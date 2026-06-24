@@ -842,6 +842,41 @@ internal sealed interface FieldSpec {
     ) : FieldSpec
 
     /**
+     * `@Count val: List<T>` where `T` is a `@ProtocolMessage data class`
+     * (or a sealed parent with `@DispatchOn`). The element-count complement
+     * to the byte-length list framings ([RemainingBytesProtocolMessageList],
+     * [LengthFromList]): instead of a byte span that the decoder drains to a
+     * limit, an unsigned LEB128 varint carries the element COUNT `N`, and the
+     * decoder reads exactly `N` elements via the element codec.
+     *
+     * Wire shape: `varint(N)` (the shipped `UnsignedVarIntCodec`, the same
+     * self-delimiting encoding an enum ordinal rides on) followed by `N`
+     * self-delimiting elements. Because the count is explicit the field is
+     * self-delimiting — unlike the drain-to-limit list shapes it need NOT be
+     * the terminal constructor parameter.
+     *
+     * Decode: read the varint count, then `repeat(N)` appending
+     * `<E>Codec.decode(buffer, context)`. Encode: write
+     * `UnsignedVarIntCodec.encode(buffer, list.size.toUInt(), context)` then
+     * iterate. wireSize = varint width of the count + sum of element
+     * wireSizes (each cast to `Exact` at runtime — same convention as
+     * [RemainingBytesProtocolMessageList]); the containing message collapses
+     * to BackPatch when the element is BackPatch-shaped.
+     *
+     * `elementIsBackPatch` mirrors [RemainingBytesProtocolMessageList]'s flag:
+     * when `true` the containing message's wireSize / variant classification
+     * collapses to BackPatch (the runtime `as Exact` cast would CCE on
+     * BackPatch element variants).
+     */
+    data class CountPrefixedProtocolMessageList(
+        override val name: String,
+        val ownerSimpleName: String,
+        val elementClassName: ClassName,
+        val elementCodecClassName: ClassName,
+        val elementIsBackPatch: Boolean,
+    ) : FieldSpec
+
+    /**
      * /
      * `@LengthFrom("ref") val: String`. The body wire bytes are
      * determined by a non-adjacent length carrier decoded

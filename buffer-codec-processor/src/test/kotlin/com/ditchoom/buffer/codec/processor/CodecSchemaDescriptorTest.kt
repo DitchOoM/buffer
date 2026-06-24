@@ -330,6 +330,7 @@ class CodecSchemaDescriptorTest {
             FieldSpec.LengthPrefixedUseCodecList("props", "Owner", listSpec),
             FieldSpec.LengthPrefixedUseCodecPayload("blob", "Owner", cn, codec, 2, Endianness.Big),
             FieldSpec.RemainingBytesProtocolMessageList("topics", "Owner", cn, codec, elementIsBackPatch = false),
+            FieldSpec.CountPrefixedProtocolMessageList("points", "Owner", cn, codec, elementIsBackPatch = false),
             FieldSpec.LengthFromList("items", "Owner", LengthSource.Sibling("count", ScalarKind.UByte), cn, codec),
             FieldSpec.LengthFromString("text", "Owner", LengthSource.Sibling("len", ScalarKind.UShort)),
             FieldSpec.ValueClassScalar("packetId", "Owner", cn, ScalarKind.UShort, "raw", 2, Endianness.Big),

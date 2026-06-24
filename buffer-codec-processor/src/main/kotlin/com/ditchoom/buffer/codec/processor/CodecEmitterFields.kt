@@ -1566,6 +1566,59 @@ internal fun appendEncodeRemainingBytesProtocolMessageList(
 }
 
 /**
+ * Emit decode for `@Count val: List<T>` where `T` is a `@ProtocolMessage`
+ * element. Reads the element COUNT as an unsigned LEB128 varint (the shipped
+ * `UnsignedVarIntCodec`, the same self-delimiting encoding an enum ordinal
+ * rides on), then loops exactly that many times decoding one element each
+ * iteration. Self-delimiting — no buffer-limit bound is consulted.
+ *
+ * Generated shape:
+ * ```
+ * val __<name>Count = UnsignedVarIntCodec.decode(buffer, context).toInt()
+ * val <name> = ArrayList<ElementType>(__<name>Count.coerceAtMost(<CAP>))
+ * repeat(__<name>Count) {
+ *     <name> += ElementCodec.decode(buffer, context)
+ * }
+ * ```
+ */
+internal fun appendDecodeCountPrefixedProtocolMessageList(
+    body: CodeBlock.Builder,
+    field: FieldSpec.CountPrefixedProtocolMessageList,
+) {
+    val countVar = "__${field.name}Count"
+    body.addStatement("val %L = %T.decode(buffer, context).toInt()", countVar, UNSIGNED_VARINT_CODEC_CN)
+    // Pre-size the list to the count, capped so a hostile varint can't
+    // request a multi-gigabyte allocation up front; the element decodes
+    // still fail fast on a truncated buffer well before the list grows.
+    body.addStatement(
+        "val %L = ArrayList<%T>(%L.coerceIn(0, %L))",
+        field.name,
+        field.elementClassName,
+        countVar,
+        COUNT_PREFETCH_CAP,
+    )
+    body.beginControlFlow("repeat(%L)", countVar)
+    body.addStatement("%L += %T.decode(buffer, context)", field.name, field.elementCodecClassName)
+    body.endControlFlow()
+}
+
+/**
+ * Emit encode for `@Count val: List<T>`. Writes the element count as an
+ * unsigned LEB128 varint, then each element via the element codec. The count
+ * is derived from `list.size`, so the wire form is always self-consistent —
+ * no user-trust contract (unlike the byte-length `@LengthFrom` list shapes).
+ */
+internal fun appendEncodeCountPrefixedProtocolMessageList(
+    body: CodeBlock.Builder,
+    field: FieldSpec.CountPrefixedProtocolMessageList,
+) {
+    body.addStatement("%T.encode(buffer, value.%L.size.toUInt(), context)", UNSIGNED_VARINT_CODEC_CN, field.name)
+    body.beginControlFlow("for (__elem in value.%L)", field.name)
+    body.addStatement("%T.encode(buffer, __elem, context)", field.elementCodecClassName)
+    body.endControlFlow()
+}
+
+/**
  * Emit decode for bare `@UseCodec val: <scalar>`.
  * Delegates to the user-supplied codec object's `decode(buffer,
  * context)`. When the codec implements [BoundingLengthCodec], the
