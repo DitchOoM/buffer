@@ -27,6 +27,7 @@ ksp = "2.3.9"
 # kctfork 0.13.0-alpha01 requires Kotlin 2.4.0-Beta1; hold at 0.12.0-alpha01 for Kotlin 2.3.x
 kctfork = "0.12.0-alpha01"
 kotlinpoet = "2.3.0"
+binaryCompatibilityValidator = "0.18.1"
 # androidx.collection — multiplatform Swiss-table maps used by the :buffer-1brc showcase only
 androidxCollection = "1.6.0"
 
@@ -61,3 +62,4 @@ dokka = { id = "org.jetbrains.dokka", version.ref = "dokka" }
 kover = { id = "org.jetbrains.kotlinx.kover", version.ref = "kover" }
 kotlinx-benchmark = { id = "org.jetbrains.kotlinx.benchmark", version.ref = "kotlinxBenchmark" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+binary-compatibility-validator = { id = "org.jetbrains.kotlinx.binary-compatibility-validator", version.ref = "binaryCompatibilityValidator" }

@@ -176,6 +176,11 @@ internal class InMemoryChaChaPolyKey(
 internal fun AesGcmKey.requireInMemoryMaterial(): PlatformBuffer =
     when (this) {
         is InMemoryAesGcmKey -> material
+        // A hardware key holds no exportable material, so the synchronous/material-reading path is
+        // not supported for it — hardware keys operate only through the async witness ops, which
+        // dispatch to the gated closures and never reach here. This throw is the safety net if a
+        // caller routes a hardware key into a blocking op (e.g. AES-GCM is Blocking on the JVM).
+        is HardwareAesGcmKey -> throw UnsupportedOperationException("hardware AES-GCM key has no synchronous path")
     }
 
 /** See [AesGcmKey.requireInMemoryMaterial]. */
@@ -183,6 +188,35 @@ internal fun ChaChaPolyKey.requireInMemoryMaterial(): PlatformBuffer =
     when (this) {
         is InMemoryChaChaPolyKey -> material
     }
+
+/**
+ * Seals [plaintext] through a hardware key's gated closure and frames the result as
+ * `nonce ‖ ciphertext ‖ tag`, identically to the in-memory async path. Shared by the async- and
+ * blocking-witness ops so a hardware key behaves the same regardless of which witness resolved.
+ */
+private suspend fun HardwareAesGcmKey.sealFramed(
+    plaintext: ReadBuffer,
+    aad: Aad,
+    factory: BufferFactory,
+): PlatformBuffer {
+    val nonce = cryptoRandom(AEAD_NONCE_BYTES)
+    val ctTag = gatedSeal(nonce, aad.bytesOrNull, plaintext, factory)
+    val out = allocateFramed(plaintext.remaining(), factory)
+    out.write(nonce)
+    out.write(ctTag)
+    out.resetForRead()
+    return out
+}
+
+/** Opens a `nonce ‖ ciphertext ‖ tag` buffer through a hardware key's gated closure. */
+private suspend fun HardwareAesGcmKey.openFramed(
+    sealed: ReadBuffer,
+    aad: Aad,
+    factory: BufferFactory,
+): PlatformBuffer {
+    val (nonce, ctAndTag, _) = splitFramed(sealed)
+    return gatedOpen(nonce, aad.bytesOrNull, ctAndTag, factory)
+}
 
 /** Copies [source]'s remaining bytes into a fresh read-ready buffer (non-destructive). */
 private fun copyMaterial(
@@ -320,19 +354,29 @@ internal object AesGcmBlockingOps : AeadBlockingOps<AesGcmKey> {
         return out
     }
 
+    // A hardware key is async-only (no in-process material for the blocking primitive), so even on a
+    // Blocking platform its async seal/open route through the gated closures, not sealBlocking.
     override suspend fun seal(
         key: AesGcmKey,
         plaintext: ReadBuffer,
         aad: Aad,
         factory: BufferFactory,
-    ): PlatformBuffer = sealBlocking(key, plaintext, aad, factory)
+    ): PlatformBuffer =
+        when (key) {
+            is InMemoryAesGcmKey -> sealBlocking(key, plaintext, aad, factory)
+            is HardwareAesGcmKey -> key.sealFramed(plaintext, aad, factory)
+        }
 
     override suspend fun open(
         sealed: ReadBuffer,
         key: AesGcmKey,
         aad: Aad,
         factory: BufferFactory,
-    ): PlatformBuffer = openBlocking(sealed, key, aad, factory)
+    ): PlatformBuffer =
+        when (key) {
+            is InMemoryAesGcmKey -> openBlocking(sealed, key, aad, factory)
+            is HardwareAesGcmKey -> key.openFramed(sealed, aad, factory)
+        }
 }
 
 /** AES-GCM ops over the async explicit-nonce seam (WebCrypto). Generates + frames the nonce here. */
@@ -342,27 +386,37 @@ internal object AesGcmAsyncOps : AeadAsyncOps<AesGcmKey> {
         plaintext: ReadBuffer,
         aad: Aad,
         factory: BufferFactory,
-    ): PlatformBuffer {
-        // Generate the nonce here so a (key, nonce) pair can never be reused by accident, then
-        // frame as nonce ‖ ciphertext ‖ tag (the with-nonce helper returns ciphertext ‖ tag).
-        val nonce = cryptoRandom(AEAD_NONCE_BYTES)
-        val ctTag = aesGcmSealWithNonceAsync(key, nonce, aad.bytesOrNull, plaintext, factory)
-        val out = allocateFramed(plaintext.remaining(), factory)
-        out.write(nonce)
-        out.write(ctTag)
-        out.resetForRead()
-        return out
-    }
+    ): PlatformBuffer =
+        when (key) {
+            is InMemoryAesGcmKey -> {
+                // Generate the nonce here so a (key, nonce) pair can never be reused by accident, then
+                // frame as nonce ‖ ciphertext ‖ tag (the with-nonce helper returns ciphertext ‖ tag).
+                val nonce = cryptoRandom(AEAD_NONCE_BYTES)
+                val ctTag = aesGcmSealWithNonceAsync(key, nonce, aad.bytesOrNull, plaintext, factory)
+                val out = allocateFramed(plaintext.remaining(), factory)
+                out.write(nonce)
+                out.write(ctTag)
+                out.resetForRead()
+                out
+            }
+            // A hardware key has no in-process material, so it routes through its gated closure;
+            // adding HardwareAesGcmKey forces this branch (the sealed-impl point).
+            is HardwareAesGcmKey -> key.sealFramed(plaintext, aad, factory)
+        }
 
     override suspend fun open(
         sealed: ReadBuffer,
         key: AesGcmKey,
         aad: Aad,
         factory: BufferFactory,
-    ): PlatformBuffer {
-        val (nonce, ctAndTag, _) = splitFramed(sealed)
-        return aesGcmOpenWithNonceAsync(key, nonce, aad.bytesOrNull, ctAndTag, factory)
-    }
+    ): PlatformBuffer =
+        when (key) {
+            is InMemoryAesGcmKey -> {
+                val (nonce, ctAndTag, _) = splitFramed(sealed)
+                aesGcmOpenWithNonceAsync(key, nonce, aad.bytesOrNull, ctAndTag, factory)
+            }
+            is HardwareAesGcmKey -> key.openFramed(sealed, aad, factory)
+        }
 }
 
 /** ChaCha20-Poly1305 ops over the synchronous native primitives (never web). */

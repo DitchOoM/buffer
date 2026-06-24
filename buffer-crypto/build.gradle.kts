@@ -14,7 +14,20 @@ plugins {
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
     alias(libs.plugins.dokka)
+    alias(libs.plugins.binary.compatibility.validator)
     signing
+}
+
+// Binary-compatibility validation locks the published 6.0 public ABI so a later minor (e.g. the
+// Hardware* key variants) is proven non-breaking by `apiCheck`. We validate the JVM ABI only: it is
+// host-independent (this dev host is Linux/WSL and cannot build the Apple klibs) and the common
+// public surface — which is what 6.0 freezes — is wholly contained in the JVM dump. Klib ABI
+// validation is left off precisely because it would diverge between a partial-target dev host and
+// the all-target Mac/Linux CI runners.
+apiValidation {
+    klib {
+        enabled = false
+    }
 }
 
 group = "com.ditchoom"

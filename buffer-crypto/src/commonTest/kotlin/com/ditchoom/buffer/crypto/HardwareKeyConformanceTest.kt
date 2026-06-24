@@ -1,0 +1,168 @@
+package com.ditchoom.buffer.crypto
+
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.crypto.CryptoTestVectors.ascii
+import com.ditchoom.buffer.crypto.CryptoTestVectors.toHex
+import kotlinx.coroutines.test.runTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
+
+/**
+ * Conformance contract for the hardware-backed key machinery (the shape frozen in 6.0). No platform
+ * ships a real secure element, so the contract is driven through [FakeHardware] — but the dispatch
+ * under test (witness → gated closure, blocking-seam safety net, the auth gate) is the production
+ * code, not the fake.
+ *
+ * Proves, for the two families a secure element backs (AES-GCM + ECDSA P-256):
+ *  - the public `CryptoCapabilities.hardware` witness is [HardwareSupport.Unavailable] on every
+ *    platform in 6.0 (no backend ships yet);
+ *  - hardware keys carry [KeyProvenance.Hardware] and a realistic eligibility subset;
+ *  - a hardware seal/sign round-trips through real crypto (hw-seal opens with an independent software
+ *    key; hw-sign verifies under the matching public key) — the gated closure is wired through;
+ *  - tampering is rejected opaquely ([VerificationFailed]) on the hardware open path;
+ *  - the **blocking** op path is unreachable for a hardware key (the material seam throws), so a
+ *    hardware key can only ever be driven through the async witness ops;
+ *  - a denied authorization gate surfaces as [AuthorizationFailed].
+ */
+class HardwareKeyConformanceTest {
+    private val provider = FakeHardware()
+    private val grant = HardwareKeySpec()
+    private val deny = HardwareKeySpec(authorization = HardwareAuthorization { false })
+
+    @Test
+    fun hardwareCapabilityUnavailableInThisRelease() {
+        // No platform constructs hardware in 6.0; the witness is a plain common Unavailable.
+        assertTrue(CryptoCapabilities.hardware is HardwareSupport.Unavailable)
+    }
+
+    @Test
+    fun eligibilityIsARealisticSubset() {
+        assertTrue(provider.eligible(HardwareAlgorithm.AesGcm), "AES-GCM is eligible")
+        assertTrue(provider.eligible(HardwareAlgorithm.EcdsaP256), "ECDSA P-256 is eligible")
+        // A secure element backs neither ChaCha20-Poly1305 nor Ed25519 (nor P-384/P-521 here).
+        assertTrue(!provider.eligible(HardwareAlgorithm.Ed25519), "Ed25519 not eligible")
+        assertTrue(!provider.eligible(HardwareAlgorithm.EcdsaP384), "P-384 not eligible")
+        assertTrue(!provider.eligible(HardwareAlgorithm.EcdsaP521), "P-521 not eligible")
+    }
+
+    @Test
+    fun generatedKeysReportHardwareProvenance() =
+        runTest {
+            assertEquals(KeyProvenance.Hardware, provider.generateAesGcm(grant).provenance)
+            assertEquals(KeyProvenance.Hardware, provider.generateSigning(SignatureScheme.EcdsaP256, grant).provenance)
+        }
+
+    @Test
+    fun generateSigningRejectsIneligibleScheme() =
+        runTest {
+            assertFailsWith<IllegalArgumentException> {
+                provider.generateSigning(SignatureScheme.Ed25519, grant)
+            }
+        }
+
+    // ---- AES-GCM ----
+
+    @Test
+    fun hardwareSealRoundTrips() =
+        runTest {
+            val keys = provider.aesGcmPair(grant)
+            val ops = aesGcmAsyncOps()
+            val plaintext = ascii("hardware-backed AES-GCM payload")
+            val expected = ascii("hardware-backed AES-GCM payload").toHex()
+
+            val sealed = ops.seal(keys.hardware, plaintext, Aad.Of(ascii("ctx")))
+            // An independent software key with the same material opens it: the hardware seal produced
+            // standard AES-GCM (the gated closure wired through to real crypto, not a stub).
+            val viaTwin = ops.open(sealed, keys.softwareTwin, Aad.Of(ascii("ctx")))
+            assertEquals(expected, viaTwin.toHex(), "hw-seal → sw-open must recover the plaintext")
+
+            // The hardware key's own gated-open path also recovers it.
+            val viaHardware = ops.open(sealed, keys.hardware, Aad.Of(ascii("ctx")))
+            assertEquals(expected, viaHardware.toHex(), "hw-seal → hw-open must recover the plaintext")
+        }
+
+    @Test
+    fun hardwareOpenRejectsEveryByteFlip() =
+        runTest {
+            val keys = provider.aesGcmPair(grant)
+            val ops = aesGcmAsyncOps()
+            val sealed = ops.seal(keys.hardware, ascii("authenticated"), Aad.Of(ascii("ctx")))
+            // The gated open must reject any single-byte corruption opaquely, like the in-memory path.
+            CryptoContract.assertEveryByteFlipRejected(sealed) { mutant ->
+                ops.open(mutant, keys.hardware, Aad.Of(ascii("ctx")))
+            }
+        }
+
+    @Test
+    fun hardwareAesGcmHasNoBlockingPath() {
+        // Where AES-GCM is Blocking (native/JVM), a hardware key routed into the synchronous path
+        // must throw at the material seam — hardware keys are async-only.
+        when (val w = CryptoCapabilities.aesGcm) {
+            is Aead.Blocking -> {
+                val keys = provider.aesGcmPair(grant)
+                assertFailsWith<UnsupportedOperationException> {
+                    w.ops.sealBlocking(keys.hardware, ascii("x"))
+                }
+            }
+            is Aead.AsyncOnly -> Unit // no blocking path exists at all on this platform
+        }
+    }
+
+    @Test
+    fun hardwareAesGcmDeniedAuthorizationFails() =
+        runTest {
+            val keys = provider.aesGcmPair(deny)
+            val ops = aesGcmAsyncOps()
+            assertFailsWith<AuthorizationFailed> {
+                ops.seal(keys.hardware, ascii("secret"))
+            }
+        }
+
+    // ---- Signatures (ECDSA P-256) ----
+    // Gated on supportsEcdsaSigningFromScalar: Apple cannot sign from a bare scalar, so the fake's
+    // scalar-built signing key is not constructible there (verify is still covered elsewhere).
+
+    @Test
+    fun hardwareSignVerifiesUnderPublicKey() =
+        runTest {
+            if (!supportsEcdsaSigningFromScalar) return@runTest
+            val pair = provider.signingPair(grant)
+            val ops = signatureAsyncOrNull(SignatureScheme.EcdsaP256) ?: return@runTest
+            val message = ascii("hardware-backed signature")
+            val signature = ops.sign(pair.hardware, message)
+            assertTrue(ops.verify(pair.verifyKey, message, signature), "hw-sign must verify under the public key")
+            // A different message must not verify under that signature.
+            assertTrue(
+                !ops.verify(pair.verifyKey, ascii("other message"), signature),
+                "signature must not verify a different message",
+            )
+        }
+
+    @Test
+    fun hardwareSigningHasNoBlockingPath() {
+        if (!supportsEcdsaSigningFromScalar) return
+        val blocking = signatureBlockingOrNull(SignatureScheme.EcdsaP256) ?: return
+        val pair = provider.signingPair(grant)
+        assertFailsWith<UnsupportedOperationException> {
+            blocking.signBlocking(pair.hardware, ascii("x"))
+        }
+        val dest = BufferFactory.Default.allocate(maxSignatureBytes(SignatureScheme.EcdsaP256))
+        assertFailsWith<UnsupportedOperationException> {
+            blocking.signInto(pair.hardware, ascii("x"), dest)
+        }
+    }
+
+    @Test
+    fun hardwareSigningDeniedAuthorizationFails() =
+        runTest {
+            if (!supportsEcdsaSigningFromScalar) return@runTest
+            val pair = provider.signingPair(deny)
+            val ops = signatureAsyncOrNull(SignatureScheme.EcdsaP256) ?: return@runTest
+            assertFailsWith<AuthorizationFailed> {
+                ops.sign(pair.hardware, ascii("message"))
+            }
+        }
+}

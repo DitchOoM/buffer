@@ -63,3 +63,15 @@ sealed class CryptoMisuseException(
 class InvalidPublicKey internal constructor(
     val curve: String,
 ) : CryptoMisuseException("invalid public key for $curve")
+
+/**
+ * A hardware-backed key operation was not authorized: the secure element / keystore declined to
+ * unlock the key for use (e.g. a required user-presence / biometric gate was not satisfied, or the
+ * platform's [HardwareKeyProvider] auth callback denied the request).
+ *
+ * This is a *public, non-secret* operational condition — it tells the caller the op was refused,
+ * never *why* the underlying key material is what it is — so it is a [CryptoMisuseException] rather
+ * than the opaque [VerificationFailed]. Only the platform/provider code constructs it (hence
+ * `internal`); callers match on the type.
+ */
+class AuthorizationFailed internal constructor() : CryptoMisuseException("hardware key authorization failed")

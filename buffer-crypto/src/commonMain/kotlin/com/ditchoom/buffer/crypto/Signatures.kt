@@ -236,6 +236,10 @@ internal class InMemoryVerifyKey(
 internal fun SigningKey.requireInMemoryMaterial(): PlatformBuffer =
     when (this) {
         is InMemorySigningKey -> requireOpen()
+        // A hardware signing key holds no exportable material; it signs only through the async
+        // witness op (the gated closure) and never reaches here. This throw is the safety net if a
+        // caller routes a hardware key into the blocking sign path. See [HardwareSigningKey].
+        is HardwareSigningKey -> throw UnsupportedOperationException("hardware signing key has no synchronous path")
     }
 
 /** See [SigningKey.requireInMemoryMaterial]. */
@@ -421,11 +425,17 @@ internal object SignatureBlockingOpsImpl : SignatureBlockingOps {
         signature: ReadBuffer,
     ): Boolean = verifyPlatform(key, message, signature)
 
+    // A hardware key is async-only (no in-process material for signBlocking), so even on a Blocking
+    // platform its async sign routes through the gated closure.
     override suspend fun sign(
         key: SigningKey,
         message: ReadBuffer,
         factory: BufferFactory,
-    ): ReadBuffer = signBlocking(key, message, factory)
+    ): ReadBuffer =
+        when (key) {
+            is InMemorySigningKey -> signBlocking(key, message, factory)
+            is HardwareSigningKey -> key.gatedSign(message, factory)
+        }
 
     override suspend fun verify(
         key: VerifyKey,
@@ -440,7 +450,13 @@ internal object SignatureAsyncOpsImpl : SignatureAsyncOps {
         key: SigningKey,
         message: ReadBuffer,
         factory: BufferFactory,
-    ): ReadBuffer = signAsyncPlatform(key, message, factory)
+    ): ReadBuffer =
+        // A hardware key signs through its gated closure (no in-process material); an in-memory key
+        // goes through the platform primitive. Adding HardwareSigningKey forces this branch.
+        when (key) {
+            is InMemorySigningKey -> signAsyncPlatform(key, message, factory)
+            is HardwareSigningKey -> key.gatedSign(message, factory)
+        }
 
     override suspend fun verify(
         key: VerifyKey,
