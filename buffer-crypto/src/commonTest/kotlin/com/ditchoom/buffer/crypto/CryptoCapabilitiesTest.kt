@@ -30,9 +30,27 @@ class CryptoCapabilitiesTest {
     }
 
     @Test
-    fun signatureFlagsMirrorUnderlying() {
-        assertEquals(supportsSyncEd25519, CryptoCapabilities.ed25519Sync)
-        assertEquals(supportsSyncEcdsa, CryptoCapabilities.ecdsaSync)
+    fun signatureWitnessResolvesForEveryScheme() {
+        val schemes =
+            listOf(
+                SignatureScheme.Ed25519,
+                SignatureScheme.EcdsaP256,
+                SignatureScheme.EcdsaP384,
+                SignatureScheme.EcdsaP521,
+            )
+        for (scheme in schemes) {
+            // The witness must resolve to one of the three variants on every platform.
+            when (CryptoCapabilities.signatures(scheme)) {
+                is SignatureSupport.Blocking -> Unit
+                is SignatureSupport.AsyncOnly -> Unit
+                SignatureSupport.Unavailable -> Unit
+            }
+        }
+        // ECDSA verification is always available, so ECDSA is never Unavailable.
+        for (scheme in listOf(SignatureScheme.EcdsaP256, SignatureScheme.EcdsaP384, SignatureScheme.EcdsaP521)) {
+            assertTrue(CryptoCapabilities.signatures(scheme) != SignatureSupport.Unavailable)
+        }
+        // The signing-from-scalar key-construction capability still mirrors its flag.
         assertEquals(supportsEcdsaSigningFromScalar, CryptoCapabilities.ecdsaSigningFromScalar)
     }
 

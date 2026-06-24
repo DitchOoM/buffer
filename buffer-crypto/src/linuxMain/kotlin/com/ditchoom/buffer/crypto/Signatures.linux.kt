@@ -36,13 +36,14 @@ import platform.posix.size_tVar
  * same gate the JVM backend applies.
  *
  * **Ed25519**: raw 32-byte seed / public key, 64-byte signature, via BoringSSL `ED25519_sign` /
- * `ED25519_verify`. [supportsSyncEd25519] is `true`.
+ * `ED25519_verify`. The Ed25519 witness is [SignatureSupport.Blocking].
  */
 
-actual val supportsSyncEd25519: Boolean = true
-actual val supportsSyncEcdsa: Boolean = true
 actual val ecdsaSignatureEncoding: EcdsaSignatureEncoding = EcdsaSignatureEncoding.Der
 actual val supportsEcdsaSigningFromScalar: Boolean = true
+
+/** BoringSSL provides a synchronous path for every scheme (ECDSA + Ed25519). */
+actual fun CryptoCapabilities.signatures(scheme: SignatureScheme): SignatureSupport = SignatureSupport.Blocking(SignatureBlockingOpsImpl)
 
 private const val P256_CURVE_BITS = 256
 private const val P384_CURVE_BITS = 384
@@ -167,7 +168,7 @@ private fun ed25519Sign(
     key: SigningKey,
     message: ReadBuffer,
 ): ByteArray {
-    val seed = key.requireOpen()
+    val seed = key.requireInMemoryMaterial()
     require(seed.remaining() == ED25519_KEY_BYTES) { "Ed25519 seed must be 32 bytes" }
     val msgLen = message.remaining()
     return memScoped {
@@ -193,7 +194,7 @@ private fun ecdsaSign(
     key: SigningKey,
     message: ReadBuffer,
 ): ByteArray {
-    val scalar = key.requireOpen()
+    val scalar = key.requireInMemoryMaterial()
     val cap = maxSignatureBytes(key.scheme)
     val curveCode = ecdsaCurveCode(key.scheme)
     val msgLen = message.remaining()
@@ -237,11 +238,12 @@ private fun ed25519Verify(
     message: ReadBuffer,
     signature: ReadBuffer,
 ): Boolean {
-    if (key.material.remaining() != ED25519_KEY_BYTES) return false
+    val pubKey = key.requireInMemoryMaterial()
+    if (pubKey.remaining() != ED25519_KEY_BYTES) return false
     if (signature.remaining() != ED25519_SIGNATURE_BYTES) return false
     val msgLen = message.remaining()
     var status = -1
-    key.material.withRemainingBytes { pubPtr, _ ->
+    pubKey.withRemainingBytes { pubPtr, _ ->
         message.withRemainingBytes2(msgLen) { msgPtr ->
             signature.withRemainingBytes { sigPtr, _ ->
                 status =
@@ -267,7 +269,7 @@ private fun ecdsaVerify(
     val curveCode = ecdsaCurveCode(key.scheme)
     val msgLen = message.remaining()
     var status = -1
-    key.material.withRemainingBytes { pubPtr, pubLen ->
+    key.requireInMemoryMaterial().withRemainingBytes { pubPtr, pubLen ->
         message.withRemainingBytes2(msgLen) { msgPtr ->
             signature.withRemainingBytes { sigPtr, sigLen ->
                 status =
@@ -286,7 +288,7 @@ private fun ecdsaVerify(
     return status == BCL_OK
 }
 
-actual fun signInto(
+internal actual fun signIntoPlatform(
     key: SigningKey,
     message: ReadBuffer,
     dest: WriteBuffer,
@@ -297,7 +299,7 @@ actual fun signInto(
     return sig.size
 }
 
-actual fun verify(
+internal actual fun verifyPlatform(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,
@@ -308,7 +310,7 @@ actual fun verify(
         ecdsaVerify(key, message, signature)
     }
 
-actual suspend fun signAsync(
+internal actual suspend fun signAsyncPlatform(
     key: SigningKey,
     message: ReadBuffer,
     factory: BufferFactory,
@@ -320,10 +322,10 @@ actual suspend fun signAsync(
     return out
 }
 
-actual suspend fun verifyAsync(
+internal actual suspend fun verifyAsyncPlatform(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,
-): Boolean = verify(key, message, signature)
+): Boolean = verifyPlatform(key, message, signature)
 
 actual suspend fun ed25519AsyncAvailable(): Boolean = true

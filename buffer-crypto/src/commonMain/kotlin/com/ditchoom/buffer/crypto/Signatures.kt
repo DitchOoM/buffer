@@ -7,6 +7,24 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.deterministic
 
+/*
+ * Digital signatures: Ed25519 + ECDSA over the NIST P-curves.
+ *
+ * Operations are reached through a **capability witness**, not throwing top-level functions: the
+ * platform's witness for a scheme ([CryptoCapabilities.signatures]) reifies what that platform
+ * supports as a `sealed` value, so an operation a platform lacks (a synchronous path on the web,
+ * Ed25519 on Android, the sync API on JS/WASM) is simply not reachable — the variance lives in the
+ * type, not in a runtime throw. A consumer `when`s over the witness exhaustively and the compiler
+ * proves every reachable path is satisfiable. See [SignatureSupport].
+ *
+ * Two capabilities stay as plain values rather than folding into the op witness because they are
+ * **not** op availability:
+ *  - [ecdsaSignatureEncoding] is a *wire-format* property (DER vs P1363), needed to pick the right
+ *    test vectors and interpret bytes regardless of which op path runs.
+ *  - [supportsEcdsaSigningFromScalar] is a *key-construction* capability (a platform may verify ECDSA
+ *    but be unable to build a signing key from a bare scalar); it gates key creation, not the op.
+ */
+
 /**
  * A digital-signature scheme. Each scheme **binds its curve to a single hash** so a caller can
  * never pair, say, P-256 with SHA-512 — the curve↔hash binding is part of the type, closing the
@@ -67,39 +85,45 @@ enum class EcdsaSignatureEncoding {
     P1363,
 }
 
+// =============================================================================
+// Key types (sealed: only library-provided keys; impls are internal)
+// =============================================================================
+
 /**
  * A **private** signing key bound to a [scheme]. Misuse-resistant: it is a distinct type from
  * [VerifyKey] so a private key can never be passed where a public key is expected, and vice versa.
  *
- * The key material lives in a [SecureBuffer] ([material]) so it is wiped from memory on [close].
- * Treat instances as one-shot resources:
+ * This is a `sealed interface`; the only implementation downstream can construct is the in-memory
+ * one produced by the scheme factories ([ed25519], [ecdsaP256], …). Because downstream cannot name
+ * the implementation, it cannot write an exhaustive `when` over it — which is what lets a
+ * hardware-backed variant be added later as a non-breaking minor. The key carries its [provenance]
+ * (software/hardware) so a caller can branch on whether the material is exportable without
+ * inspecting it.
+ *
+ * In-memory key material lives in a wiped [SecureBuffer] (via [deterministicSecure]) and is erased
+ * on [close]. Treat instances as one-shot resources:
  *
  * ```kotlin
- * SigningKey.ed25519(seed).use { sk -> signInto(sk, message, dest) }
+ * val signatures = CryptoCapabilities.signatures(SignatureScheme.Ed25519)
+ * SigningKey.ed25519(seed).use { sk ->
+ *     when (signatures) {
+ *         is SignatureSupport.Blocking -> signatures.ops.signInto(sk, message, dest)
+ *         is SignatureSupport.AsyncOnly -> signatures.ops.sign(sk, message)
+ *         SignatureSupport.Unavailable -> error("Ed25519 not available here")
+ *     }
+ * }
  * ```
  *
- * The exact bytes [material] holds are platform-defined (a PKCS#8 blob on JCA, a raw seed on
- * Apple/WebCrypto); callers never inspect them. Construct via the scheme-specific factories
- * ([ed25519], [ecdsaP256], …) which accept the *standard import encoding* for that scheme.
+ * The exact bytes the material holds are platform-defined (a PKCS#8 blob on JCA, a raw seed on
+ * Apple/WebCrypto); callers never inspect them. The factories accept the *standard import encoding*
+ * for that scheme.
  */
-class SigningKey private constructor(
-    val scheme: SignatureScheme,
-    internal val material: PlatformBuffer,
-) : AutoCloseable {
-    private var closed = false
+sealed interface SigningKey : AutoCloseable {
+    /** The scheme this key signs under. */
+    val scheme: SignatureScheme
 
-    /** Zeroes and frees the key material. Idempotent. */
-    override fun close() {
-        if (!closed) {
-            closed = true
-            material.freeNativeMemory()
-        }
-    }
-
-    internal fun requireOpen(): PlatformBuffer {
-        check(!closed) { "SigningKey already closed" }
-        return material
-    }
+    /** Whether the key material is in software memory or hardware-backed. */
+    val provenance: KeyProvenance
 
     companion object {
         /**
@@ -133,21 +157,49 @@ class SigningKey private constructor(
             scheme: SignatureScheme,
             raw: ReadBuffer,
             factory: BufferFactory,
-        ): SigningKey = SigningKey(scheme, copyBuffer(raw, factory))
+        ): SigningKey = InMemorySigningKey(scheme, copyBuffer(raw, factory))
+    }
+}
+
+/** In-memory [SigningKey]: holds the raw key material in a [SecureBuffer], wiped on [close]. */
+internal class InMemorySigningKey(
+    override val scheme: SignatureScheme,
+    private val material: PlatformBuffer,
+) : SigningKey {
+    override val provenance: KeyProvenance get() = KeyProvenance.Software
+    private var closed = false
+
+    /** Zeroes and frees the key material. Idempotent. */
+    override fun close() {
+        if (!closed) {
+            closed = true
+            material.freeNativeMemory()
+        }
+    }
+
+    /** The live key material; throws if the key has been [close]d. */
+    fun requireOpen(): PlatformBuffer {
+        check(!closed) { "SigningKey already closed" }
+        return material
     }
 }
 
 /**
  * A **public** verification key bound to a [scheme]. Distinct from [SigningKey] by type so the two
- * can never be cross-used. Public keys are not secret, so this is a plain buffer (no wipe needed).
+ * can never be cross-used, and `sealed` with an internal in-memory impl like [SigningKey] (so a
+ * hardware-backed verify key can be added later). Public keys are not secret, so the in-memory
+ * variant is a plain buffer (no wipe needed).
  *
  * Construct via the scheme factories ([ed25519], [ecdsaP256], …) using the standard import
  * encoding: a raw 32-byte key for Ed25519, an uncompressed SEC1 point (`04 ‖ X ‖ Y`) for ECDSA.
  */
-class VerifyKey private constructor(
-    val scheme: SignatureScheme,
-    internal val material: ReadBuffer,
-) {
+sealed interface VerifyKey {
+    /** The scheme this key verifies under. */
+    val scheme: SignatureScheme
+
+    /** Whether the key material is in software memory or hardware-backed. */
+    val provenance: KeyProvenance
+
     companion object {
         /** An Ed25519 verify key from its 32-byte raw public key (RFC 8032 §5.1.5). */
         fun ed25519(publicKey: ReadBuffer): VerifyKey = of(SignatureScheme.Ed25519, publicKey)
@@ -164,35 +216,40 @@ class VerifyKey private constructor(
         private fun of(
             scheme: SignatureScheme,
             raw: ReadBuffer,
-        ): VerifyKey = VerifyKey(scheme, copyBuffer(raw, BufferFactory.Default))
+        ): VerifyKey = InMemoryVerifyKey(scheme, copyBuffer(raw, BufferFactory.Default))
     }
 }
+
+/** In-memory [VerifyKey]: holds the (non-secret) public key bytes. */
+internal class InMemoryVerifyKey(
+    override val scheme: SignatureScheme,
+    val material: ReadBuffer,
+) : VerifyKey {
+    override val provenance: KeyProvenance get() = KeyProvenance.Software
+}
+
+/**
+ * The in-memory signing material, for the platform bridges. A hardware-backed key (added later)
+ * holds no exportable material and would route through a provider path instead, so this seam is
+ * only reached for in-memory keys. Throws if the key was already [SigningKey.close]d.
+ */
+internal fun SigningKey.requireInMemoryMaterial(): PlatformBuffer =
+    when (this) {
+        is InMemorySigningKey -> requireOpen()
+    }
+
+/** See [SigningKey.requireInMemoryMaterial]. */
+internal fun VerifyKey.requireInMemoryMaterial(): ReadBuffer =
+    when (this) {
+        is InMemoryVerifyKey -> material
+    }
 
 /** Returns a deterministic, secure-erasing factory for private key material. */
 internal fun BufferFactory.Companion.deterministicSecure(): BufferFactory = BufferFactory.deterministic().secure()
 
-// ============================================================================
-// Synchronous API (native platforms: JVM / Android / Apple)
-// ============================================================================
-
-/**
- * Whether this platform can sign/verify Ed25519 **synchronously**.
- *
- *  - JVM: `true` on JDK 15+ (the `Ed25519` JCA algorithm); `false` on older JDKs.
- *  - Android: `true` only at runtime `SDK_INT >= 34` (Conscrypt added Ed25519 in Android 14);
- *    `false` on API 28–33 — the gate is a *runtime* check, not compile-time.
- *  - Apple: `true` (CryptoKit `Curve25519.Signing`).
- *  - JS / WASM: `false` — WebCrypto sign/verify is async-only; use [signAsync] / [verifyAsync].
- */
-expect val supportsSyncEd25519: Boolean
-
-/**
- * Whether this platform can sign/verify ECDSA over the NIST P-curves **synchronously**.
- *
- *  - JVM / Android / Apple: `true`.
- *  - JS / WASM: `false` — WebCrypto is async-only; use [signAsync] / [verifyAsync].
- */
-expect val supportsSyncEcdsa: Boolean
+// =============================================================================
+// Wire-format + key-construction capabilities (NOT op availability — see file header)
+// =============================================================================
 
 /** The ECDSA signature encoding this platform produces and consumes (see [EcdsaSignatureEncoding]). */
 expect val ecdsaSignatureEncoding: EcdsaSignatureEncoding
@@ -202,45 +259,29 @@ expect val ecdsaSignatureEncoding: EcdsaSignatureEncoding
  *
  *  - JVM / Android: `true` — JCA derives the public key from the scalar.
  *  - JS / WASM: `true` — WebCrypto imports the PKCS#8 we assemble from the scalar.
- *  - Apple: `false` — Security.framework's `SecKeyCreateWithData` needs the *full* X9.63 private
- *    representation `04 ‖ X ‖ Y ‖ K`, which cannot be reconstructed from the scalar alone without
- *    a scalar-multiply we don't expose. ECDSA **verify** is fully supported on Apple regardless.
+ *  - Apple: `true` — CryptoKit's `P###.Signing.PrivateKey(rawRepresentation:)` builds the key from
+ *    the scalar (Security.framework cannot, but the CryptoKit shim does).
+ *  - Linux: `true`.
  *
- * Verification ([verify] / [verifyAsync]) is available on every native platform irrespective of
- * this flag; it only gates signing.
+ * This is a **key-construction** capability, not an op witness variant: ECDSA *verification* is
+ * available on every platform regardless, so it cannot live on the op witness.
  */
 expect val supportsEcdsaSigningFromScalar: Boolean
 
 /**
- * Signs the remaining bytes of [message] under [key], writing the signature into [dest] at its
- * current position and advancing it. Returns the number of signature bytes written (Ed25519 is
- * always 64; ECDSA-DER varies, P1363 is fixed-width per curve).
+ * Whether Ed25519 sign/verify is available through the **async** API on this platform/runtime.
+ * Unlike the synchronous capability — which is reified in the [signatures] witness — Ed25519 on the
+ * web is **feature-detected** at runtime against the engine's WebCrypto (a Promise, hence the
+ * suspend), so it cannot be a synchronous witness variant:
  *
- * [dest] must have at least [maxSignatureBytes] of [key]'s scheme remaining. Throws
- * [UnsupportedOperationException] where the scheme's `supportsSync*` flag is `false` (e.g. Ed25519
- * on Android below API 34, or on JS/WASM).
+ *  - JVM: same as the Ed25519 witness being [SignatureSupport.Blocking] (JDK 15+).
+ *  - Android: `false` (no raw-key Ed25519 import path).
+ *  - Apple / Linux: `true`.
+ *  - JS / WASM: `true` on Chrome 137+/Firefox 129+/Safari 17+/Node stable, `false` otherwise.
+ *
+ * When `false`, the Ed25519 async ops throw [UnsupportedOperationException].
  */
-expect fun signInto(
-    key: SigningKey,
-    message: ReadBuffer,
-    dest: WriteBuffer,
-): Int
-
-/**
- * Verifies that [signature] is a valid signature of [message] under [key].
- *
- * Returns `true` iff the signature verifies. A tampered signature / message / public key returns
- * `false` — it is **never** an accepted signature. Malformed inputs (non-canonical DER, `r=0`,
- * off-curve point, etc.) are rejected by the platform and surface as `false` here. Throws
- * [UnsupportedOperationException] where the scheme is not synchronously supported.
- *
- * The reads are non-destructive on success and failure alike; positions are restored.
- */
-expect fun verify(
-    key: VerifyKey,
-    message: ReadBuffer,
-    signature: ReadBuffer,
-): Boolean
+expect suspend fun ed25519AsyncAvailable(): Boolean
 
 // Upper-bound signature sizes (bytes). Ed25519 is fixed at 64; the ECDSA values are the DER
 // worst case (SEQUENCE + two INTEGERs, each tag+len+sign-pad+coordinate) for each curve.
@@ -249,7 +290,7 @@ private const val ECDSA_P256_MAX_DER_BYTES = 72
 private const val ECDSA_P384_MAX_DER_BYTES = 104
 private const val ECDSA_P521_MAX_DER_BYTES = 139
 
-/** Upper bound on the signature size (bytes) a [scheme] can produce, for sizing [dest]. */
+/** Upper bound on the signature size (bytes) a [scheme] can produce, for sizing a destination. */
 fun maxSignatureBytes(scheme: SignatureScheme): Int =
     when (scheme) {
         SignatureScheme.Ed25519 -> ED25519_SIGNATURE_BYTES
@@ -258,57 +299,187 @@ fun maxSignatureBytes(scheme: SignatureScheme): Int =
         SignatureScheme.EcdsaP521 -> ECDSA_P521_MAX_DER_BYTES
     }
 
+// =============================================================================
+// Capability witness: operations live ON the witness the platform supplies
+// =============================================================================
+
 /**
- * One-shot synchronous sign returning a freshly allocated, read-ready signature buffer.
- * Convenience over [signInto]; see it for the capability contract.
+ * Signature operations available through *some* path. Both sign and verify are `suspend`; on
+ * platforms with a synchronous native signature stack the witness is a [SignatureBlockingOps],
+ * which adds the non-suspend entry points.
  */
-fun sign(
-    key: SigningKey,
-    message: ReadBuffer,
-    factory: BufferFactory = BufferFactory.Default,
-): ReadBuffer {
-    val out = factory.allocate(maxSignatureBytes(key.scheme))
-    val written = signInto(key, message, out)
-    out.position(0)
-    out.setLimit(written)
-    return out
+interface SignatureAsyncOps {
+    /** Signs [message] under [key], returning a read-ready signature buffer. */
+    suspend fun sign(
+        key: SigningKey,
+        message: ReadBuffer,
+        factory: BufferFactory = BufferFactory.Default,
+    ): ReadBuffer
+
+    /**
+     * Verifies that [signature] is a valid signature of [message] under [key]. Returns `true` iff
+     * it verifies; a tampered signature / message / key returns `false`, never throw-as-valid.
+     */
+    suspend fun verify(
+        key: VerifyKey,
+        message: ReadBuffer,
+        signature: ReadBuffer,
+    ): Boolean
 }
 
-// ============================================================================
-// Suspending async API (works on every platform, including browser JS/WASM)
-// ============================================================================
+/** Signatures with a synchronous (non-`suspend`) path, in addition to the inherited async one. */
+interface SignatureBlockingOps : SignatureAsyncOps {
+    /**
+     * Signs the remaining bytes of [message] under [key], writing the signature into [dest] at its
+     * current position and advancing it. Returns the number of signature bytes written. [dest] must
+     * have at least [maxSignatureBytes] of [key]'s scheme remaining.
+     */
+    fun signInto(
+        key: SigningKey,
+        message: ReadBuffer,
+        dest: WriteBuffer,
+    ): Int
+
+    /** Synchronous [SignatureAsyncOps.sign]: a freshly allocated, read-ready signature buffer. */
+    fun signBlocking(
+        key: SigningKey,
+        message: ReadBuffer,
+        factory: BufferFactory = BufferFactory.Default,
+    ): ReadBuffer
+
+    /** Synchronous [SignatureAsyncOps.verify]. */
+    fun verifyBlocking(
+        key: VerifyKey,
+        message: ReadBuffer,
+        signature: ReadBuffer,
+    ): Boolean
+}
 
 /**
- * Signs [message] under [key], returning a read-ready signature buffer. Works on **every**
- * platform: native ones fulfil it synchronously, JS/WASM go through WebCrypto's async
- * `SubtleCrypto.sign`. Throws [UnsupportedOperationException] only where the scheme itself is
- * unavailable (e.g. Ed25519 on a WebCrypto engine without it, or Android below API 34).
+ * Capability witness for a signature scheme on this platform:
+ *
+ *  - [Blocking] — a synchronous path exists (JVM/Android/Apple/Linux for the supported schemes);
+ *    [ops] also satisfies [SignatureAsyncOps].
+ *  - [AsyncOnly] — only the async path exists (JS/WASM, where WebCrypto is `suspend`-only).
+ *  - [Unavailable] — the scheme cannot be reached at all on this platform (e.g. Ed25519 on Android,
+ *    which has no raw-key import path).
+ *
+ * Reached via [CryptoCapabilities.signatures]. Because an unsupported op is not a member of the
+ * resolved witness, it is unrepresentable rather than a runtime throw.
  */
-expect suspend fun signAsync(
+sealed interface SignatureSupport {
+    /** The scheme is not available on this platform (cannot be reached at all). */
+    data object Unavailable : SignatureSupport
+
+    /** Async-only path available (e.g. WebCrypto). Only [SignatureAsyncOps] is reachable. */
+    data class AsyncOnly(
+        val ops: SignatureAsyncOps,
+    ) : SignatureSupport
+
+    /** A synchronous native path is available; [ops] also satisfies [SignatureAsyncOps]. */
+    data class Blocking(
+        val ops: SignatureBlockingOps,
+    ) : SignatureSupport
+}
+
+/**
+ * The signature capability for [scheme] on this platform: [SignatureSupport.Blocking] on
+ * JVM/Android/Apple/Linux for supported schemes, [SignatureSupport.AsyncOnly] on JS/WASM (WebCrypto
+ * is `suspend`-only), [SignatureSupport.Unavailable] where the scheme is absent (Ed25519 on
+ * Android). Ed25519 on the web is reported [SignatureSupport.AsyncOnly]; whether the engine actually
+ * supports it is feature-detected at call time (see [ed25519AsyncAvailable]).
+ */
+expect fun CryptoCapabilities.signatures(scheme: SignatureScheme): SignatureSupport
+
+// =============================================================================
+// Witness op implementations (common — call the per-platform expect primitives)
+// =============================================================================
+
+/** Signature ops over the synchronous native primitives. Native async == sync. */
+internal object SignatureBlockingOpsImpl : SignatureBlockingOps {
+    override fun signInto(
+        key: SigningKey,
+        message: ReadBuffer,
+        dest: WriteBuffer,
+    ): Int = signIntoPlatform(key, message, dest)
+
+    override fun signBlocking(
+        key: SigningKey,
+        message: ReadBuffer,
+        factory: BufferFactory,
+    ): ReadBuffer {
+        val out = factory.allocate(maxSignatureBytes(key.scheme))
+        val written = signIntoPlatform(key, message, out)
+        out.position(0)
+        out.setLimit(written)
+        return out
+    }
+
+    override fun verifyBlocking(
+        key: VerifyKey,
+        message: ReadBuffer,
+        signature: ReadBuffer,
+    ): Boolean = verifyPlatform(key, message, signature)
+
+    override suspend fun sign(
+        key: SigningKey,
+        message: ReadBuffer,
+        factory: BufferFactory,
+    ): ReadBuffer = signBlocking(key, message, factory)
+
+    override suspend fun verify(
+        key: VerifyKey,
+        message: ReadBuffer,
+        signature: ReadBuffer,
+    ): Boolean = verifyBlocking(key, message, signature)
+}
+
+/** Signature ops over the async-only primitives (WebCrypto on JS/WASM). */
+internal object SignatureAsyncOpsImpl : SignatureAsyncOps {
+    override suspend fun sign(
+        key: SigningKey,
+        message: ReadBuffer,
+        factory: BufferFactory,
+    ): ReadBuffer = signAsyncPlatform(key, message, factory)
+
+    override suspend fun verify(
+        key: VerifyKey,
+        message: ReadBuffer,
+        signature: ReadBuffer,
+    ): Boolean = verifyAsyncPlatform(key, message, signature)
+}
+
+// =============================================================================
+// Per-platform primitives — internal seam driven by the witness ops above
+// =============================================================================
+//
+// On JS/WASM the synchronous primitives throw (the witness there is AsyncOnly, so they are never
+// reached). On native platforms the async primitives fulfil synchronously.
+
+/** Synchronous sign-into-[dest]. Throws on JS/WASM (witness is AsyncOnly there). */
+internal expect fun signIntoPlatform(
     key: SigningKey,
     message: ReadBuffer,
-    factory: BufferFactory = BufferFactory.Default,
-): ReadBuffer
+    dest: WriteBuffer,
+): Int
 
-/**
- * Verifies [signature] over [message] under [key] on every platform (WebCrypto async on JS/WASM,
- * native otherwise). Returns `true` iff valid; tampered inputs return `false`, never throw-as-valid.
- */
-expect suspend fun verifyAsync(
+/** Synchronous verify. Throws on JS/WASM (witness is AsyncOnly there). */
+internal expect fun verifyPlatform(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,
 ): Boolean
 
-/**
- * Whether Ed25519 sign/verify is available through the **async** API on this platform/runtime:
- *
- *  - JVM: same as [supportsSyncEd25519] (JDK 15+).
- *  - Android: `true` only at runtime `SDK_INT >= 34`.
- *  - Apple: `false` (no CryptoKit bridge; see the Apple notes).
- *  - JS / WASM: runtime **feature-detected** against the engine's WebCrypto (a Promise, hence the
- *    suspend) — `true` on Chrome 137+/Firefox 129+/Safari 17+/Node stable, `false` otherwise.
- *
- * When `false`, [signAsync] / [verifyAsync] throw [UnsupportedOperationException] for Ed25519.
- */
-expect suspend fun ed25519AsyncAvailable(): Boolean
+/** Async sign — native fulfils synchronously; JS/WASM goes through WebCrypto. */
+internal expect suspend fun signAsyncPlatform(
+    key: SigningKey,
+    message: ReadBuffer,
+    factory: BufferFactory,
+): ReadBuffer
+
+/** Async verify — native fulfils synchronously; JS/WASM goes through WebCrypto. */
+internal expect suspend fun verifyAsyncPlatform(
+    key: VerifyKey,
+    message: ReadBuffer,
+    signature: ReadBuffer,
+): Boolean

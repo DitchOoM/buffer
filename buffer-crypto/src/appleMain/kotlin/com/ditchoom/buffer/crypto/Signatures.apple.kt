@@ -54,7 +54,7 @@ import platform.posix.size_tVar
  *
  * **Ed25519** is not exposed by the Security.framework C API — it lives in CryptoKit. It is wired
  * through the `cryptokitshim` cinterop ([bcks_ed25519_sign] / [bcks_ed25519_verify]), which calls
- * CryptoKit `Curve25519.Signing`. [supportsSyncEd25519] is therefore `true` on Apple.
+ * CryptoKit `Curve25519.Signing`. The Ed25519 witness is therefore [SignatureSupport.Blocking] on Apple.
  *
  * **ECDSA signing-from-scalar (Apple-specific):** `SecKeyCreateWithData` for an EC *private* key
  * requires the full ANSI X9.63 representation `04 ‖ X ‖ Y ‖ K`, not the bare scalar — it cannot
@@ -65,11 +65,13 @@ import platform.posix.size_tVar
  * `04 ‖ X ‖ Y` and DER signatures directly.
  */
 
-actual val supportsSyncEd25519: Boolean get() = true
-
-actual val supportsSyncEcdsa: Boolean get() = true
-
 actual val ecdsaSignatureEncoding: EcdsaSignatureEncoding get() = EcdsaSignatureEncoding.Der
+
+/**
+ * Every scheme has a synchronous path on Apple: ECDSA via Security.framework + the CryptoKit
+ * sign-from-scalar shim, Ed25519 via the CryptoKit `Curve25519.Signing` shim.
+ */
+actual fun CryptoCapabilities.signatures(scheme: SignatureScheme): SignatureSupport = SignatureSupport.Blocking(SignatureBlockingOpsImpl)
 
 private const val P256_CURVE_BITS = 256
 private const val P384_CURVE_BITS = 384
@@ -156,7 +158,7 @@ private fun cryptoKitSign(
     message: ReadBuffer,
 ): ByteArray {
     val cap = maxSignatureBytes(key.scheme)
-    val scalar = key.requireOpen()
+    val scalar = key.requireInMemoryMaterial()
     return memScoped {
         val sigOut = allocArray<ByteVar>(cap)
         val sigLen = alloc<size_tVar>()
@@ -207,7 +209,7 @@ private fun appleEd25519Verify(
     if (signature.remaining() != ED25519_SIGNATURE_BYTES) return false
     var status = -1
     val msgLen = message.remaining()
-    key.material.withRemainingBytes { pubPtr, pubLen ->
+    key.requireInMemoryMaterial().withRemainingBytes { pubPtr, pubLen ->
         message.withRemainingBytes2(msgLen) { msgPtr ->
             signature.withRemainingBytes { sigPtr, sigLen ->
                 status =
@@ -304,7 +306,7 @@ private fun appleEcdsaVerify(
 ): Boolean {
     // SecKeyVerifySignature accepts non-canonical BER; reject anything that is not strict DER first.
     if (!isCanonicalEcdsaDer(signature)) return false
-    val pub = createKey(key.material.toNsData(), isPrivate = false) ?: return false
+    val pub = createKey(key.requireInMemoryMaterial().toNsData(), isPrivate = false) ?: return false
 
     @Suppress("UNCHECKED_CAST")
     val msgData = CFBridgingRetain(message.toNsData()) as CFDataRef
@@ -323,7 +325,7 @@ private fun appleEcdsaVerify(
     }
 }
 
-actual fun signInto(
+internal actual fun signIntoPlatform(
     key: SigningKey,
     message: ReadBuffer,
     dest: WriteBuffer,
@@ -335,7 +337,7 @@ actual fun signInto(
     return n
 }
 
-actual fun verify(
+internal actual fun verifyPlatform(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,
@@ -346,7 +348,7 @@ actual fun verify(
         appleEcdsaVerify(key, message, signature)
     }
 
-actual suspend fun signAsync(
+internal actual suspend fun signAsyncPlatform(
     key: SigningKey,
     message: ReadBuffer,
     factory: BufferFactory,
@@ -358,11 +360,11 @@ actual suspend fun signAsync(
     return out
 }
 
-actual suspend fun verifyAsync(
+internal actual suspend fun verifyAsyncPlatform(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,
-): Boolean = verify(key, message, signature)
+): Boolean = verifyPlatform(key, message, signature)
 
 actual suspend fun ed25519AsyncAvailable(): Boolean = true
 

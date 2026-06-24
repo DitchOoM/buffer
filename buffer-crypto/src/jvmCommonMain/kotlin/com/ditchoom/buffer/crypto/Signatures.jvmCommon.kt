@@ -27,8 +27,8 @@ import java.security.spec.X509EncodedKeySpec
  *   ECDSA signature format), pinned by ecdsaSignatureEncoding.
  * - Ed25519 uses JCA Signature("Ed25519") (JDK 15+ / Conscrypt on Android 14+). Whether it is
  *   available at all is decided per-platform by ed25519RuntimeSupported: a JDK probe on JVM, a
- *   Build.VERSION.SDK_INT >= 34 runtime gate on Android. When it is false, every Ed25519 op throws
- *   UnsupportedOperationException and supportsSyncEd25519 reports false.
+ *   Build.VERSION.SDK_INT >= 34 runtime gate on Android. When it is false, the Ed25519 witness
+ *   resolves to SignatureSupport.Unavailable, so the op cannot be reached at all.
  *
  * Key import: callers hand us the standard raw encoding (Ed25519 32-byte seed / public key, ECDSA
  * raw scalar / uncompressed SEC1 point). We assemble the JCA KeySpec from those at the boundary;
@@ -38,14 +38,23 @@ import java.security.spec.X509EncodedKeySpec
 /** Decided per-platform: JVM probes the JDK, Android gates on `SDK_INT >= 34`. */
 internal expect val ed25519RuntimeSupported: Boolean
 
-actual val supportsSyncEd25519: Boolean
-    get() = ed25519RuntimeSupported
-
-actual val supportsSyncEcdsa: Boolean
-    get() = true
-
 actual val ecdsaSignatureEncoding: EcdsaSignatureEncoding
     get() = EcdsaSignatureEncoding.Der
+
+/**
+ * ECDSA is always synchronous via JCA; Ed25519 is synchronous when the runtime supports raw-key
+ * import (JDK 15+ on the JVM, never on Android), else [SignatureSupport.Unavailable].
+ */
+actual fun CryptoCapabilities.signatures(scheme: SignatureScheme): SignatureSupport =
+    when (scheme) {
+        SignatureScheme.Ed25519 ->
+            if (ed25519RuntimeSupported) {
+                SignatureSupport.Blocking(SignatureBlockingOpsImpl)
+            } else {
+                SignatureSupport.Unavailable
+            }
+        else -> SignatureSupport.Blocking(SignatureBlockingOpsImpl)
+    }
 
 // ---------------------------------------------------------------------------
 // Byte extraction at the JCA boundary (non-destructive). Mirrors the hashes bridge:
@@ -240,7 +249,7 @@ internal fun signToByteArray(
     message: ReadBuffer,
 ): ByteArray {
     val material =
-        key.requireOpen().let { buf ->
+        key.requireInMemoryMaterial().let { buf ->
             // material is read-ready; snapshot its bytes for the JCA spec.
             val start = buf.position()
             val n = buf.remaining()
@@ -254,7 +263,7 @@ internal fun signToByteArray(
     return sig.sign()
 }
 
-actual fun signInto(
+internal actual fun signIntoPlatform(
     key: SigningKey,
     message: ReadBuffer,
     dest: WriteBuffer,
@@ -358,7 +367,7 @@ internal fun verifyBytes(
         if (parseCanonicalEcdsaDer(sigBytes, curveOrder(key.scheme)) == null) return false
     }
     return try {
-        val pub = publicKeyFor(key.scheme, key.material.remainingBytes())
+        val pub = publicKeyFor(key.scheme, key.requireInMemoryMaterial().remainingBytes())
         val sig = signatureFor(key.scheme)
         sig.initVerify(pub)
         sig.update(message.remainingBytes())
@@ -371,7 +380,7 @@ internal fun verifyBytes(
     }
 }
 
-actual fun verify(
+internal actual fun verifyPlatform(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,
@@ -381,7 +390,7 @@ actual fun verify(
 // Async wrappers — native, so just fulfil synchronously.
 // ---------------------------------------------------------------------------
 
-actual suspend fun signAsync(
+internal actual suspend fun signAsyncPlatform(
     key: SigningKey,
     message: ReadBuffer,
     factory: BufferFactory,
@@ -393,7 +402,7 @@ actual suspend fun signAsync(
     return out
 }
 
-actual suspend fun verifyAsync(
+internal actual suspend fun verifyAsyncPlatform(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,

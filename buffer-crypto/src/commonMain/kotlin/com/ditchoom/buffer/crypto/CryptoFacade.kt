@@ -4,10 +4,8 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.crypto.deriveSharedSecret as freeDeriveSharedSecret
 import com.ditchoom.buffer.crypto.deriveSharedSecretAsync as freeDeriveSharedSecretAsync
-import com.ditchoom.buffer.crypto.ed25519AsyncAvailable as freeEd25519AsyncAvailable
 import com.ditchoom.buffer.crypto.generateKeyPair as freeGenerateKeyPair
 import com.ditchoom.buffer.crypto.generateKeyPairAsync as freeGenerateKeyPairAsync
 import com.ditchoom.buffer.crypto.hpkeGenerateKeyPair as freeHpkeGenerateKeyPair
@@ -25,73 +23,20 @@ import com.ditchoom.buffer.crypto.hpkeSetupPskReceiver as freeHpkeSetupPskReceiv
 import com.ditchoom.buffer.crypto.hpkeSetupPskSender as freeHpkeSetupPskSender
 import com.ditchoom.buffer.crypto.hpkeSupported as freeHpkeSupported
 import com.ditchoom.buffer.crypto.importPrivateKey as freeImportPrivateKey
-import com.ditchoom.buffer.crypto.maxSignatureBytes as freeMaxSignatureBytes
-import com.ditchoom.buffer.crypto.sign as freeSign
-import com.ditchoom.buffer.crypto.signAsync as freeSignAsync
-import com.ditchoom.buffer.crypto.signInto as freeSignInto
 import com.ditchoom.buffer.crypto.supportsSync as freeSupportsSync
-import com.ditchoom.buffer.crypto.verify as freeVerify
-import com.ditchoom.buffer.crypto.verifyAsync as freeVerifyAsync
 
 /*
  * Namespaced entry points for the crypto primitive families.
  *
  * Each object below groups the family's free functions under a single discoverable name so IDE
- * completion surfaces, e.g., `Sign.sign` / `Kex.deriveSharedSecret` / `Hpke.sealBase` instead of a
- * flat list of top-level functions. (AEAD has no facade object — its operations live on the
- * [Aead] / [OptionalAead] capability witnesses.) These are thin, additive
+ * completion surfaces, e.g., `Kex.deriveSharedSecret` / `Hpke.sealBase` instead of a flat list of
+ * top-level functions. (AEAD and signatures have no facade object — their operations live on the
+ * [Aead] / [OptionalAead] / [SignatureSupport] capability witnesses.) These are thin, additive
  * facades: every member delegates to the existing top-level function of the same family (which
  * remains the canonical, unchanged public API — many are `expect`/`internal`-backed and cannot
  * move into an object). Nothing here is breaking; the original top-level functions are kept
  * exactly as-is, so existing callers continue to compile unchanged.
  */
-
-/**
- * Digital-signature (Ed25519, ECDSA P-256/P-384/P-521) namespaced entry points. Delegates to the
- * top-level `sign*` / `verify*` functions.
- */
-object Sign {
-    /** @see signInto */
-    fun signInto(
-        key: SigningKey,
-        message: ReadBuffer,
-        dest: WriteBuffer,
-    ): Int = freeSignInto(key, message, dest)
-
-    /** @see verify */
-    fun verify(
-        key: VerifyKey,
-        message: ReadBuffer,
-        signature: ReadBuffer,
-    ): Boolean = freeVerify(key, message, signature)
-
-    /** @see maxSignatureBytes */
-    fun maxSignatureBytes(scheme: SignatureScheme): Int = freeMaxSignatureBytes(scheme)
-
-    /** @see sign */
-    fun sign(
-        key: SigningKey,
-        message: ReadBuffer,
-        factory: BufferFactory = BufferFactory.Default,
-    ): ReadBuffer = freeSign(key, message, factory)
-
-    /** @see signAsync */
-    suspend fun signAsync(
-        key: SigningKey,
-        message: ReadBuffer,
-        factory: BufferFactory = BufferFactory.Default,
-    ): ReadBuffer = freeSignAsync(key, message, factory)
-
-    /** @see verifyAsync */
-    suspend fun verifyAsync(
-        key: VerifyKey,
-        message: ReadBuffer,
-        signature: ReadBuffer,
-    ): Boolean = freeVerifyAsync(key, message, signature)
-
-    /** @see ed25519AsyncAvailable */
-    suspend fun ed25519AsyncAvailable(): Boolean = freeEd25519AsyncAvailable()
-}
 
 /**
  * Key-exchange / agreement (X25519, ECDH P-256/P-384/P-521) namespaced entry points. Delegates to

@@ -11,11 +11,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * The namespaced facade objects ([Sign], [Kex], [Hpke]) are thin delegates over the existing
- * top-level functions. These tests prove the delegation is wired correctly and behaves identically
- * to the top-level surface, on every platform (driving the async/cross-platform paths). AEAD has no
- * facade object — its operations live on the [Aead] / [OptionalAead] capability witnesses, exercised
- * via [aeadWitnessRoundTrips].
+ * The namespaced facade objects ([Kex], [Hpke]) are thin delegates over the existing top-level
+ * functions. These tests prove the delegation is wired correctly and behaves identically to the
+ * top-level surface, on every platform (driving the async/cross-platform paths). AEAD and signatures
+ * have no facade object — their operations live on the [Aead] / [OptionalAead] / [SignatureSupport]
+ * capability witnesses, exercised via [aeadWitnessRoundTrips] / [signatureWitnessRoundTrips].
  */
 class CryptoFacadeTest {
     private val aes256Key = "feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308"
@@ -34,31 +34,21 @@ class CryptoFacadeTest {
         }
 
     @Test
-    fun signFacadeMaxBytesMatchesTopLevel() {
-        val schemes =
-            listOf(
-                SignatureScheme.Ed25519,
-                SignatureScheme.EcdsaP256,
-                SignatureScheme.EcdsaP384,
-                SignatureScheme.EcdsaP521,
-            )
-        for (scheme in schemes) {
-            assertEquals(maxSignatureBytes(scheme), Sign.maxSignatureBytes(scheme))
-        }
-    }
-
-    @Test
-    fun signFacadeRoundTrips() =
+    fun signatureWitnessRoundTrips() =
         runTest {
             if (!ed25519AsyncAvailable()) return@runTest
-            // RFC 8032 §7.1 test vector 1 (matching seed/public-key pair).
+            // RFC 8032 §7.1 test vector 1 (matching seed/public-key pair), driven through the witness.
             val seed = hexBuffer("9d61b19deffebc3a6f689b25f8a1ada92a2c4a26e3aa1bd2f60ba844af492ec2")
             val pub = hexBuffer("dacdbc0f4e3606de5619c8a565a6864275feddf264b11b130abc1167e4f5d034")
-            val signing = SigningKey.ed25519(seed)
-            val verify = VerifyKey.ed25519(pub)
-            val msg = ascii("namespaced signing")
-            val sig = Sign.signAsync(signing, msg, BufferFactory.Default)
-            assertTrue(Sign.verifyAsync(verify, msg, sig), "facade verify must accept facade signature")
+            val ops = signatureAsyncOrNull(SignatureScheme.Ed25519) ?: return@runTest
+            val msg = ascii("witness signing")
+            SigningKey.ed25519(seed).use { signing ->
+                val sig = ops.sign(signing, msg, BufferFactory.Default)
+                assertTrue(
+                    ops.verify(VerifyKey.ed25519(pub), msg, sig),
+                    "witness verify must accept witness signature",
+                )
+            }
         }
 
     @Test

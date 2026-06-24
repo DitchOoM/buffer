@@ -3,10 +3,11 @@ package com.ditchoom.buffer.crypto
 /**
  * One discoverable surface for the per-platform crypto capability flags that vary by platform.
  *
- * AEAD capability is **not** here — it is reified as a [capability witness][Aead] reachable via
- * [CryptoCapabilities.aesGcm] / [CryptoCapabilities.chaChaPoly], so an unsupported AEAD path is
- * unrepresentable rather than a boolean a caller might forget to check. The signature /
- * key-agreement / HPKE flags below remain plain booleans pending their own witness reshape.
+ * AEAD and signature capability are **not** here — each is reified as a capability witness
+ * ([Aead] / [OptionalAead] via [CryptoCapabilities.aesGcm] / [CryptoCapabilities.chaChaPoly];
+ * [SignatureSupport] via [CryptoCapabilities.signatures]), so an unsupported op is unrepresentable
+ * rather than a boolean a caller might forget to check. The key-agreement / HPKE flags below remain
+ * plain booleans pending their own witness reshape.
  *
  * ```kotlin
  * // AEAD: exhaustive when over the witness — the web (AsyncOnly) cannot reach sealBlocking.
@@ -15,23 +16,21 @@ package com.ditchoom.buffer.crypto
  *     is Aead.AsyncOnly -> gcm.ops.seal(key, plaintext)
  * }
  *
+ * // Signatures: the unsupported op is not a member of the resolved witness.
+ * when (val s = CryptoCapabilities.signatures(SignatureScheme.Ed25519)) {
+ *     is SignatureSupport.Blocking  -> s.ops.signInto(key, message, dest)
+ *     is SignatureSupport.AsyncOnly -> s.ops.sign(key, message)
+ *     SignatureSupport.Unavailable  -> { /* not reachable here */ }
+ * }
+ *
  * // HPKE: check the whole suite before use.
  * if (CryptoCapabilities.hpke(suite)) { /* setup sender/receiver */ }
  * ```
  */
 object CryptoCapabilities {
     /**
-     * Whether Ed25519 sign/verify is available synchronously (JVM 15+, Apple, Android API 34+).
-     * `false` on JS/WASM (use the `*Async` sign/verify there).
-     */
-    val ed25519Sync: Boolean get() = supportsSyncEd25519
-
-    /** Whether ECDSA sign/verify over the NIST P-curves is available synchronously. */
-    val ecdsaSync: Boolean get() = supportsSyncEcdsa
-
-    /**
-     * Whether ECDSA **signing from a bare private scalar** is supported (`false` on Apple, which
-     * needs the full X9.63 private representation). ECDSA *verification* is available regardless.
+     * Whether ECDSA **signing from a bare private scalar** is supported (a key-construction
+     * capability, not an op variant: ECDSA *verification* is available on every platform regardless).
      */
     val ecdsaSigningFromScalar: Boolean get() = supportsEcdsaSigningFromScalar
 
