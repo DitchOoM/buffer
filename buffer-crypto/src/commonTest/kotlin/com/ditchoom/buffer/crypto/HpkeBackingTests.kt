@@ -94,42 +94,45 @@ class HpkeBackingTests {
         val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
         val root = json.parseToJsonElement(HpkeRfcVectors.JSON) as kotlinx.serialization.json.JsonObject
         val vectors = (root["vectors"]!! as kotlinx.serialization.json.JsonArray)
-        for (vEl in vectors) {
-            val v = vEl as kotlinx.serialization.json.JsonObject
+        return vectors.firstNotNullOfOrNull { vEl -> vectorOrNull(vEl as kotlinx.serialization.json.JsonObject) }
+    }
 
-            fun s(n: String) = (v[n] as kotlinx.serialization.json.JsonPrimitive).content
+    /** Converts a vector object to [Vec], or `null` if its mode/suite is not exercised here. */
+    private fun vectorOrNull(v: kotlinx.serialization.json.JsonObject): Vec? {
+        fun s(n: String) = (v[n] as kotlinx.serialization.json.JsonPrimitive).content
 
-            fun i(n: String) = s(n).toInt()
-            if (i("mode") != 0) continue
-            val suite =
-                HpkeSuite(
-                    HpkeTestSupport.kemById(i("kem_id")),
-                    HpkeTestSupport.kdfById(i("kdf_id")),
-                    HpkeTestSupport.aeadById(i("aead_id")),
-                )
-            if (!HpkeTestSupport.suiteSupported(suite)) continue
-            // The backing matrix drives a KAT vector with pinned raw scalars, importable only on
-            // raw-scalar platforms (JVM/Android). On web/Apple the wrapper-transparency contract for
-            // HPKE is still covered by HpkeRoundTripTest running across generated keys.
-            if (!supportsRawScalarKat(suite.kem.curve)) continue
-            val enc0 = (v["encryptions"]!! as kotlinx.serialization.json.JsonArray)[0] as kotlinx.serialization.json.JsonObject
-
-            fun e(n: String) = (enc0[n] as kotlinx.serialization.json.JsonPrimitive).content
-            return Vec(
-                kemId = i("kem_id"),
-                kdfId = i("kdf_id"),
-                aeadId = i("aead_id"),
-                info = s("info"),
-                pkRm = s("pkRm"),
-                skRm = s("skRm"),
-                skEm = s("skEm"),
-                pkEm = s("pkEm"),
-                enc = s("enc"),
-                pt = e("pt"),
-                aad = e("aad"),
-                ctSeq0 = e("ct"),
+        fun i(n: String) = s(n).toInt()
+        val suite =
+            HpkeSuite(
+                HpkeTestSupport.kemById(i("kem_id")),
+                HpkeTestSupport.kdfById(i("kdf_id")),
+                HpkeTestSupport.aeadById(i("aead_id")),
             )
-        }
-        return null
+        // Only Base-mode (0) suites that are supported and importable from pinned raw scalars
+        // (JVM/Android) are exercised here; on web/Apple HpkeRoundTripTest covers the contract
+        // across generated keys instead.
+        val eligible =
+            i("mode") == 0 &&
+                HpkeTestSupport.suiteSupported(suite) &&
+                supportsRawScalarKat(suite.kem.curve)
+        if (!eligible) return null
+        val encryptions = v["encryptions"]!! as kotlinx.serialization.json.JsonArray
+        val enc0 = encryptions[0] as kotlinx.serialization.json.JsonObject
+
+        fun e(n: String) = (enc0[n] as kotlinx.serialization.json.JsonPrimitive).content
+        return Vec(
+            kemId = i("kem_id"),
+            kdfId = i("kdf_id"),
+            aeadId = i("aead_id"),
+            info = s("info"),
+            pkRm = s("pkRm"),
+            skRm = s("skRm"),
+            skEm = s("skEm"),
+            pkEm = s("pkEm"),
+            enc = s("enc"),
+            pt = e("pt"),
+            aad = e("aad"),
+            ctSeq0 = e("ct"),
+        )
     }
 }

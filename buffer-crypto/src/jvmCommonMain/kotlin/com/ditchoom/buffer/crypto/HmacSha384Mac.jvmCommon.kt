@@ -1,3 +1,5 @@
+@file:Suppress("MatchingDeclarationName") // MPP platform-suffixed actual file
+
 package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.ReadBuffer
@@ -17,7 +19,12 @@ actual class HmacSha384Mac actual constructor(
             val spec =
                 if (managed != null) {
                     // SecretKeySpec copies the requested range, so no aliasing of the source buffer.
-                    SecretKeySpec(managed.backingArray, managed.arrayOffset + key.position(), key.remaining(), "HmacSHA384")
+                    SecretKeySpec(
+                        managed.backingArray,
+                        managed.arrayOffset + key.position(),
+                        key.remaining(),
+                        "HmacSHA384",
+                    )
                 } else {
                     SecretKeySpec(key.toByteArray(), "HmacSHA384")
                 }

@@ -794,8 +794,9 @@ class BufferTests {
                     it.toString(),
                 )
                 successfulCount++
-            } catch (e: UnsupportedOperationException) {
-                // unallowed type.
+            } catch (_: UnsupportedOperationException) {
+                // Intentionally ignored: this charset is not supported on the current platform,
+                // so we skip it and rely on successfulCount to assert at least one charset worked.
             }
         }
         assertTrue { successfulCount > 0 }
@@ -829,36 +830,36 @@ class BufferTests {
             value = value.padStart(length * 2, '0')
             return value.hexToByteArray()
         }
+        val fullBytes =
+            byteArrayOf(0, 1, -87, 96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56)
+        val afterMessageId =
+            byteArrayOf(-87, 96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56)
+        val payloadBytes =
+            byteArrayOf(96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56)
         val hex = str.toByteArrayFromHex()
-        assertContentEquals(
-            hex,
-            byteArrayOf(0, 1, -87, 96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56),
-        )
+        assertContentEquals(hex, fullBytes)
         val buf = BufferFactory.Default.wrap(hex)
-        assertBufferEquals(
-            buf,
-            byteArrayOf(0, 1, -87, 96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56),
-        )
+        assertBufferEquals(buf, fullBytes)
         assertEquals(0, buf.position())
         assertEquals(25, buf.limit())
         val messageId = buf.readUnsignedShort()
-        assertBufferEquals(buf, byteArrayOf(-87, 96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56))
+        assertBufferEquals(buf, afterMessageId)
         assertEquals(messageId.toInt(), 1)
         assertEquals(2, buf.position())
         assertEquals(25, buf.limit())
         val cmd = buf.readByte()
-        assertBufferEquals(buf, byteArrayOf(96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56))
+        assertBufferEquals(buf, payloadBytes)
         assertEquals(-87, cmd)
         assertEquals(3, buf.position())
         assertEquals(25, buf.limit())
         val rem = buf.remaining()
         assertEquals(22, rem)
         val data = buf.readByteArray(rem)
-        assertContentEquals(data, byteArrayOf(96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56))
+        assertContentEquals(data, payloadBytes)
         val newBuffer = BufferFactory.Default.wrap(data)
         assertEquals(0, newBuffer.position())
         assertEquals(22, newBuffer.limit())
-        assertBufferEquals(newBuffer, byteArrayOf(96, -37, -40, -91, 0, 0, 101, 0, 0, 100, 0, 1, 10, 0, 49, 50, 51, 52, 53, 54, 55, 56))
+        assertBufferEquals(newBuffer, payloadBytes)
         val b = newBuffer.readByteArray(4)
         assertEquals(b.toHexString().uppercase(), "60DBD8A5")
     }

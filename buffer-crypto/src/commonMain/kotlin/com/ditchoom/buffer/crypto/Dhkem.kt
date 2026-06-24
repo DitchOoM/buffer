@@ -19,12 +19,6 @@ import com.ditchoom.buffer.ReadBuffer
  * (Auth). The `shared_secret` is returned in a wiped SecureBuffer; the caller frees it.
  */
 
-/** Result of a DHKEM encapsulation: the [sharedSecret] (secure, caller frees) and the [enc] to send. */
-internal class DhkemEncapResult(
-    val sharedSecret: PlatformBuffer,
-    val enc: ReadBuffer,
-)
-
 /** DHKEM.Encap(pkR): generate an ephemeral key pair, then encapsulate. */
 internal suspend fun dhkemEncap(
     kem: HpkeKem,

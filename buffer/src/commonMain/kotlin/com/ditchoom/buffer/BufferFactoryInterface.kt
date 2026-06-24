@@ -205,7 +205,10 @@ fun BufferFactory.Companion.shared(): BufferFactory = sharedBufferFactory
  *
  * @param threadConfined If true, uses a thread-confined arena on JVM 21+
  *   ([Arena.ofConfined][java.lang.foreign.Arena.ofConfined]). Ignored on other platforms.
+ *
+ * ktlint (no .editorconfig) collapses this expression body onto one line, so it cannot be wrapped.
  */
+@Suppress("MaxLineLength")
 fun BufferFactory.Companion.deterministic(threadConfined: Boolean = false): BufferFactory = deterministicBufferFactory(threadConfined)
 
 // =============================================================================

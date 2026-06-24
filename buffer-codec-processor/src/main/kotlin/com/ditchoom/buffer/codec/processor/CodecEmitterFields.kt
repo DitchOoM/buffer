@@ -21,7 +21,7 @@ import com.squareup.kotlinpoet.TypeName
  * verified by the snapshot suite.
  */
 
-internal fun scalarHeaderBytes(shape: CodecShape): Int = shape.fields.sumOfFixedWireBytes().requireFixed("scalarHeaderBytes")
+internal fun CodecShape.scalarHeaderBytes(): Int = fields.sumOfFixedWireBytes().requireFixed("scalarHeaderBytes")
 
 internal fun appendDecodeScalar(
     body: CodeBlock.Builder,
@@ -247,9 +247,9 @@ internal fun appendEncodeGuard(
     val accessor = "value.${field.name}"
     val (lhs, maxLit) =
         when (field.kind) {
-            ScalarKind.ULong -> accessor to "((1uL shl ${8 * field.wireBytes}) - 1uL)"
-            ScalarKind.UInt -> accessor to "((1u shl ${8 * field.wireBytes}) - 1u)"
-            ScalarKind.UShort -> "$accessor.toUInt()" to "((1u shl ${8 * field.wireBytes}) - 1u)"
+            ScalarKind.ULong -> accessor to "((1uL shl ${Byte.SIZE_BITS * field.wireBytes}) - 1uL)"
+            ScalarKind.UInt -> accessor to "((1u shl ${Byte.SIZE_BITS * field.wireBytes}) - 1u)"
+            ScalarKind.UShort -> "$accessor.toUInt()" to "((1u shl ${Byte.SIZE_BITS * field.wireBytes}) - 1u)"
             // wireBytes < 1 is rejected by analyzeField
             ScalarKind.UByte -> return
             // signed kinds reject @WireBytes narrowing in analyzeField
@@ -946,8 +946,8 @@ internal fun appendEncodeConditionalLengthPrefixedUseCodecPayload(
     body.addStatement("%T.encode(buffer, %L, context)", inner.payloadCodecType, accessor)
     body.addStatement("val %L = buffer.position()", endPosVar)
     body.addStatement("val %L = %L - %L", byteCountVar, endPosVar, bodyStartVar)
-    if (inner.prefixWidth < 4) {
-        val maxValue = (1L shl (inner.prefixWidth * 8)) - 1
+    if (inner.prefixWidth < Int.SIZE_BYTES) {
+        val maxValue = (1L shl (inner.prefixWidth * Byte.SIZE_BITS)) - 1
         val widthName =
             when (inner.prefixWidth) {
                 1 -> "Byte"
@@ -1187,8 +1187,8 @@ internal fun appendLengthPrefixedStringEncode(
     // Runtime overflow guard. For 4-byte prefixes the max (UInt.MAX_VALUE =
     // 2^32-1) exceeds Int.MAX_VALUE, so a position-delta byte count can never
     // overflow it — the check would be dead code.
-    if (prefixWidth < 4) {
-        val maxValue = (1L shl (prefixWidth * 8)) - 1
+    if (prefixWidth < Int.SIZE_BYTES) {
+        val maxValue = (1L shl (prefixWidth * Byte.SIZE_BITS)) - 1
         val widthName =
             when (prefixWidth) {
                 1 -> "Byte"
@@ -1678,7 +1678,8 @@ internal fun appendDecodeEnum(
         )
     } else {
         body.addStatement(
-            "val %L = %T.entries.getOrElse(__%LOrdinal) { throw %T(fieldPath = %S, bufferPosition = buffer.position(), expected = %S, actual = __%LOrdinal.toString()) }",
+            "val %L = %T.entries.getOrElse(__%LOrdinal) { throw %T(fieldPath = %S, " +
+                "bufferPosition = buffer.position(), expected = %S, actual = __%LOrdinal.toString()) }",
             field.name,
             field.enumType,
             field.name,
@@ -1897,8 +1898,8 @@ internal fun appendEncodeLengthPrefixedUseCodecPayload(
     )
     body.addStatement("val %L = buffer.position()", endPosVar)
     body.addStatement("val %L = %L - %L", byteCountVar, endPosVar, bodyStartVar)
-    if (field.prefixWidth < 4) {
-        val maxValue = (1L shl (field.prefixWidth * 8)) - 1
+    if (field.prefixWidth < Int.SIZE_BYTES) {
+        val maxValue = (1L shl (field.prefixWidth * Byte.SIZE_BITS)) - 1
         val widthName =
             when (field.prefixWidth) {
                 1 -> "Byte"

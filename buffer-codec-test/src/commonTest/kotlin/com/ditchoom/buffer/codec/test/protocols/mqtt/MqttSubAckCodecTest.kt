@@ -4,6 +4,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
@@ -370,7 +371,7 @@ class MqttSubAckCodecTest {
         data class VariantCase(
             val name: String,
             val singleton: MqttV3SubAckReturnCode,
-            val codec: com.ditchoom.buffer.codec.Codec<MqttV3SubAckReturnCode>,
+            val codec: Codec<MqttV3SubAckReturnCode>,
             val expectedWireByte: Byte,
         )
 
@@ -380,25 +381,25 @@ class MqttSubAckCodecTest {
                 VariantCase(
                     "SuccessMaximumQoS0",
                     MqttV3SubAckReturnCode.SuccessMaximumQoS0,
-                    MqttV3SubAckReturnCodeSuccessMaximumQoS0Codec as com.ditchoom.buffer.codec.Codec<MqttV3SubAckReturnCode>,
+                    MqttV3SubAckReturnCodeSuccessMaximumQoS0Codec as Codec<MqttV3SubAckReturnCode>,
                     0x00.toByte(),
                 ),
                 VariantCase(
                     "SuccessMaximumQoS1",
                     MqttV3SubAckReturnCode.SuccessMaximumQoS1,
-                    MqttV3SubAckReturnCodeSuccessMaximumQoS1Codec as com.ditchoom.buffer.codec.Codec<MqttV3SubAckReturnCode>,
+                    MqttV3SubAckReturnCodeSuccessMaximumQoS1Codec as Codec<MqttV3SubAckReturnCode>,
                     0x01.toByte(),
                 ),
                 VariantCase(
                     "SuccessMaximumQoS2",
                     MqttV3SubAckReturnCode.SuccessMaximumQoS2,
-                    MqttV3SubAckReturnCodeSuccessMaximumQoS2Codec as com.ditchoom.buffer.codec.Codec<MqttV3SubAckReturnCode>,
+                    MqttV3SubAckReturnCodeSuccessMaximumQoS2Codec as Codec<MqttV3SubAckReturnCode>,
                     0x02.toByte(),
                 ),
                 VariantCase(
                     "Failure",
                     MqttV3SubAckReturnCode.Failure,
-                    MqttV3SubAckReturnCodeFailureCodec as com.ditchoom.buffer.codec.Codec<MqttV3SubAckReturnCode>,
+                    MqttV3SubAckReturnCodeFailureCodec as Codec<MqttV3SubAckReturnCode>,
                     0x80.toByte(),
                 ),
             )

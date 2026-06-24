@@ -61,9 +61,11 @@ private fun isAllZero(buffer: ReadBuffer): Boolean {
     val start = buffer.position()
     val n = buffer.remaining()
     var acc = 0
-    for (i in 0 until n) acc = acc or (buffer.get(start + i).toInt() and 0xFF)
+    for (i in 0 until n) acc = acc or (buffer.get(start + i).toInt() and BYTE_MASK)
     return acc == 0
 }
+
+private const val BYTE_MASK = 0xFF
 
 /** Scratch factory for the raw secret: deterministic so it can be `use {}`-freed, secure so it is wiped. */
 internal val secureScratch: BufferFactory get() = BufferFactory.deterministic().secure()

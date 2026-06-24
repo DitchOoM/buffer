@@ -50,6 +50,8 @@ const val AES_256_KEY_BYTES: Int = 32
 /** Key length in bytes for ChaCha20-Poly1305 (always 256-bit). */
 const val CHACHA_KEY_BYTES: Int = 32
 
+private const val SYNC_AES_GCM_UNSUPPORTED = "synchronous AES-GCM is not supported on this platform"
+
 /**
  * An AES-GCM key, carrying its [size] so a 128-bit key can never be silently used where a
  * 256-bit key was meant (or vice versa). Construct via [AesGcmKey.of]; the key bytes are
@@ -96,7 +98,7 @@ class AesGcmKey private constructor(
             require(n == AES_128_KEY_BYTES || n == AES_256_KEY_BYTES) {
                 "AES-GCM key must be $AES_128_KEY_BYTES or $AES_256_KEY_BYTES bytes, was $n"
             }
-            return AesGcmKey(n * 8, copyMaterial(key, factory))
+            return AesGcmKey(n * Byte.SIZE_BITS, copyMaterial(key, factory))
         }
     }
 }
@@ -259,7 +261,7 @@ fun aesGcmSeal(
     aad: ReadBuffer? = null,
     factory: BufferFactory = BufferFactory.Default,
 ): PlatformBuffer {
-    if (!supportsSyncAesGcm) throw UnsupportedOperationException("synchronous AES-GCM is not supported on this platform")
+    if (!supportsSyncAesGcm) throw UnsupportedOperationException(SYNC_AES_GCM_UNSUPPORTED)
     val out = allocateFramed(plaintext.remaining(), factory)
     val nonce = writeFreshNonce(out)
     aesGcmSeal(key, nonce, aad, plaintext, out)
@@ -280,7 +282,7 @@ fun aesGcmOpen(
     aad: ReadBuffer? = null,
     factory: BufferFactory = BufferFactory.Default,
 ): PlatformBuffer {
-    if (!supportsSyncAesGcm) throw UnsupportedOperationException("synchronous AES-GCM is not supported on this platform")
+    if (!supportsSyncAesGcm) throw UnsupportedOperationException(SYNC_AES_GCM_UNSUPPORTED)
     val (nonce, ctAndTag, ptLen) = splitFramed(sealed)
     val out = factory.allocate(ptLen)
     aesGcmOpen(key, nonce, aad, ctAndTag, out)

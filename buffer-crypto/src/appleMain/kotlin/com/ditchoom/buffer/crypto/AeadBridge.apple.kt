@@ -96,10 +96,10 @@ internal fun nativeTagBuffer(tag: CPointer<ByteVar>): ReadBuffer {
  * routes through the CryptoKit Swift shim ([bcks_chachapoly_seal] / [bcks_chachapoly_open], from
  * `CryptoKitShim.swift` via the `cryptokitshim` cinterop). CryptoKit is available on every Apple
  * target this module builds for (macOS 10.15+, iOS 13+, tvOS 13+, watchOS 6+), all of which exceed
- * the module's deployment floors, so [appleChaChaPolyAvailable] is `true` unconditionally — no
+ * the module's deployment floors, so [APPLE_CHACHA_POLY_AVAILABLE] is `true` unconditionally — no
  * runtime feature-detection is needed.
  */
-internal val appleChaChaPolyAvailable: Boolean = true
+internal const val APPLE_CHACHA_POLY_AVAILABLE: Boolean = true
 
 internal fun appleChaChaPolySeal(
     key: ChaChaPolyKey,

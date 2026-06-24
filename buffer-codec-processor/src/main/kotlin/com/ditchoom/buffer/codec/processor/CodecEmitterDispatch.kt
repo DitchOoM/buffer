@@ -59,8 +59,8 @@ internal fun DispatchVariant.dispatchLabel(format: LabelFormat): CodeBlock =
             CodeBlock.of(
                 "0x%L",
                 dispatchValue
-                    .toString(16)
-                    .padStart(2, '0')
+                    .toString(HEX_RADIX)
+                    .padStart(HEX_BYTE_PAD, '0')
                     .uppercase(),
             )
         // Int passed as %L so KotlinPoet underscores large decimals
@@ -80,7 +80,7 @@ internal fun expectedDispatchSet(shape: DispatchShape): String =
     shape.variants.joinToString(prefix = "one of {", postfix = "}") { variant ->
         when (shape.discriminator.labelFormat) {
             LabelFormat.Hex ->
-                "0x${variant.dispatchValue.toString(16).padStart(2, '0').uppercase()}"
+                "0x${variant.dispatchValue.toString(HEX_RADIX).padStart(HEX_BYTE_PAD, '0').uppercase()}"
             LabelFormat.Decimal -> variant.dispatchValue.toString()
         }
     }
@@ -267,8 +267,8 @@ internal fun buildDispatchEncodeFun(shape: DispatchShape): FunSpec {
                 body.addStatement(
                     "buffer.writeUByte(0x%L.toUByte())",
                     variant.dispatchValue
-                        .toString(16)
-                        .padStart(2, '0')
+                        .toString(HEX_RADIX)
+                        .padStart(HEX_BYTE_PAD, '0')
                         .uppercase(),
                 )
                 if (variant.codecRef is VariantCodecRef.GenericInstance) {

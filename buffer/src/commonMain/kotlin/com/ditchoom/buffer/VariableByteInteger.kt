@@ -8,6 +8,18 @@ import kotlin.experimental.or
  */
 const val VARIABLE_BYTE_INT_MAX = 268435455
 
+/** Radix of each variable-byte-integer digit (7 data bits per byte → base 128). */
+private const val VBI_RADIX = 128
+
+/** Continuation flag set on a byte when more variable-byte-integer digits follow (`0x80`). */
+private const val VBI_CONTINUATION_FLAG = 0x80
+
+/** Mask isolating the 7 data bits of a variable-byte-integer digit (`0x7F`). */
+private const val VBI_DATA_MASK = 0x7F
+
+/** Maximum number of bytes in a variable-byte integer. */
+private const val VBI_MAX_BYTES = 4
+
 /**
  * Encodes [value] as a variable-byte integer (1–4 bytes).
  *
@@ -22,14 +34,14 @@ fun WriteBuffer.writeVariableByteInteger(value: Int): WriteBuffer {
     var numBytes = 0
     var remaining = value.toLong()
     do {
-        var digit = (remaining % 128).toByte()
-        remaining /= 128
+        var digit = (remaining % VBI_RADIX).toByte()
+        remaining /= VBI_RADIX
         if (remaining > 0) {
-            digit = digit or 0x80.toByte()
+            digit = digit or VBI_CONTINUATION_FLAG.toByte()
         }
         writeByte(digit)
         numBytes++
-    } while (remaining > 0 && numBytes < 4)
+    } while (remaining > 0 && numBytes < VBI_MAX_BYTES)
     return this
 }
 
@@ -44,7 +56,7 @@ fun ReadBuffer.readVariableByteInteger(): Int {
     var multiplier = 1L
     var count = 0
     do {
-        if (count >= 4) {
+        if (count >= VBI_MAX_BYTES) {
             throw IllegalArgumentException(
                 "Variable byte integer is malformed: more than 4 continuation bytes",
             )
@@ -56,9 +68,9 @@ fun ReadBuffer.readVariableByteInteger(): Int {
         }
         digit = readByte()
         count++
-        value += (digit and 0x7F).toLong() * multiplier
-        multiplier *= 128
-    } while ((digit and 0x80.toByte()).toInt() != 0)
+        value += (digit and VBI_DATA_MASK.toByte()).toLong() * multiplier
+        multiplier *= VBI_RADIX
+    } while ((digit and VBI_CONTINUATION_FLAG.toByte()).toInt() != 0)
     require(value in 0..VARIABLE_BYTE_INT_MAX.toLong()) {
         "Variable byte integer value $value is out of range (0..$VARIABLE_BYTE_INT_MAX)"
     }
@@ -82,8 +94,8 @@ fun variableByteSize(value: Int): Byte {
     var numBytes: Byte = 0
     var remaining = value
     do {
-        remaining /= 128
+        remaining /= VBI_RADIX
         numBytes++
-    } while (remaining > 0 && numBytes < 4)
+    } while (remaining > 0 && numBytes < VBI_MAX_BYTES)
     return numBytes
 }

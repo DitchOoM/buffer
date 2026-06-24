@@ -21,7 +21,9 @@ import java.io.File
  * survives layout changes. The tasks `dependsOn` the `ksp*` tasks (wired in [CodecSchemaPlugin]) so
  * the descriptor is regenerated before either task runs.
  */
-@DisableCachingByDefault(because = "Schema diffing is fast and reads a source-controlled baseline; caching adds no value")
+@DisableCachingByDefault(
+    because = "Schema diffing is fast and reads a source-controlled baseline; caching adds no value",
+)
 abstract class AbstractCodecSchemaTask : DefaultTask() {
     /**
      * The KSP generated-output root(s) to scan for `codec-schema.txt`. Wired to

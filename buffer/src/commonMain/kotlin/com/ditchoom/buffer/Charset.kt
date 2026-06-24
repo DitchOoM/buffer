@@ -1,5 +1,8 @@
 package com.ditchoom.buffer
 
+// The literals below are the average/maximum bytes-per-character ratios that define each encoding
+// (e.g. UTF-8 averages ~1.1 bytes/char, up to 4); they are intrinsic charset data, not tunable values.
+@Suppress("MagicNumber")
 enum class Charset(
     val averageBytesPerChar: Float,
     val maxBytesPerChar: Float,

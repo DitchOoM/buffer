@@ -12,7 +12,7 @@ import java.util.zip.Deflater
 import java.util.zip.Inflater
 
 // Helper to unwrap PooledBuffer/TrackedSlice and access the underlying ByteBuffer.
-private fun ReadWriteBuffer.jvmByteBuffer(): ByteBuffer = ((this as ReadBuffer).unwrapFully() as BaseJvmBuffer).byteBuffer
+private fun ReadWriteBuffer.jvmByteBuffer() = ((this as ReadBuffer).unwrapFully() as BaseJvmBuffer).byteBuffer
 
 private fun ReadBuffer.jvmByteBufferOrNull(): ByteBuffer? = (unwrapFully() as? BaseJvmBuffer)?.byteBuffer
 
@@ -29,8 +29,10 @@ actual fun StreamingCompressor.Companion.create(
 ): StreamingCompressor =
     when (algorithm) {
         CompressionAlgorithm.Gzip -> JvmGzipStreamingCompressor(level, bufferFactory, outputBufferSize)
-        CompressionAlgorithm.Deflate -> JvmDeflateStreamingCompressor(level, nowrap = false, bufferFactory, outputBufferSize)
-        CompressionAlgorithm.Raw -> JvmDeflateStreamingCompressor(level, nowrap = true, bufferFactory, outputBufferSize)
+        CompressionAlgorithm.Deflate ->
+            JvmDeflateStreamingCompressor(level, nowrap = false, bufferFactory, outputBufferSize)
+        CompressionAlgorithm.Raw ->
+            JvmDeflateStreamingCompressor(level, nowrap = true, bufferFactory, outputBufferSize)
     }
 
 actual fun StreamingDecompressor.Companion.create(
@@ -41,8 +43,10 @@ actual fun StreamingDecompressor.Companion.create(
 ): StreamingDecompressor =
     when (algorithm) {
         CompressionAlgorithm.Gzip -> JvmGzipStreamingDecompressor(bufferFactory, outputBufferSize, expectedSize)
-        CompressionAlgorithm.Deflate -> JvmInflateStreamingDecompressor(nowrap = false, bufferFactory, outputBufferSize, expectedSize)
-        CompressionAlgorithm.Raw -> JvmInflateStreamingDecompressor(nowrap = true, bufferFactory, outputBufferSize, expectedSize)
+        CompressionAlgorithm.Deflate ->
+            JvmInflateStreamingDecompressor(nowrap = false, bufferFactory, outputBufferSize, expectedSize)
+        CompressionAlgorithm.Raw ->
+            JvmInflateStreamingDecompressor(nowrap = true, bufferFactory, outputBufferSize, expectedSize)
     }
 
 // =============================================================================
@@ -95,7 +99,8 @@ private fun Deflater.deflateInto(
 
     // Fallback: use array if available
     if (buffer.hasArray()) {
-        val count = deflateArray(buffer.array(), buffer.arrayOffset() + buffer.position(), buffer.remaining(), flushMode)
+        val offset = buffer.arrayOffset() + buffer.position()
+        val count = deflateArray(buffer.array(), offset, buffer.remaining(), flushMode)
         (buffer as Buffer).position(buffer.position() + count)
         return count
     }
@@ -402,7 +407,8 @@ private class JvmGzipStreamingCompressor(
 
         // Write trailer (8 bytes)
         val trailerBuffer = bufferFactory.allocate(8)
-        trailerBuffer.writeLong(gzipTrailerLong(crc.value.toInt(), (totalInputBytes and 0xFFFFFFFFL).toInt()))
+        val isize = (totalInputBytes and GzipFormat.LOW_32_BITS_MASK).toInt()
+        trailerBuffer.writeLong(gzipTrailerLong(crc.value.toInt(), isize))
         trailerBuffer.resetForRead()
         onOutput(trailerBuffer)
         currentOutput = null
@@ -657,32 +663,36 @@ private class JvmGzipStreamingDecompressor(
         // Parse fixed 10-byte header if not done yet
         if (headerFlags < 0) {
             // Fast path: read all 10 bytes at once if available
-            if (headerPos == 0 && buffer.remaining() >= 10) {
+            if (headerPos == 0 && buffer.remaining() >= GzipFormat.HEADER_BYTES) {
                 // Read header bytes individually to avoid byte-order dependency
-                for (i in 0 until 10) {
+                for (i in 0 until GzipFormat.HEADER_BYTES) {
                     headerBytes[i] = buffer.readByte()
                 }
 
-                val magic = (headerBytes[0].toInt() and 0xFF shl 8) or (headerBytes[1].toInt() and 0xFF)
+                val magic =
+                    (headerBytes[0].toInt() and 0xFF shl GzipFormat.HI_BYTE_SHIFT) or
+                        (headerBytes[1].toInt() and 0xFF)
                 if (magic != GzipFormat.MAGIC) {
                     throw CompressionException("Invalid gzip magic number")
                 }
 
-                headerFlags = headerBytes[3].toInt() and 0xFF
-                headerPos = 10
+                headerFlags = headerBytes[GzipFormat.FLAG_BYTE_INDEX].toInt() and GzipFormat.BYTE_MASK
+                headerPos = GzipFormat.HEADER_BYTES
             } else {
                 // Slow path: accumulate bytes for partial headers
-                while (buffer.remaining() > 0 && headerPos < 10) {
+                while (buffer.remaining() > 0 && headerPos < GzipFormat.HEADER_BYTES) {
                     headerBytes[headerPos++] = buffer.readByte()
                 }
-                if (headerPos < 10) return false
+                if (headerPos < GzipFormat.HEADER_BYTES) return false
 
-                val magic = (headerBytes[0].toInt() and 0xFF shl 8) or (headerBytes[1].toInt() and 0xFF)
+                val magic =
+                    (headerBytes[0].toInt() and 0xFF shl GzipFormat.HI_BYTE_SHIFT) or
+                        (headerBytes[1].toInt() and 0xFF)
                 if (magic != GzipFormat.MAGIC) {
                     throw CompressionException("Invalid gzip magic number")
                 }
 
-                headerFlags = headerBytes[3].toInt() and 0xFF
+                headerFlags = headerBytes[GzipFormat.FLAG_BYTE_INDEX].toInt() and GzipFormat.BYTE_MASK
             }
         }
 
@@ -695,12 +705,14 @@ private class JvmGzipStreamingDecompressor(
     ): Boolean {
         // FEXTRA: 2-byte length + extra data
         if ((flags and GzipFormat.FLAG_FEXTRA) != 0) {
-            while (buffer.remaining() > 0 && headerPos < 12) {
+            while (buffer.remaining() > 0 && headerPos < GzipFormat.FEXTRA_LENGTH_END) {
                 headerBytes[headerPos++] = buffer.readByte()
             }
-            if (headerPos < 12) return false
+            if (headerPos < GzipFormat.FEXTRA_LENGTH_END) return false
 
-            val xlen = (headerBytes[10].toInt() and 0xFF) or ((headerBytes[11].toInt() and 0xFF) shl 8)
+            val xlen =
+                (headerBytes[GzipFormat.HEADER_BYTES].toInt() and 0xFF) or
+                    ((headerBytes[GzipFormat.HEADER_BYTES + 1].toInt() and 0xFF) shl GzipFormat.HI_BYTE_SHIFT)
             repeat(xlen) {
                 if (buffer.remaining() == 0) return false
                 buffer.readByte()

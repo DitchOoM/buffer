@@ -38,7 +38,14 @@ class CryptoEdgeCaseTests {
 
     @Test
     fun hkdfZeroLengthProducesEmptyOutput() {
-        val out = Hkdf.derive(salt = null, ikm = repeatedByte(0x0b, 22), info = null, length = 0, factory = BufferFactory.Default)
+        val out =
+            Hkdf.derive(
+                salt = null,
+                ikm = repeatedByte(0x0b, 22),
+                info = null,
+                length = 0,
+                factory = BufferFactory.Default,
+            )
         assertEquals(0, out.remaining())
     }
 

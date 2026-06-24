@@ -2,6 +2,11 @@
 
 package com.ditchoom.buffer
 
+import com.ditchoom.buffer.BufferConstants.BYTE_1_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_2_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_3_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_MASK
+import com.ditchoom.buffer.BufferConstants.WORD_BYTE_3
 import kotlin.js.ExperimentalWasmJsInterop
 
 /**
@@ -73,15 +78,15 @@ internal actual fun decodeByteArrayToString(
         { intIndex ->
             val byteIndex = startIndex + (intIndex shl 2)
             val remainingBytes = length - (intIndex shl 2)
-            if (remainingBytes >= 4) {
-                (data[byteIndex].toInt() and 0xFF) or
-                    ((data[byteIndex + 1].toInt() and 0xFF) shl 8) or
-                    ((data[byteIndex + 2].toInt() and 0xFF) shl 16) or
-                    ((data[byteIndex + 3].toInt() and 0xFF) shl 24)
+            if (remainingBytes >= Int.SIZE_BYTES) {
+                (data[byteIndex].toInt() and BYTE_MASK) or
+                    ((data[byteIndex + 1].toInt() and BYTE_MASK) shl BYTE_1_SHIFT) or
+                    ((data[byteIndex + 2].toInt() and BYTE_MASK) shl BYTE_2_SHIFT) or
+                    ((data[byteIndex + WORD_BYTE_3].toInt() and BYTE_MASK) shl BYTE_3_SHIFT)
             } else {
                 var v = 0
                 for (j in 0 until remainingBytes) {
-                    v = v or ((data[byteIndex + j].toInt() and 0xFF) shl (j shl 3))
+                    v = v or ((data[byteIndex + j].toInt() and BYTE_MASK) shl (j * Byte.SIZE_BITS))
                 }
                 v
             }

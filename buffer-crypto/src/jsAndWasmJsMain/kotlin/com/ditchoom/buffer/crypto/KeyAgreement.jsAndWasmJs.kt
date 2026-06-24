@@ -22,6 +22,9 @@ import com.ditchoom.buffer.ReadBuffer
  * `deriveBits`, surfaced as [InvalidPublicKey].
  */
 
+private const val HEX_RADIX = 16
+private const val NIBBLE_BITS = 4
+
 actual val supportsSyncX25519: Boolean = false
 actual val supportsSyncEcdhP256: Boolean = false
 actual val supportsSyncEcdhP384: Boolean = false
@@ -58,7 +61,7 @@ private fun ReadBuffer.toHex(): String {
     val sb = StringBuilder(n * 2)
     for (i in 0 until n) {
         val v = get(start + i).toInt() and 0xFF
-        sb.append(digits[v ushr 4])
+        sb.append(digits[v ushr NIBBLE_BITS])
         sb.append(digits[v and 0xF])
     }
     return sb.toString()
@@ -71,7 +74,7 @@ private fun hexToBuffer(
 ): PlatformBuffer {
     val n = hex.length / 2
     val b = factory.allocate(n)
-    for (i in 0 until n) b.writeByte(hex.substring(i * 2, i * 2 + 2).toInt(16).toByte())
+    for (i in 0 until n) b.writeByte(hex.substring(i * 2, i * 2 + 2).toInt(HEX_RADIX).toByte())
     b.resetForRead()
     return b
 }
@@ -90,6 +93,10 @@ actual suspend fun generateKeyPairAsync(curve: KeyAgreementCurve): KeyAgreementK
     return KeyAgreementKeyPair(curve, KeyAgreementPrivateKey(curve, privBuf), publicKey)
 }
 
+// A failed WebCrypto import/deriveBits is mapped to a single uniform InvalidPublicKey: Throwable is
+// caught and its cause intentionally dropped so a malformed/off-curve peer point cannot be told apart
+// by the engine's exception type (oracle avoidance).
+@Suppress("SwallowedException", "TooGenericExceptionCaught")
 actual suspend fun deriveSharedSecretAsync(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,
@@ -120,6 +127,7 @@ actual suspend fun deriveSharedSecretAsync(
  * Raw DH secret seam for HPKE/DHKEM on the web. Awaits WebCrypto `deriveBits` and returns the raw
  * secret in a wiped SecureBuffer (no KDF). Same validation contract as [deriveSharedSecretAsync].
  */
+@Suppress("SwallowedException", "TooGenericExceptionCaught")
 internal actual suspend fun dhRawSecret(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,

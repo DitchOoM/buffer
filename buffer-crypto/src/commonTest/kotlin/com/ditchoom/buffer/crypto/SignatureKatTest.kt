@@ -30,13 +30,15 @@ class SignatureKatTest {
                 "9d61b19deffebc3a6f689b25f8a1ada92a2c4a26e3aa1bd2f60ba844af492ec2",
                 "dacdbc0f4e3606de5619c8a565a6864275feddf264b11b130abc1167e4f5d034",
                 "",
-                "b4f80989858693c75ab32b65b85ca3af703dde0fa635313f7304fdcdaca6c7f3dfe93ecb6af52bd7101b5b65b53ea8bee7d4991655ad824a7a3c5834f2953100",
+                "b4f80989858693c75ab32b65b85ca3af703dde0fa635313f7304fdcdaca6c7f3" +
+                    "dfe93ecb6af52bd7101b5b65b53ea8bee7d4991655ad824a7a3c5834f2953100",
             ),
             Quad(
                 "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb",
                 "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
                 "72",
-                "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00",
+                "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da" +
+                    "085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00",
             ),
         )
 

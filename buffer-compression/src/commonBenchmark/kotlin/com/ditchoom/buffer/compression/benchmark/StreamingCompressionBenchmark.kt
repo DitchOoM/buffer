@@ -54,7 +54,12 @@ open class StreamingCompressionBenchmark {
 
     @Setup
     fun setup() {
-        compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, BufferFactory.Default)
+        compressor =
+            StreamingCompressor.create(
+                CompressionAlgorithm.Raw,
+                CompressionLevel.Default,
+                BufferFactory.Default,
+            )
         decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, BufferFactory.Default)
 
         // Generate compressible text data (simulates WebSocket text messages)

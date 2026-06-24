@@ -35,6 +35,8 @@ private class JsStreamingStringDecoder(
 
     private val decoder: dynamic = createTextDecoder(encoding, fatal)
 
+    // Parameters are referenced by name inside the js(...) template, which detekt cannot see.
+    @Suppress("UnusedParameter")
     private fun createTextDecoder(
         encoding: String,
         fatal: Boolean,
@@ -59,7 +61,10 @@ private class JsStreamingStringDecoder(
                 totalChars += result.length
                 offset += chunkSize
             }
-        } catch (e: Throwable) {
+            // TextDecoder surfaces decode failures as arbitrary JS errors (Throwable on Kotlin/JS).
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Throwable,
+        ) {
             totalChars += handleError(destination, e)
         } finally {
             buffer.position(startPos + remaining)
@@ -94,7 +99,10 @@ private class JsStreamingStringDecoder(
                 destination.append(result)
             }
             result.length
-        } catch (e: Throwable) {
+            // TextDecoder surfaces flush failures as arbitrary JS errors (Throwable on Kotlin/JS).
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Throwable,
+        ) {
             handleError(destination, e)
         }
 
@@ -125,4 +133,6 @@ private class JsStreamingStringDecoder(
         }
 }
 
+// ktlint (no .editorconfig) collapses this expression body onto one line, so it cannot be wrapped.
+@Suppress("MaxLineLength")
 actual fun StreamingStringDecoder(config: StreamingStringDecoderConfig): StreamingStringDecoder = JsStreamingStringDecoder(config)

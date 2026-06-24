@@ -59,18 +59,17 @@ abstract class CheckCodecSchemaTask : AbstractCodecSchemaTask() {
         val reportable = drifts.filter { it.severity != DriftSeverity.SAFE }
         if (reportable.isEmpty()) {
             logger.info("codec schema: no wire-significant drift")
-            return
-        }
+        } else {
+            logger.warn(renderReport(reportable, failOnBreaking.get()))
 
-        logger.warn(renderReport(reportable, failOnBreaking.get()))
-
-        val breaking = reportable.filter { it.severity == DriftSeverity.BREAKING }
-        if (failOnBreaking.get() && breaking.isNotEmpty()) {
-            throw GradleException(
-                "codec schema drift is breaking wire compatibility (${breaking.size} " +
-                    "${if (breaking.size == 1) "delta" else "deltas"}); see the warnings above. If the " +
-                    "change is intentional, run updateCodecSchema to accept the new baseline.",
-            )
+            val breaking = reportable.filter { it.severity == DriftSeverity.BREAKING }
+            if (failOnBreaking.get() && breaking.isNotEmpty()) {
+                throw GradleException(
+                    "codec schema drift is breaking wire compatibility (${breaking.size} " +
+                        "${if (breaking.size == 1) "delta" else "deltas"}); see the warnings above. If the " +
+                        "change is intentional, run updateCodecSchema to accept the new baseline.",
+                )
+            }
         }
     }
 

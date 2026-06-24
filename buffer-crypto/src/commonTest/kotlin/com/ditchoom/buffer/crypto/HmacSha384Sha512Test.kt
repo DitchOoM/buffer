@@ -13,11 +13,15 @@ import kotlin.test.assertFailsWith
  * longer than the 128-byte block (exercises the "hash the key first" path on every backend).
  */
 class HmacSha384Sha512Test {
-    private val jefe384 = "af45d2e376484031617f78d2b58a6b1b9c7ef464f5a01b47e42ec3736322445e8e2240ca5e69e2c78b3239ecfab21649"
+    private val jefe384 =
+        "af45d2e376484031617f78d2b58a6b1b9c7ef464f5a01b47" +
+            "e42ec3736322445e8e2240ca5e69e2c78b3239ecfab21649"
     private val jefe512 =
         "164b7a7bfcf819e2e395fbe73b56e0a387bd64222e831fd610270cd7ea250554" +
             "9758bf75c05a994a6d034f65f8f0e6fdcaeab1a34d4a6b4b636e070a38bce737"
-    private val klong384 = "46804650ed802b963703b909887d57afcb0d97f6e56f1c108c55b6cc6e9f107c92f872d89b2cce41d391a7bbe01437d3"
+    private val klong384 =
+        "46804650ed802b963703b909887d57afcb0d97f6e56f1c10" +
+            "8c55b6cc6e9f107c92f872d89b2cce41d391a7bbe01437d3"
     private val klong512 =
         "570e8c4da93a8bd928732d2fa577124f7bc1fea09d7b06209669452471de9888" +
             "817b9cb9657076a130e0ae62d25545cb725c1d3dd4edd7c878a23b104939536e"

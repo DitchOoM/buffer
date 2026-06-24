@@ -96,6 +96,10 @@ class WriteStringBenchmarkTest {
             assertEquals(written1, written3, "simdutf produced different byte count")
             assertEquals(written1, written4, "simdutf-from-chararray produced different byte count")
 
+            val speedupEncode =
+                if (time2.inWholeMicroseconds > 0) time1.inWholeMicroseconds / time2.inWholeMicroseconds else 0
+            val speedupSimdutf =
+                if (time3.inWholeMicroseconds > 0) time1.inWholeMicroseconds / time3.inWholeMicroseconds else 0
             println(
                 "BENCH size=$label " +
                     "perChar=${time1.inWholeMilliseconds}ms " +
@@ -103,8 +107,8 @@ class WriteStringBenchmarkTest {
                     "simdutf(toCharArray+convert)=${time3.inWholeMilliseconds}ms " +
                     "toCharArray=${toCharArrayTime.inWholeMilliseconds}ms " +
                     "simdutfOnly=${simdutfOnlyTime.inWholeMilliseconds}ms " +
-                    "speedup_encode=${if (time2.inWholeMicroseconds > 0) time1.inWholeMicroseconds / time2.inWholeMicroseconds else 0}x " +
-                    "speedup_simdutf=${if (time3.inWholeMicroseconds > 0) time1.inWholeMicroseconds / time3.inWholeMicroseconds else 0}x",
+                    "speedup_encode=${speedupEncode}x " +
+                    "speedup_simdutf=${speedupSimdutf}x",
             )
         }
     }
@@ -134,7 +138,7 @@ class WriteStringBenchmarkTest {
             assertEquals(
                 expected.toList(),
                 actual.toList(),
-                "simdutf mismatch for test case $i: ${text.take(30)}...",
+                "simdutf mismatch for test case $i: ${text.take(PREVIEW_CHARS)}...",
             )
         }
         println("VERIFY: All simdutf correctness tests passed")
@@ -185,5 +189,9 @@ class WriteStringBenchmarkTest {
                 ).toInt()
             }
         buf.position(buf.position() + written)
+    }
+
+    private companion object {
+        private const val PREVIEW_CHARS = 30
     }
 }

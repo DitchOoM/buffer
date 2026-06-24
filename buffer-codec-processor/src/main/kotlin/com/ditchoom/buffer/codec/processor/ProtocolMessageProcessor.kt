@@ -262,7 +262,7 @@ class ProtocolMessageProcessor(
                 )
                 continue
             }
-            if (rawValue !in 0..255) {
+            if (rawValue !in 0..UBYTE_MAX_VALUE) {
                 logger.error(
                     "@PacketType($rawValue) on $subName is out of range — the simple " +
                         "dispatch discriminator is one byte, so value must be in 0..255.",
@@ -383,7 +383,8 @@ class ProtocolMessageProcessor(
         if (dispatchValueProperties.size != 1) {
             logger.error(
                 "@DispatchOn($discriminatorName::class) on $parentName: $discriminatorName must " +
-                    "declare exactly one property annotated with `@DispatchValue`. Found ${dispatchValueProperties.size}.",
+                    "declare exactly one property annotated with `@DispatchValue`. " +
+                    "Found ${dispatchValueProperties.size}.",
                 parent,
             )
             return
@@ -693,7 +694,7 @@ class ProtocolMessageProcessor(
                     ?.value as? Int ?: continue
             val ownerName = owner.qualifiedName?.asString() ?: owner.simpleName.asString()
             val fieldName = param.name?.asString() ?: "<unknown>"
-            if (n < 1 || n > 8) {
+            if (n < MIN_WIRE_BYTES || n > MAX_WIRE_BYTES) {
                 logger.error(
                     "@WireBytes($n) on $ownerName.$fieldName is out of range — width must be 1..8 bytes.",
                     param,
@@ -1317,7 +1318,8 @@ class ProtocolMessageProcessor(
                         "`com.ditchoom.buffer.codec.Payload` but no `@UseCodec`. The codec " +
                         "emitter has no way to read or write a Payload-typed field without a " +
                         "user-supplied `Codec<T>` reference. Add `@UseCodec(SomeCodec::class)` " +
-                        "naming a Kotlin `object` that implements `Codec<${fieldType.declaration.simpleName.asString()}>`.",
+                        "naming a Kotlin `object` that implements " +
+                        "`Codec<${fieldType.declaration.simpleName.asString()}>`.",
                     param,
                 )
                 continue
@@ -1835,7 +1837,8 @@ class ProtocolMessageProcessor(
                 val available = parameters.mapNotNull { it.name?.asString() }
                 logger.error(
                     "@FramedBy on $ownerName: `after = \"$afterName\"` names a field that is not on " +
-                        "$variantName's primary constructor. Available: ${available.joinToString().ifEmpty { "<none>" }}.",
+                        "$variantName's primary constructor. " +
+                        "Available: ${available.joinToString().ifEmpty { "<none>" }}.",
                     variant,
                 )
                 continue
@@ -1999,7 +2002,10 @@ class ProtocolMessageProcessor(
 
         // F3 — exactly one @UnknownVariant sealed member, matching `unknown`.
         val unknownMembers =
-            owner.getSealedSubclasses().filter { it.hasAnnotation(UNKNOWN_VARIANT_SHORT, UNKNOWN_VARIANT_QNAME) }.toList()
+            owner
+                .getSealedSubclasses()
+                .filter { it.hasAnnotation(UNKNOWN_VARIANT_SHORT, UNKNOWN_VARIANT_QNAME) }
+                .toList()
         if (unknownMembers.size != 1) {
             logger.error(
                 "@ForwardCompatible on $ownerName requires exactly one sealed member marked " +
@@ -2431,6 +2437,13 @@ class ProtocolMessageProcessor(
     }
 
     private companion object {
+        /** Inclusive upper bound of an unsigned byte; `@PacketType` wire values live in `0..255`. */
+        private const val UBYTE_MAX_VALUE = 0xFF
+
+        /** Minimum / maximum byte width accepted by `@WireBytes` (a Long is 8 bytes wide). */
+        private const val MIN_WIRE_BYTES = 1
+        private const val MAX_WIRE_BYTES = Long.SIZE_BYTES
+
         private const val PROTOCOL_MESSAGE_QNAME = "com.ditchoom.buffer.codec.annotations.ProtocolMessage"
         private const val PAYLOAD_QNAME = "com.ditchoom.buffer.codec.Payload"
         private const val LENGTH_FROM_QNAME = "com.ditchoom.buffer.codec.annotations.LengthFrom"

@@ -242,14 +242,20 @@ expect fun verify(
     signature: ReadBuffer,
 ): Boolean
 
+// Upper-bound signature sizes (bytes). Ed25519 is fixed at 64; the ECDSA values are the DER
+// worst case (SEQUENCE + two INTEGERs, each tag+len+sign-pad+coordinate) for each curve.
+private const val ED25519_SIGNATURE_BYTES = 64
+private const val ECDSA_P256_MAX_DER_BYTES = 72
+private const val ECDSA_P384_MAX_DER_BYTES = 104
+private const val ECDSA_P521_MAX_DER_BYTES = 139
+
 /** Upper bound on the signature size (bytes) a [scheme] can produce, for sizing [dest]. */
 fun maxSignatureBytes(scheme: SignatureScheme): Int =
     when (scheme) {
-        SignatureScheme.Ed25519 -> 64
-        // DER overhead worst case: SEQUENCE + two INTEGER (each: tag+len+sign-pad+coord).
-        SignatureScheme.EcdsaP256 -> 72
-        SignatureScheme.EcdsaP384 -> 104
-        SignatureScheme.EcdsaP521 -> 139
+        SignatureScheme.Ed25519 -> ED25519_SIGNATURE_BYTES
+        SignatureScheme.EcdsaP256 -> ECDSA_P256_MAX_DER_BYTES
+        SignatureScheme.EcdsaP384 -> ECDSA_P384_MAX_DER_BYTES
+        SignatureScheme.EcdsaP521 -> ECDSA_P521_MAX_DER_BYTES
     }
 
 /**

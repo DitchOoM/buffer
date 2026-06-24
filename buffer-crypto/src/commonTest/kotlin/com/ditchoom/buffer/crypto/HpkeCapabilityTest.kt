@@ -45,7 +45,10 @@ class HpkeCapabilityTest {
                     // A supported suite must complete a setup without throwing UnsupportedOperationException.
                     val recipient = hpkeGenerateKeyPair(suite.kem)
                     val sender = hpkeSetupBaseSender(suite, recipient.publicKey, ascii("cap"))
-                    assertTrue(sender.enc.remaining() == suite.kem.nEnc, "${suite.kem.kemName}/${suite.aead.aeadName} enc length")
+                    assertTrue(
+                        sender.enc.remaining() == suite.kem.nEnc,
+                        "${suite.kem.kemName}/${suite.aead.aeadName} enc length",
+                    )
                     sender.context.close()
                     recipient.close()
                 } else {

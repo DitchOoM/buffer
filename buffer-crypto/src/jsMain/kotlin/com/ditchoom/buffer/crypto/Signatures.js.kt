@@ -31,6 +31,7 @@ private fun toThrowable(error: dynamic): Throwable =
 
 private val subtle: dynamic get() = js("(globalThis.crypto).subtle")
 
+@Suppress("UnusedParameter") // referenced inside the js(...) template
 private fun hexToU8(hex: String): dynamic =
     js(
         """
@@ -42,6 +43,7 @@ private fun hexToU8(hex: String): dynamic =
         """,
     )
 
+@Suppress("UnusedParameter") // referenced inside the js(...) template
 private fun u8ToHex(buf: dynamic): String =
     js(
         """
@@ -113,7 +115,11 @@ internal actual suspend fun webCryptoSign(
         importAlgo = js("({ name: 'ECDSA', namedCurve: curve })")
         signAlgo = js("({ name: 'ECDSA', hash: { name: hash } })")
     }
-    val key = subtle.importKey("pkcs8", pkcs8, importAlgo, false, js("['sign']")).unsafeCast<Promise<dynamic>>().awaitResult()
+    val key =
+        subtle
+            .importKey("pkcs8", pkcs8, importAlgo, false, js("['sign']"))
+            .unsafeCast<Promise<dynamic>>()
+            .awaitResult()
     val sig = subtle.sign(signAlgo, key, msg).unsafeCast<Promise<dynamic>>().awaitResult()
     return u8ToHex(sig)
 }

@@ -40,11 +40,19 @@ class PooledSliceLifecycleTests {
 
         // chunk: refCount=2 (chunk + slice). Releasing only chunk → refCount=1, still alive.
         chunk.freeNativeMemory()
-        assertEquals(0, pool.stats().currentPoolSize, "Chunk freed but slice still alive — pool must NOT have it back yet")
+        assertEquals(
+            0,
+            pool.stats().currentPoolSize,
+            "Chunk freed but slice still alive — pool must NOT have it back yet",
+        )
 
         // slice.freeNativeMemory must route through releaseToPool() so refCount→0 → pool.release.
         slice.freeNativeMemory()
-        assertEquals(1, pool.stats().currentPoolSize, "After both chunk and slice released, buffer must be back in pool")
+        assertEquals(
+            1,
+            pool.stats().currentPoolSize,
+            "After both chunk and slice released, buffer must be back in pool",
+        )
 
         pool.clear()
     }

@@ -172,10 +172,15 @@ internal actual fun nodeZlibDecompressSync(
 // Browser CompressionStream / DecompressionStream
 // ============================================================================
 
+// Parameters below are referenced inside the js(...) template strings, which detekt
+// cannot see, so they are flagged unused despite being required by the generated JS.
+@Suppress("UnusedParameter")
 private fun createCompressionStream(format: String): dynamic = js("new CompressionStream(format)")
 
+@Suppress("UnusedParameter")
 private fun createDecompressionStream(format: String): dynamic = js("new DecompressionStream(format)")
 
+@Suppress("UnusedParameter")
 private fun createBlob(data: Uint8Array): dynamic = js("new Blob([data])")
 
 private fun getStream(blob: dynamic): dynamic = blob.stream()
@@ -185,11 +190,13 @@ private fun pipeThrough(
     transform: dynamic,
 ): dynamic = stream.pipeThrough(transform)
 
+@Suppress("UnusedParameter")
 private fun createResponse(stream: dynamic): dynamic = js("new Response(stream)")
 
 private fun getArrayBuffer(response: dynamic): Promise<dynamic> = response.arrayBuffer().unsafeCast<Promise<dynamic>>()
 
-private fun createUint8ArrayFromBuffer(buffer: dynamic): Uint8Array = js("new Uint8Array(buffer)").unsafeCast<Uint8Array>()
+@Suppress("UnusedParameter")
+private fun createUint8ArrayFromBuffer(buffer: dynamic) = js("new Uint8Array(buffer)").unsafeCast<Uint8Array>()
 
 internal actual suspend fun browserCompress(
     input: JsByteArray,

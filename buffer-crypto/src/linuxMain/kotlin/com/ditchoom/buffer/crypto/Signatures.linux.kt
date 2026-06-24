@@ -44,11 +44,26 @@ actual val supportsSyncEcdsa: Boolean = true
 actual val ecdsaSignatureEncoding: EcdsaSignatureEncoding = EcdsaSignatureEncoding.Der
 actual val supportsEcdsaSigningFromScalar: Boolean = true
 
+private const val P256_CURVE_BITS = 256
+private const val P384_CURVE_BITS = 384
+private const val P521_CURVE_BITS = 521
+private const val ED25519_KEY_BYTES = 32
+private const val ED25519_SIGNATURE_BYTES = 64
+
+private const val HEX_RADIX = 16
+private const val BYTE_MASK = 0xFF
+private const val DER_TAG_SEQUENCE = 0x30
+private const val DER_TAG_INTEGER = 0x02
+private const val DER_LONG_FORM_FLAG = 0x80 // high bit set ⇒ long-form length / negative integer
+private const val DER_LONG_FORM_ONE_OCTET = 0x81 // long form with a single following length octet
+private const val DER_MIN_ECDSA_SIG_BYTES = 8 // smallest plausible SEQUENCE{INTEGER,INTEGER}
+private const val DER_LONG_FORM_HEADER_BYTES = 3 // tag + 0x81 + one length octet
+
 private fun ecdsaCurveCode(scheme: SignatureScheme): Int =
     when (scheme) {
-        SignatureScheme.EcdsaP256 -> 256
-        SignatureScheme.EcdsaP384 -> 384
-        SignatureScheme.EcdsaP521 -> 521
+        SignatureScheme.EcdsaP256 -> P256_CURVE_BITS
+        SignatureScheme.EcdsaP384 -> P384_CURVE_BITS
+        SignatureScheme.EcdsaP521 -> P521_CURVE_BITS
         SignatureScheme.Ed25519 -> error("not an ECDSA scheme")
     }
 
@@ -79,14 +94,14 @@ private fun inRangeOneToOrder(
     // Reject zero.
     if (value.all { it.toInt() == 0 }) return false
     // Build order bytes (even-length hex, big-endian).
-    val order = ByteArray(orderHex.length / 2) { i -> orderHex.substring(i * 2, i * 2 + 2).toInt(16).toByte() }
+    val order = ByteArray(orderHex.length / 2) { i -> orderHex.substring(i * 2, i * 2 + 2).toInt(HEX_RADIX).toByte() }
     // Strip leading zeros from order for a magnitude compare.
     val orderMag = order.dropWhile { it.toInt() == 0 }.toByteArray()
     val valMag = value.dropWhile { it.toInt() == 0 }.toByteArray()
     if (valMag.size != orderMag.size) return valMag.size < orderMag.size
     for (i in valMag.indices) {
-        val a = valMag[i].toInt() and 0xFF
-        val b = orderMag[i].toInt() and 0xFF
+        val a = valMag[i].toInt() and BYTE_MASK
+        val b = orderMag[i].toInt() and BYTE_MASK
         if (a != b) return a < b
     }
     return false // equal to order ⇒ not < n
@@ -102,36 +117,36 @@ private fun isCanonicalEcdsaDer(
 ): Boolean {
     val start = signature.position()
     val n = signature.remaining()
-    if (n < 8) return false
+    if (n < DER_MIN_ECDSA_SIG_BYTES) return false
     val b = ByteArray(n) { signature.get(start + it) }
 
-    fun u(i: Int) = b[i].toInt() and 0xFF
-    if (u(0) != 0x30) return false
+    fun u(i: Int) = b[i].toInt() and BYTE_MASK
+    if (u(0) != DER_TAG_SEQUENCE) return false
     var p: Int
     val seqLen: Int
     when {
-        u(1) < 0x80 -> {
+        u(1) < DER_LONG_FORM_FLAG -> {
             seqLen = u(1)
             p = 2
         }
-        u(1) == 0x81 -> {
-            if (n < 3) return false
+        u(1) == DER_LONG_FORM_ONE_OCTET -> {
+            if (n < DER_LONG_FORM_HEADER_BYTES) return false
             seqLen = u(2)
-            if (seqLen < 0x80) return false // long form must be minimal
-            p = 3
+            if (seqLen < DER_LONG_FORM_FLAG) return false // long form must be minimal
+            p = DER_LONG_FORM_HEADER_BYTES
         }
         else -> return false
     }
     if (p + seqLen != n) return false
 
     fun readInt(): ByteArray? {
-        if (p + 2 > n || u(p) != 0x02) return null
+        if (p + 2 > n || u(p) != DER_TAG_INTEGER) return null
         val len = u(p + 1)
-        if (len == 0 || len >= 0x80) return null
+        if (len == 0 || len >= DER_LONG_FORM_FLAG) return null
         val s = p + 2
         if (s + len > n) return null
-        if (len > 1 && u(s) == 0x00 && (u(s + 1) and 0x80) == 0) return null // superfluous 0x00
-        if (u(s) and 0x80 != 0) return null // negative
+        if (len > 1 && u(s) == 0x00 && (u(s + 1) and DER_LONG_FORM_FLAG) == 0) return null // superfluous 0x00
+        if (u(s) and DER_LONG_FORM_FLAG != 0) return null // negative
         val out = ByteArray(len) { b[s + it] }
         p = s + len
         return out
@@ -153,10 +168,10 @@ private fun ed25519Sign(
     message: ReadBuffer,
 ): ByteArray {
     val seed = key.requireOpen()
-    require(seed.remaining() == 32) { "Ed25519 seed must be 32 bytes" }
+    require(seed.remaining() == ED25519_KEY_BYTES) { "Ed25519 seed must be 32 bytes" }
     val msgLen = message.remaining()
     return memScoped {
-        val sigOut = allocArray<ByteVar>(64)
+        val sigOut = allocArray<ByteVar>(ED25519_SIGNATURE_BYTES)
         var status = -1
         seed.withRemainingBytes { seedPtr, _ ->
             message.withRemainingBytes2(msgLen) { msgPtr ->
@@ -170,7 +185,7 @@ private fun ed25519Sign(
             }
         }
         check(status == BCL_OK) { "Ed25519 sign failed (status=$status)" }
-        ByteArray(64) { sigOut[it] }
+        ByteArray(ED25519_SIGNATURE_BYTES) { sigOut[it] }
     }
 }
 
@@ -222,8 +237,8 @@ private fun ed25519Verify(
     message: ReadBuffer,
     signature: ReadBuffer,
 ): Boolean {
-    if (key.material.remaining() != 32) return false
-    if (signature.remaining() != 64) return false
+    if (key.material.remaining() != ED25519_KEY_BYTES) return false
+    if (signature.remaining() != ED25519_SIGNATURE_BYTES) return false
     val msgLen = message.remaining()
     var status = -1
     key.material.withRemainingBytes { pubPtr, _ ->

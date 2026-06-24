@@ -34,29 +34,30 @@ class KeyAgreementTest {
     @Test
     fun roundTripDerivesSameKeyAsync() =
         runTest {
-            for (curve in curves) {
-                if (!asyncAgreementSupported(curve)) continue
-                // Engines that advertise WebCrypto but lack a specific algorithm (e.g. older browsers
-                // without X25519) throw the capability exception at op time; treat that as a skip —
-                // the capability contract itself is asserted in the dedicated capability tests.
-                val a =
-                    try {
-                        generateKeyPairAsync(curve)
-                    } catch (_: UnsupportedOperationException) {
-                        continue
-                    }
-                val b = generateKeyPairAsync(curve)
-                try {
-                    val ab = deriveSharedSecretAsync(a.privateKey, b.publicKey, info(), 32, salt())
-                    val ba = deriveSharedSecretAsync(b.privateKey, a.publicKey, info(), 32, salt())
-                    assertEquals(ab.toHex(), ba.toHex(), "${curve.curveName} both parties must derive the same key")
-                    assertEquals(32, ab.remaining(), "derived length")
-                } finally {
-                    a.close()
-                    b.close()
-                }
-            }
+            curves.filter { asyncAgreementSupported(it) }.forEach { roundTripAsyncFor(it) }
         }
+
+    private suspend fun roundTripAsyncFor(curve: KeyAgreementCurve) {
+        // Engines that advertise WebCrypto but lack a specific algorithm (e.g. older browsers
+        // without X25519) throw the capability exception at op time; treat that as a skip —
+        // the capability contract itself is asserted in the dedicated capability tests.
+        val a =
+            try {
+                generateKeyPairAsync(curve)
+            } catch (_: UnsupportedOperationException) {
+                return
+            }
+        val b = generateKeyPairAsync(curve)
+        try {
+            val ab = deriveSharedSecretAsync(a.privateKey, b.publicKey, info(), 32, salt())
+            val ba = deriveSharedSecretAsync(b.privateKey, a.publicKey, info(), 32, salt())
+            assertEquals(ab.toHex(), ba.toHex(), "${curve.curveName} both parties must derive the same key")
+            assertEquals(32, ab.remaining(), "derived length")
+        } finally {
+            a.close()
+            b.close()
+        }
+    }
 
     @Test
     fun roundTripSyncWhereSupported() {
@@ -98,7 +99,9 @@ class KeyAgreementTest {
             repeat(curve.publicKeyBytes) { pubBuf.writeByte(0) }
             pubBuf.resetForRead()
             val pub = KeyAgreementPublicKey(curve, pubBuf)
-            assertFailsWith<UnsupportedOperationException>("${curve.curveName} sync derive must throw when unsupported") {
+            assertFailsWith<UnsupportedOperationException>(
+                "${curve.curveName} sync derive must throw when unsupported",
+            ) {
                 deriveSharedSecret(priv, pub, info(), 32)
             }
             priv.close()

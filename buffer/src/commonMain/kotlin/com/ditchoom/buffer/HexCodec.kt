@@ -17,12 +17,30 @@ package com.ditchoom.buffer
 internal const val HEX_LOWER_ALPHA_DELTA = 0x27
 internal const val HEX_UPPER_ALPHA_DELTA = 0x07
 
+/** Largest nibble value (`9`) that maps directly to an ASCII digit; above it needs an alpha delta. */
+private const val HEX_LAST_DIGIT_NIBBLE = 9
+
+/** Sign-bit shift of an Int — turns `(9 - nibble)` into an all-ones/zero branchless mask. */
+private const val INT_SIGN_SHIFT = 31
+
+/** ASCII code of '0'; nibbles 0..9 encode as this plus the nibble. */
+private const val ASCII_ZERO = 0x30
+
+/** Decimal value added to nibbles 'a'/'A'..'f'/'F' when decoding alpha hex digits. */
+private const val HEX_ALPHA_BASE = 10
+
+/** Mask isolating the low nibble (4 bits) of a byte. */
+private const val LOW_NIBBLE_MASK = 0x0F
+
+/** Bit width of a single hex nibble. */
+private const val NIBBLE_BITS = 4
+
 internal fun hexEncodeNibble(
     nibble: Int,
     alphaDelta: Int,
 ): Byte {
-    val mask = (9 - nibble) shr 31
-    return (0x30 + nibble + (mask and alphaDelta)).toByte()
+    val mask = (HEX_LAST_DIGIT_NIBBLE - nibble) shr INT_SIGN_SHIFT
+    return (ASCII_ZERO + nibble + (mask and alphaDelta)).toByte()
 }
 
 /**
@@ -30,11 +48,11 @@ internal fun hexEncodeNibble(
  * Accepts '0'-'9', 'a'-'f' and 'A'-'F'.
  */
 internal fun hexDecodeNibble(c: Byte): Int {
-    val v = c.toInt() and 0xFF
+    val v = c.toInt() and BufferConstants.BYTE_MASK
     return when (v) {
         in '0'.code..'9'.code -> v - '0'.code
-        in 'a'.code..'f'.code -> v - 'a'.code + 10
-        in 'A'.code..'F'.code -> v - 'A'.code + 10
+        in 'a'.code..'f'.code -> v - 'a'.code + HEX_ALPHA_BASE
+        in 'A'.code..'F'.code -> v - 'A'.code + HEX_ALPHA_BASE
         else -> -1
     }
 }
@@ -58,9 +76,9 @@ internal fun ReadBuffer.encodeHexCommon(
     val alphaDelta = if (upperCase) HEX_UPPER_ALPHA_DELTA else HEX_LOWER_ALPHA_DELTA
     var i = 0
     while (i < length) {
-        val b = getUnchecked(srcOffset + i).toInt() and 0xFF
-        dest.writeByte(hexEncodeNibble(b ushr 4, alphaDelta))
-        dest.writeByte(hexEncodeNibble(b and 0x0F, alphaDelta))
+        val b = getUnchecked(srcOffset + i).toInt() and BufferConstants.BYTE_MASK
+        dest.writeByte(hexEncodeNibble(b ushr NIBBLE_BITS, alphaDelta))
+        dest.writeByte(hexEncodeNibble(b and LOW_NIBBLE_MASK, alphaDelta))
         i++
     }
 }
@@ -86,7 +104,7 @@ internal inline fun decodeHexFallback(
             val badIndex = if (hi < 0) srcOffset + i else srcOffset + i + 1
             throw IllegalArgumentException("invalid hex character at index $badIndex")
         }
-        putByte(((hi shl 4) or lo).toByte())
+        putByte(((hi shl NIBBLE_BITS) or lo).toByte())
         i += 2
     }
 }

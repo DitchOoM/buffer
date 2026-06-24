@@ -32,7 +32,8 @@ internal actual suspend fun webCryptoDeriveSharedSecret(
 
 private fun jsSubtleAvailable(): Boolean =
     js(
-        "(function(){ try { var s=(globalThis.crypto&&globalThis.crypto.subtle); return !!(s&&typeof s.generateKey==='function'); } catch(e){ return false; } })()",
+        "(function(){ try { var s=(globalThis.crypto&&globalThis.crypto.subtle); " +
+            "return !!(s&&typeof s.generateKey==='function'); } catch(e){ return false; } })()",
     ) as Boolean
 
 private fun jsGenerateKeyPair(curveName: String): Promise<String> {
@@ -53,6 +54,7 @@ private fun jsGenerateKeyPair(curveName: String): Promise<String> {
     )
 }
 
+@Suppress("UnusedParameter") // referenced inside the js(...) template
 private fun jsDeriveSharedSecret(
     curveName: String,
     privateHex: String,
@@ -88,4 +90,5 @@ private fun jsDeriveSharedSecret(
     )
 }
 
+@Suppress("UnusedParameter") // referenced inside the js(...) template
 private fun jsEcdhAlg(curveName: String): dynamic = js("({ name: 'ECDH', namedCurve: curveName })")

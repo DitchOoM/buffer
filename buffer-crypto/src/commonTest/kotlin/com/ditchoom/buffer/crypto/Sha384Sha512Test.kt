@@ -18,18 +18,26 @@ import kotlin.test.assertTrue
  */
 class Sha384Sha512Test {
     // (message-builder, sha384, sha512)
-    private val empty384 = "38b060a751ac96384cd9327eb1b1e36a21fdb71114be07434c0cc7bf63f6e1da274edebfe76f65fbd51ad2f14898b95b"
+    private val empty384 =
+        "38b060a751ac96384cd9327eb1b1e36a21fdb71114be0743" +
+            "4c0cc7bf63f6e1da274edebfe76f65fbd51ad2f14898b95b"
     private val empty512 =
         "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce" +
             "47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e"
-    private val abc384 = "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7"
+    private val abc384 =
+        "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded163" +
+            "1a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7"
     private val abc512 =
         "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a" +
             "2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
 
     // 111- and 112-byte messages straddle the 1024-bit block's length-field boundary.
-    private val e111v384 = "a47bc504cd628dbc1abac61dd4fb95c14a5ce395ce0a2ba23e29f065159ab694335cd8664a63cdc8a1b1ce318cf99187"
-    private val e112v384 = "2f4396d8a08aa20908f102b110f5895325c27e87b7f2cc60fb80e191762f4557aa6edc8ce5877bb67541c6628c664892"
+    private val e111v384 =
+        "a47bc504cd628dbc1abac61dd4fb95c14a5ce395ce0a2ba2" +
+            "3e29f065159ab694335cd8664a63cdc8a1b1ce318cf99187"
+    private val e112v384 =
+        "2f4396d8a08aa20908f102b110f5895325c27e87b7f2cc60" +
+            "fb80e191762f4557aa6edc8ce5877bb67541c6628c664892"
     private val e111v512 =
         "419c4a5a61a60515b115bc4c67f412b9d5e3a9b044451cccf91fd9cf917ff148" +
             "8c05942ea6598d2fc40183befd85786cff8ac0bcd5fd7fff666968a198f22e21"

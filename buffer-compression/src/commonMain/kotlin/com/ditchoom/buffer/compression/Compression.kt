@@ -43,8 +43,18 @@ sealed interface CompressionLevel {
         override val value: Int,
     ) : CompressionLevel {
         init {
-            require(value in 0..9) { "Compression level must be between 0 and 9" }
+            require(value in MIN_LEVEL..MAX_LEVEL) {
+                "Compression level must be between $MIN_LEVEL and $MAX_LEVEL"
+            }
         }
+    }
+
+    companion object {
+        /** Lowest zlib compression level (no compression). */
+        const val MIN_LEVEL: Int = 0
+
+        /** Highest zlib compression level (best compression). */
+        const val MAX_LEVEL: Int = 9
     }
 }
 
@@ -343,6 +353,9 @@ object DeflateFormat {
      * The sequence represents an empty non-final stored block in the deflate format.
      */
     const val SYNC_FLUSH_MARKER: Int = 0x0000FFFF
+
+    /** Length in bytes of the [SYNC_FLUSH_MARKER] (`00 00 FF FF`). */
+    const val SYNC_FLUSH_MARKER_BYTES: Int = 4
 }
 
 /**
@@ -356,9 +369,9 @@ object DeflateFormat {
  *   is not present, returns the buffer unchanged.
  */
 fun ReadBuffer.stripSyncFlushMarker(): ReadBuffer {
-    if (remaining() < 4) return this
+    if (remaining() < DeflateFormat.SYNC_FLUSH_MARKER_BYTES) return this
 
-    val markerStart = limit() - 4
+    val markerStart = limit() - DeflateFormat.SYNC_FLUSH_MARKER_BYTES
     val lastFourBytes = getInt(markerStart)
 
     // Sync marker bytes are 00 00 FF FF. When read as int:

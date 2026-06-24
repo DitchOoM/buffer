@@ -76,11 +76,15 @@ actual val supportsSyncEcdhP256: Boolean = true
 actual val supportsSyncEcdhP384: Boolean = true
 actual val supportsSyncEcdhP521: Boolean = true
 
+private const val P256_KEY_BITS = 256
+private const val P384_KEY_BITS = 384
+private const val P521_KEY_BITS = 521
+
 private fun keySizeBits(curve: KeyAgreementCurve): Int =
     when (curve) {
-        KeyAgreementCurve.P256 -> 256
-        KeyAgreementCurve.P384 -> 384
-        KeyAgreementCurve.P521 -> 521
+        KeyAgreementCurve.P256 -> P256_KEY_BITS
+        KeyAgreementCurve.P384 -> P384_KEY_BITS
+        KeyAgreementCurve.P521 -> P521_KEY_BITS
         KeyAgreementCurve.X25519 -> error("X25519 unsupported on Apple")
     }
 
@@ -140,6 +144,9 @@ private fun attributes(
     return dict
 }
 
+// Each Security-framework null result is a distinct failure point mapped to InvalidPublicKey while
+// CFRelease cleanup runs in try/finally; the multiple throws are inherent to that resource pattern.
+@Suppress("ThrowsCount")
 actual fun generateKeyPair(curve: KeyAgreementCurve): KeyAgreementKeyPair {
     requireSupported(curve)
     if (curve == KeyAgreementCurve.X25519) return generateX25519KeyPair()
@@ -194,7 +201,13 @@ internal actual suspend fun dhRawSecret(
     peerPublicKey: KeyAgreementPublicKey,
 ): PlatformBuffer = validateRawSecret(privateKey.curve, rawAgreeApple(privateKey, peerPublicKey))
 
-/** Computes the raw ECDH secret into a wiped SecureBuffer; throws [InvalidPublicKey] on a bad point. */
+/**
+ * Computes the raw ECDH secret into a wiped SecureBuffer; throws [InvalidPublicKey] on a bad point.
+ *
+ * Each Security-framework null result maps to InvalidPublicKey while CFRelease cleanup runs in
+ * try/finally; the multiple throws are inherent to that resource-management pattern.
+ */
+@Suppress("ThrowsCount")
 private fun rawAgreeApple(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,

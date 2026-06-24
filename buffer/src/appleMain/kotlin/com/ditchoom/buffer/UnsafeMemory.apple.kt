@@ -1,3 +1,4 @@
+@file:Suppress("MatchingDeclarationName") // MPP platform-suffixed actual file
 @file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, kotlinx.cinterop.UnsafeNumber::class)
 
 package com.ditchoom.buffer

@@ -1185,10 +1185,10 @@ class BufferPoolTests {
         try {
             pool.withBuffer(512) { buffer ->
                 buffer.writeByte(0x42)
-                throw RuntimeException("Test exception")
+                error("Test exception")
             }
-        } catch (e: RuntimeException) {
-            // Expected
+        } catch (_: IllegalStateException) {
+            // Expected: the block's exception propagates after the buffer is released.
         }
 
         // Buffer should still be released back to pool
@@ -1241,8 +1241,9 @@ class BufferPoolTests {
     fun withBufferReleasesOnException() {
         val pool = BufferPool(defaultBufferSize = 1024, maxPoolSize = 10)
         try {
-            pool.withBuffer(512) { throw RuntimeException("test") }
-        } catch (_: RuntimeException) {
+            pool.withBuffer(512) { error("test") }
+        } catch (_: IllegalStateException) {
+            // Expected: exception propagates after the buffer is released back to the pool.
         }
         assertEquals(1, pool.stats().currentPoolSize)
         pool.clear()
@@ -1281,10 +1282,10 @@ class BufferPoolTests {
         try {
             withPool(defaultBufferSize = 1024) { pool ->
                 pool.acquire(512)
-                throw RuntimeException("Test exception")
+                error("Test exception")
             }
-        } catch (e: RuntimeException) {
-            // Expected - pool should be cleared
+        } catch (_: IllegalStateException) {
+            // Expected: pool is cleared in the finally block before the exception propagates.
         }
         // No memory leak - pool was cleaned up in finally block
     }
@@ -1966,7 +1967,7 @@ class BufferPoolTests {
                         unmasked.position(0)
 
                         val recovered = unmasked.readByteArray(100)
-                        assertTrue(original.contentEquals(recovered), "Round-trip XOR mask should recover original data")
+                        assertTrue(original.contentEquals(recovered), "XOR mask round-trip should recover data")
                     }
                 }
             }

@@ -46,4 +46,6 @@ fun Flow<ReadBuffer>.mapBuffer(transform: (ReadBuffer) -> ReadBuffer): Flow<Read
  * Converts a [Flow] of [ReadBuffer]s into a [Flow] of [String]s.
  * Each buffer is read from its current position to its limit.
  */
-fun Flow<ReadBuffer>.asStringFlow(charset: Charset = Charset.UTF8): Flow<String> = map { buf -> buf.readString(buf.remaining(), charset) }
+fun Flow<ReadBuffer>.asStringFlow(charset: Charset = Charset.UTF8): Flow<String> = map { it.readRemaining(charset) }
+
+private fun ReadBuffer.readRemaining(charset: Charset): String = readString(remaining(), charset)

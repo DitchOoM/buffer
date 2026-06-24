@@ -364,7 +364,11 @@ class CompressionTests {
 
         // Compute expected Adler32 and verify it matches stored value
         val expectedAdler32 = adler32(originalBytes)
-        assertEquals(expectedAdler32, storedAdler32, "Adler32 in trailer should match computed Adler32 of original data")
+        assertEquals(
+            expectedAdler32,
+            storedAdler32,
+            "Adler32 in trailer should match computed Adler32 of original data",
+        )
 
         // Reset and decompress
         compressedBuffer.position(0)
@@ -424,9 +428,11 @@ class CompressionTests {
         assertIs<CompressionResult.Success>(bestCompression)
 
         // Best compression should produce smaller or equal output than best speed
+        val bestCompressionSize = bestCompression.buffer.remaining()
+        val bestSpeedSize = bestSpeed.buffer.remaining()
         assertTrue(
-            bestCompression.buffer.remaining() <= bestSpeed.buffer.remaining(),
-            "BestCompression (${bestCompression.buffer.remaining()}) should be <= BestSpeed (${bestSpeed.buffer.remaining()})",
+            bestCompressionSize <= bestSpeedSize,
+            "BestCompression ($bestCompressionSize) should be <= BestSpeed ($bestSpeedSize)",
         )
 
         // All should decompress to original text

@@ -58,10 +58,18 @@ class UnsignedVarIntCodecTest {
             try {
                 for (i in 0 until width - 1) {
                     appendByte(stream, src.readByte())
-                    assertEquals(VarLenPeek.NeedsMoreData, UnsignedVarIntCodec.peekValue(stream), "value $value after ${i + 1} bytes")
+                    assertEquals(
+                        VarLenPeek.NeedsMoreData,
+                        UnsignedVarIntCodec.peekValue(stream),
+                        "value $value after ${i + 1} bytes",
+                    )
                 }
                 appendByte(stream, src.readByte())
-                assertEquals(VarLenPeek.Decoded(value, width), UnsignedVarIntCodec.peekValue(stream), "value $value complete")
+                assertEquals(
+                    VarLenPeek.Decoded(value, width),
+                    UnsignedVarIntCodec.peekValue(stream),
+                    "value $value complete",
+                )
             } finally {
                 stream.release()
                 pool.clear()

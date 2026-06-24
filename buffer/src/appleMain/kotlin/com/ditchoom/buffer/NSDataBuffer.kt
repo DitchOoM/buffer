@@ -109,14 +109,14 @@ class NSDataBuffer(
     }
 
     override fun getInt(index: Int): Int {
-        requireIndex(index, 4)
+        requireIndex(index, Int.SIZE_BYTES)
         val ptr = (bytePointer + index)!!.reinterpret<IntVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun getLong(index: Int): Long {
-        requireIndex(index, 8)
+        requireIndex(index, Long.SIZE_BYTES)
         val ptr = (bytePointer + index)!!.reinterpret<LongVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
@@ -131,18 +131,18 @@ class NSDataBuffer(
     }
 
     override fun readInt(): Int {
-        requireReadable(4)
+        requireReadable(Int.SIZE_BYTES)
         val ptr = (bytePointer + position)!!.reinterpret<IntVar>()
         val value = ptr[0]
-        position += 4
+        position += Int.SIZE_BYTES
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun readLong(): Long {
-        requireReadable(8)
+        requireReadable(Long.SIZE_BYTES)
         val ptr = (bytePointer + position)!!.reinterpret<LongVar>()
         val value = ptr[0]
-        position += 8
+        position += Long.SIZE_BYTES
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
@@ -337,14 +337,14 @@ internal class NSDataBufferSlice(
     }
 
     override fun getInt(index: Int): Int {
-        requireIndex(index, 4)
+        requireIndex(index, Int.SIZE_BYTES)
         val ptr = (bytePointer + index)!!.reinterpret<IntVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun getLong(index: Int): Long {
-        requireIndex(index, 8)
+        requireIndex(index, Long.SIZE_BYTES)
         val ptr = (bytePointer + index)!!.reinterpret<LongVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
@@ -359,23 +359,24 @@ internal class NSDataBufferSlice(
     }
 
     override fun readInt(): Int {
-        requireReadable(4)
+        requireReadable(Int.SIZE_BYTES)
         val ptr = (bytePointer + position)!!.reinterpret<IntVar>()
         val value = ptr[0]
-        position += 4
+        position += Int.SIZE_BYTES
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun readLong(): Long {
-        requireReadable(8)
+        requireReadable(Long.SIZE_BYTES)
         val ptr = (bytePointer + position)!!.reinterpret<LongVar>()
         val value = ptr[0]
-        position += 8
+        position += Long.SIZE_BYTES
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
-    override fun slice(byteOrder: ByteOrder): ReadBuffer =
-        NSDataBufferSlice(parent, sliceOffset + position, limit - position, byteOrder)
+    // ktlint (no .editorconfig) collapses this expression body onto one line, so it cannot be wrapped.
+    @Suppress("MaxLineLength")
+    override fun slice(byteOrder: ByteOrder): ReadBuffer = NSDataBufferSlice(parent, sliceOffset + position, limit - position, byteOrder)
 
     override fun readByteArray(size: Int): ByteArray {
         if (size < 1) {

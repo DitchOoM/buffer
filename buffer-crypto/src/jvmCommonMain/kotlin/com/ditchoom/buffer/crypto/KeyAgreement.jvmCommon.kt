@@ -37,6 +37,12 @@ private val x25519SpkiPrefix: ByteArray =
     // SPKI prefix for an X25519 SubjectPublicKeyInfo: AlgorithmIdentifier(id-X25519) + BIT STRING header.
     byteArrayOf(0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x6e, 0x03, 0x21, 0x00)
 
+// Raw X25519 public-key / scalar width in bytes.
+private const val X25519_RAW_BYTES = 32
+
+// SEC1 prefix byte marking an uncompressed elliptic-curve point (0x04 ‖ X ‖ Y).
+private const val SEC1_UNCOMPRESSED_POINT: Int = 0x04
+
 private fun probe(block: () -> Unit): Boolean =
     try {
         block()
@@ -105,9 +111,9 @@ private fun ecParams(curve: KeyAgreementCurve): ECParameterSpec {
 // ---- X25519 -----------------------------------------------------------------
 
 private fun x25519PublicKey(raw: ByteArray): java.security.PublicKey {
-    val spki = ByteArray(x25519SpkiPrefix.size + 32)
+    val spki = ByteArray(x25519SpkiPrefix.size + X25519_RAW_BYTES)
     System.arraycopy(x25519SpkiPrefix, 0, spki, 0, x25519SpkiPrefix.size)
-    System.arraycopy(raw, 0, spki, x25519SpkiPrefix.size, 32)
+    System.arraycopy(raw, 0, spki, x25519SpkiPrefix.size, X25519_RAW_BYTES)
     return KeyFactory.getInstance("XDH").generatePublic(X509EncodedKeySpec(spki))
 }
 
@@ -132,9 +138,9 @@ private fun x25519PrivateKeyFrom(scalar: ByteArray): java.security.PrivateKey {
             0x04,
             0x20,
         )
-    val der = ByteArray(pkcs8Prefix.size + 32)
+    val der = ByteArray(pkcs8Prefix.size + X25519_RAW_BYTES)
     System.arraycopy(pkcs8Prefix, 0, der, 0, pkcs8Prefix.size)
-    System.arraycopy(scalar, 0, der, pkcs8Prefix.size, 32)
+    System.arraycopy(scalar, 0, der, pkcs8Prefix.size, X25519_RAW_BYTES)
     return KeyFactory.getInstance("XDH").generatePrivate(java.security.spec.PKCS8EncodedKeySpec(der))
 }
 
@@ -142,11 +148,11 @@ private fun x25519PrivateKeyFrom(scalar: ByteArray): java.security.PrivateKey {
 private fun rawX25519(pub: java.security.PublicKey): ByteArray {
     val u = (pub as XECPublicKey).u
     val be = u.toByteArray() // big-endian, possibly with sign byte / shorter than 32
-    val raw = ByteArray(32)
+    val raw = ByteArray(X25519_RAW_BYTES)
     // copy big-endian magnitude into the low bytes, then reverse to little-endian
     var src = be.size - 1
     var dst = 0
-    while (src >= 0 && dst < 32) {
+    while (src >= 0 && dst < X25519_RAW_BYTES) {
         raw[dst] = be[src]
         src--
         dst++
@@ -160,7 +166,9 @@ private fun ecPublicKey(
     curve: KeyAgreementCurve,
     raw: ByteArray,
 ): java.security.PublicKey {
-    require(raw.isNotEmpty() && raw[0].toInt() == 0x04) { "ECDH public point must be uncompressed (0x04)" }
+    require(raw.isNotEmpty() && raw[0].toInt() == SEC1_UNCOMPRESSED_POINT) {
+        "ECDH public point must be uncompressed (0x04)"
+    }
     val coord = curve.privateKeyBytes // coordinate width == scalar width for these curves
     require(raw.size == 1 + 2 * coord) { "bad ${curve.curveName} point length" }
     val x = beInt(raw, 1, coord)
@@ -177,7 +185,7 @@ private fun rawEcPoint(
     val w = (pub as ECPublicKey).w
     val coord = curve.privateKeyBytes
     val out = ByteArray(1 + 2 * coord)
-    out[0] = 0x04
+    out[0] = SEC1_UNCOMPRESSED_POINT.toByte()
     putFixedBe(w.affineX, out, 1, coord)
     putFixedBe(w.affineY, out, 1 + coord, coord)
     return out
@@ -237,8 +245,8 @@ actual fun generateKeyPair(curve: KeyAgreementCurve): KeyAgreementKeyPair {
 /** Extracts the 32-byte X25519 scalar from a PKCS#8 PrivateKeyInfo encoding. */
 private fun extractX25519Scalar(pkcs8: ByteArray): ByteArray {
     // The scalar is the last 32 bytes of the standard X25519 PKCS#8 encoding (inner OCTET STRING).
-    val out = ByteArray(32)
-    System.arraycopy(pkcs8, pkcs8.size - 32, out, 0, 32)
+    val out = ByteArray(X25519_RAW_BYTES)
+    System.arraycopy(pkcs8, pkcs8.size - X25519_RAW_BYTES, out, 0, X25519_RAW_BYTES)
     return out
 }
 
@@ -262,6 +270,10 @@ private inline fun secureBufferOf(
     return buf
 }
 
+// Provider rejections are mapped to a single uniform InvalidPublicKey on purpose: the cause is
+// intentionally dropped and RuntimeException is intentionally caught so a bad/off-curve point
+// cannot be distinguished by exception type or cause (oracle avoidance across JCA providers).
+@Suppress("SwallowedException", "TooGenericExceptionCaught", "ThrowsCount")
 actual fun deriveSharedSecret(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,
@@ -340,7 +352,11 @@ private fun rawAgree(
  * Raw DH secret seam for HPKE/DHKEM. Performs the native agreement (with the same provider
  * public-key validation as [deriveSharedSecret]) and hands back the raw secret in a wiped
  * SecureBuffer — without the KDF step the public path applies.
+ *
+ * Same uniform-rejection contract as [deriveSharedSecret]: the cause is dropped and RuntimeException
+ * is caught on purpose so no provider exception type/cause leaks a public-point oracle.
  */
+@Suppress("SwallowedException", "TooGenericExceptionCaught", "ThrowsCount")
 internal actual suspend fun dhRawSecret(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,

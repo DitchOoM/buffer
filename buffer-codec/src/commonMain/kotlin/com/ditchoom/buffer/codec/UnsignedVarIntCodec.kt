@@ -32,11 +32,29 @@ object UnsignedVarIntCodec : VariableLengthCodec<UInt> {
     /** Maximum encoded length of a 32-bit value: ceil(32 / 7) = 5 bytes. */
     const val MAX_BYTES: Int = 5
 
+    /** Number of value bits carried per LEB128 byte (the low 7 bits). */
+    private const val VALUE_BITS_PER_BYTE = 7
+
+    /** Mask selecting the 7 value bits of a LEB128 byte. */
+    private const val VALUE_MASK = 0x7F
+
+    /** High bit of a LEB128 byte: set on every byte except the last (continuation flag). */
+    private const val CONTINUATION_BIT = 0x80
+
+    /**
+     * High value bits (4..6) of the 5th byte: these would carry value bits 32..34,
+     * which cannot fit in a [UInt], so a non-zero result signals overflow.
+     */
+    private const val FIFTH_BYTE_OVERFLOW_MASK = 0x70
+
+    private const val CONTINUATION_BIT_U = 0x80u
+    private const val VALUE_MASK_U = 0x7Fu
+
     override fun encodedLength(value: UInt): Int {
         var v = value
         var len = 1
-        while (v >= 0x80u) {
-            v = v shr 7
+        while (v >= CONTINUATION_BIT_U) {
+            v = v shr VALUE_BITS_PER_BYTE
             len++
         }
         return len
@@ -48,9 +66,9 @@ object UnsignedVarIntCodec : VariableLengthCodec<UInt> {
         context: EncodeContext,
     ) {
         var v = value
-        while (v >= 0x80u) {
-            buffer.writeByte(((v and 0x7Fu) or 0x80u).toByte())
-            v = v shr 7
+        while (v >= CONTINUATION_BIT_U) {
+            buffer.writeByte(((v and VALUE_MASK_U) or CONTINUATION_BIT_U).toByte())
+            v = v shr VALUE_BITS_PER_BYTE
         }
         buffer.writeByte(v.toByte())
     }
@@ -67,7 +85,7 @@ object UnsignedVarIntCodec : VariableLengthCodec<UInt> {
             bytes++
             // On the 5th (last possible) byte only the low 4 bits are in UInt range; bits 4..6
             // (0x70) would carry value bits 32..34 and silently truncate, so reject the overflow.
-            if (bytes == MAX_BYTES && b and 0x70 != 0) {
+            if (bytes == MAX_BYTES && b and FIFTH_BYTE_OVERFLOW_MASK != 0) {
                 throw DecodeException(
                     fieldPath = "UnsignedVarInt",
                     bufferPosition = buffer.position(),
@@ -75,9 +93,9 @@ object UnsignedVarIntCodec : VariableLengthCodec<UInt> {
                     actual = "a 5th byte carrying value bits beyond 2^32",
                 )
             }
-            result = result or ((b and 0x7F).toUInt() shl shift)
-            if (b and 0x80 == 0) break
-            shift += 7
+            result = result or ((b and VALUE_MASK).toUInt() shl shift)
+            if (b and CONTINUATION_BIT == 0) break
+            shift += VALUE_BITS_PER_BYTE
             if (bytes >= MAX_BYTES) {
                 throw DecodeException(
                     fieldPath = "UnsignedVarInt",
@@ -101,7 +119,7 @@ object UnsignedVarIntCodec : VariableLengthCodec<UInt> {
             if (stream.available() - baseOffset < i + 1) return VarLenPeek.NeedsMoreData
             val b = stream.peekByte(baseOffset + i).toInt() and 0xFF
             // 5th byte: reject value bits beyond 2^32 (see decode) rather than truncate.
-            if (i == MAX_BYTES - 1 && b and 0x70 != 0) {
+            if (i == MAX_BYTES - 1 && b and FIFTH_BYTE_OVERFLOW_MASK != 0) {
                 throw DecodeException(
                     fieldPath = "UnsignedVarInt",
                     bufferPosition = baseOffset + i,
@@ -109,10 +127,10 @@ object UnsignedVarIntCodec : VariableLengthCodec<UInt> {
                     actual = "a 5th byte carrying value bits beyond 2^32",
                 )
             }
-            result = result or ((b and 0x7F).toUInt() shl shift)
+            result = result or ((b and VALUE_MASK).toUInt() shl shift)
             i++
-            if (b and 0x80 == 0) break
-            shift += 7
+            if (b and CONTINUATION_BIT == 0) break
+            shift += VALUE_BITS_PER_BYTE
             if (i >= MAX_BYTES) {
                 throw DecodeException(
                     fieldPath = "UnsignedVarInt",

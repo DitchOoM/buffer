@@ -71,12 +71,17 @@ actual val supportsSyncEcdsa: Boolean get() = true
 
 actual val ecdsaSignatureEncoding: EcdsaSignatureEncoding get() = EcdsaSignatureEncoding.Der
 
+private const val P256_CURVE_BITS = 256
+private const val P384_CURVE_BITS = 384
+private const val P521_CURVE_BITS = 521
+private const val ED25519_SIGNATURE_BYTES = 64
+
 /** Curve order in bits for the CryptoKit ECDSA-from-scalar shim (256 / 384 / 521). */
 private fun ecdsaCurveCode(scheme: SignatureScheme): Int =
     when (scheme) {
-        SignatureScheme.EcdsaP256 -> 256
-        SignatureScheme.EcdsaP384 -> 384
-        SignatureScheme.EcdsaP521 -> 521
+        SignatureScheme.EcdsaP256 -> P256_CURVE_BITS
+        SignatureScheme.EcdsaP384 -> P384_CURVE_BITS
+        SignatureScheme.EcdsaP521 -> P521_CURVE_BITS
         SignatureScheme.Ed25519 -> error("not an ECDSA scheme")
     }
 
@@ -199,7 +204,7 @@ private fun appleEd25519Verify(
     signature: ReadBuffer,
 ): Boolean {
     // Ed25519 signatures are a fixed 64 bytes; reject anything else without calling into CryptoKit.
-    if (signature.remaining() != 64) return false
+    if (signature.remaining() != ED25519_SIGNATURE_BYTES) return false
     var status = -1
     val msgLen = message.remaining()
     key.material.withRemainingBytes { pubPtr, pubLen ->
@@ -220,6 +225,13 @@ private fun appleEd25519Verify(
     return status == BCKS_OK
 }
 
+private const val BYTE_MASK = 0xFF
+private const val DER_LONG_FORM_FLAG = 0x80 // high bit set ⇒ long-form length / negative integer
+private const val DER_LENGTH_COUNT_MASK = 0x7f // low 7 bits of a long-form first octet = octet count
+private const val DER_MAX_LENGTH_OCTETS = 4 // we accept at most a 4-byte length
+private const val DER_TAG_INTEGER = 0x02
+private const val DER_TAG_SEQUENCE = 0x30
+
 /**
  * Returns (decoded length, index just past the length octets) for a minimal-form DER length at
  * [i], or `null` if the length is non-canonical (indefinite form, leading-zero octet, or long
@@ -230,15 +242,15 @@ private fun readDerLen(
     i: Int,
 ): Pair<Int, Int>? {
     if (i >= b.size) return null
-    val first = b[i].toInt() and 0xFF
-    if (first < 0x80) return first to (i + 1) // short form
-    val numBytes = first and 0x7f
-    if (numBytes == 0 || numBytes > 4) return null // indefinite form / unreasonably large
+    val first = b[i].toInt() and BYTE_MASK
+    if (first < DER_LONG_FORM_FLAG) return first to (i + 1) // short form
+    val numBytes = first and DER_LENGTH_COUNT_MASK
+    if (numBytes == 0 || numBytes > DER_MAX_LENGTH_OCTETS) return null // indefinite form / unreasonably large
     if (i + 1 + numBytes > b.size) return null
-    if ((b[i + 1].toInt() and 0xFF) == 0x00) return null // leading-zero length octet (non-minimal)
+    if ((b[i + 1].toInt() and BYTE_MASK) == 0x00) return null // leading-zero length octet (non-minimal)
     var len = 0
-    for (k in 0 until numBytes) len = (len shl 8) or (b[i + 1 + k].toInt() and 0xFF)
-    if (len < 0x80) return null // long form used where short form fits (non-minimal)
+    for (k in 0 until numBytes) len = (len shl Byte.SIZE_BITS) or (b[i + 1 + k].toInt() and BYTE_MASK)
+    if (len < DER_LONG_FORM_FLAG) return null // long form used where short form fits (non-minimal)
     return len to (i + 1 + numBytes)
 }
 
@@ -251,12 +263,14 @@ private fun readDerPositiveInt(
     i: Int,
     end: Int,
 ): Int {
-    if (i >= end || (b[i].toInt() and 0xFF) != 0x02) return -1
+    if (i >= end || (b[i].toInt() and BYTE_MASK) != DER_TAG_INTEGER) return -1
     val (len, contentStart) = readDerLen(b, i + 1) ?: return -1
     if (len < 1 || contentStart + len > end) return -1
-    val c0 = b[contentStart].toInt() and 0xFF
-    if (c0 and 0x80 != 0) return -1 // negative (r/s must be positive)
-    if (c0 == 0x00 && len > 1 && (b[contentStart + 1].toInt() and 0x80) == 0) return -1 // superfluous 0x00
+    val c0 = b[contentStart].toInt() and BYTE_MASK
+    if (c0 and DER_LONG_FORM_FLAG != 0) return -1 // negative (r/s must be positive)
+    if (c0 == 0x00 && len > 1 && (b[contentStart + 1].toInt() and DER_LONG_FORM_FLAG) == 0) {
+        return -1 // superfluous 0x00
+    }
     return contentStart + len
 }
 
@@ -274,7 +288,7 @@ private fun isCanonicalEcdsaDer(signature: ReadBuffer): Boolean {
     val n = signature.remaining()
     if (n < 2) return false
     val b = ByteArray(n) { signature.get(start + it) }
-    if ((b[0].toInt() and 0xFF) != 0x30) return false
+    if ((b[0].toInt() and BYTE_MASK) != DER_TAG_SEQUENCE) return false
     val (seqLen, contentStart) = readDerLen(b, 1) ?: return false
     if (contentStart + seqLen != n) return false // exact consumption, no trailing bytes
     val afterR = readDerPositiveInt(b, contentStart, n)

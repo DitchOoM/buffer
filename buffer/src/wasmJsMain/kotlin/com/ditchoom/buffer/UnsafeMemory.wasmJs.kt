@@ -2,6 +2,11 @@
 
 package com.ditchoom.buffer
 
+import com.ditchoom.buffer.BufferConstants.BYTE_1_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_2_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_3_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_MASK
+import com.ditchoom.buffer.BufferConstants.WORD_BYTE_3
 import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.wasm.unsafe.Pointer
 import kotlin.wasm.unsafe.UnsafeWasmMemoryApi
@@ -104,14 +109,14 @@ actual object UnsafeMemory {
         var addr = srcAddress
         var i = destOffset
         val end = destOffset + length
-        while (i + 4 <= end) {
+        while (i + Int.SIZE_BYTES <= end) {
             val v = ptr(addr).loadInt()
             dest[i] = v.toByte()
-            dest[i + 1] = (v shr 8).toByte()
-            dest[i + 2] = (v shr 16).toByte()
-            dest[i + 3] = (v shr 24).toByte()
-            addr += 4
-            i += 4
+            dest[i + 1] = (v shr BYTE_1_SHIFT).toByte()
+            dest[i + 2] = (v shr BYTE_2_SHIFT).toByte()
+            dest[i + WORD_BYTE_3] = (v shr BYTE_3_SHIFT).toByte()
+            addr += Int.SIZE_BYTES
+            i += Int.SIZE_BYTES
         }
         // Handle remaining bytes
         while (i < end) {
@@ -131,15 +136,15 @@ actual object UnsafeMemory {
         var addr = dstAddress
         var i = srcOffset
         val end = srcOffset + length
-        while (i + 4 <= end) {
+        while (i + Int.SIZE_BYTES <= end) {
             val v =
-                (src[i].toInt() and 0xFF) or
-                    ((src[i + 1].toInt() and 0xFF) shl 8) or
-                    ((src[i + 2].toInt() and 0xFF) shl 16) or
-                    ((src[i + 3].toInt() and 0xFF) shl 24)
+                (src[i].toInt() and BYTE_MASK) or
+                    ((src[i + 1].toInt() and BYTE_MASK) shl BYTE_1_SHIFT) or
+                    ((src[i + 2].toInt() and BYTE_MASK) shl BYTE_2_SHIFT) or
+                    ((src[i + WORD_BYTE_3].toInt() and BYTE_MASK) shl BYTE_3_SHIFT)
             ptr(addr).storeInt(v)
-            addr += 4
-            i += 4
+            addr += Int.SIZE_BYTES
+            i += Int.SIZE_BYTES
         }
         // Handle remaining bytes
         while (i < end) {

@@ -1,3 +1,5 @@
+@file:Suppress("MatchingDeclarationName") // MPP platform-suffixed actual file
+
 package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.BufferFactory
@@ -30,8 +32,8 @@ actual class HmacSha256Mac actual constructor(
         }
         for (i in 0 until SHA256_BLOCK_BYTES) {
             val kb = kBlock.get(i).toInt()
-            inner.absorbByte((kb xor 0x36).toByte()) // ipad
-            opad.set(i, (kb xor 0x5c).toByte())
+            inner.absorbByte((kb xor HMAC_IPAD).toByte()) // ipad
+            opad.set(i, (kb xor HMAC_OPAD).toByte())
         }
         kBlock.fill(0) // wipe the key-derived block
     }

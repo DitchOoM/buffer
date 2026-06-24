@@ -12,15 +12,15 @@ private val secureRandom = SecureRandom()
  */
 actual fun cryptoRandomInto(dest: WriteBuffer) {
     var remaining = dest.remaining()
-    while (remaining >= 8) {
+    while (remaining >= Long.SIZE_BYTES) {
         dest.writeLong(secureRandom.nextLong())
-        remaining -= 8
+        remaining -= Long.SIZE_BYTES
     }
     if (remaining > 0) {
         var bits = secureRandom.nextLong()
         repeat(remaining) {
             dest.writeByte(bits.toByte())
-            bits = bits ushr 8
+            bits = bits ushr Byte.SIZE_BITS
         }
     }
 }

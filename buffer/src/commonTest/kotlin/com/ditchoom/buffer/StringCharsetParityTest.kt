@@ -37,32 +37,40 @@ class StringCharsetParityTest {
     fun everyCharsetRoundTripsOrThrowsUnsupported() {
         for ((factoryName, factory) in factories()) {
             for (charset in Charset.entries) {
-                val label = "$factoryName/$charset"
-                val buffer = factory.allocate(256)
-
-                val bytesWritten =
-                    try {
-                        buffer.writeString(sample, charset)
-                        buffer.position()
-                    } catch (_: UnsupportedOperationException) {
-                        // Acceptable: platform openly rejects writing this charset.
-                        continue
-                    }
-
-                assertTrue(bytesWritten > 0, "writeString($label) wrote zero bytes for a non-empty string")
-                buffer.resetForRead()
-
-                val readBack =
-                    try {
-                        buffer.readString(bytesWritten, charset)
-                    } catch (_: UnsupportedOperationException) {
-                        // Acceptable: write supported, read not — asymmetric but loud.
-                        continue
-                    }
-
-                assertEquals(sample, readBack, "round-trip corrupted text for $label")
+                assertCharsetRoundTripsOrSkips(factoryName, factory, charset)
             }
         }
+    }
+
+    private fun assertCharsetRoundTripsOrSkips(
+        factoryName: String,
+        factory: BufferFactory,
+        charset: Charset,
+    ) {
+        val label = "$factoryName/$charset"
+        val buffer = factory.allocate(256)
+
+        val bytesWritten =
+            try {
+                buffer.writeString(sample, charset)
+                buffer.position()
+            } catch (_: UnsupportedOperationException) {
+                // Acceptable: platform openly rejects writing this charset.
+                return
+            }
+
+        assertTrue(bytesWritten > 0, "writeString($label) wrote zero bytes for a non-empty string")
+        buffer.resetForRead()
+
+        val readBack =
+            try {
+                buffer.readString(bytesWritten, charset)
+            } catch (_: UnsupportedOperationException) {
+                // Acceptable: write supported, read not — asymmetric but loud.
+                return
+            }
+
+        assertEquals(sample, readBack, "round-trip corrupted text for $label")
     }
 
     @Test
@@ -76,7 +84,11 @@ class StringCharsetParityTest {
             }
             val bytesWritten = buffer.position()
             buffer.resetForRead()
-            assertEquals(sample, buffer.readString(bytesWritten, Charset.UTF8), "UTF-8 round-trip failed ($factoryName)")
+            assertEquals(
+                sample,
+                buffer.readString(bytesWritten, Charset.UTF8),
+                "UTF-8 round-trip failed ($factoryName)",
+            )
         }
     }
 }

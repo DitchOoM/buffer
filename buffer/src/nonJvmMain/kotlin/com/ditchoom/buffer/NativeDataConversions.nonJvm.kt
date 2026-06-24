@@ -21,11 +21,12 @@ actual fun ReadBuffer.toByteArray(): ByteArray {
         val offset = managed.arrayOffset
         val pos = position()
         val rem = remaining()
-        if (offset == 0 && pos == 0 && rem == array.size) {
-            return array
+        // Zero-copy when the backing array exactly matches the remaining content; otherwise copy.
+        return if (offset == 0 && pos == 0 && rem == array.size) {
+            array
+        } else {
+            array.copyOfRange(offset + pos, offset + pos + rem)
         }
-        // Copy without modifying position
-        return array.copyOfRange(offset + pos, offset + pos + rem)
     }
     // Fallback: read and restore position
     val pos = position()

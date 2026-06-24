@@ -182,30 +182,30 @@ class NativeBuffer private constructor(
 
     override fun readInt(): Int {
         checkOpen()
-        requireReadable(4)
+        requireReadable(Int.SIZE_BYTES)
         val raw = UnsafeMemory.getInt(nativeAddress + positionValue)
-        positionValue += 4
+        positionValue += Int.SIZE_BYTES
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
 
     override fun getInt(index: Int): Int {
         checkOpen()
-        requireIndex(index, 4)
+        requireIndex(index, Int.SIZE_BYTES)
         val raw = UnsafeMemory.getInt(nativeAddress + index)
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
 
     override fun readLong(): Long {
         checkOpen()
-        requireReadable(8)
+        requireReadable(Long.SIZE_BYTES)
         val raw = UnsafeMemory.getLong(nativeAddress + positionValue)
-        positionValue += 8
+        positionValue += Long.SIZE_BYTES
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
 
     override fun getLong(index: Int): Long {
         checkOpen()
-        requireIndex(index, 8)
+        requireIndex(index, Long.SIZE_BYTES)
         val raw = UnsafeMemory.getLong(nativeAddress + index)
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
@@ -364,9 +364,9 @@ class NativeBuffer private constructor(
 
     override fun writeInt(int: Int): WriteBuffer {
         checkOpen()
-        checkWriteBounds(4)
+        checkWriteBounds(Int.SIZE_BYTES)
         set(positionValue, int)
-        positionValue += 4
+        positionValue += Int.SIZE_BYTES
         return this
     }
 
@@ -375,7 +375,7 @@ class NativeBuffer private constructor(
         int: Int,
     ): WriteBuffer {
         checkOpen()
-        checkIndexBounds(index, 4)
+        checkIndexBounds(index, Int.SIZE_BYTES)
         val value = if (littleEndian == nativeIsLittleEndian) int else int.reverseBytes()
         UnsafeMemory.putInt(nativeAddress + index, value)
         return this
@@ -383,9 +383,9 @@ class NativeBuffer private constructor(
 
     override fun writeLong(long: Long): WriteBuffer {
         checkOpen()
-        checkWriteBounds(8)
+        checkWriteBounds(Long.SIZE_BYTES)
         set(positionValue, long)
-        positionValue += 8
+        positionValue += Long.SIZE_BYTES
         return this
     }
 
@@ -394,7 +394,7 @@ class NativeBuffer private constructor(
         long: Long,
     ): WriteBuffer {
         checkOpen()
-        checkIndexBounds(index, 8)
+        checkIndexBounds(index, Long.SIZE_BYTES)
         val value = if (littleEndian == nativeIsLittleEndian) long else long.reverseBytes()
         UnsafeMemory.putLong(nativeAddress + index, value)
         return this
@@ -664,7 +664,7 @@ class NativeBuffer private constructor(
     ): Int {
         checkOpen()
         val size = remaining()
-        if (size < 4) return -1
+        if (size < Int.SIZE_BYTES) return -1
         val nativeValue = if (littleEndian == nativeIsLittleEndian) value else value.reverseBytes()
         val fn = if (aligned) ::buf_indexof_int_aligned else ::buf_indexof_int
         return fn(
@@ -684,7 +684,7 @@ class NativeBuffer private constructor(
     ): Int {
         checkOpen()
         val size = remaining()
-        if (size < 8) return -1
+        if (size < Long.SIZE_BYTES) return -1
         val nativeValue = if (littleEndian == nativeIsLittleEndian) value else value.reverseBytes()
         val fn = if (aligned) ::buf_indexof_long_aligned else ::buf_indexof_long
         return fn(
@@ -807,30 +807,30 @@ private class NativeBufferSlice(
 
     override fun readInt(): Int {
         checkOpen()
-        requireReadable(4)
+        requireReadable(Int.SIZE_BYTES)
         val raw = UnsafeMemory.getInt(baseAddress + positionValue)
-        positionValue += 4
+        positionValue += Int.SIZE_BYTES
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
 
     override fun getInt(index: Int): Int {
         checkOpen()
-        requireIndex(index, 4)
+        requireIndex(index, Int.SIZE_BYTES)
         val raw = UnsafeMemory.getInt(baseAddress + index)
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
 
     override fun readLong(): Long {
         checkOpen()
-        requireReadable(8)
+        requireReadable(Long.SIZE_BYTES)
         val raw = UnsafeMemory.getLong(baseAddress + positionValue)
-        positionValue += 8
+        positionValue += Long.SIZE_BYTES
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
 
     override fun getLong(index: Int): Long {
         checkOpen()
-        requireIndex(index, 8)
+        requireIndex(index, Long.SIZE_BYTES)
         val raw = UnsafeMemory.getLong(baseAddress + index)
         return if (littleEndian == nativeIsLittleEndian) raw else raw.reverseBytes()
     }
@@ -987,7 +987,7 @@ private class NativeBufferSlice(
         int: Int,
     ): WriteBuffer {
         checkOpen()
-        checkIndexBounds(index, 4)
+        checkIndexBounds(index, Int.SIZE_BYTES)
         val value = if (littleEndian == nativeIsLittleEndian) int else int.reverseBytes()
         UnsafeMemory.putInt(baseAddress + index, value)
         return this
@@ -998,7 +998,7 @@ private class NativeBufferSlice(
         long: Long,
     ): WriteBuffer {
         checkOpen()
-        checkIndexBounds(index, 8)
+        checkIndexBounds(index, Long.SIZE_BYTES)
         val value = if (littleEndian == nativeIsLittleEndian) long else long.reverseBytes()
         UnsafeMemory.putLong(baseAddress + index, value)
         return this

@@ -33,10 +33,14 @@ class EthernetFrameByEtherTypeCodecTest {
     fun arpRoundTripsThroughDispatcher() = roundTrip(EthernetFrameByEtherType.Arp(), byteArrayOf(0x08, 0x06))
 
     @Test
-    fun vlanTagRoundTripsThroughDispatcher() = roundTrip(EthernetFrameByEtherType.VlanTag(), byteArrayOf(0x81.toByte(), 0x00))
+    fun vlanTagRoundTripsThroughDispatcher() {
+        roundTrip(EthernetFrameByEtherType.VlanTag(), byteArrayOf(0x81.toByte(), 0x00))
+    }
 
     @Test
-    fun ipv6RoundTripsThroughDispatcher() = roundTrip(EthernetFrameByEtherType.Ipv6(), byteArrayOf(0x86.toByte(), 0xDD.toByte()))
+    fun ipv6RoundTripsThroughDispatcher() {
+        roundTrip(EthernetFrameByEtherType.Ipv6(), byteArrayOf(0x86.toByte(), 0xDD.toByte()))
+    }
 
     @Test
     fun decodeRoutesByExactEtherTypeBytes() {

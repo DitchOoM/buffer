@@ -12,6 +12,9 @@ package com.ditchoom.buffer
 // textual representation, e.g. the bytes '-','1','2','.','3' -> -123 tenths. Allocation-free: they
 // read through the supplied absolute getByte accessor only.
 
+/** Base-10 radix used when accumulating successive decimal digits. */
+private const val DECIMAL_RADIX = 10
+
 /**
  * Parse the fixed 1BRC-style temperature format from an absolute byte range:
  * an optional leading '-', one or two integer digits, a '.', then exactly one
@@ -42,7 +45,7 @@ internal inline fun parseFixedDecimalTenths(
     while (i < end) {
         val b = getByte(i)
         if (b != '.'.code.toByte()) {
-            value = value * 10 + (b - '0'.code.toByte())
+            value = value * DECIMAL_RADIX + (b - '0'.code.toByte())
         }
         i++
     }
@@ -72,7 +75,7 @@ internal inline fun parseSignedLong(
     }
     var value = 0L
     while (i < end) {
-        value = value * 10 + (getByte(i) - '0'.code.toByte())
+        value = value * DECIMAL_RADIX + (getByte(i) - '0'.code.toByte())
         i++
     }
     return if (negative) -value else value

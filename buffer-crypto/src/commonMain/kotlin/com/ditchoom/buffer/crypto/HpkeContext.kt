@@ -5,6 +5,7 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
+import com.ditchoom.buffer.crypto.HpkeMode.AuthPsk
 
 /**
  * HPKE encryption contexts (RFC 9180 §5.2) and the setup functions that produce them.
@@ -265,7 +266,7 @@ suspend fun hpkeSetupAuthPskReceiver(
     info: ReadBuffer,
     psk: HpkePsk,
     senderPublicKey: HpkePublicKey,
-): HpkeContext.Receiver = hpkeSetupReceiver(suite, HpkeMode.AuthPsk, recipientPrivateKey, enc, info, psk, senderPublicKey)
+): HpkeContext.Receiver = hpkeSetupReceiver(suite, AuthPsk, recipientPrivateKey, enc, info, psk, senderPublicKey)
 
 internal suspend fun hpkeSetupReceiver(
     suite: HpkeSuite,
@@ -308,7 +309,11 @@ private fun validateModeParams(
         if (needsPsk) "mode ${mode.value} requires a PSK" else "a PSK must not be supplied in mode ${mode.value}"
     }
     require(needsSender == (senderKey != null)) {
-        if (needsSender) "mode ${mode.value} requires a sender key" else "a sender key must not be supplied in mode ${mode.value}"
+        if (needsSender) {
+            "mode ${mode.value} requires a sender key"
+        } else {
+            "a sender key must not be supplied in mode ${mode.value}"
+        }
     }
 }
 

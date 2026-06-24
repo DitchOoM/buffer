@@ -69,6 +69,20 @@ internal expect suspend fun webCryptoVerify(
 // ---------------------------------------------------------------------------
 
 private const val HEX = "0123456789abcdef"
+private const val NIBBLE_BITS = 4
+private const val NIBBLE_MASK = 0xF
+private const val BYTE_MASK = 0xFF
+private const val BYTE_BITS = 8
+
+// EC private-scalar / coordinate widths (bytes) per curve.
+private const val P256_SCALAR_BYTES = 32
+private const val P384_SCALAR_BYTES = 48
+private const val P521_SCALAR_BYTES = 66
+private const val ED25519_SEED_BYTES = 32
+
+// DER definite-length encoding thresholds.
+private const val DER_SHORT_LEN_LIMIT = 0x80 // lengths below use the single-byte short form
+private const val DER_ONE_BYTE_LIMIT = 0x100 // lengths below fit in one long-form byte (0x81 LL)
 
 private fun ReadBuffer.toHexString(): String {
     val start = position()
@@ -76,8 +90,8 @@ private fun ReadBuffer.toHexString(): String {
     val sb = StringBuilder(n * 2)
     for (i in 0 until n) {
         val v = get(start + i).toInt() and 0xFF
-        sb.append(HEX[v ushr 4])
-        sb.append(HEX[v and 0xF])
+        sb.append(HEX[v ushr NIBBLE_BITS])
+        sb.append(HEX[v and NIBBLE_MASK])
     }
     return sb.toString()
 }
@@ -91,7 +105,7 @@ private fun hexToBuffer(
     for (i in 0 until n) {
         val hi = HEX.indexOf(hex[i * 2].lowercaseChar())
         val lo = HEX.indexOf(hex[i * 2 + 1].lowercaseChar())
-        b.writeByte(((hi shl 4) or lo).toByte())
+        b.writeByte(((hi shl NIBBLE_BITS) or lo).toByte())
     }
     b.resetForRead()
     return b
@@ -104,16 +118,16 @@ private fun hexToBuffer(
 // ---------------------------------------------------------------------------
 
 private fun pkcs8Ed25519Hex(seed: ReadBuffer): String {
-    require(seed.remaining() == 32) { "Ed25519 seed must be 32 bytes" }
+    require(seed.remaining() == ED25519_SEED_BYTES) { "Ed25519 seed must be 32 bytes" }
     return "302e020100300506032b657004220420" + seed.toHexString()
 }
 
 /** Curve byte length for the private scalar (also the coordinate width). */
 private fun ecScalarBytes(scheme: SignatureScheme): Int =
     when (scheme) {
-        SignatureScheme.EcdsaP256 -> 32
-        SignatureScheme.EcdsaP384 -> 48
-        SignatureScheme.EcdsaP521 -> 66
+        SignatureScheme.EcdsaP256 -> P256_SCALAR_BYTES
+        SignatureScheme.EcdsaP384 -> P384_SCALAR_BYTES
+        SignatureScheme.EcdsaP521 -> P521_SCALAR_BYTES
         SignatureScheme.Ed25519 -> error("not ECDSA")
     }
 
@@ -128,12 +142,12 @@ private fun curveOidHex(scheme: SignatureScheme): String =
 
 private fun derLenHex(len: Int): String =
     when {
-        len < 0x80 -> twoHex(len)
-        len < 0x100 -> "81" + twoHex(len)
-        else -> "82" + twoHex(len ushr 8) + twoHex(len and 0xFF)
+        len < DER_SHORT_LEN_LIMIT -> twoHex(len)
+        len < DER_ONE_BYTE_LIMIT -> "81" + twoHex(len)
+        else -> "82" + twoHex(len ushr BYTE_BITS) + twoHex(len and BYTE_MASK)
     }
 
-private fun twoHex(v: Int): String = HEX[(v ushr 4) and 0xF].toString() + HEX[v and 0xF]
+private fun twoHex(v: Int): String = HEX[(v ushr NIBBLE_BITS) and NIBBLE_MASK].toString() + HEX[v and NIBBLE_MASK]
 
 private fun derTlv(
     tagHex: String,
