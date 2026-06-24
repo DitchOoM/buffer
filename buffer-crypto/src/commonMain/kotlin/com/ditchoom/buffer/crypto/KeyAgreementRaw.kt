@@ -49,7 +49,7 @@ internal fun validateRawSecret(
     // already rejected genuinely invalid points, so the zero check is not applied there.
     if (curve == KeyAgreementCurve.X25519 && isAllZeroSecret(rawSecret)) {
         rawSecret.freeNativeMemory()
-        throw InvalidPublicKey(curve.curveName)
+        throw InvalidPublicKey(curve)
     }
     return rawSecret
 }

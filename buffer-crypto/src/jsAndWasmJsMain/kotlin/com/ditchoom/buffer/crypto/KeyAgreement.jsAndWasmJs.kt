@@ -119,7 +119,7 @@ internal actual suspend fun deriveSharedSecretAsyncPlatform(
             )
         } catch (e: Throwable) {
             // A failed import / deriveBits means an off-curve / low-order / malformed peer point.
-            throw InvalidPublicKey(curve.curveName)
+            throw InvalidPublicKey(curve)
         }
     if (sharedHex == UNSUPPORTED_SENTINEL) {
         throw UnsupportedOperationException("${curve.curveName} is not available in this WebCrypto engine")
@@ -149,7 +149,7 @@ internal actual suspend fun dhRawSecret(
                 peerPublicKey.encoded.toHex(),
             )
         } catch (e: Throwable) {
-            throw InvalidPublicKey(curve.curveName)
+            throw InvalidPublicKey(curve)
         }
     if (sharedHex == UNSUPPORTED_SENTINEL) {
         throw UnsupportedOperationException("${curve.curveName} is not available in this WebCrypto engine")

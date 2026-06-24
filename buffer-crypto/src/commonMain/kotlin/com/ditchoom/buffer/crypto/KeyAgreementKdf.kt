@@ -45,7 +45,7 @@ internal fun deriveFromRawSecret(
         // invalid/off-curve/infinity points are already rejected by the native provider — so the
         // zero check must not be applied there or it would reject those valid edge vectors.
         if (curve == KeyAgreementCurve.X25519 && isAllZero(rawSecret)) {
-            throw InvalidPublicKey(curve.curveName)
+            throw InvalidPublicKey(curve)
         }
         Hkdf.derive(salt = salt.toSalt(), ikm = rawSecret, info = info.toInfo(), length = length, factory = factory)
     } finally {

@@ -310,7 +310,7 @@ internal actual fun deriveSharedSecretPlatform(
             throw e
         } catch (e: GeneralSecurityException) {
             // Invalid-curve / off-curve / infinity points surface as a JCA exception → reject.
-            throw InvalidPublicKey(curve.curveName)
+            throw InvalidPublicKey(curve)
         } catch (e: RuntimeException) {
             // Some JCA providers (and SunEC for certain malformed points) reject a bad public point
             // with an *unchecked* exception (ProviderException / IllegalArgumentException /
@@ -318,7 +318,7 @@ internal actual fun deriveSharedSecretPlatform(
             // uniform InvalidPublicKey so an off-curve probe can't be distinguished by exception
             // type and the documented rejection contract holds across providers. (IllegalArgument
             // from our own require()s is thrown before dispatch, so it never reaches here.)
-            throw InvalidPublicKey(curve.curveName)
+            throw InvalidPublicKey(curve)
         }
 
     // Move the raw secret into a wiped SecureBuffer, then hand to the single audited KDF gate.
@@ -388,11 +388,11 @@ internal actual suspend fun dhRawSecret(
         } catch (e: InvalidPublicKey) {
             throw e
         } catch (e: GeneralSecurityException) {
-            throw InvalidPublicKey(curve.curveName)
+            throw InvalidPublicKey(curve)
         } catch (e: RuntimeException) {
             // Unchecked provider rejections (ProviderException / IllegalState / IllegalArgument from
             // the provider) map to the same uniform InvalidPublicKey — no exception-type oracle.
-            throw InvalidPublicKey(curve.curveName)
+            throw InvalidPublicKey(curve)
         }
 
     val raw = secureScratch.allocate(curve.sharedSecretBytes)

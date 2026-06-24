@@ -159,7 +159,7 @@ private fun rawAgreeX25519(
         }
         if (status != BCL_OK) {
             out.freeNativeMemory()
-            throw InvalidPublicKey(curve.curveName)
+            throw InvalidPublicKey(curve)
         }
         for (i in 0 until curve.sharedSecretBytes) out.writeByte(secretOut[i])
     }
@@ -194,7 +194,7 @@ private fun rawAgreeEc(
         }
         if (status != BCL_OK || secretLen.value.toInt() != curve.sharedSecretBytes) {
             out.freeNativeMemory()
-            throw InvalidPublicKey(curve.curveName)
+            throw InvalidPublicKey(curve)
         }
         for (i in 0 until curve.sharedSecretBytes) out.writeByte(secretOut[i])
     }

@@ -167,14 +167,14 @@ internal actual fun generateKeyPairPlatform(curve: KeyAgreementCurve): KeyAgreem
     val privKey =
         SecKeyCreateRandomKey(attrs, null) ?: run {
             CFRelease(attrs)
-            throw InvalidPublicKey(curve.curveName)
+            throw InvalidPublicKey(curve)
         }
     CFRelease(attrs)
     try {
-        val pubKey = SecKeyCopyPublicKey(privKey) ?: throw InvalidPublicKey(curve.curveName)
+        val pubKey = SecKeyCopyPublicKey(privKey) ?: throw InvalidPublicKey(curve)
         try {
-            val pubData = SecKeyCopyExternalRepresentation(pubKey, null) ?: throw InvalidPublicKey(curve.curveName)
-            val privData = SecKeyCopyExternalRepresentation(privKey, null) ?: throw InvalidPublicKey(curve.curveName)
+            val pubData = SecKeyCopyExternalRepresentation(pubKey, null) ?: throw InvalidPublicKey(curve)
+            val privData = SecKeyCopyExternalRepresentation(privKey, null) ?: throw InvalidPublicKey(curve)
             try {
                 val rawPubBuf = cfDataToBuffer(pubData, BufferFactory.Default)
                 val publicKey = KeyAgreementPublicKey.of(curve, rawPubBuf)
@@ -237,12 +237,12 @@ private fun rawAgreeApple(
     try {
         val secPriv =
             SecKeyCreateWithData(CFBridgingRetain(privData) as CFDataRef, privAttrs, null)
-                ?: throw InvalidPublicKey(curve.curveName)
+                ?: throw InvalidPublicKey(curve)
         val secPub =
             SecKeyCreateWithData(CFBridgingRetain(pubData) as CFDataRef, pubAttrs, null)
                 ?: run {
                     CFRelease(secPriv)
-                    throw InvalidPublicKey(curve.curveName)
+                    throw InvalidPublicKey(curve)
                 }
         try {
             val params =
@@ -261,7 +261,7 @@ private fun rawAgreeApple(
                     null,
                 ) ?: run {
                     CFRelease(params)
-                    throw InvalidPublicKey(curve.curveName)
+                    throw InvalidPublicKey(curve)
                 }
             CFRelease(params)
             try {
@@ -347,7 +347,7 @@ private fun rawAgreeX25519(
         }
         if (status != BCKS_OK) {
             out.freeNativeMemory()
-            throw InvalidPublicKey(KeyAgreementCurve.X25519.curveName)
+            throw InvalidPublicKey(KeyAgreementCurve.X25519)
         }
         for (i in 0 until X25519_BYTES) out.writeByte(secretOut[i])
     }
