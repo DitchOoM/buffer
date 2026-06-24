@@ -30,6 +30,9 @@ import platform.CoreFoundation.kCFAllocatorNull
 import platform.CoreFoundation.kCFStringEncodingUTF8
 import platform.Foundation.CFBridgingRelease
 
+/** A `byteCount` above this index means the UTF-8 sequence carries a 4th (b3) byte. */
+private const val FOURTH_BYTE_PRESENT_THRESHOLD = 3
+
 /**
  * Apple implementation using CoreFoundation for optimized UTF-8 decoding.
  *
@@ -140,8 +143,8 @@ private class AppleStreamingStringDecoder(
             pendingCount = dataRemaining - boundary
             pendingLong = 0L
             for (i in 0 until pendingCount) {
-                pendingLong =
-                    pendingLong or ((ptr[boundary + i].toLong() and Utf8.BYTE_MASK.toLong()) shl (i * Utf8.BITS_PER_BYTE))
+                val maskedByte = ptr[boundary + i].toLong() and Utf8.BYTE_MASK.toLong()
+                pendingLong = pendingLong or (maskedByte shl (i * Utf8.BITS_PER_BYTE))
             }
         }
 
@@ -195,8 +198,8 @@ private class AppleStreamingStringDecoder(
             val basePos = buffer.position()
             for (i in 0 until available) {
                 val b = buffer.get(basePos + i)
-                pendingLong =
-                    pendingLong or ((b.toLong() and Utf8.BYTE_MASK.toLong()) shl ((pendingCount + i) * Utf8.BITS_PER_BYTE))
+                val maskedByte = b.toLong() and Utf8.BYTE_MASK.toLong()
+                pendingLong = pendingLong or (maskedByte shl ((pendingCount + i) * Utf8.BITS_PER_BYTE))
             }
             pendingCount += available
             return DecodeResult(0, available)
@@ -232,7 +235,7 @@ private class AppleStreamingStringDecoder(
         if (byteCount > 2 && (b2 and Utf8.CONTINUATION_MASK) != Utf8.CONTINUATION_MARKER) {
             return handleMalformedInput(destination).charsWritten
         }
-        if (byteCount > 3 && (b3 and Utf8.CONTINUATION_MASK) != Utf8.CONTINUATION_MARKER) {
+        if (byteCount > FOURTH_BYTE_PRESENT_THRESHOLD && (b3 and Utf8.CONTINUATION_MASK) != Utf8.CONTINUATION_MARKER) {
             return handleMalformedInput(destination).charsWritten
         }
 
@@ -428,4 +431,6 @@ private class AppleStreamingStringDecoder(
     }
 }
 
+// ktlint (no .editorconfig) collapses this expression body onto one line, so it cannot be wrapped.
+@Suppress("MaxLineLength")
 actual fun StreamingStringDecoder(config: StreamingStringDecoderConfig): StreamingStringDecoder = AppleStreamingStringDecoder(config)

@@ -194,10 +194,10 @@ class FfmBufferTest {
     fun `use block frees memory on exception`() {
         val buffer = createFfmBuffer(64)
         val segment = buffer.segment
-        assertFailsWith<RuntimeException> {
+        assertFailsWith<IllegalStateException> {
             buffer.use {
                 it.writeInt(42)
-                throw RuntimeException("test error")
+                error("test error")
             }
         }
         assertFalse(segment.scope().isAlive, "Buffer should be freed even after exception")

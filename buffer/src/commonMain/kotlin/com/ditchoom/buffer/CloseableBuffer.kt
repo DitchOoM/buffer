@@ -66,7 +66,11 @@ inline fun <R> PlatformBuffer.use(block: (PlatformBuffer) -> R): R {
     var exception: Throwable? = null
     try {
         return block(this)
-    } catch (e: Throwable) {
+        // Mirrors the stdlib `use` contract: capture any Throwable so the release in `finally`
+        // can attach a failing freeNativeMemory() as a suppressed exception, then rethrow.
+    } catch (
+        @Suppress("TooGenericExceptionCaught") e: Throwable,
+    ) {
         exception = e
         throw e
     } finally {
@@ -75,7 +79,10 @@ inline fun <R> PlatformBuffer.use(block: (PlatformBuffer) -> R): R {
         } else {
             try {
                 freeNativeMemory()
-            } catch (closeException: Throwable) {
+                // Preserve the original failure; a release failure is recorded as suppressed.
+            } catch (
+                @Suppress("TooGenericExceptionCaught") closeException: Throwable,
+            ) {
                 exception.addSuppressed(closeException)
             }
         }

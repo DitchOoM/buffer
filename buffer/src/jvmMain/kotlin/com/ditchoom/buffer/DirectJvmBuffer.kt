@@ -72,6 +72,8 @@ class DirectJvmBuffer(
         return if (byteOrder == ByteOrder.BIG_ENDIAN) java.lang.Long.reverseBytes(raw) else raw
     }
 
+    // ktlint (no .editorconfig) collapses this expression body onto one line, so it cannot be wrapped.
+    @Suppress("MaxLineLength")
     override fun slice(byteOrder: ByteOrder): DirectJvmBuffer = DirectJvmBuffer(byteBuffer.slice().order(byteOrder.toJava()))
 
     private companion object {

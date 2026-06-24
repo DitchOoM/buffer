@@ -22,5 +22,7 @@ class HeapJvmBuffer(
 
     override val arrayOffset: Int get() = (byteBuffer as Buffer).arrayOffset()
 
+    // ktlint (no .editorconfig) collapses this expression body onto one line, so it cannot be wrapped.
+    @Suppress("MaxLineLength")
     override fun slice(byteOrder: ByteOrder): HeapJvmBuffer = HeapJvmBuffer(byteBuffer.slice().order(byteOrder.toJava()))
 }

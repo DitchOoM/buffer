@@ -44,7 +44,9 @@ class FfmSliceBuffer(
     }
 
     /** No-op — this slice does not own the Arena. */
-    override fun freeNativeMemory() {}
+    override fun freeNativeMemory() {
+        // no-op: the slice does not own the backing Arena.
+    }
 
     override fun slice(byteOrder: ByteOrder): PlatformBuffer {
         val sliced = segment.asSlice(position().toLong(), remaining().toLong())

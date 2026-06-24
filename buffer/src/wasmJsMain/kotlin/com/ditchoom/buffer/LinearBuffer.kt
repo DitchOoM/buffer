@@ -2,6 +2,21 @@
 
 package com.ditchoom.buffer
 
+import com.ditchoom.buffer.BufferConstants.BYTE_1_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_2_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_3_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_4_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_5_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_6_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_7_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_MASK
+import com.ditchoom.buffer.BufferConstants.INT_MASK
+import com.ditchoom.buffer.BufferConstants.WORD_BYTE_3
+import com.ditchoom.buffer.BufferConstants.WORD_BYTE_4
+import com.ditchoom.buffer.BufferConstants.WORD_BYTE_5
+import com.ditchoom.buffer.BufferConstants.WORD_BYTE_6
+import com.ditchoom.buffer.BufferConstants.WORD_BYTE_7
+import com.ditchoom.buffer.BufferConstants.WORD_BYTE_MASK
 import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.wasm.unsafe.Pointer
 import kotlin.wasm.unsafe.UnsafeWasmMemoryApi
@@ -175,7 +190,8 @@ class LinearBuffer(
             raw
         } else {
             // Swap bytes for big endian
-            ((raw.toInt() and 0xFF) shl 8 or ((raw.toInt() shr 8) and 0xFF)).toShort()
+            val r = raw.toInt()
+            ((r and BYTE_MASK) shl BYTE_1_SHIFT or ((r shr BYTE_1_SHIFT) and BYTE_MASK)).toShort()
         }
     }
 
@@ -187,7 +203,8 @@ class LinearBuffer(
             if (littleEndian) {
                 value
             } else {
-                ((value.toInt() and 0xFF) shl 8 or ((value.toInt() shr 8) and 0xFF)).toShort()
+                val v = value.toInt()
+                ((v and BYTE_MASK) shl BYTE_1_SHIFT or ((v shr BYTE_1_SHIFT) and BYTE_MASK)).toShort()
             }
         ptr(index).storeShort(toStore)
     }
@@ -251,31 +268,31 @@ class LinearBuffer(
         if (size == 0) return
 
         // Rotate the big-endian mask so that byte at (maskOffset % 4) becomes byte 0
-        val shift = (maskOffset and 3) * 8
+        val shift = (maskOffset and WORD_BYTE_MASK) * Byte.SIZE_BITS
         val rotatedMask =
-            if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
+            if (shift == 0) mask else (mask shl shift) or (mask ushr (Int.SIZE_BITS - shift))
 
         // WASM is little-endian, so reverse the rotated big-endian mask for memory layout
         val leMask = rotatedMask.reverseBytes()
-        val maskLong = (leMask.toLong() and 0xFFFFFFFFL) or (leMask.toLong() shl 32)
+        val maskLong = (leMask.toLong() and INT_MASK) or (leMask.toLong() shl Int.SIZE_BITS)
 
         var offset = pos
         // Process 8 bytes at a time
-        while (offset + 8 <= lim) {
+        while (offset + Long.SIZE_BYTES <= lim) {
             val value = ptr(offset).loadLong()
             ptr(offset).storeLong(value xor maskLong)
-            offset += 8
+            offset += Long.SIZE_BYTES
         }
 
         // Handle remaining bytes using the ORIGINAL mask with offset
-        val maskByte0 = (mask ushr 24).toByte()
-        val maskByte1 = (mask ushr 16).toByte()
-        val maskByte2 = (mask ushr 8).toByte()
+        val maskByte0 = (mask ushr BYTE_3_SHIFT).toByte()
+        val maskByte1 = (mask ushr BYTE_2_SHIFT).toByte()
+        val maskByte2 = (mask ushr BYTE_1_SHIFT).toByte()
         val maskByte3 = mask.toByte()
         var i = offset - pos
         while (offset < lim) {
             val maskByte =
-                when ((i + maskOffset) and 3) {
+                when ((i + maskOffset) and WORD_BYTE_MASK) {
                     0 -> maskByte0
                     1 -> maskByte1
                     2 -> maskByte2
@@ -305,11 +322,11 @@ class LinearBuffer(
         }
 
         // Build mask Long for little-endian WASM memory
-        val shift = (maskOffset and 3) * 8
+        val shift = (maskOffset and WORD_BYTE_MASK) * Byte.SIZE_BITS
         val rotatedMask =
-            if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
+            if (shift == 0) mask else (mask shl shift) or (mask ushr (Int.SIZE_BITS - shift))
         val leMask = rotatedMask.reverseBytes()
-        val maskLong = (leMask.toLong() and 0xFFFFFFFFL) or (leMask.toLong() shl 32)
+        val maskLong = (leMask.toLong() and INT_MASK) or (leMask.toLong() shl Int.SIZE_BITS)
 
         val actual = source.unwrapFully()
         if (actual is LinearBuffer) {
@@ -318,23 +335,23 @@ class LinearBuffer(
             var dstOffset = baseOffset + positionValue
 
             // Process 8 bytes at a time
-            while (srcOffset + 8 <= actual.baseOffset + actual.positionValue + size) {
+            while (srcOffset + Long.SIZE_BYTES <= actual.baseOffset + actual.positionValue + size) {
                 val srcPtr = Pointer(srcOffset.toUInt())
                 val dstPtr = Pointer(dstOffset.toUInt())
                 dstPtr.storeLong(srcPtr.loadLong() xor maskLong)
-                srcOffset += 8
-                dstOffset += 8
+                srcOffset += Long.SIZE_BYTES
+                dstOffset += Long.SIZE_BYTES
             }
 
             // Handle remaining bytes using the ORIGINAL mask with offset
-            val maskByte0 = (mask ushr 24).toByte()
-            val maskByte1 = (mask ushr 16).toByte()
-            val maskByte2 = (mask ushr 8).toByte()
+            val maskByte0 = (mask ushr BYTE_3_SHIFT).toByte()
+            val maskByte1 = (mask ushr BYTE_2_SHIFT).toByte()
+            val maskByte2 = (mask ushr BYTE_1_SHIFT).toByte()
             val maskByte3 = mask.toByte()
             var i = srcOffset - (actual.baseOffset + actual.positionValue)
             while (srcOffset < actual.baseOffset + actual.positionValue + size) {
                 val maskByte =
-                    when ((i + maskOffset) and 3) {
+                    when ((i + maskOffset) and WORD_BYTE_MASK) {
                         0 -> maskByte0
                         1 -> maskByte1
                         2 -> maskByte2
@@ -381,18 +398,18 @@ class LinearBuffer(
         val end = offset + length
 
         // Copy 8 bytes at a time using Long operations
-        while (dstOffset + 8 <= end) {
+        while (dstOffset + Long.SIZE_BYTES <= end) {
             val value = ptr(srcOffset).loadLong()
             dst[dstOffset] = value.toByte()
-            dst[dstOffset + 1] = (value shr 8).toByte()
-            dst[dstOffset + 2] = (value shr 16).toByte()
-            dst[dstOffset + 3] = (value shr 24).toByte()
-            dst[dstOffset + 4] = (value shr 32).toByte()
-            dst[dstOffset + 5] = (value shr 40).toByte()
-            dst[dstOffset + 6] = (value shr 48).toByte()
-            dst[dstOffset + 7] = (value shr 56).toByte()
-            srcOffset += 8
-            dstOffset += 8
+            dst[dstOffset + 1] = (value shr BYTE_1_SHIFT).toByte()
+            dst[dstOffset + 2] = (value shr BYTE_2_SHIFT).toByte()
+            dst[dstOffset + WORD_BYTE_3] = (value shr BYTE_3_SHIFT).toByte()
+            dst[dstOffset + WORD_BYTE_4] = (value shr BYTE_4_SHIFT).toByte()
+            dst[dstOffset + WORD_BYTE_5] = (value shr BYTE_5_SHIFT).toByte()
+            dst[dstOffset + WORD_BYTE_6] = (value shr BYTE_6_SHIFT).toByte()
+            dst[dstOffset + WORD_BYTE_7] = (value shr BYTE_7_SHIFT).toByte()
+            srcOffset += Long.SIZE_BYTES
+            dstOffset += Long.SIZE_BYTES
         }
 
         // Copy remaining bytes
@@ -416,20 +433,20 @@ class LinearBuffer(
         var dstOffset = positionValue
 
         // Copy 8 bytes at a time using Long operations
-        while (srcOffset + 8 <= offset + length) {
+        while (srcOffset + Long.SIZE_BYTES <= offset + length) {
             // Pack 8 bytes into a Long
             val value =
-                (bytes[srcOffset].toLong() and 0xFFL) or
-                    ((bytes[srcOffset + 1].toLong() and 0xFFL) shl 8) or
-                    ((bytes[srcOffset + 2].toLong() and 0xFFL) shl 16) or
-                    ((bytes[srcOffset + 3].toLong() and 0xFFL) shl 24) or
-                    ((bytes[srcOffset + 4].toLong() and 0xFFL) shl 32) or
-                    ((bytes[srcOffset + 5].toLong() and 0xFFL) shl 40) or
-                    ((bytes[srcOffset + 6].toLong() and 0xFFL) shl 48) or
-                    ((bytes[srcOffset + 7].toLong() and 0xFFL) shl 56)
+                (bytes[srcOffset].toLong() and BYTE_MASK.toLong()) or
+                    ((bytes[srcOffset + 1].toLong() and BYTE_MASK.toLong()) shl BYTE_1_SHIFT) or
+                    ((bytes[srcOffset + 2].toLong() and BYTE_MASK.toLong()) shl BYTE_2_SHIFT) or
+                    ((bytes[srcOffset + WORD_BYTE_3].toLong() and BYTE_MASK.toLong()) shl BYTE_3_SHIFT) or
+                    ((bytes[srcOffset + WORD_BYTE_4].toLong() and BYTE_MASK.toLong()) shl BYTE_4_SHIFT) or
+                    ((bytes[srcOffset + WORD_BYTE_5].toLong() and BYTE_MASK.toLong()) shl BYTE_5_SHIFT) or
+                    ((bytes[srcOffset + WORD_BYTE_6].toLong() and BYTE_MASK.toLong()) shl BYTE_6_SHIFT) or
+                    ((bytes[srcOffset + WORD_BYTE_7].toLong() and BYTE_MASK.toLong()) shl BYTE_7_SHIFT)
             ptr(dstOffset).storeLong(value)
-            srcOffset += 8
-            dstOffset += 8
+            srcOffset += Long.SIZE_BYTES
+            dstOffset += Long.SIZE_BYTES
         }
 
         // Copy remaining bytes

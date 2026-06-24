@@ -29,20 +29,25 @@ open class LinearBufferIsolationBenchmark {
     @Setup
     fun setup() {
         // Only allocate Heap buffer in setup - Direct would trigger the bug
-        heapBuffer = BufferFactory.managed().allocate(1024)
+        heapBuffer = BufferFactory.managed().allocate(BUFFER_SIZE)
     }
 
     // Benchmark 1: Just heap allocation - should work
     @Benchmark
-    fun heapAllocationOnly(): PlatformBuffer = BufferFactory.managed().allocate(1024)
+    fun heapAllocationOnly(): PlatformBuffer = BufferFactory.managed().allocate(BUFFER_SIZE)
 
     // Benchmark 2: Heap buffer operations - should work
     @Benchmark
     fun heapOperations(): Int {
         heapBuffer.resetForWrite()
-        heapBuffer.writeInt(42)
+        heapBuffer.writeInt(SENTINEL_VALUE)
         heapBuffer.resetForRead()
         return heapBuffer.readInt()
+    }
+
+    private companion object {
+        private const val BUFFER_SIZE = 1024
+        private const val SENTINEL_VALUE = 42
     }
 
     // If the above work, uncomment one at a time to find the culprit:

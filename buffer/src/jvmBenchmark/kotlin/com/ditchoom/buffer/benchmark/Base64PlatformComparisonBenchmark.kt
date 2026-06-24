@@ -50,8 +50,8 @@ open class Base64PlatformComparisonBenchmark {
     fun setup() {
         smallSrc = BufferFactory.Default.allocate(smallSize)
         largeSrc = BufferFactory.Default.allocate(largeSize)
-        smallDest = BufferFactory.Default.allocate(smallSize / 3 * 4)
-        largeDest = BufferFactory.Default.allocate(largeSize / 3 * 4)
+        smallDest = BufferFactory.Default.allocate(smallSize / INPUT_GROUP * OUTPUT_GROUP)
+        largeDest = BufferFactory.Default.allocate(largeSize / INPUT_GROUP * OUTPUT_GROUP)
         smallSrcBB = ByteBuffer.allocateDirect(smallSize)
         largeSrcBB = ByteBuffer.allocateDirect(largeSize)
         for (i in 0 until smallSize) {
@@ -100,5 +100,10 @@ open class Base64PlatformComparisonBenchmark {
         largeSrcBB.position(0)
         largeSrcBB.limit(largeSize)
         return encoder.encode(largeSrcBB).get(0).toInt()
+    }
+
+    private companion object {
+        private const val INPUT_GROUP = 3
+        private const val OUTPUT_GROUP = 4
     }
 }

@@ -31,5 +31,7 @@ class DirectJvmBuffer(
      */
     override val nativeSize: Long get() = capacity.toLong()
 
+    // ktlint (no .editorconfig) collapses this expression body onto one line, so it cannot be wrapped.
+    @Suppress("MaxLineLength")
     override fun slice(byteOrder: ByteOrder): DirectJvmBuffer = DirectJvmBuffer(byteBuffer.slice().order(byteOrder.toJava()))
 }

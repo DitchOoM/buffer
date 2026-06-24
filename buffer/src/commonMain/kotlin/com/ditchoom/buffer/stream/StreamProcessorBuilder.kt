@@ -95,7 +95,10 @@ class StreamProcessorBuilder(
      *         stream.append(buffer)
      *     }
      * ```
+     *
+     * ktlint (no .editorconfig) collapses this signature onto one line, so it cannot be wrapped.
      */
+    @Suppress("MaxLineLength")
     fun buildSuspendingWithAutoFill(refill: suspend (AutoFillingSuspendingStreamProcessor) -> Unit): AutoFillingSuspendingStreamProcessor {
         val delegate = buildSuspending()
         return AutoFillingSuspendingStreamProcessor(delegate, refill)

@@ -238,12 +238,12 @@ interface ReadBuffer : PositionBuffer {
      * - LITTLE_ENDIAN: bytes `[0x12, 0x34]` → `0x3412`
      */
     fun readShort(): Short {
-        val b0 = readByte().toInt() and 0xFF
-        val b1 = readByte().toInt() and 0xFF
+        val b0 = readByte().toInt() and BufferConstants.BYTE_MASK
+        val b1 = readByte().toInt() and BufferConstants.BYTE_MASK
         return if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            ((b0 shl 8) or b1).toShort()
+            ((b0 shl Byte.SIZE_BITS) or b1).toShort()
         } else {
-            (b0 or (b1 shl 8)).toShort()
+            (b0 or (b1 shl Byte.SIZE_BITS)).toShort()
         }
     }
 
@@ -253,12 +253,12 @@ interface ReadBuffer : PositionBuffer {
      * @param index The absolute byte index to read from
      */
     fun getShort(index: Int): Short {
-        val b0 = get(index).toInt() and 0xFF
-        val b1 = get(index + 1).toInt() and 0xFF
+        val b0 = get(index).toInt() and BufferConstants.BYTE_MASK
+        val b1 = get(index + 1).toInt() and BufferConstants.BYTE_MASK
         return if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            ((b0 shl 8) or b1).toShort()
+            ((b0 shl Byte.SIZE_BITS) or b1).toShort()
         } else {
-            (b0 or (b1 shl 8)).toShort()
+            (b0 or (b1 shl Byte.SIZE_BITS)).toShort()
         }
     }
 
@@ -277,23 +277,23 @@ interface ReadBuffer : PositionBuffer {
      * Byte order is determined by [byteOrder].
      */
     fun readInt(): Int {
-        val s0 = readShort().toInt() and 0xFFFF
-        val s1 = readShort().toInt() and 0xFFFF
+        val s0 = readShort().toInt() and BufferConstants.SHORT_MASK
+        val s1 = readShort().toInt() and BufferConstants.SHORT_MASK
         return if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            (s0 shl 16) or s1
+            (s0 shl Short.SIZE_BITS) or s1
         } else {
-            s0 or (s1 shl 16)
+            s0 or (s1 shl Short.SIZE_BITS)
         }
     }
 
     /** Gets a 32-bit signed integer at the specified index without changing position. */
     fun getInt(index: Int): Int {
-        val s0 = getShort(index).toInt() and 0xFFFF
-        val s1 = getShort(index + 2).toInt() and 0xFFFF
+        val s0 = getShort(index).toInt() and BufferConstants.SHORT_MASK
+        val s1 = getShort(index + Short.SIZE_BYTES).toInt() and BufferConstants.SHORT_MASK
         return if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            (s0 shl 16) or s1
+            (s0 shl Short.SIZE_BITS) or s1
         } else {
-            s0 or (s1 shl 16)
+            s0 or (s1 shl Short.SIZE_BITS)
         }
     }
 
@@ -318,23 +318,23 @@ interface ReadBuffer : PositionBuffer {
      * Byte order is determined by [byteOrder].
      */
     fun readLong(): Long {
-        val first = readInt().toLong() and 0xFFFFFFFFL
-        val second = readInt().toLong() and 0xFFFFFFFFL
+        val first = readInt().toLong() and BufferConstants.INT_MASK
+        val second = readInt().toLong() and BufferConstants.INT_MASK
         return if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            (first shl 32) or second
+            (first shl Int.SIZE_BITS) or second
         } else {
-            (second shl 32) or first
+            (second shl Int.SIZE_BITS) or first
         }
     }
 
     /** Gets a 64-bit signed integer at the specified index without changing position. */
     fun getLong(index: Int): Long {
-        val first = getInt(index).toLong() and 0xFFFFFFFFL
-        val second = getInt(index + 4).toLong() and 0xFFFFFFFFL
+        val first = getInt(index).toLong() and BufferConstants.INT_MASK
+        val second = getInt(index + Int.SIZE_BYTES).toLong() and BufferConstants.INT_MASK
         return if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            (first shl 32) or second
+            (first shl Int.SIZE_BITS) or second
         } else {
-            (second shl 32) or first
+            (second shl Int.SIZE_BITS) or first
         }
     }
 
@@ -479,43 +479,46 @@ interface ReadBuffer : PositionBuffer {
      * @throws IllegalStateException if numberOfBytes is not in 1..8
      */
     fun readNumberWithByteSize(numberOfBytes: Int): Long {
-        check(numberOfBytes in 1..8) { "byte size out of range" }
+        check(numberOfBytes in 1..Long.SIZE_BYTES) { "byte size out of range" }
         // Decompose into bulk reads (readLong/readInt/readShort/readByte) instead of N readByte() calls.
         // E.g. 7 bytes → readInt(4) + readShort(2) + readByte(1), 3 calls instead of 7.
         var result = 0L
         var remaining = numberOfBytes
         if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            if (remaining >= 8) {
+            if (remaining >= Long.SIZE_BYTES) {
                 return readLong()
             }
-            if (remaining >= 4) {
-                result = readInt().toLong() and 0xFFFFFFFFL shl ((remaining - 4) * 8)
-                remaining -= 4
+            if (remaining >= Int.SIZE_BYTES) {
+                val intShift = (remaining - Int.SIZE_BYTES) * Byte.SIZE_BITS
+                result = readInt().toLong() and BufferConstants.INT_MASK shl intShift
+                remaining -= Int.SIZE_BYTES
             }
-            if (remaining >= 2) {
-                result = result or (readShort().toLong() and 0xFFFF shl ((remaining - 2) * 8))
-                remaining -= 2
+            if (remaining >= Short.SIZE_BYTES) {
+                val shortShift = (remaining - Short.SIZE_BYTES) * Byte.SIZE_BITS
+                val shortValue = readShort().toLong() and BufferConstants.SHORT_MASK.toLong()
+                result = result or (shortValue shl shortShift)
+                remaining -= Short.SIZE_BYTES
             }
             if (remaining >= 1) {
-                result = result or (readByte().toLong() and 0xFF)
+                result = result or (readByte().toLong() and BufferConstants.BYTE_MASK.toLong())
             }
         } else {
             var shift = 0
-            if (remaining >= 8) {
+            if (remaining >= Long.SIZE_BYTES) {
                 return readLong()
             }
-            if (remaining >= 4) {
-                result = readInt().toLong() and 0xFFFFFFFFL
-                shift = 32
-                remaining -= 4
+            if (remaining >= Int.SIZE_BYTES) {
+                result = readInt().toLong() and BufferConstants.INT_MASK
+                shift = Int.SIZE_BITS
+                remaining -= Int.SIZE_BYTES
             }
-            if (remaining >= 2) {
-                result = result or (readShort().toLong() and 0xFFFF shl shift)
-                shift += 16
-                remaining -= 2
+            if (remaining >= Short.SIZE_BYTES) {
+                result = result or (readShort().toLong() and BufferConstants.SHORT_MASK.toLong() shl shift)
+                shift += Short.SIZE_BITS
+                remaining -= Short.SIZE_BYTES
             }
             if (remaining >= 1) {
-                result = result or (readByte().toLong() and 0xFF shl shift)
+                result = result or (readByte().toLong() and BufferConstants.BYTE_MASK.toLong() shl shift)
             }
         }
         return result
@@ -533,7 +536,7 @@ interface ReadBuffer : PositionBuffer {
         startIndex: Int,
         numberOfBytes: Int,
     ): Long {
-        check(numberOfBytes in 1..8) { "byte size out of range" }
+        check(numberOfBytes in 1..Long.SIZE_BYTES) { "byte size out of range" }
         val savedPos = position()
         position(startIndex)
         val result = readNumberWithByteSize(numberOfBytes)
@@ -843,11 +846,11 @@ interface ReadBuffer : PositionBuffer {
         aligned: Boolean = false,
     ): Int {
         val size = remaining()
-        if (size < 4) return -1
+        if (size < Int.SIZE_BYTES) return -1
 
         val pos = position()
-        val step = if (aligned) 4 else 1
-        val searchLimit = size - 3
+        val step = if (aligned) Int.SIZE_BYTES else 1
+        val searchLimit = size - (Int.SIZE_BYTES - 1)
 
         for (i in 0 until searchLimit step step) {
             if (getInt(pos + i) == value) {
@@ -874,11 +877,11 @@ interface ReadBuffer : PositionBuffer {
         aligned: Boolean = false,
     ): Int {
         val size = remaining()
-        if (size < 8) return -1
+        if (size < Long.SIZE_BYTES) return -1
 
         val pos = position()
-        val step = if (aligned) 8 else 1
-        val searchLimit = size - 7
+        val step = if (aligned) Long.SIZE_BYTES else 1
+        val searchLimit = size - (Long.SIZE_BYTES - 1)
 
         for (i in 0 until searchLimit step step) {
             if (getLong(pos + i) == value) {
@@ -1105,6 +1108,18 @@ fun bufferEquals(
     return self.contentEquals(other)
 }
 
+/** The documented stable multiplier of the rolling content hash (matches String.hashCode's 31). */
+private const val HASH_MULTIPLIER = 31
+
+/** Bit shifts extracting each byte (7..0) of a Long word during the unrolled hash fold. */
+private const val SHIFT_BYTE7 = 56
+private const val SHIFT_BYTE6 = 48
+private const val SHIFT_BYTE5 = 40
+private const val SHIFT_BYTE4 = 32
+private const val SHIFT_BYTE3 = 24
+private const val SHIFT_BYTE2 = 16
+private const val SHIFT_BYTE1 = 8
+
 /**
  * Content-based hash code for buffer implementations.
  * Hashes the remaining bytes (position to limit) using absolute reads to avoid side effects.
@@ -1118,34 +1133,34 @@ fun bufferHashCode(self: ReadBuffer): Int {
     // Bit-identical to the per-byte 31-multiplier loop; the [position, limit) range is in-bounds so
     // the unchecked accessors are safe (see ReadBuffer.getUnchecked).
     if (self.byteOrder == ByteOrder.BIG_ENDIAN) {
-        while (i + 8 <= end) {
+        while (i + Long.SIZE_BYTES <= end) {
             val w = self.getLongUnchecked(i)
-            h = 31 * h + (w shr 56).toByte().toInt()
-            h = 31 * h + (w shr 48).toByte().toInt()
-            h = 31 * h + (w shr 40).toByte().toInt()
-            h = 31 * h + (w shr 32).toByte().toInt()
-            h = 31 * h + (w shr 24).toByte().toInt()
-            h = 31 * h + (w shr 16).toByte().toInt()
-            h = 31 * h + (w shr 8).toByte().toInt()
-            h = 31 * h + w.toByte().toInt()
-            i += 8
+            h = HASH_MULTIPLIER * h + (w shr SHIFT_BYTE7).toByte().toInt()
+            h = HASH_MULTIPLIER * h + (w shr SHIFT_BYTE6).toByte().toInt()
+            h = HASH_MULTIPLIER * h + (w shr SHIFT_BYTE5).toByte().toInt()
+            h = HASH_MULTIPLIER * h + (w shr SHIFT_BYTE4).toByte().toInt()
+            h = HASH_MULTIPLIER * h + (w shr SHIFT_BYTE3).toByte().toInt()
+            h = HASH_MULTIPLIER * h + (w shr SHIFT_BYTE2).toByte().toInt()
+            h = HASH_MULTIPLIER * h + (w shr SHIFT_BYTE1).toByte().toInt()
+            h = HASH_MULTIPLIER * h + w.toByte().toInt()
+            i += Long.SIZE_BYTES
         }
     } else {
-        while (i + 8 <= end) {
+        while (i + Long.SIZE_BYTES <= end) {
             val w = self.getLongUnchecked(i)
-            h = 31 * h + w.toByte().toInt()
-            h = 31 * h + (w shr 8).toByte().toInt()
-            h = 31 * h + (w shr 16).toByte().toInt()
-            h = 31 * h + (w shr 24).toByte().toInt()
-            h = 31 * h + (w shr 32).toByte().toInt()
-            h = 31 * h + (w shr 40).toByte().toInt()
-            h = 31 * h + (w shr 48).toByte().toInt()
-            h = 31 * h + (w shr 56).toByte().toInt()
-            i += 8
+            h = HASH_MULTIPLIER * h + w.toByte().toInt()
+            h = HASH_MULTIPLIER * h + (w shr SHIFT_BYTE1).toByte().toInt()
+            h = HASH_MULTIPLIER * h + (w shr SHIFT_BYTE2).toByte().toInt()
+            h = HASH_MULTIPLIER * h + (w shr SHIFT_BYTE3).toByte().toInt()
+            h = HASH_MULTIPLIER * h + (w shr SHIFT_BYTE4).toByte().toInt()
+            h = HASH_MULTIPLIER * h + (w shr SHIFT_BYTE5).toByte().toInt()
+            h = HASH_MULTIPLIER * h + (w shr SHIFT_BYTE6).toByte().toInt()
+            h = HASH_MULTIPLIER * h + (w shr SHIFT_BYTE7).toByte().toInt()
+            i += Long.SIZE_BYTES
         }
     }
     while (i < end) {
-        h = 31 * h + self.getUnchecked(i).toInt()
+        h = HASH_MULTIPLIER * h + self.getUnchecked(i).toInt()
         i++
     }
     return h

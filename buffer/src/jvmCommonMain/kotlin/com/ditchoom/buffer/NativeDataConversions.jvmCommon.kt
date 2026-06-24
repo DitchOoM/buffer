@@ -40,18 +40,20 @@ actual class MutableNativeData(
 actual fun ReadBuffer.toNativeData(): NativeData {
     val unwrapped = unwrapFully()
     if (unwrapped !== this) return unwrapped.toNativeData()
-    if (this is BaseJvmBuffer && byteBuffer.isDirect) {
+    return if (this is BaseJvmBuffer && byteBuffer.isDirect) {
+        // Zero-copy: read-only duplicate sharing the underlying native memory.
         val duplicate = byteBuffer.duplicate()
         duplicate.position(position())
         duplicate.limit(limit())
-        return NativeData(duplicate.asReadOnlyBuffer())
+        NativeData(duplicate.asReadOnlyBuffer())
+    } else {
+        // Copy heap-backed bytes into a new direct buffer.
+        val bytes = toByteArray()
+        val direct = ByteBuffer.allocateDirect(bytes.size)
+        direct.put(bytes)
+        direct.flip()
+        NativeData(direct.asReadOnlyBuffer())
     }
-    // Copy to direct buffer
-    val bytes = toByteArray()
-    val direct = ByteBuffer.allocateDirect(bytes.size)
-    direct.put(bytes)
-    direct.flip()
-    return NativeData(direct.asReadOnlyBuffer())
 }
 
 /**

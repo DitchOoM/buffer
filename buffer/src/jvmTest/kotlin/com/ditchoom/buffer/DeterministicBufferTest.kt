@@ -35,9 +35,9 @@ class DeterministicBufferTest {
 
     @Test
     fun deterministicBufferUseWithException() {
-        assertFailsWith<RuntimeException> {
+        assertFailsWith<IllegalStateException> {
             BufferFactory.deterministic().allocate(64).use { _ ->
-                throw RuntimeException("test")
+                error("test")
             }
         }
         // Buffer should still be freed even on exception

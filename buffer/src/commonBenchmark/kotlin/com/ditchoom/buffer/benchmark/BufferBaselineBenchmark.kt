@@ -53,10 +53,11 @@ open class BufferBaselineBenchmark {
     @Setup
     fun setup() {
         heapBuffer = BufferFactory.managed().allocate(smallBufferSize)
-        // Use Heap for buffers that would be Direct - isolates WASM optimizer bug
-        directBuffer = BufferFactory.managed().allocate(smallBufferSize) // TODO: restore to Direct
-        largeDirectBuffer = BufferFactory.managed().allocate(largeBufferSize) // TODO: restore to Direct
-        sourceBuffer = BufferFactory.managed().allocate(smallBufferSize) // TODO: restore to Direct
+        // Use Heap for buffers that would be Direct - isolates the WASM optimizer bug.
+        // These intentionally stay managed() until the WASM optimizer crash is resolved upstream.
+        directBuffer = BufferFactory.managed().allocate(smallBufferSize)
+        largeDirectBuffer = BufferFactory.managed().allocate(largeBufferSize)
+        sourceBuffer = BufferFactory.managed().allocate(smallBufferSize)
         testData = ByteArray(smallBufferSize) { it.toByte() }
 
         // Pre-fill source buffer for bulk write operations
@@ -85,20 +86,20 @@ open class BufferBaselineBenchmark {
     @Benchmark
     fun readWriteIntHeap(): Long {
         heapBuffer.resetForWrite()
-        repeat(smallBufferSize / 4) { heapBuffer.writeInt(it) }
+        repeat(smallBufferSize / Int.SIZE_BYTES) { heapBuffer.writeInt(it) }
         heapBuffer.resetForRead()
         var sum = 0L
-        repeat(smallBufferSize / 4) { sum += heapBuffer.readInt() }
+        repeat(smallBufferSize / Int.SIZE_BYTES) { sum += heapBuffer.readInt() }
         return sum
     }
 
     @Benchmark
     fun readWriteIntDirect(): Long {
         directBuffer.resetForWrite()
-        repeat(smallBufferSize / 4) { directBuffer.writeInt(it) }
+        repeat(smallBufferSize / Int.SIZE_BYTES) { directBuffer.writeInt(it) }
         directBuffer.resetForRead()
         var sum = 0L
-        repeat(smallBufferSize / 4) { sum += directBuffer.readInt() }
+        repeat(smallBufferSize / Int.SIZE_BYTES) { sum += directBuffer.readInt() }
         return sum
     }
 
@@ -129,10 +130,10 @@ open class BufferBaselineBenchmark {
     @Benchmark
     fun largeBufferOperations(): Long {
         largeDirectBuffer.resetForWrite()
-        repeat(largeBufferSize / 8) { largeDirectBuffer.writeLong(it.toLong()) }
+        repeat(largeBufferSize / Long.SIZE_BYTES) { largeDirectBuffer.writeLong(it.toLong()) }
         largeDirectBuffer.resetForRead()
         var sum = 0L
-        repeat(largeBufferSize / 8) { sum += largeDirectBuffer.readLong() }
+        repeat(largeBufferSize / Long.SIZE_BYTES) { sum += largeDirectBuffer.readLong() }
         return sum
     }
 
@@ -141,15 +142,15 @@ open class BufferBaselineBenchmark {
     @Benchmark
     fun mixedOperations(): Long {
         directBuffer.resetForWrite()
-        repeat(64) {
+        repeat(MIXED_OPS_ITERATIONS) {
             directBuffer.writeByte(1)
             directBuffer.writeShort(2)
-            directBuffer.writeInt(3)
-            directBuffer.writeLong(4)
+            directBuffer.writeInt(INT_VALUE)
+            directBuffer.writeLong(LONG_VALUE)
         }
         directBuffer.resetForRead()
         var sum = 0L
-        repeat(64) {
+        repeat(MIXED_OPS_ITERATIONS) {
             sum += directBuffer.readByte()
             sum += directBuffer.readShort()
             sum += directBuffer.readInt()
@@ -215,5 +216,11 @@ open class BufferBaselineBenchmark {
         val buffer = BufferFactory.managed().allocate(smallBufferSize)
         val access = buffer as? NativeMemoryAccess ?: return 0L
         return access.nativeAddress
+    }
+
+    private companion object {
+        private const val MIXED_OPS_ITERATIONS = 64
+        private const val INT_VALUE = 3
+        private const val LONG_VALUE = 4L
     }
 }

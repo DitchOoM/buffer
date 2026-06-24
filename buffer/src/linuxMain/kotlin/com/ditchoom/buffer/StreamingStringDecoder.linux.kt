@@ -16,6 +16,9 @@ import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.usePinned
 
+/** A `byteCount` above this index means the UTF-8 sequence carries a 4th (b3) byte. */
+private const val FOURTH_BYTE_PRESENT_THRESHOLD = 3
+
 /**
  * Linux implementation using simdutf for SIMD-accelerated UTF-8 decoding.
  *
@@ -113,8 +116,8 @@ private class LinuxStreamingStringDecoder(
             pendingLong = 0L
             val basePos = buffer.position() + bytesConsumed + boundary
             for (i in 0 until pendingCount) {
-                pendingLong =
-                    pendingLong or ((buffer.get(basePos + i).toLong() and Utf8.BYTE_MASK.toLong()) shl (i * Utf8.BITS_PER_BYTE))
+                val maskedByte = buffer.get(basePos + i).toLong() and Utf8.BYTE_MASK.toLong()
+                pendingLong = pendingLong or (maskedByte shl (i * Utf8.BITS_PER_BYTE))
             }
         }
 
@@ -190,8 +193,8 @@ private class LinuxStreamingStringDecoder(
             val basePos = buffer.position()
             for (i in 0 until available) {
                 val b = buffer.get(basePos + i)
-                pendingLong =
-                    pendingLong or ((b.toLong() and Utf8.BYTE_MASK.toLong()) shl ((pendingCount + i) * Utf8.BITS_PER_BYTE))
+                val maskedByte = b.toLong() and Utf8.BYTE_MASK.toLong()
+                pendingLong = pendingLong or (maskedByte shl ((pendingCount + i) * Utf8.BITS_PER_BYTE))
             }
             pendingCount += available
             return DecodeResult(0, available)
@@ -227,7 +230,7 @@ private class LinuxStreamingStringDecoder(
         if (byteCount > 2 && (b2 and Utf8.CONTINUATION_MASK) != Utf8.CONTINUATION_MARKER) {
             return handleMalformedInput(destination).charsWritten
         }
-        if (byteCount > 3 && (b3 and Utf8.CONTINUATION_MASK) != Utf8.CONTINUATION_MARKER) {
+        if (byteCount > FOURTH_BYTE_PRESENT_THRESHOLD && (b3 and Utf8.CONTINUATION_MASK) != Utf8.CONTINUATION_MARKER) {
             return handleMalformedInput(destination).charsWritten
         }
 
@@ -355,4 +358,6 @@ private class LinuxStreamingStringDecoder(
     )
 }
 
-actual fun StreamingStringDecoder(config: StreamingStringDecoderConfig): StreamingStringDecoder = LinuxStreamingStringDecoder(config)
+actual fun StreamingStringDecoder(
+    config: StreamingStringDecoderConfig,
+): StreamingStringDecoder = LinuxStreamingStringDecoder(config)
