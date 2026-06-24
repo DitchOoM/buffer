@@ -2,7 +2,6 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>MagicNumber:CodecSchemaClassifier.kt:CodecSchemaClassifier$16</ID>
     <ID>TooManyFunctions:CodecSchemaClassifier.kt:CodecSchemaClassifier</ID>
   </CurrentIssues>
 </SmellBaseline>
