@@ -7,7 +7,7 @@ title: Cryptography
 
 The `buffer-crypto` module provides cross-platform cryptographic primitives that operate directly on `ReadBuffer`/`WriteBuffer`, so key material and plaintext never have to be copied out into a `ByteArray` first.
 
-Every primitive wraps the platform's **vetted native stack** — JCA/Conscrypt (JVM/Android), CommonCrypto + Security framework (Apple), and WebCrypto (JS/WASM). Nothing cryptographic is hand-rolled. If a platform cannot provide an algorithm, the call throws `UnsupportedOperationException` and the matching `supports…` capability flag is `false` — never a silent fallback.
+Every primitive wraps the platform's **vetted native stack** — JCA/Conscrypt (JVM/Android), CryptoKit + CommonCrypto + Security framework (Apple), BoringSSL (Linux), and WebCrypto (JS/WASM). Nothing cryptographic is hand-rolled. If a platform cannot provide an algorithm, the call throws `UnsupportedOperationException` and the matching `supports…` capability flag is `false` — never a silent fallback.
 
 :::tip Security model
 This page is a cookbook. For the full threat model, attack-vector coverage, exception contract, and supply-chain integrity controls, read the standing [`buffer-crypto/SECURITY.md`](https://github.com/DitchOoM/buffer/blob/main/buffer-crypto/SECURITY.md). A condensed [Security model](#security-model) section is at the bottom of this page.
@@ -116,8 +116,8 @@ val signature = signAsync(signingKey, message)
 val ok = verifyAsync(verifyKey, message, signature)
 ```
 
-:::note Apple ECDSA signing
-On Apple, ECDSA **verify** is fully supported, but signing **from a bare private scalar** is not (`supportsEcdsaSigningFromScalar` is `false`) — `SecKeyCreateWithData` cannot derive the public point from a scalar alone. Signing from a full key representation works. See the capability matrix below.
+:::note ECDSA signing from a bare scalar
+`SigningKey.ecdsaP256/384/521` derive the public point from the private scalar alone. This is supported on every current target — on Apple it is provided by CryptoKit — so `supportsEcdsaSigningFromScalar` is `true` everywhere. The flag is retained for forward-looking feature detection; gate on it if you target a future backend that cannot sign from a scalar. See the capability matrix below.
 :::
 
 ## Key Agreement (ECDH / X25519)
@@ -217,7 +217,7 @@ val pt2 = receiver.open(ct2)
 
 All four RFC 9180 modes are exposed via the matching setup functions: `hpkeSetupBaseSender`/`Receiver` (Base), `hpkeSetupPskSender`/`Receiver` (PSK, via `HpkePsk.of`), `hpkeSetupAuthSender`/`Receiver` (sender authentication), and `hpkeSetupAuthPskSender`/`Receiver` (both). A context can also derive independent secrets with `context.export(exporterContext, length)` (RFC 9180 §5.3).
 
-Suite availability differs by platform — gate with `hpkeSupported(suite)` (or `suite.isSupported`). A suite is usable only if its KEM curve and AEAD are both available: a ChaCha20-Poly1305 suite is unsupported on the web, and an X25519 KEM is unsupported on Apple (see below).
+Suite availability differs by platform — gate with `hpkeSupported(suite)` (or `suite.isSupported`). A suite is usable only if its KEM curve and AEAD are both available: a ChaCha20-Poly1305 suite is unsupported on the web, and an X25519 KEM requires Android API 34+ (see the matrix below).
 
 ## SecureBuffer — wipe key material on free
 
@@ -311,7 +311,7 @@ if (CryptoCapabilities.chaChaPoly.anyPath) { /* … */ }
 if (CryptoCapabilities.ed25519Sync) sign(privateScalar, message, dest)
 if (CryptoCapabilities.keyAgreementSync(KeyAgreementCurve.X25519)) { /* … */ }
 
-// ECDSA verify is universal; signing from a bare scalar is gated off on Apple.
+// ECDSA verify is universal; signing from a bare scalar is feature-detected (true on all current targets).
 if (CryptoCapabilities.ecdsaSigningFromScalar) { /* sign from a raw private scalar */ }
 
 // HPKE: check the whole suite (its KEM curve *and* AEAD must both be available).
@@ -337,27 +337,27 @@ The full threat model lives in [`buffer-crypto/SECURITY.md`](https://github.com/
 
 Capability flags are tested error paths, not assumptions — the flag drives a `true`→works / `false`→throws test on every target.
 
-| Primitive | JVM | Android (minSdk 28) | Apple | JS / WASM |
-|---|---|---|---|---|
-| SHA-256/384/512, HMAC, HKDF | ✅ | ✅ | ✅ | ✅ (pure-Kotlin core) |
-| AES-GCM 128/256 | ✅ | ✅ | ✅ | ✅ (WebCrypto, async only) |
-| ChaCha20-Poly1305 | ✅ (JDK 11+) | ✅ | ⚠️ pending | ❌ throws — not in WebCrypto |
-| ECDSA P-256/384/521 (verify) | ✅ | ✅ | ✅ | ✅ |
-| ECDSA signing | ✅ | ✅ | ⚠️ from-scalar gated off | ✅ |
-| Ed25519 | ✅ (JDK 15+) | ✅ **API 34+** (throws 28–33) | ⚠️ pending | ✅ newer engines (feature-detected) |
-| X25519 | ✅ (JDK 11+) | ✅ **API 34+** | ⚠️ pending | ✅ newer engines (feature-detected) |
-| ECDH P-256/384/521 | ✅ | ✅ | ✅ | ✅ |
-| HPKE/DHKEM (P-256/384/521) | ✅ | ✅ | ✅ | ✅ (WebCrypto async) |
-| HPKE/DHKEM (X25519) | ✅ (JDK 11+) | ✅ **API 34+** | ❌ throws (X25519 pending) | ✅ newer engines (feature-detected) |
-| HPKE AEAD = ChaCha20-Poly1305 | ✅ (JDK 11+) | ✅ | ⚠️ pending | ❌ throws — not in WebCrypto |
+| Primitive | JVM | Android (minSdk 28) | Apple | Linux | JS / WASM |
+|---|---|---|---|---|---|
+| SHA-256/384/512, HMAC, HKDF | ✅ | ✅ | ✅ | ✅ | ✅ (pure-Kotlin core) |
+| AES-GCM 128/256 | ✅ | ✅ | ✅ | ✅ | ✅ (WebCrypto, async only) |
+| ChaCha20-Poly1305 | ✅ (JDK 11+) | ✅ | ✅ | ✅ | ❌ throws — not in WebCrypto |
+| ECDSA P-256/384/521 (verify) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| ECDSA signing | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Ed25519 | ✅ (JDK 15+) | ✅ **API 34+** (throws 28–33) | ✅ | ✅ | ✅ newer engines (feature-detected) |
+| X25519 | ✅ (JDK 11+) | ✅ **API 34+** | ✅ | ✅ | ✅ newer engines (feature-detected) |
+| ECDH P-256/384/521 | ✅ | ✅ | ✅ | ✅ | ✅ |
+| HPKE/DHKEM (P-256/384/521) | ✅ | ✅ | ✅ | ✅ | ✅ (WebCrypto async) |
+| HPKE/DHKEM (X25519) | ✅ (JDK 11+) | ✅ **API 34+** | ✅ | ✅ | ✅ newer engines (feature-detected) |
+| HPKE AEAD = ChaCha20-Poly1305 | ✅ (JDK 11+) | ✅ | ✅ | ✅ | ❌ throws — not in WebCrypto |
 
-Legend: ✅ available · ⚠️ gated off on this platform (capability flag `false`, throws `UnsupportedOperationException`) · ❌ unavailable.
+Legend: ✅ available · ❌ unavailable (capability flag `false`, throws `UnsupportedOperationException`).
 
 Notes:
 
-- **Apple ChaCha20-Poly1305, Ed25519, X25519** live in CryptoKit (Swift), which this module's Kotlin/Native cinterop does not yet reach (only CommonCrypto + Security framework are wired). They report unsupported and throw. Apple AES-GCM, ECDSA (verify; sign from a full key representation), and ECDH are complete.
+- **Apple** primitives are provided by CryptoKit (via a Swift `@_cdecl` shim) alongside CommonCrypto and the Security framework. ChaCha20-Poly1305, Ed25519, X25519, and ECDSA signing from a raw scalar are all available — CryptoKit is above the module's deployment floors, so the flags are `true` unconditionally. AES-GCM, ECDSA verify, and ECDH use CommonCrypto/Security.
+- **Linux** uses a native BoringSSL backend (statically linked) and has full parity with JVM across every primitive above.
 - **Android X25519/Ed25519** were added by Conscrypt in Android 14, so the capability flag is `false` and the call throws on API 28–33. This is a runtime (`SDK_INT`) gate, not compile-time.
 - **JS/WASM** gates ChaCha20-Poly1305 off entirely (not in WebCrypto, never polyfilled), and feature-detects Ed25519/X25519 against the engine's WebCrypto.
-- **Linux** has no native crypto target registered yet (deferred); when added it will wrap BoringSSL.
 
 Encoding differs by platform and is pinned + tested both ways: JCA uses DER/ASN.1 (ECDSA) and SPKI/X.509 (ECDH); WebCrypto uses raw P1363 `r‖s` and raw points. HPKE keys use the RFC 9180 raw KEM encodings.
