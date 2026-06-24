@@ -72,6 +72,15 @@ int32_t bcks_x25519_agree(
     uint8_t *secretOut, size_t secretCap,
     size_t *secretLenOut);
 
+// ECDH: reconstruct the ANSI X9.63 private representation (04 ‖ X ‖ Y ‖ K) from a bare scalar
+// (curve: 256, 384, or 521). Lets the Security-framework agreement path accept a stored raw scalar,
+// so the key-agreement private encoding is the same raw big-endian scalar on every platform.
+int32_t bcks_ecdh_x963_from_scalar(
+    int32_t curve,
+    const uint8_t *scalarPtr, size_t scalarLen,
+    uint8_t *x963Out, size_t x963Cap,
+    size_t *x963LenOut);
+
 // ECDSA signing from a bare scalar (curve: 256, 384, or 521).
 int32_t bcks_ecdsa_sign_from_scalar(
     int32_t curve,

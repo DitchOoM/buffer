@@ -16,14 +16,70 @@ import com.ditchoom.buffer.ReadBuffer
  * it the async X25519 entry points throw [UnsupportedOperationException] (the documented error path
  * for an absent algorithm) rather than silently degrading. ECDH P-256/384/521 is broadly available.
  *
- * Encoding matches the pinned cross-platform contract: WebCrypto `raw` export/import is the raw
- * 32-byte X25519 u-coordinate and the uncompressed `0x04 ‖ X ‖ Y` EC point — the same bytes the
- * JVM and Apple glue produce. Off-curve / low-order peer points are rejected by `importKey` /
- * `deriveBits`, surfaced as [InvalidPublicKey].
+ * Encoding matches the pinned cross-platform contract: public keys are the raw 32-byte X25519
+ * u-coordinate and the uncompressed `0x04 ‖ X ‖ Y` EC point, and **private keys are the raw
+ * big-endian scalar** (32/48/66 bytes) — the same bytes the JVM/Apple/Linux glue produce, so
+ * [KeyAgreementPrivateKey.exportEncoded] / [importPrivateKey] are byte-portable. WebCrypto imports
+ * private keys as PKCS#8, so the stored scalar is wrapped via [scalarToPkcs8Hex] just before the
+ * derive call. Off-curve / low-order peer points are rejected by `importKey` / `deriveBits`,
+ * surfaced as [InvalidPublicKey].
  */
 
 private const val HEX_RADIX = 16
 private const val NIBBLE_BITS = 4
+
+// --- raw scalar -> PKCS#8 (WebCrypto importKey('pkcs8') input) ----------------
+// The KA private encoding is the raw big-endian scalar (cross-platform). WebCrypto imports PKCS#8,
+// so the scalar is wrapped here just before the exchange. X25519 is the fixed RFC 8410 prefix; the
+// NIST curves wrap an RFC 5915 ECPrivateKey in PKCS#8 with a tiny DER writer.
+
+private const val DER_SHORT_LEN_LIMIT = 0x80
+private const val DER_ONE_BYTE_LIMIT = 0x100
+private const val LEN_BYTE_SHIFT = 8
+private const val LEN_BYTE_MASK = 0xFF
+
+/** RFC 8410 PKCS#8 prefix for an X25519 private key: SEQUENCE wrapping id-X25519 + 32-byte scalar. */
+private const val X25519_PKCS8_PREFIX = "302e020100300506032b656e04220420"
+
+private fun hx2(v: Int): String {
+    val d = "0123456789abcdef"
+    return "" + d[(v ushr NIBBLE_BITS) and 0xF] + d[v and 0xF]
+}
+
+private fun derLen(len: Int): String =
+    when {
+        len < DER_SHORT_LEN_LIMIT -> hx2(len)
+        len < DER_ONE_BYTE_LIMIT -> "81" + hx2(len)
+        else -> "82" + hx2(len ushr LEN_BYTE_SHIFT) + hx2(len and LEN_BYTE_MASK)
+    }
+
+private fun tlv(
+    tag: String,
+    value: String,
+): String = tag + derLen(value.length / 2) + value
+
+private fun ecCurveOidHex(curve: KeyAgreementCurve): String =
+    when (curve) {
+        KeyAgreementCurve.P256 -> "2a8648ce3d030107" // 1.2.840.10045.3.1.7
+        KeyAgreementCurve.P384 -> "2b81040022" // 1.3.132.0.34
+        KeyAgreementCurve.P521 -> "2b81040023" // 1.3.132.0.35
+        KeyAgreementCurve.X25519 -> error("X25519 uses the RFC 8410 wrapper")
+    }
+
+/** Wraps the raw private [scalar] for [curve] in the PKCS#8 DER WebCrypto's `importKey('pkcs8')` accepts. */
+private fun scalarToPkcs8Hex(
+    curve: KeyAgreementCurve,
+    scalar: ReadBuffer,
+): String {
+    val dHex = scalar.toHex()
+    if (curve == KeyAgreementCurve.X25519) return X25519_PKCS8_PREFIX + dHex
+    // ECPrivateKey ::= SEQUENCE { version INTEGER(1), privateKey OCTET STRING(scalar) }
+    val ecPrivateKey = tlv("30", tlv("02", "01") + tlv("04", dHex))
+    // AlgorithmIdentifier ::= SEQUENCE { id-ecPublicKey, namedCurve OID }
+    val algId = tlv("30", tlv("06", "2a8648ce3d0201") + tlv("06", ecCurveOidHex(curve)))
+    // PrivateKeyInfo ::= SEQUENCE { version INTEGER(0), AlgorithmIdentifier, OCTET STRING(ECPrivateKey) }
+    return tlv("30", tlv("02", "00") + algId + tlv("04", ecPrivateKey))
+}
 
 /** Web key agreement is async-only (WebCrypto is Promise-based); every curve resolves to AsyncOnly. */
 actual fun CryptoCapabilities.keyAgreement(curve: KeyAgreementCurve): KeyAgreementSupport =
@@ -82,8 +138,8 @@ private fun hexToBuffer(
 
 internal actual suspend fun generateKeyPairAsyncPlatform(curve: KeyAgreementCurve): KeyAgreementKeyPair {
     ensureSupported(curve)
-    // WebCrypto returns "publicHex|privateHex" (raw public export, PKCS#8 private export), or the
-    // sentinel "UNSUPPORTED" if the engine lacks the algorithm (e.g. X25519 on an older browser).
+    // WebCrypto returns "publicHex|privateHex" (raw public export, raw private scalar from JWK `d`), or
+    // the sentinel "UNSUPPORTED" if the engine lacks the algorithm (e.g. X25519 on an older browser).
     val result = webCryptoGenerateKeyPair(curve.curveName)
     if (result.publicHex == UNSUPPORTED_SENTINEL) {
         throw UnsupportedOperationException("${curve.curveName} is not available in this WebCrypto engine")
@@ -114,7 +170,7 @@ internal actual suspend fun deriveSharedSecretAsyncPlatform(
         try {
             webCryptoDeriveSharedSecret(
                 curve.curveName,
-                privateKey.requireInMemoryMaterial().toHex(),
+                scalarToPkcs8Hex(curve, privateKey.requireInMemoryMaterial()),
                 peerPublicKey.encoded.toHex(),
             )
         } catch (e: Throwable) {
@@ -145,7 +201,7 @@ internal actual suspend fun dhRawSecret(
         try {
             webCryptoDeriveSharedSecret(
                 curve.curveName,
-                privateKey.requireInMemoryMaterial().toHex(),
+                scalarToPkcs8Hex(curve, privateKey.requireInMemoryMaterial()),
                 peerPublicKey.encoded.toHex(),
             )
         } catch (e: Throwable) {

@@ -6,8 +6,8 @@ actual fun asyncAgreementSupported(curve: KeyAgreementCurve): Boolean = supports
 
 actual val isWebPlatform: Boolean = false
 
-// Apple's *EC* private encoding is the Security external representation (04‖X‖Y‖scalar), not a raw
-// scalar, so the raw-scalar KAT/Wycheproof vectors cannot be imported for P-256/384/521. X25519,
-// however, goes through CryptoKit's Curve25519.KeyAgreement, which imports the bare 32-byte scalar
-// directly — so the RFC 7748 raw-scalar KAT and the X25519 Wycheproof vectors DO apply there.
-actual fun supportsRawScalarKat(curve: KeyAgreementCurve): Boolean = curve == KeyAgreementCurve.X25519
+// The EC private encoding is now the raw big-endian scalar on Apple too: imports store the scalar
+// and the Security-framework exchange reconstructs X9.63 via the CryptoKit shim, while generation
+// exports the trailing scalar. X25519 already used CryptoKit's raw 32-byte scalar. So the raw-scalar
+// KAT / Wycheproof private-key vectors now apply to every curve.
+actual fun supportsRawScalarKat(curve: KeyAgreementCurve): Boolean = supportsSync(curve)

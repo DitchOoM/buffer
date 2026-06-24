@@ -433,9 +433,9 @@ private fun generateEcdsa(
     factory: BufferFactory,
 ): SyncCapableSigningKey {
     // Reuse the key-agreement generator over the same NIST curve. On Apple the KA public key is the
-    // uncompressed point (exactly the signature verify-key encoding), and the KA private key is the
-    // ANSI X9.63 representation 04‖X‖Y‖K, whose trailing field-width bytes are the raw scalar the
-    // CryptoKit signing shim expects.
+    // uncompressed point (exactly the signature verify-key encoding), and the KA private key now
+    // exports the raw big-endian scalar the CryptoKit signing shim expects — so the trailing-bytes
+    // copy below is an identity copy (total == field), kept defensively.
     val pair = generateKeyPairPlatform(scheme.toKeyAgreementCurve())
     try {
         val verifyKey = verifyKeyOf(scheme, pair.publicKey.encoded)

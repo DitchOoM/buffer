@@ -194,6 +194,43 @@ public func bcks_x25519_agree(
 }
 
 // =============================================================================
+// ECDH X9.63 reconstruction from a bare scalar — CryptoKit P256/P384/P521.KeyAgreement
+// =============================================================================
+//
+// The key-agreement private encoding is the raw big-endian scalar on every platform. Apple's
+// Security-framework agreement (SecKeyCreateWithData) needs the full X9.63 private representation
+// (04 ‖ X ‖ Y ‖ K) and cannot derive the public point from the scalar, so this reconstructs it via
+// CryptoKit's P###.KeyAgreement.PrivateKey(rawRepresentation:).x963Representation just before the
+// Security-framework exchange.
+
+private func ecdhX963(_ curve: Int32, _ scalar: Data) -> Data? {
+    switch curve {
+    case 256:
+        return (try? P256.KeyAgreement.PrivateKey(rawRepresentation: scalar))?.x963Representation
+    case 384:
+        return (try? P384.KeyAgreement.PrivateKey(rawRepresentation: scalar))?.x963Representation
+    case 521:
+        return (try? P521.KeyAgreement.PrivateKey(rawRepresentation: scalar))?.x963Representation
+    default:
+        return nil
+    }
+}
+
+// Emit the X9.63 private representation (04 ‖ X ‖ Y ‖ K) for a curve's raw scalar (256/384/521).
+@_cdecl("bcks_ecdh_x963_from_scalar")
+public func bcks_ecdh_x963_from_scalar(
+    _ curve: Int32,
+    _ scalarPtr: UnsafePointer<UInt8>?, _ scalarLen: Int,
+    _ x963Out: UnsafeMutablePointer<UInt8>?, _ x963Cap: Int,
+    _ x963LenOut: UnsafeMutablePointer<Int>?
+) -> Int32 {
+    guard let x963 = ecdhX963(curve, bytes(scalarPtr, scalarLen)) else {
+        return BCKS_ERR_INPUT
+    }
+    return emit(x963, x963Out, x963Cap, x963LenOut)
+}
+
+// =============================================================================
 // ECDSA signing from a bare scalar — CryptoKit P256/P384/P521.Signing
 // =============================================================================
 //

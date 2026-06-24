@@ -60,6 +60,44 @@ class KeyAgreementTest {
     }
 
     @Test
+    fun exportedPrivateScalarReimportsAndDerivesSameKeyAsync() =
+        runTest {
+            curves.filter { asyncAgreementSupported(it) }.forEach { importRoundTripAsyncFor(it) }
+        }
+
+    // Exercises the raw-scalar export/import boundary on every platform (the one place the EC private
+    // encoding used to diverge — Apple X9.63, web PKCS#8). exportEncoded must yield exactly the
+    // curve's raw scalar, and re-importing it must derive the identical secret.
+    private suspend fun importRoundTripAsyncFor(curve: KeyAgreementCurve) {
+        val a =
+            try {
+                generateKeyPairAsync(curve)
+            } catch (_: UnsupportedOperationException) {
+                return
+            }
+        val b = generateKeyPairAsync(curve)
+        try {
+            val exported = a.privateKey.exportEncoded()
+            assertEquals(
+                curve.privateKeyBytes,
+                exported.remaining(),
+                "${curve.curveName} exportEncoded must be the raw ${curve.privateKeyBytes}-byte scalar",
+            )
+            val reimported = importPrivateKey(curve, exported)
+            try {
+                val viaOriginal = deriveSharedSecretAsync(a.privateKey, b.publicKey, info(), 32, salt()).toHex()
+                val viaReimport = deriveSharedSecretAsync(reimported, b.publicKey, info(), 32, salt()).toHex()
+                assertEquals(viaOriginal, viaReimport, "${curve.curveName} re-imported private key must derive the same secret")
+            } finally {
+                reimported.close()
+            }
+        } finally {
+            a.close()
+            b.close()
+        }
+    }
+
+    @Test
     fun roundTripSyncWhereSupported() {
         for (curve in curves) {
             if (!supportsSync(curve)) continue
