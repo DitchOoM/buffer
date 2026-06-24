@@ -57,12 +57,12 @@ open class FlowExtensionsBenchmark {
         singleChunkLarge = listOf(largeLines)
 
         // Many small chunks: split into ~20-byte pieces (simulates fragmented TCP reads)
-        manyChunksSmall = splitIntoChunks(smallLines, 20)
-        manyChunksLarge = splitIntoChunks(largeLines, 20)
+        manyChunksSmall = splitIntoChunks(smallLines, FRAGMENTED_CHUNK_BYTES)
+        manyChunksLarge = splitIntoChunks(largeLines, FRAGMENTED_CHUNK_BYTES)
 
         // --- mapBuffer / asStringFlow data ---
-        buffers4KB = buildBufferList(10, 4 * 1024) // 10 buffers of 4KB each
-        buffers64KB = buildBufferList(10, 64 * 1024) // 10 buffers of 64KB each
+        buffers4KB = buildBufferList(BUFFER_LIST_COUNT, BUFFER_SIZE_4KB) // 10 buffers of 4KB each
+        buffers64KB = buildBufferList(BUFFER_LIST_COUNT, BUFFER_SIZE_64KB) // 10 buffers of 64KB each
     }
 
     // ===== lines() benchmarks =====
@@ -256,4 +256,12 @@ open class FlowExtensionsBenchmark {
                 emit(buf)
             }
         }
+
+    private companion object {
+        private const val FRAGMENTED_CHUNK_BYTES = 20
+        private const val BUFFER_LIST_COUNT = 10
+        private const val BYTES_PER_KB = 1024
+        private const val BUFFER_SIZE_4KB = 4 * BYTES_PER_KB
+        private const val BUFFER_SIZE_64KB = 64 * BYTES_PER_KB
+    }
 }
