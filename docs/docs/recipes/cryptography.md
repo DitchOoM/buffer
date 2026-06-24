@@ -210,6 +210,39 @@ Peer public keys are validated before use: X25519 all-zero shared secrets (low-o
 `importPrivateKey(curve, encoded)` and `KeyAgreementPrivateKey.exportEncoded()` use the **curve's raw big-endian scalar** (32/48/66 bytes for P-256/384/521, 32 bytes for X25519) on **every** platform, so a serialized private key is byte-portable across JVM/Android/Apple/Linux/JS/WASM. The platforms whose native stack needs a wrapped form reconstruct it just-in-time for the exchange and never surface it — Apple rebuilds the Security-framework X9.63 representation via CryptoKit, and JS/WASM wrap the scalar in PKCS#8 for WebCrypto. Public keys, shared secrets, signatures, and AEAD outputs are byte-identical across all platforms too.
 :::
 
+## EC interop — boundary transcoders
+
+The witness ops always speak the module's **canonical** encodings (raw scalar private keys, uncompressed SEC1 `04 ‖ X ‖ Y` public points, the platform's ECDSA signature form). When you interoperate with an external system that uses a different standard encoding — JOSE/WebAuthn fixed-width signatures, X.509 / PEM keys, compressed points in a TLS handshake or COSE key — compose a transcoder on the boundary. These are pure, synchronous, **buffer-in / buffer-out** functions in the `EcInterop` surface (no `ByteArray` churn): they take a `ReadBuffer` and return a `ReadBuffer` allocated from a `BufferFactory` you supply (pass `BufferFactory.managed()` or call `copyToByteArray()` on the result if you want bytes). Every parser is strict (canonical DER, minimal lengths, no trailing bytes, range-checked) and fails closed with a typed, **string-free** `EcEncodingException` carrying an exhaustive `EcEncodingError` — branch on `e.error`, never parse a message.
+
+```kotlin
+import com.ditchoom.buffer.crypto.*
+
+// --- ECDSA signatures: DER <-> P1363 (r ‖ s) -------------------------------------
+// Native platforms emit ASN.1 DER; JOSE/JWT/WebAuthn (and WebCrypto) want fixed-width P1363.
+val p1363 = ecdsaSignatureToP1363(SignatureScheme.EcdsaP256, derSignature) // 64 bytes
+val der = ecdsaSignatureToDer(SignatureScheme.EcdsaP256, p1363)            // canonical DER
+
+// --- EC private key: raw scalar <-> PKCS#8 ---------------------------------------
+// exportEncoded() yields the raw scalar; wrap it for OpenSSL/PEM/WebCrypto and back.
+val pkcs8 = ecPrivateKeyToPkcs8(KeyAgreementCurve.P256, privateKey.exportEncoded())
+val scalar = pkcs8ToEcPrivateKey(KeyAgreementCurve.P256, pkcs8) // tolerates the optional [1] publicKey
+// X25519 uses the RFC 8410 form; the NIST curves wrap RFC 5915 ECPrivateKey in RFC 5208 PKCS#8.
+
+// --- EC public key: uncompressed point <-> X.509 SPKI ----------------------------
+val spki = ecPublicKeyToSpki(KeyAgreementCurve.P256, publicKey.encoded) // id-ecPublicKey + namedCurve
+val point = spkiToEcPublicKey(KeyAgreementCurve.P256, spki)             // 04 ‖ X ‖ Y
+
+// --- EC public key: point compression --------------------------------------------
+val compressed = ecPublicKeyCompress(KeyAgreementCurve.P256, point)      // 02/03 ‖ X (33 bytes)
+val recovered = ecPublicKeyDecompress(KeyAgreementCurve.P256, compressed) // back to 04 ‖ X ‖ Y
+```
+
+Compression (`ecPublicKeyCompress`) is pure — it drops Y and records its parity in the `0x02`/`0x03` prefix. **Decompression** (`ecPublicKeyDecompress`) recovers Y by solving `y² = x³ − 3x + b` over the curve field; an `x` with no square root is rejected with `EcEncodingError.PointNotOnCurve`, so the result is always a genuine on-curve point. It is uniformly available on every platform with no capability gap: JVM/Android compute the field sqrt with `java.math.BigInteger`, JS/WASM with the host `BigInt`, and Apple/Linux through the native CryptoKit / BoringSSL stack. The math runs only on the *public* X coordinate (no secret material), so a variable-time implementation leaks nothing. All three NIST primes (P-256/384/521) are `p ≡ 3 (mod 4)`, so the sqrt is a single modular exponentiation.
+
+:::note Apple decompression has an OS floor
+`ecPublicKeyDecompress` on Apple targets uses CryptoKit's compressed-point support, which requires **macOS 13 / iOS 16 / watchOS 9 / tvOS 16** or newer; on an older OS it throws `UnsupportedOperationException`. Every other platform (and all the other transcoders) have no such floor. Point ops (`ecPublicKeyToSpki`, `ecPublicKeyCompress`, `ecPublicKeyDecompress`) are NIST-prime-curve only — passing `KeyAgreementCurve.X25519` raises `EcEncodingError.UnsupportedCurve`.
+:::
+
 ## HPKE (RFC 9180)
 
 Hybrid Public Key Encryption is composed entirely over the primitives above (DHKEM over the key-agreement family, HKDF for the key schedule, and the AEAD layer). A suite is a `kem` + `kdf` + `aead` triple, and the whole API is `suspend`, so it covers the web. Operations live on the `HpkeSupport.Supported` witness; key construction is on the `Hpke` namespace.
