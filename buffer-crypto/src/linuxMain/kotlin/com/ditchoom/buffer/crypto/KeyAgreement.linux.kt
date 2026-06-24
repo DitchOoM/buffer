@@ -44,11 +44,15 @@ actual val supportsSyncEcdhP256: Boolean = true
 actual val supportsSyncEcdhP384: Boolean = true
 actual val supportsSyncEcdhP521: Boolean = true
 
+private const val P256_CURVE_BITS = 256
+private const val P384_CURVE_BITS = 384
+private const val P521_CURVE_BITS = 521
+
 private fun curveCode(curve: KeyAgreementCurve): Int =
     when (curve) {
-        KeyAgreementCurve.P256 -> 256
-        KeyAgreementCurve.P384 -> 384
-        KeyAgreementCurve.P521 -> 521
+        KeyAgreementCurve.P256 -> P256_CURVE_BITS
+        KeyAgreementCurve.P384 -> P384_CURVE_BITS
+        KeyAgreementCurve.P521 -> P521_CURVE_BITS
         KeyAgreementCurve.X25519 -> error("X25519 is not a NIST curve code")
     }
 

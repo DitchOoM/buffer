@@ -53,9 +53,9 @@ import platform.posix.size_tVar
 
 actual val supportsSyncAesGcm: Boolean = true
 
-actual val supportsChaChaPoly: Boolean = appleChaChaPolyAvailable
+actual val supportsChaChaPoly: Boolean = APPLE_CHACHA_POLY_AVAILABLE
 
-actual val supportsSyncChaChaPoly: Boolean = appleChaChaPolyAvailable
+actual val supportsSyncChaChaPoly: Boolean = APPLE_CHACHA_POLY_AVAILABLE
 
 internal actual fun aesGcmSeal(
     key: AesGcmKey,

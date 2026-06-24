@@ -16,7 +16,14 @@ class KeyAgreementBackingTests {
     @Test
     fun derivedKeyIsBackingInvariantForPublicKey() {
         val pool = BufferPool()
-        for (curve in listOf(KeyAgreementCurve.X25519, KeyAgreementCurve.P256, KeyAgreementCurve.P384, KeyAgreementCurve.P521)) {
+        val curves =
+            listOf(
+                KeyAgreementCurve.X25519,
+                KeyAgreementCurve.P256,
+                KeyAgreementCurve.P384,
+                KeyAgreementCurve.P521,
+            )
+        for (curve in curves) {
             if (!supportsSync(curve)) continue
             val a = generateKeyPair(curve)
             val b = generateKeyPair(curve)

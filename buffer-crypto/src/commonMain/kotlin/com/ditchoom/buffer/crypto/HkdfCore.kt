@@ -34,7 +34,10 @@ internal class HkdfEngine(
 ) {
     private val maxOutput = MAX_BLOCKS * hashLen
 
-    /** Scratch factory for key-derived intermediates: deterministic so it can be `use {}`-freed, secure so it is wiped. */
+    /**
+     * Scratch factory for key-derived intermediates: deterministic so it can be `use {}`-freed,
+     * secure so it is wiped.
+     */
     private val scratch: BufferFactory get() = BufferFactory.deterministic().secure()
 
     /**

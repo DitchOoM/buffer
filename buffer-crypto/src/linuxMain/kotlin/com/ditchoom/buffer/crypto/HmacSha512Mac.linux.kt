@@ -1,3 +1,4 @@
+@file:Suppress("MatchingDeclarationName") // MPP platform-suffixed actual file
 @file:OptIn(ExperimentalForeignApi::class)
 
 package com.ditchoom.buffer.crypto

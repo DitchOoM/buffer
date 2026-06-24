@@ -63,7 +63,8 @@ class AeadTamperTest {
     fun aesGcmWrongKeyRejected() =
         runTest {
             val sealed = sealOnce()
-            val wrongKey = AesGcmKey.of(hexBuffer("00000000000000000000000000000000" + "00000000000000000000000000000000"))
+            val wrongKey =
+                AesGcmKey.of(hexBuffer("00000000000000000000000000000000" + "00000000000000000000000000000000"))
             assertFailsWith<VerificationFailed> {
                 aesGcmOpenAsync(sealed, wrongKey, ascii(aad), BufferFactory.Default)
             }
@@ -74,7 +75,8 @@ class AeadTamperTest {
         runTest {
             val key = AesGcmKey.of(hexBuffer(keyHex))
             // Empty plaintext, empty/no AAD — the length off-by-one edge.
-            val sealed = aesGcmSealAsync(key, BufferFactory.Default.allocate(0).also { it.resetForRead() }, null, BufferFactory.Default)
+            val empty = BufferFactory.Default.allocate(0).also { it.resetForRead() }
+            val sealed = aesGcmSealAsync(key, empty, null, BufferFactory.Default)
             assertEquals(AEAD_NONCE_BYTES + AEAD_TAG_BYTES, sealed.remaining())
             val opened = aesGcmOpenAsync(sealed, key, null, BufferFactory.Default)
             assertEquals(0, opened.remaining(), "empty plaintext must round-trip to empty")
@@ -124,7 +126,13 @@ class AeadTamperTest {
             val key = AesGcmKey.of(hexBuffer(keyHex))
             // 8-byte (64-bit) nonce — too short.
             assertFailsWith<IllegalArgumentException>("8-byte nonce must reject on seal") {
-                aesGcmSealWithNonceAsync(key, hexBuffer("0001020304050607"), ascii(aad), ascii(plaintext), BufferFactory.Default)
+                aesGcmSealWithNonceAsync(
+                    key,
+                    hexBuffer("0001020304050607"),
+                    ascii(aad),
+                    ascii(plaintext),
+                    BufferFactory.Default,
+                )
             }
             // 16-byte (128-bit) nonce — too long.
             assertFailsWith<IllegalArgumentException>("16-byte nonce must reject on seal") {
@@ -146,10 +154,22 @@ class AeadTamperTest {
             val sealed = sealOnce()
             val (_, ctAndTag, _) = splitFramed(sealed)
             assertFailsWith<IllegalArgumentException>("8-byte nonce must reject on open") {
-                aesGcmOpenWithNonceAsync(key, hexBuffer("0001020304050607"), ascii(aad), ctAndTag, BufferFactory.Default)
+                aesGcmOpenWithNonceAsync(
+                    key,
+                    hexBuffer("0001020304050607"),
+                    ascii(aad),
+                    ctAndTag,
+                    BufferFactory.Default,
+                )
             }
             assertFailsWith<IllegalArgumentException>("16-byte nonce must reject on open") {
-                aesGcmOpenWithNonceAsync(key, hexBuffer("000102030405060708090a0b0c0d0e0f"), ascii(aad), ctAndTag, BufferFactory.Default)
+                aesGcmOpenWithNonceAsync(
+                    key,
+                    hexBuffer("000102030405060708090a0b0c0d0e0f"),
+                    ascii(aad),
+                    ctAndTag,
+                    BufferFactory.Default,
+                )
             }
         }
 

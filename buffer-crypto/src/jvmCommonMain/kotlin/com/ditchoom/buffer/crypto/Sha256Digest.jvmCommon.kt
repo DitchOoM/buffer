@@ -1,3 +1,5 @@
+@file:Suppress("MatchingDeclarationName") // MPP platform-suffixed actual file
+
 package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.ReadBuffer

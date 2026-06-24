@@ -36,8 +36,8 @@ internal class Sha512FamilyHmac(
         }
         for (i in 0 until SHA512_BLOCK_BYTES) {
             val kb = kBlock.get(i).toInt()
-            inner.absorbByte((kb xor 0x36).toByte()) // ipad
-            opad.set(i, (kb xor 0x5c).toByte())
+            inner.absorbByte((kb xor HMAC_IPAD).toByte()) // ipad
+            opad.set(i, (kb xor HMAC_OPAD).toByte())
         }
         kBlock.fill(0) // wipe the key-derived block
     }

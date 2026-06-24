@@ -47,7 +47,11 @@ class HpkeRoundTripTest {
 
                 val receiver = hpkeSetupBaseReceiver(suite, recipient.privateKey, sender.enc, info)
                 val recovered = receiver.open(ct, aad, BufferFactory.Default)
-                assertEquals(pt.toHex(), recovered.toHex(), "${suite.kem.kemName}/${suite.aead.aeadName} base round-trip")
+                assertEquals(
+                    pt.toHex(),
+                    recovered.toHex(),
+                    "${suite.kem.kemName}/${suite.aead.aeadName} base round-trip",
+                )
 
                 recipient.close()
             }

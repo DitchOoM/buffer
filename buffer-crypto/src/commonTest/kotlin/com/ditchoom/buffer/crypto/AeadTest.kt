@@ -40,8 +40,12 @@ class AeadTest {
             key = "feffe9928665731c6d6a8f9467308308",
             iv = "cafebabefacedbaddecaf888",
             aad = "feedfacedeadbeeffeedfacedeadbeefabaddad2",
-            pt = "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
-            ct = "42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329aca12e21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e091",
+            pt =
+                "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a31" +
+                    "8a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
+            ct =
+                "42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329ac" +
+                    "a12e21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e091",
             tag = "5bc94fbc3221a5db94fae95ae7121a47",
         )
 
@@ -51,8 +55,12 @@ class AeadTest {
             key = "feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308",
             iv = "cafebabefacedbaddecaf888",
             aad = "feedfacedeadbeeffeedfacedeadbeefabaddad2",
-            pt = "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
-            ct = "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662",
+            pt =
+                "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a31" +
+                    "8a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
+            ct =
+                "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555" +
+                    "d1aa8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662",
             tag = "76fc6ece0f4e1768cddf8853bb2d551b",
         )
 
@@ -66,7 +74,8 @@ class AeadTest {
                 val sealed = aesGcmSealWithNonceAsync(key, hexBuffer(v.iv), aad, hexBuffer(v.pt), BufferFactory.Default)
                 assertEquals(v.ct + v.tag, sealed.toHex(), "AES-GCM ct+tag for key=${v.key.length * 4}bit")
                 // Decrypt the same ct+tag back to the plaintext.
-                val opened = aesGcmOpenWithNonceAsync(key, hexBuffer(v.iv), aad, hexBuffer(v.ct + v.tag), BufferFactory.Default)
+                val opened =
+                    aesGcmOpenWithNonceAsync(key, hexBuffer(v.iv), aad, hexBuffer(v.ct + v.tag), BufferFactory.Default)
                 assertEquals(v.pt, opened.toHex(), "AES-GCM decrypt")
             }
         }

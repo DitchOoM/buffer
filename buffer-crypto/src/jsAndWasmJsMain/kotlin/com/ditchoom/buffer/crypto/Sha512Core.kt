@@ -34,14 +34,22 @@ internal class Sha512Core(
 
     init {
         val iv = if (sha384) IV384 else IV512
-        h0 = iv.getLong(0).toULong()
-        h1 = iv.getLong(8).toULong()
-        h2 = iv.getLong(16).toULong()
-        h3 = iv.getLong(24).toULong()
-        h4 = iv.getLong(32).toULong()
-        h5 = iv.getLong(40).toULong()
-        h6 = iv.getLong(48).toULong()
-        h7 = iv.getLong(56).toULong()
+        var off = 0
+        h0 = iv.getLong(off).toULong()
+        off += WORD_BYTES
+        h1 = iv.getLong(off).toULong()
+        off += WORD_BYTES
+        h2 = iv.getLong(off).toULong()
+        off += WORD_BYTES
+        h3 = iv.getLong(off).toULong()
+        off += WORD_BYTES
+        h4 = iv.getLong(off).toULong()
+        off += WORD_BYTES
+        h5 = iv.getLong(off).toULong()
+        off += WORD_BYTES
+        h6 = iv.getLong(off).toULong()
+        off += WORD_BYTES
+        h7 = iv.getLong(off).toULong()
     }
 
     // 128-byte message block (bytes 0..127 = schedule words 0..15) plus room for the expanded
@@ -79,7 +87,7 @@ internal class Sha512Core(
         val lenLow = totalBytes shl 3
         work.set(blockLen, 0x80.toByte())
         blockLen++
-        if (blockLen > SHA512_BLOCK_BYTES - 16) {
+        if (blockLen > SHA512_BLOCK_BYTES - LENGTH_FIELD_BYTES) {
             while (blockLen < SHA512_BLOCK_BYTES) {
                 work.set(blockLen, 0.toByte())
                 blockLen++
@@ -87,12 +95,12 @@ internal class Sha512Core(
             processBlock()
             blockLen = 0
         }
-        while (blockLen < SHA512_BLOCK_BYTES - 16) {
+        while (blockLen < SHA512_BLOCK_BYTES - LENGTH_FIELD_BYTES) {
             work.set(blockLen, 0.toByte())
             blockLen++
         }
-        work.set(SHA512_BLOCK_BYTES - 16, lenHigh) // bytes 112..119
-        work.set(SHA512_BLOCK_BYTES - 8, lenLow) // bytes 120..127
+        work.set(SHA512_BLOCK_BYTES - LENGTH_FIELD_BYTES, lenHigh) // bytes 112..119
+        work.set(SHA512_BLOCK_BYTES - LOW_LENGTH_BYTES, lenLow) // bytes 120..127
         processBlock()
     }
 
@@ -109,18 +117,20 @@ internal class Sha512Core(
                 6 -> h6
                 else -> h7
             }
-        return (word shr (56 - 8 * (i and 7))).toByte()
+        return (word shr (HIGH_BYTE_SHIFT - BITS_PER_BYTE * (i and BYTE_INDEX_MASK))).toByte()
     }
 
     private fun processBlock() {
         // Expand schedule words 16..79 in place (words 0..15 are the message block).
-        for (t in 16 until 80) {
-            val w15 = work.getLong((t - 15) * 8).toULong()
-            val w2 = work.getLong((t - 2) * 8).toULong()
+        for (t in MESSAGE_WORDS until SCHEDULE_WORDS) {
+            val w15 = work.getLong((t - 15) * WORD_BYTES).toULong()
+            val w2 = work.getLong((t - 2) * WORD_BYTES).toULong()
             val s0 = w15.rotateRight(1) xor w15.rotateRight(8) xor (w15 shr 7)
             val s1 = w2.rotateRight(19) xor w2.rotateRight(61) xor (w2 shr 6)
-            val v = work.getLong((t - 16) * 8).toULong() + s0 + work.getLong((t - 7) * 8).toULong() + s1
-            work.set(t * 8, v.toLong())
+            val w16 = work.getLong((t - 16) * WORD_BYTES).toULong()
+            val w7 = work.getLong((t - 7) * WORD_BYTES).toULong()
+            val v = w16 + s0 + w7 + s1
+            work.set(t * WORD_BYTES, v.toLong())
         }
 
         var a = h0
@@ -132,11 +142,11 @@ internal class Sha512Core(
         var g = h6
         var hh = h7
 
-        for (t in 0 until 80) {
-            val w = work.getLong(t * 8).toULong()
+        for (t in 0 until SCHEDULE_WORDS) {
+            val w = work.getLong(t * WORD_BYTES).toULong()
             val bigS1 = e.rotateRight(14) xor e.rotateRight(18) xor e.rotateRight(41)
             val ch = (e and f) xor (e.inv() and g)
-            val t1 = hh + bigS1 + ch + K.getLong(t * 8).toULong() + w
+            val t1 = hh + bigS1 + ch + K.getLong(t * WORD_BYTES).toULong() + w
             val bigS0 = a.rotateRight(28) xor a.rotateRight(34) xor a.rotateRight(39)
             val maj = (a and b) xor (a and c) xor (b and c)
             val t2 = bigS0 + maj
@@ -161,9 +171,19 @@ internal class Sha512Core(
     }
 
     private companion object {
+        private const val WORD_BYTES = 8 // 64-bit word width
+        private const val LENGTH_FIELD_BYTES = 16 // trailing 128-bit big-endian message length
+        private const val LOW_LENGTH_BYTES = 8 // low 64 bits of the length field
+        private const val SCHEDULE_WORDS = 80 // SHA-512 message-schedule / round count
+        private const val MESSAGE_WORDS = 16 // words taken straight from the input block
+        private const val HIGH_BYTE_SHIFT = 56 // shift to the most-significant byte of a 64-bit word
+        private const val BITS_PER_BYTE = 8
+        private const val BYTE_INDEX_MASK = 7 // i mod 8 → byte within the word
+        private const val HEX_RADIX = 16
+
         private fun hexBufferOf(hex: String): ReadBuffer =
             BufferFactory.managed().allocate(hex.length / 2, ByteOrder.BIG_ENDIAN).apply {
-                for (i in 0 until hex.length / 2) set(i, hex.substring(i * 2, i * 2 + 2).toInt(16).toByte())
+                for (i in 0 until hex.length / 2) set(i, hex.substring(i * 2, i * 2 + 2).toInt(HEX_RADIX).toByte())
             }
 
         // First 64 bits of the fractional parts of the cube roots of the first 80 primes.

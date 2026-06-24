@@ -62,7 +62,7 @@ internal class Sha256Core {
         val bitLen = totalBytes * 8
         work.set(blockLen, 0x80.toByte())
         blockLen++
-        if (blockLen > SHA256_BLOCK_BYTES - 8) {
+        if (blockLen > SHA256_BLOCK_BYTES - LENGTH_FIELD_BYTES) {
             while (blockLen < SHA256_BLOCK_BYTES) {
                 work.set(blockLen, 0.toByte())
                 blockLen++
@@ -70,11 +70,11 @@ internal class Sha256Core {
             processBlock()
             blockLen = 0
         }
-        while (blockLen < SHA256_BLOCK_BYTES - 8) {
+        while (blockLen < SHA256_BLOCK_BYTES - LENGTH_FIELD_BYTES) {
             work.set(blockLen, 0.toByte())
             blockLen++
         }
-        work.set(SHA256_BLOCK_BYTES - 8, bitLen) // 64-bit big-endian length at bytes 56..63
+        work.set(SHA256_BLOCK_BYTES - LENGTH_FIELD_BYTES, bitLen) // 64-bit big-endian length at bytes 56..63
         processBlock()
     }
 
@@ -91,18 +91,18 @@ internal class Sha256Core {
                 6 -> h6
                 else -> h7
             }
-        return (word shr (24 - 8 * (i and 3))).toByte()
+        return (word shr (HIGH_BYTE_SHIFT - BITS_PER_BYTE * (i and BYTE_INDEX_MASK))).toByte()
     }
 
     private fun processBlock() {
         // Expand schedule words 16..63 in place (words 0..15 are the message block).
-        for (t in 16 until 64) {
-            val w15 = work.getInt((t - 15) * 4).toUInt()
-            val w2 = work.getInt((t - 2) * 4).toUInt()
+        for (t in MESSAGE_WORDS until SCHEDULE_WORDS) {
+            val w15 = work.getInt((t - 15) * WORD_BYTES).toUInt()
+            val w2 = work.getInt((t - 2) * WORD_BYTES).toUInt()
             val s0 = w15.rotateRight(7) xor w15.rotateRight(18) xor (w15 shr 3)
             val s1 = w2.rotateRight(17) xor w2.rotateRight(19) xor (w2 shr 10)
-            val v = work.getInt((t - 16) * 4).toUInt() + s0 + work.getInt((t - 7) * 4).toUInt() + s1
-            work.set(t * 4, v.toInt())
+            val v = work.getInt((t - 16) * WORD_BYTES).toUInt() + s0 + work.getInt((t - 7) * WORD_BYTES).toUInt() + s1
+            work.set(t * WORD_BYTES, v.toInt())
         }
 
         var a = h0
@@ -114,11 +114,11 @@ internal class Sha256Core {
         var g = h6
         var hh = h7
 
-        for (t in 0 until 64) {
-            val w = work.getInt(t * 4).toUInt()
+        for (t in 0 until SCHEDULE_WORDS) {
+            val w = work.getInt(t * WORD_BYTES).toUInt()
             val bigS1 = e.rotateRight(6) xor e.rotateRight(11) xor e.rotateRight(25)
             val ch = (e and f) xor (e.inv() and g)
-            val t1 = hh + bigS1 + ch + K.getInt(t * 4).toUInt() + w
+            val t1 = hh + bigS1 + ch + K.getInt(t * WORD_BYTES).toUInt() + w
             val bigS0 = a.rotateRight(2) xor a.rotateRight(13) xor a.rotateRight(22)
             val maj = (a and b) xor (a and c) xor (b and c)
             val t2 = bigS0 + maj
@@ -143,6 +143,16 @@ internal class Sha256Core {
     }
 
     companion object {
+        private const val LENGTH_FIELD_BYTES = 8 // trailing 64-bit big-endian message length
+        private const val SCHEDULE_WORDS = 64 // SHA-256 message-schedule / round count
+        private const val MESSAGE_WORDS = 16 // words taken straight from the input block
+        private const val WORD_BYTES = 4 // 32-bit word width
+        private const val HIGH_BYTE_SHIFT = 24 // shift to the most-significant byte of a word
+        private const val BITS_PER_BYTE = 8
+        private const val BYTE_INDEX_MASK = 3 // i mod 4 → byte within the word
+        private const val HEX_RADIX = 16
+        private const val SHA256_K_BYTES = 256 // 64 round constants × 4 bytes
+
         // First 32 bits of the fractional parts of the cube roots of the first 64 primes,
         // stored in a shared read-only big-endian buffer (no primitive array).
         private const val K_HEX =
@@ -157,7 +167,7 @@ internal class Sha256Core {
 
         private val K: ReadBuffer =
             BufferFactory.managed().allocate(256, ByteOrder.BIG_ENDIAN).apply {
-                for (i in 0 until 256) set(i, K_HEX.substring(i * 2, i * 2 + 2).toInt(16).toByte())
+                for (i in 0 until SHA256_K_BYTES) set(i, K_HEX.substring(i * 2, i * 2 + 2).toInt(HEX_RADIX).toByte())
             }
     }
 }

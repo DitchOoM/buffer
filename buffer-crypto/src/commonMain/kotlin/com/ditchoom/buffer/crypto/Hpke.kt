@@ -337,8 +337,10 @@ class HpkePsk private constructor(
     }
 }
 
+private const val MESSAGE_LIMIT_MESSAGE = "HPKE message sequence number would overflow; rekey required"
+
 /** Raised when a context's per-message sequence number would overflow (RFC 9180 §5.2). Carries no secret. */
-class MessageLimitReached internal constructor() : CryptoMisuseException("HPKE message sequence number would overflow; rekey required")
+class MessageLimitReached internal constructor() : CryptoMisuseException(MESSAGE_LIMIT_MESSAGE)
 
 // =============================================================================
 // Capability flags
@@ -499,13 +501,15 @@ internal val HPKE_V1: ByteArray = "HPKE-v1".encodeToByteArray()
 internal val HPKE_ASCII: ByteArray = "HPKE".encodeToByteArray()
 internal val KEM_ASCII: ByteArray = "KEM".encodeToByteArray()
 
+private const val BYTE_MASK = 0xFF
+
 /** Writes [value] as a 2-byte big-endian (I2OSP(value, 2)) into [dest]. */
 internal fun i2osp2(
     value: Int,
     dest: WriteBuffer,
 ) {
-    dest.writeByte(((value ushr 8) and 0xFF).toByte())
-    dest.writeByte((value and 0xFF).toByte())
+    dest.writeByte(((value ushr Byte.SIZE_BITS) and BYTE_MASK).toByte())
+    dest.writeByte((value and BYTE_MASK).toByte())
 }
 
 /**

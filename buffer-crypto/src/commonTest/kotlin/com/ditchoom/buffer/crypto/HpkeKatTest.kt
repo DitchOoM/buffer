@@ -155,7 +155,7 @@ class HpkeKatTest {
 
     private fun emptyBuffer(): ReadBuffer = hexBuffer("")
 
-    private fun JsonObject.str(name: String): String = this[name]?.jsonPrimitive?.content ?: error("missing field '$name'")
+    private fun JsonObject.str(key: String): String = this[key]?.jsonPrimitive?.content ?: error("missing field '$key'")
 
     private fun JsonObject.int(name: String): Int = this[name]?.jsonPrimitive?.int ?: error("missing int '$name'")
 }

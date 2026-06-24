@@ -24,6 +24,8 @@ import com.ditchoom.buffer.WriteBuffer
  * plaintext is only produced after WebCrypto verifies it.
  */
 
+private const val NO_CHACHA_POLY = "ChaCha20-Poly1305 is not part of WebCrypto and is not polyfilled"
+
 actual val supportsSyncAesGcm: Boolean = false
 
 actual val supportsChaChaPoly: Boolean = false
@@ -52,7 +54,7 @@ internal actual fun chaChaPolySeal(
     aad: ReadBuffer?,
     plaintext: ReadBuffer,
     dest: WriteBuffer,
-): Unit = throw UnsupportedOperationException("ChaCha20-Poly1305 is not part of WebCrypto and is not polyfilled")
+): Unit = throw UnsupportedOperationException(NO_CHACHA_POLY)
 
 internal actual fun chaChaPolyOpen(
     key: ChaChaPolyKey,
@@ -60,7 +62,7 @@ internal actual fun chaChaPolyOpen(
     aad: ReadBuffer?,
     ciphertextAndTag: ReadBuffer,
     dest: WriteBuffer,
-): Unit = throw UnsupportedOperationException("ChaCha20-Poly1305 is not part of WebCrypto and is not polyfilled")
+): Unit = throw UnsupportedOperationException(NO_CHACHA_POLY)
 
 actual suspend fun aesGcmSealAsync(
     key: AesGcmKey,
@@ -94,14 +96,14 @@ actual suspend fun chaChaPolySealAsync(
     plaintext: ReadBuffer,
     aad: ReadBuffer?,
     factory: BufferFactory,
-): PlatformBuffer = throw UnsupportedOperationException("ChaCha20-Poly1305 is not part of WebCrypto and is not polyfilled")
+): PlatformBuffer = throw UnsupportedOperationException(NO_CHACHA_POLY)
 
 actual suspend fun chaChaPolyOpenAsync(
     sealed: ReadBuffer,
     key: ChaChaPolyKey,
     aad: ReadBuffer?,
     factory: BufferFactory,
-): PlatformBuffer = throw UnsupportedOperationException("ChaCha20-Poly1305 is not part of WebCrypto and is not polyfilled")
+): PlatformBuffer = throw UnsupportedOperationException(NO_CHACHA_POLY)
 
 actual suspend fun aesGcmSealWithNonceAsync(
     key: AesGcmKey,
@@ -154,6 +156,8 @@ actual suspend fun aesGcmOpenWithNonceAsync(
 // =============================================================================
 
 private const val HEX = "0123456789abcdef"
+private const val HEX_RADIX = 16
+private const val NIBBLE_BITS = 4
 
 /** Lowercase hex of this buffer's remaining bytes (non-destructive). */
 internal fun ReadBuffer.toHexRemaining(): String {
@@ -162,7 +166,7 @@ internal fun ReadBuffer.toHexRemaining(): String {
     val sb = StringBuilder(n * 2)
     for (i in 0 until n) {
         val v = get(start + i).toInt() and 0xFF
-        sb.append(HEX[v ushr 4])
+        sb.append(HEX[v ushr NIBBLE_BITS])
         sb.append(HEX[v and 0xF])
     }
     return sb.toString()
@@ -172,9 +176,9 @@ internal fun ReadBuffer.toHexRemaining(): String {
 internal fun WriteBuffer.writeHex(hex: String) {
     var i = 0
     while (i < hex.length) {
-        val hi = hex[i].digitToInt(16)
-        val lo = hex[i + 1].digitToInt(16)
-        writeByte(((hi shl 4) or lo).toByte())
+        val hi = hex[i].digitToInt(HEX_RADIX)
+        val lo = hex[i + 1].digitToInt(HEX_RADIX)
+        writeByte(((hi shl NIBBLE_BITS) or lo).toByte())
         i += 2
     }
 }
