@@ -11,22 +11,25 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * The namespaced facade objects ([Aead], [Sign], [Kex], [Hpke]) are thin delegates over the
- * existing top-level functions. These tests prove the delegation is wired correctly and behaves
- * identically to the top-level surface, on every platform (driving the async/cross-platform paths).
+ * The namespaced facade objects ([Sign], [Kex], [Hpke]) are thin delegates over the existing
+ * top-level functions. These tests prove the delegation is wired correctly and behaves identically
+ * to the top-level surface, on every platform (driving the async/cross-platform paths). AEAD has no
+ * facade object — its operations live on the [Aead] / [OptionalAead] capability witnesses, exercised
+ * via [aeadWitnessRoundTrips].
  */
 class CryptoFacadeTest {
     private val aes256Key = "feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308"
 
     @Test
-    fun aeadFacadeRoundTripMatchesTopLevel() =
+    fun aeadWitnessRoundTrips() =
         runTest {
+            val ops = aesGcmAsyncOps()
             val key = AesGcmKey.of(hexBuffer(aes256Key))
-            val aad = ascii("context-v1")
-            val plaintext = ascii("namespaced AEAD round-trip")
-            val sealed = Aead.aesGcmSealAsync(key, plaintext, aad, BufferFactory.Default)
+            val aad = Aad.Of(ascii("context-v1"))
+            val plaintext = ascii("witness AEAD round-trip")
+            val sealed = ops.seal(key, plaintext, aad, BufferFactory.Default)
             assertEquals(AEAD_NONCE_BYTES + plaintext.remaining() + AEAD_TAG_BYTES, sealed.remaining())
-            val opened = Aead.aesGcmOpenAsync(sealed, key, aad, BufferFactory.Default)
+            val opened = ops.open(sealed, key, aad, BufferFactory.Default)
             assertEquals(plaintext.toHex(), opened.toHex())
         }
 

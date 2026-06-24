@@ -5,14 +5,6 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
-import com.ditchoom.buffer.crypto.aesGcmOpen as freeAesGcmOpen
-import com.ditchoom.buffer.crypto.aesGcmOpenAsync as freeAesGcmOpenAsync
-import com.ditchoom.buffer.crypto.aesGcmSeal as freeAesGcmSeal
-import com.ditchoom.buffer.crypto.aesGcmSealAsync as freeAesGcmSealAsync
-import com.ditchoom.buffer.crypto.chaChaPolyOpen as freeChaChaPolyOpen
-import com.ditchoom.buffer.crypto.chaChaPolyOpenAsync as freeChaChaPolyOpenAsync
-import com.ditchoom.buffer.crypto.chaChaPolySeal as freeChaChaPolySeal
-import com.ditchoom.buffer.crypto.chaChaPolySealAsync as freeChaChaPolySealAsync
 import com.ditchoom.buffer.crypto.deriveSharedSecret as freeDeriveSharedSecret
 import com.ditchoom.buffer.crypto.deriveSharedSecretAsync as freeDeriveSharedSecretAsync
 import com.ditchoom.buffer.crypto.ed25519AsyncAvailable as freeEd25519AsyncAvailable
@@ -45,83 +37,14 @@ import com.ditchoom.buffer.crypto.verifyAsync as freeVerifyAsync
  * Namespaced entry points for the crypto primitive families.
  *
  * Each object below groups the family's free functions under a single discoverable name so IDE
- * completion surfaces, e.g., `Aead.aesGcmSeal` / `Sign.sign` / `Kex.deriveSharedSecret` /
- * `Hpke.sealBase` instead of a flat list of top-level functions. These are thin, additive
+ * completion surfaces, e.g., `Sign.sign` / `Kex.deriveSharedSecret` / `Hpke.sealBase` instead of a
+ * flat list of top-level functions. (AEAD has no facade object — its operations live on the
+ * [Aead] / [OptionalAead] capability witnesses.) These are thin, additive
  * facades: every member delegates to the existing top-level function of the same family (which
  * remains the canonical, unchanged public API — many are `expect`/`internal`-backed and cannot
  * move into an object). Nothing here is breaking; the original top-level functions are kept
  * exactly as-is, so existing callers continue to compile unchanged.
  */
-
-/**
- * AEAD (AES-GCM, ChaCha20-Poly1305) namespaced entry points. Delegates to the top-level
- * `aesGcm*` / `chaChaPoly*` functions. The self-framing helpers emit `nonce ‖ ciphertext ‖ tag`.
- */
-object Aead {
-    /** @see aesGcmSeal */
-    fun aesGcmSeal(
-        key: AesGcmKey,
-        plaintext: ReadBuffer,
-        aad: ReadBuffer? = null,
-        factory: BufferFactory = BufferFactory.Default,
-    ): PlatformBuffer = freeAesGcmSeal(key, plaintext, aad, factory)
-
-    /** @see aesGcmOpen */
-    fun aesGcmOpen(
-        sealed: ReadBuffer,
-        key: AesGcmKey,
-        aad: ReadBuffer? = null,
-        factory: BufferFactory = BufferFactory.Default,
-    ): PlatformBuffer = freeAesGcmOpen(sealed, key, aad, factory)
-
-    /** @see chaChaPolySeal */
-    fun chaChaPolySeal(
-        key: ChaChaPolyKey,
-        plaintext: ReadBuffer,
-        aad: ReadBuffer? = null,
-        factory: BufferFactory = BufferFactory.Default,
-    ): PlatformBuffer = freeChaChaPolySeal(key, plaintext, aad, factory)
-
-    /** @see chaChaPolyOpen */
-    fun chaChaPolyOpen(
-        sealed: ReadBuffer,
-        key: ChaChaPolyKey,
-        aad: ReadBuffer? = null,
-        factory: BufferFactory = BufferFactory.Default,
-    ): PlatformBuffer = freeChaChaPolyOpen(sealed, key, aad, factory)
-
-    /** @see aesGcmSealAsync */
-    suspend fun aesGcmSealAsync(
-        key: AesGcmKey,
-        plaintext: ReadBuffer,
-        aad: ReadBuffer? = null,
-        factory: BufferFactory = BufferFactory.Default,
-    ): PlatformBuffer = freeAesGcmSealAsync(key, plaintext, aad, factory)
-
-    /** @see aesGcmOpenAsync */
-    suspend fun aesGcmOpenAsync(
-        sealed: ReadBuffer,
-        key: AesGcmKey,
-        aad: ReadBuffer? = null,
-        factory: BufferFactory = BufferFactory.Default,
-    ): PlatformBuffer = freeAesGcmOpenAsync(sealed, key, aad, factory)
-
-    /** @see chaChaPolySealAsync */
-    suspend fun chaChaPolySealAsync(
-        key: ChaChaPolyKey,
-        plaintext: ReadBuffer,
-        aad: ReadBuffer? = null,
-        factory: BufferFactory = BufferFactory.Default,
-    ): PlatformBuffer = freeChaChaPolySealAsync(key, plaintext, aad, factory)
-
-    /** @see chaChaPolyOpenAsync */
-    suspend fun chaChaPolyOpenAsync(
-        sealed: ReadBuffer,
-        key: ChaChaPolyKey,
-        aad: ReadBuffer? = null,
-        factory: BufferFactory = BufferFactory.Default,
-    ): PlatformBuffer = freeChaChaPolyOpenAsync(sealed, key, aad, factory)
-}
 
 /**
  * Digital-signature (Ed25519, ECDSA P-256/P-384/P-521) namespaced entry points. Delegates to the

@@ -26,11 +26,17 @@ import com.ditchoom.buffer.WriteBuffer
 
 private const val NO_CHACHA_POLY = "ChaCha20-Poly1305 is not part of WebCrypto and is not polyfilled"
 
-actual val supportsSyncAesGcm: Boolean = false
+internal actual val supportsSyncAesGcm: Boolean = false
 
-actual val supportsChaChaPoly: Boolean = false
+internal actual val supportsChaChaPoly: Boolean = false
 
-actual val supportsSyncChaChaPoly: Boolean = false
+internal actual val supportsSyncChaChaPoly: Boolean = false
+
+/** AES-GCM on the web is async-only (WebCrypto `SubtleCrypto` is Promise-based). */
+actual val CryptoCapabilities.aesGcm: Aead<AesGcmKey> get() = Aead.AsyncOnly(AesGcmAsyncOps)
+
+/** ChaCha20-Poly1305 is not part of WebCrypto and is never polyfilled. */
+actual val CryptoCapabilities.chaChaPoly: OptionalAead<ChaChaPolyKey> get() = OptionalAead.Unavailable
 
 internal actual fun aesGcmSeal(
     key: AesGcmKey,
@@ -64,48 +70,7 @@ internal actual fun chaChaPolyOpen(
     dest: WriteBuffer,
 ): Unit = throw UnsupportedOperationException(NO_CHACHA_POLY)
 
-actual suspend fun aesGcmSealAsync(
-    key: AesGcmKey,
-    plaintext: ReadBuffer,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer {
-    // Generate the nonce here so a (key, nonce) pair can never be reused by accident, then
-    // frame as nonce ‖ ciphertext ‖ tag (the with-nonce helper returns ciphertext ‖ tag).
-    val nonce = cryptoRandom(AEAD_NONCE_BYTES)
-    val ctTag = aesGcmSealWithNonceAsync(key, nonce, aad, plaintext, factory)
-    val out = allocateFramed(plaintext.remaining(), factory)
-    out.write(nonce)
-    out.write(ctTag)
-    out.resetForRead()
-    return out
-}
-
-actual suspend fun aesGcmOpenAsync(
-    sealed: ReadBuffer,
-    key: AesGcmKey,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer {
-    val (nonce, ctAndTag, _) = splitFramed(sealed)
-    return aesGcmOpenWithNonceAsync(key, nonce, aad, ctAndTag, factory)
-}
-
-actual suspend fun chaChaPolySealAsync(
-    key: ChaChaPolyKey,
-    plaintext: ReadBuffer,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = throw UnsupportedOperationException(NO_CHACHA_POLY)
-
-actual suspend fun chaChaPolyOpenAsync(
-    sealed: ReadBuffer,
-    key: ChaChaPolyKey,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = throw UnsupportedOperationException(NO_CHACHA_POLY)
-
-actual suspend fun aesGcmSealWithNonceAsync(
+internal actual suspend fun aesGcmSealWithNonceAsync(
     key: AesGcmKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
@@ -117,7 +82,7 @@ actual suspend fun aesGcmSealWithNonceAsync(
     }
     val ctTagHex =
         webCryptoAesGcmEncrypt(
-            keyHex = key.material.toHexRemaining(),
+            keyHex = key.requireInMemoryMaterial().toHexRemaining(),
             ivHex = nonce.toHexRemaining(),
             aadHex = aad?.toHexRemaining() ?: "",
             plaintextHex = plaintext.toHexRemaining(),
@@ -128,7 +93,7 @@ actual suspend fun aesGcmSealWithNonceAsync(
     return out
 }
 
-actual suspend fun aesGcmOpenWithNonceAsync(
+internal actual suspend fun aesGcmOpenWithNonceAsync(
     key: AesGcmKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
@@ -140,7 +105,7 @@ actual suspend fun aesGcmOpenWithNonceAsync(
     }
     val ptHex =
         webCryptoAesGcmDecrypt(
-            keyHex = key.material.toHexRemaining(),
+            keyHex = key.requireInMemoryMaterial().toHexRemaining(),
             ivHex = nonce.toHexRemaining(),
             aadHex = aad?.toHexRemaining() ?: "",
             ciphertextAndTagHex = ciphertextAndTag.toHexRemaining(),

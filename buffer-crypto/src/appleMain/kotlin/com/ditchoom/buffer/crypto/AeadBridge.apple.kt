@@ -115,7 +115,7 @@ internal fun appleChaChaPolySeal(
     memScoped {
         val tag = allocArray<ByteVar>(AEAD_TAG_BYTES)
         var status = -1
-        key.material.withRemainingBytes { keyPtr, keyLen ->
+        key.requireInMemoryMaterial().withRemainingBytes { keyPtr, keyLen ->
             nonce.withRemainingBytes { ivPtr, ivLen ->
                 withOptionalBytes(aad) { aadPtr, aadLen ->
                     plaintext.withRemainingBytes2(ptLen) { ptPtr ->
@@ -167,7 +167,7 @@ internal fun appleChaChaPolyOpen(
         var status = -1
         var written = 0
         val writtenVar = alloc<size_tVar>()
-        key.material.withRemainingBytes { keyPtr, keyLen ->
+        key.requireInMemoryMaterial().withRemainingBytes { keyPtr, keyLen ->
             nonce.withRemainingBytes { ivPtr, ivLen ->
                 withOptionalBytes(aad) { aadPtr, aadLen ->
                     ctView.withRemainingBytes2(ctLen) { ctPtr ->

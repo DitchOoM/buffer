@@ -35,11 +35,23 @@ private val chaChaPolyAvailable: Boolean =
         false
     }
 
-actual val supportsSyncAesGcm: Boolean = true
+internal actual val supportsSyncAesGcm: Boolean = true
 
-actual val supportsChaChaPoly: Boolean = chaChaPolyAvailable
+internal actual val supportsChaChaPoly: Boolean = chaChaPolyAvailable
 
-actual val supportsSyncChaChaPoly: Boolean = chaChaPolyAvailable
+internal actual val supportsSyncChaChaPoly: Boolean = chaChaPolyAvailable
+
+/** AES-GCM is synchronous via JCA. */
+actual val CryptoCapabilities.aesGcm: Aead<AesGcmKey> get() = Aead.Blocking(AesGcmBlockingOps)
+
+/** ChaCha20-Poly1305 is synchronous via JCA when the transform is present (JDK 11+ / Conscrypt). */
+actual val CryptoCapabilities.chaChaPoly: OptionalAead<ChaChaPolyKey>
+    get() =
+        if (supportsChaChaPoly) {
+            OptionalAead.Blocking(ChaChaPolyBlockingOps)
+        } else {
+            OptionalAead.Unavailable
+        }
 
 internal actual fun aesGcmSeal(
     key: AesGcmKey,
@@ -52,7 +64,7 @@ internal actual fun aesGcmSeal(
     val cipher = Cipher.getInstance("AES/GCM/NoPadding")
     cipher.init(
         Cipher.ENCRYPT_MODE,
-        SecretKeySpec(materialBytes(key.material), "AES"),
+        SecretKeySpec(materialBytes(key.requireInMemoryMaterial()), "AES"),
         GCMParameterSpec(GCM_TAG_BITS, nonceBytes(nonce)),
     )
     aad?.let { cipher.updateAADRemaining(it) }
@@ -71,7 +83,7 @@ internal actual fun aesGcmOpen(
     val cipher = Cipher.getInstance("AES/GCM/NoPadding")
     cipher.init(
         Cipher.DECRYPT_MODE,
-        SecretKeySpec(materialBytes(key.material), "AES"),
+        SecretKeySpec(materialBytes(key.requireInMemoryMaterial()), "AES"),
         GCMParameterSpec(GCM_TAG_BITS, nonceBytes(nonce)),
     )
     aad?.let { cipher.updateAADRemaining(it) }
@@ -92,7 +104,7 @@ internal actual fun chaChaPolySeal(
     val cipher = Cipher.getInstance("ChaCha20-Poly1305")
     cipher.init(
         Cipher.ENCRYPT_MODE,
-        SecretKeySpec(materialBytes(key.material), "ChaCha20"),
+        SecretKeySpec(materialBytes(key.requireInMemoryMaterial()), "ChaCha20"),
         IvParameterSpec(nonceBytes(nonce)),
     )
     aad?.let { cipher.updateAADRemaining(it) }
@@ -114,7 +126,7 @@ internal actual fun chaChaPolyOpen(
     val cipher = Cipher.getInstance("ChaCha20-Poly1305")
     cipher.init(
         Cipher.DECRYPT_MODE,
-        SecretKeySpec(materialBytes(key.material), "ChaCha20"),
+        SecretKeySpec(materialBytes(key.requireInMemoryMaterial()), "ChaCha20"),
         IvParameterSpec(nonceBytes(nonce)),
     )
     aad?.let { cipher.updateAADRemaining(it) }
@@ -123,35 +135,7 @@ internal actual fun chaChaPolyOpen(
 
 // Native async simply delegates to the synchronous JCA path — no event loop needed off-web.
 
-actual suspend fun aesGcmSealAsync(
-    key: AesGcmKey,
-    plaintext: ReadBuffer,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = aesGcmSeal(key, plaintext, aad, factory)
-
-actual suspend fun aesGcmOpenAsync(
-    sealed: ReadBuffer,
-    key: AesGcmKey,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = aesGcmOpen(sealed, key, aad, factory)
-
-actual suspend fun chaChaPolySealAsync(
-    key: ChaChaPolyKey,
-    plaintext: ReadBuffer,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = chaChaPolySeal(key, plaintext, aad, factory)
-
-actual suspend fun chaChaPolyOpenAsync(
-    sealed: ReadBuffer,
-    key: ChaChaPolyKey,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = chaChaPolyOpen(sealed, key, aad, factory)
-
-actual suspend fun aesGcmSealWithNonceAsync(
+internal actual suspend fun aesGcmSealWithNonceAsync(
     key: AesGcmKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
@@ -164,7 +148,7 @@ actual suspend fun aesGcmSealWithNonceAsync(
     return out
 }
 
-actual suspend fun aesGcmOpenWithNonceAsync(
+internal actual suspend fun aesGcmOpenWithNonceAsync(
     key: AesGcmKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,

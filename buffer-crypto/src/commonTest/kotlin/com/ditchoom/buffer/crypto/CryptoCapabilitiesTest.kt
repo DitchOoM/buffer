@@ -2,29 +2,31 @@ package com.ditchoom.buffer.crypto
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
- * The facade must stay a faithful alias of the underlying `supports*` source-of-truth flags — these
- * assertions fail if the two ever drift apart, on whatever platform the suite runs.
+ * The capability facade / witnesses must stay faithful to the underlying `supports*`
+ * source-of-truth flags — these assertions fail if the two ever drift apart, on whatever platform
+ * the suite runs. AEAD capability is a witness ([Aead] / [OptionalAead]); its variant must match
+ * the sync/availability flags.
  */
 class CryptoCapabilitiesTest {
     @Test
-    fun aesGcmMirrorsUnderlyingFlags() {
-        assertEquals(supportsSyncAesGcm, CryptoCapabilities.aesGcm.sync)
-        assertEquals(supportsAesGcmAnyPath, CryptoCapabilities.aesGcm.anyPath)
+    fun aesGcmWitnessMatchesSyncCapability() {
+        when (CryptoCapabilities.aesGcm) {
+            is Aead.Blocking -> assertTrue(supportsSyncAesGcm, "Blocking witness implies a sync path")
+            is Aead.AsyncOnly -> assertFalse(supportsSyncAesGcm, "AsyncOnly witness implies no sync path")
+        }
     }
 
     @Test
-    fun chaChaPolyMirrorsUnderlyingFlags() {
-        assertEquals(supportsSyncChaChaPoly, CryptoCapabilities.chaChaPoly.sync)
-        assertEquals(supportsChaChaPoly, CryptoCapabilities.chaChaPoly.anyPath)
-    }
-
-    @Test
-    fun aeadDispatchMapsToTheRightPrimitive() {
-        assertEquals(CryptoCapabilities.aesGcm, CryptoCapabilities.aead(HpkeAead.Aes128Gcm))
-        assertEquals(CryptoCapabilities.aesGcm, CryptoCapabilities.aead(HpkeAead.Aes256Gcm))
-        assertEquals(CryptoCapabilities.chaChaPoly, CryptoCapabilities.aead(HpkeAead.ChaCha20Poly1305))
+    fun chaChaPolyWitnessMatchesCapability() {
+        when (CryptoCapabilities.chaChaPoly) {
+            is OptionalAead.Blocking -> assertTrue(supportsChaChaPoly && supportsSyncChaChaPoly)
+            is OptionalAead.AsyncOnly -> assertTrue(supportsChaChaPoly)
+            OptionalAead.Unavailable -> assertFalse(supportsChaChaPoly)
+        }
     }
 
     @Test
