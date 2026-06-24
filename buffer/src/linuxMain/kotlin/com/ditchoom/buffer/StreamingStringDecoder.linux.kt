@@ -237,15 +237,18 @@ private class LinuxStreamingStringDecoder(
         val codePoint =
             when (byteCount) {
                 1 -> b0
-                2 -> ((b0 and Utf8.TWO_BYTE_PAYLOAD_MASK) shl Utf8.CONTINUATION_SHIFT) or
-                    (b1 and Utf8.CONTINUATION_PAYLOAD_MASK)
-                3 -> ((b0 and Utf8.THREE_BYTE_PAYLOAD_MASK) shl (Utf8.CONTINUATION_SHIFT * 2)) or
-                    ((b1 and Utf8.CONTINUATION_PAYLOAD_MASK) shl Utf8.CONTINUATION_SHIFT) or
-                    (b2 and Utf8.CONTINUATION_PAYLOAD_MASK)
-                4 -> ((b0 and Utf8.FOUR_BYTE_PAYLOAD_MASK) shl (Utf8.CONTINUATION_SHIFT * 3)) or
-                    ((b1 and Utf8.CONTINUATION_PAYLOAD_MASK) shl (Utf8.CONTINUATION_SHIFT * 2)) or
-                    ((b2 and Utf8.CONTINUATION_PAYLOAD_MASK) shl Utf8.CONTINUATION_SHIFT) or
-                    (b3 and Utf8.CONTINUATION_PAYLOAD_MASK)
+                2 ->
+                    ((b0 and Utf8.TWO_BYTE_PAYLOAD_MASK) shl Utf8.CONTINUATION_SHIFT) or
+                        (b1 and Utf8.CONTINUATION_PAYLOAD_MASK)
+                3 ->
+                    ((b0 and Utf8.THREE_BYTE_PAYLOAD_MASK) shl (Utf8.CONTINUATION_SHIFT * 2)) or
+                        ((b1 and Utf8.CONTINUATION_PAYLOAD_MASK) shl Utf8.CONTINUATION_SHIFT) or
+                        (b2 and Utf8.CONTINUATION_PAYLOAD_MASK)
+                4 ->
+                    ((b0 and Utf8.FOUR_BYTE_PAYLOAD_MASK) shl (Utf8.CONTINUATION_SHIFT * 3)) or
+                        ((b1 and Utf8.CONTINUATION_PAYLOAD_MASK) shl (Utf8.CONTINUATION_SHIFT * 2)) or
+                        ((b2 and Utf8.CONTINUATION_PAYLOAD_MASK) shl Utf8.CONTINUATION_SHIFT) or
+                        (b3 and Utf8.CONTINUATION_PAYLOAD_MASK)
                 else -> return handleMalformedInput(destination).charsWritten
             }
 
@@ -253,8 +256,9 @@ private class LinuxStreamingStringDecoder(
         val isValid =
             when (byteCount) {
                 2 -> codePoint >= Utf8.ASCII_LIMIT
-                3 -> codePoint >= Utf8.THREE_BYTE_MIN &&
-                    (codePoint < Utf8.HIGH_SURROGATE_START || codePoint > Utf8.LOW_SURROGATE_END)
+                3 ->
+                    codePoint >= Utf8.THREE_BYTE_MIN &&
+                        (codePoint < Utf8.HIGH_SURROGATE_START || codePoint > Utf8.LOW_SURROGATE_END)
                 4 -> codePoint in Utf8.FOUR_BYTE_MIN..Utf8.MAX_CODE_POINT
                 else -> true
             }
@@ -358,6 +362,4 @@ private class LinuxStreamingStringDecoder(
     )
 }
 
-actual fun StreamingStringDecoder(
-    config: StreamingStringDecoderConfig,
-): StreamingStringDecoder = LinuxStreamingStringDecoder(config)
+actual fun StreamingStringDecoder(config: StreamingStringDecoderConfig): StreamingStringDecoder = LinuxStreamingStringDecoder(config)
