@@ -159,13 +159,13 @@ internal actual suspend fun aesGcmOpenWithNonceAsync(
 // JCA glue
 // =============================================================================
 
-private fun requireNonce(nonce: ReadBuffer) {
+internal fun requireNonce(nonce: ReadBuffer) {
     require(nonce.remaining() == AEAD_NONCE_BYTES) {
         "nonce must be $AEAD_NONCE_BYTES bytes, was ${nonce.remaining()}"
     }
 }
 
-private fun requireTagged(ciphertextAndTag: ReadBuffer) {
+internal fun requireTagged(ciphertextAndTag: ReadBuffer) {
     require(ciphertextAndTag.remaining() >= AEAD_TAG_BYTES) {
         "ciphertext+tag must be at least $AEAD_TAG_BYTES bytes, was ${ciphertextAndTag.remaining()}"
     }
@@ -174,7 +174,7 @@ private fun requireTagged(ciphertextAndTag: ReadBuffer) {
 /** Copies a key/nonce buffer's remaining bytes into a JCA-consumable array (non-destructive). */
 private fun materialBytes(buffer: ReadBuffer): ByteArray = remainingBytes(buffer)
 
-private fun nonceBytes(nonce: ReadBuffer): ByteArray = remainingBytes(nonce)
+internal fun nonceBytes(nonce: ReadBuffer): ByteArray = remainingBytes(nonce)
 
 /** Materializes a buffer's remaining bytes into an array without disturbing its position. */
 private fun remainingBytes(buffer: ReadBuffer): ByteArray {
@@ -190,7 +190,7 @@ private fun remainingBytes(buffer: ReadBuffer): ByteArray {
 }
 
 /** Feeds a buffer's remaining bytes into the cipher as AAD, zero-copy where possible. */
-private fun Cipher.updateAADRemaining(buffer: ReadBuffer) {
+internal fun Cipher.updateAADRemaining(buffer: ReadBuffer) {
     if (buffer.remaining() == 0) return
     val managed = buffer.managedMemoryAccess
     if (managed != null) {
@@ -204,7 +204,7 @@ private fun Cipher.updateAADRemaining(buffer: ReadBuffer) {
  * Runs `doFinal` over [input]'s remaining bytes (ENCRYPT mode), writing `ciphertext ‖ tag`
  * into [dest]. Direct-dest fast path writes straight into the destination's backing array.
  */
-private fun finalInto(
+internal fun finalInto(
     cipher: Cipher,
     input: ReadBuffer,
     dest: WriteBuffer,
@@ -227,7 +227,7 @@ private fun finalInto(
  * a bad tag throws `AEADBadTagException`, which we collapse to the opaque [VerificationFailed]
  * so the failure carries no oracle-friendly reason.
  */
-private fun openInto(
+internal fun openInto(
     cipher: Cipher,
     ciphertextAndTag: ReadBuffer,
     dest: WriteBuffer,

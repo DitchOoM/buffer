@@ -350,6 +350,7 @@ Capability flags are tested error paths, not assumptions — the flag drives a `
 | HPKE/DHKEM (P-256/384/521) | ✅ | ✅ | ✅ | ✅ | ✅ (WebCrypto async) |
 | HPKE/DHKEM (X25519) | ✅ (JDK 11+) | ✅ **API 34+** | ✅ | ✅ | ✅ newer engines (feature-detected) |
 | HPKE AEAD = ChaCha20-Poly1305 | ✅ (JDK 11+) | ✅ | ✅ | ✅ | ❌ throws — not in WebCrypto |
+| Hardware-backed keys (secure element) | ❌ | ✅ AES-GCM + ECDSA-P256 (StrongBox / TEE) | ✅ ECDSA-P256 only (Secure Enclave) | ❌ | ❌ |
 
 Legend: ✅ available · ❌ unavailable (capability flag `false`, throws `UnsupportedOperationException`).
 
@@ -359,5 +360,6 @@ Notes:
 - **Linux** uses a native BoringSSL backend (statically linked) and has full parity with JVM across every primitive above.
 - **Android X25519/Ed25519** were added by Conscrypt in Android 14, so the capability flag is `false` and the call throws on API 28–33. This is a runtime (`SDK_INT`) gate, not compile-time.
 - **JS/WASM** gates ChaCha20-Poly1305 off entirely (not in WebCrypto, never polyfilled), and feature-detects Ed25519/X25519 against the engine's WebCrypto.
+- **Hardware-backed keys** are reached through `CryptoCapabilities.hardware` (`HardwareSupport.Available` / `Unavailable`). The provider mints **non-exportable** keys inside the secure element; they carry `KeyProvenance.Hardware` and operate only through the `suspend` AEAD/signature witnesses (the blocking/material path throws), gated per-use by a `HardwareAuthorization`. **Android Keystore** backs AES-GCM and ECDSA-P256, StrongBox-backed when a dedicated secure element is present (`dedicatedSecureElement = true`) and TEE-backed otherwise. **Apple Secure Enclave** backs ECDSA-P256 only: CryptoKit exposes no app-controlled symmetric Enclave key, so AES-GCM is not eligible there — an Enclave-derived AES key would re-enter process memory, breaking the non-exportable contract (the Enclave's internal AES engine is reserved for OS Data Protection). JVM, Linux, and JS/WASM wire no secure element, so `hardware` is `Unavailable`. A provider-minted signing key publishes its matching public key via `SigningKey.verifyKey`.
 
 Encoding differs by platform and is pinned + tested both ways: JCA uses DER/ASN.1 (ECDSA) and SPKI/X.509 (ECDH); WebCrypto uses raw P1363 `r‖s` and raw points. HPKE keys use the RFC 9180 raw KEM encodings.

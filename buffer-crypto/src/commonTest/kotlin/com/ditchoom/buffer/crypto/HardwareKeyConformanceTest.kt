@@ -8,6 +8,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -33,9 +34,51 @@ class HardwareKeyConformanceTest {
     private val deny = HardwareKeySpec(authorization = HardwareAuthorization { false })
 
     @Test
-    fun hardwareCapabilityUnavailableInThisRelease() {
-        // No platform constructs hardware in 6.0; the witness is a plain common Unavailable.
-        assertTrue(CryptoCapabilities.hardware is HardwareSupport.Unavailable)
+    fun hardwareCapabilityReflectsThePlatformBackend() =
+        runTest {
+            // The witness reflects whether *this* platform wires a usable secure element:
+            //  - Unavailable on JVM / JS / WASM / Linux, and on Apple/Android targets without a usable
+            //    element (the iOS simulator, an unentitled macOS test binary, a host-JVM unit-test run).
+            //  - Available where a real backend resolves: the Android Keystore (emulator/device) or the
+            //    Apple Secure Enclave (entitled device). There, a provider-minted key must actually work.
+            when (val hw = CryptoCapabilities.hardware) {
+                is HardwareSupport.Unavailable -> Unit
+                is HardwareSupport.Available -> assertRealProviderWorks(hw.provider)
+            }
+        }
+
+    /** A real (non-fake) provider must round-trip its eligible primitives and expose the verify key. */
+    private suspend fun assertRealProviderWorks(provider: HardwareKeyProvider) {
+        // Every shipping secure element backs ECDSA P-256; prove a real sign → verify-under-public-key.
+        assertTrue(provider.eligible(HardwareAlgorithm.EcdsaP256), "a real provider backs ECDSA P-256")
+        val signing = provider.generateSigning(SignatureScheme.EcdsaP256, grant)
+        try {
+            assertEquals(KeyProvenance.Hardware, signing.provenance)
+            val vk = assertNotNull(signing.verifyKey, "a provider-minted signing key exposes its public verify key")
+            val ops = signatureAsyncOrNull(SignatureScheme.EcdsaP256)
+            if (ops != null) {
+                val message = ascii("real hardware-backed signature")
+                val signature = ops.sign(signing, message)
+                assertTrue(ops.verify(vk, message, signature), "real hw-sign must verify under its public key")
+            }
+        } finally {
+            signing.close()
+        }
+
+        // AES-GCM is backed by StrongBox/TEE (Android) but not the Enclave (Apple) — gate on eligibility.
+        if (provider.eligible(HardwareAlgorithm.AesGcm)) {
+            val aes = provider.generateAesGcm(grant)
+            try {
+                assertEquals(KeyProvenance.Hardware, aes.provenance)
+                val ops = aesGcmAsyncOps()
+                val plaintext = ascii("real hardware-backed AES-GCM payload")
+                val sealed = ops.seal(aes, plaintext, Aad.Of(ascii("ctx")))
+                val opened = ops.open(sealed, aes, Aad.Of(ascii("ctx")))
+                assertEquals(plaintext.toHex(), opened.toHex(), "real hw-seal → hw-open must round-trip")
+            } finally {
+                aes.close()
+            }
+        }
     }
 
     @Test
@@ -139,6 +182,19 @@ class HardwareKeyConformanceTest {
                 !ops.verify(pair.verifyKey, ascii("other message"), signature),
                 "signature must not verify a different message",
             )
+        }
+
+    @Test
+    fun hardwareSigningKeyExposesItsVerifyKey() =
+        runTest {
+            if (!supportsEcdsaSigningFromScalar) return@runTest
+            val pair = provider.signingPair(grant)
+            val ops = signatureAsyncOrNull(SignatureScheme.EcdsaP256) ?: return@runTest
+            // The public SigningKey.verifyKey accessor surfaces the provider-captured public key.
+            val vk = assertNotNull(pair.hardware.verifyKey, "a hardware signing key exposes its verify key via SigningKey.verifyKey")
+            val message = ascii("verifyKey accessor")
+            val signature = ops.sign(pair.hardware, message)
+            assertTrue(ops.verify(vk, message, signature), "the accessor's verify key verifies the signature")
         }
 
     @Test

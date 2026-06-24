@@ -152,11 +152,27 @@ sealed interface HardwareSupport {
 }
 
 /**
- * The hardware-backed key capability on this platform. Always [HardwareSupport.Unavailable] in 6.0:
- * no platform yet wires a secure element. A plain `val` (not `expect`/`actual`) precisely because no
- * `actual` constructs hardware today; a later minor adds backends without changing this signature.
+ * The hardware-backed key capability on this platform: [HardwareSupport.Available] where a secure
+ * element / keystore backend is wired and actually usable (Android Keystore, Apple Secure Enclave),
+ * [HardwareSupport.Unavailable] elsewhere (JVM, JS/WASM, Linux).
+ *
+ * A plain `val` (not `expect`/`actual`) by design: the *public* signature is frozen, and a backend
+ * resolves through the **internal** [platformHardwareKeyProvider] seam, so a later platform can wire
+ * a provider without changing this declaration. The seam is `internal`, so it never enters the
+ * public ABI.
  */
-val CryptoCapabilities.hardware: HardwareSupport get() = HardwareSupport.Unavailable
+val CryptoCapabilities.hardware: HardwareSupport get() =
+    platformHardwareKeyProvider()
+        ?.let { HardwareSupport.Available(it) }
+        ?: HardwareSupport.Unavailable
+
+/**
+ * The platform's hardware-backed key provider, or `null` when this platform wires none (or the
+ * secure element is present but not actually usable — e.g. an unentitled test binary). `internal`
+ * and `expect`/`actual` so it stays out of the public ABI while [CryptoCapabilities.hardware]'s
+ * signature remains frozen. Implementations resolve a cheap, cached singleton.
+ */
+internal expect fun platformHardwareKeyProvider(): HardwareKeyProvider?
 
 // =============================================================================
 // Internal hardware-backed key impls — gated async closures, never exportable material
@@ -188,11 +204,15 @@ internal class HardwareAesGcmKey(
     override val sizeBits: Int,
     val gatedSeal: HardwareAesGcmSeal,
     val gatedOpen: HardwareAesGcmOpen,
+    private val onClose: () -> Unit = {},
 ) : AesGcmKey {
     override val provenance: KeyProvenance get() = KeyProvenance.Hardware
 
-    /** Opaque handle; there is no process-memory material to wipe. */
-    override fun close() = Unit
+    /**
+     * Opaque handle; there is no process-memory material to wipe. [onClose] lets a provider release
+     * an out-of-process resource (e.g. delete the keystore alias). Defaults to a no-op.
+     */
+    override fun close() = onClose()
 }
 
 /**
@@ -203,9 +223,24 @@ internal class HardwareAesGcmKey(
 internal class HardwareSigningKey(
     override val scheme: SignatureScheme,
     val gatedSign: HardwareSign,
+    /** The public key matching this signing key, captured by the provider at generation. */
+    val verifyKey: VerifyKey,
+    private val onClose: () -> Unit = {},
 ) : SigningKey {
     override val provenance: KeyProvenance get() = KeyProvenance.Hardware
 
-    /** Opaque handle; there is no process-memory material to wipe. */
-    override fun close() = Unit
+    /**
+     * Opaque handle; there is no process-memory material to wipe. [onClose] lets a provider release
+     * an out-of-process resource (e.g. delete the keystore alias). Defaults to a no-op.
+     */
+    override fun close() = onClose()
 }
+
+/**
+ * The public [VerifyKey] matching this signing key, when known. A provider-minted hardware signing
+ * key always carries the public key the secure element produced at generation (signatures from a
+ * non-exportable hardware key are useless without a way to publish the verifier). In-memory signing
+ * keys return `null` — their public key is not tracked today (a non-breaking enhancement could add
+ * it later).
+ */
+val SigningKey.verifyKey: VerifyKey? get() = (this as? HardwareSigningKey)?.verifyKey

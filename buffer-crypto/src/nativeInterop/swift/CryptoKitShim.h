@@ -80,4 +80,17 @@ int32_t bcks_ecdsa_sign_from_scalar(
     uint8_t *sigOut, size_t sigCap,
     size_t *sigLenOut);
 
+// Secure Enclave (hardware-backed P-256 signing).
+int32_t bcks_secure_enclave_available(void);
+
+int32_t bcks_secure_enclave_p256_generate(
+    uint8_t *blobOut, size_t blobCap, size_t *blobLenOut,
+    uint8_t *pointOut, size_t pointCap, size_t *pointLenOut);
+
+int32_t bcks_secure_enclave_p256_sign(
+    const uint8_t *blobPtr, size_t blobLen,
+    const uint8_t *msgPtr, size_t msgLen,
+    uint8_t *sigOut, size_t sigCap,
+    size_t *sigLenOut);
+
 #endif // BUFFER_CRYPTO_CRYPTOKIT_SHIM_H

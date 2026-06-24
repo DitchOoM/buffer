@@ -90,6 +90,7 @@ internal class FakeHardware(
                     if (!auth.authorize()) throw AuthorizationFailed()
                     signAsyncPlatform(inner, message, factory)
                 },
+                verifyKey = verifyKey,
             )
         return SigningPair(hardware, verifyKey)
     }

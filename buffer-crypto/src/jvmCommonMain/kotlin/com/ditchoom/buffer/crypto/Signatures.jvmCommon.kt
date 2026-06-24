@@ -61,7 +61,7 @@ actual fun CryptoCapabilities.signatures(scheme: SignatureScheme): SignatureSupp
 // heap buffers expose their backing range, others copy via toByteArray().
 // ---------------------------------------------------------------------------
 
-private fun ReadBuffer.remainingBytes(): ByteArray {
+internal fun ReadBuffer.remainingBytes(): ByteArray {
     val managed = managedMemoryAccess
     return if (managed != null) {
         managed.backingArray.copyOfRange(

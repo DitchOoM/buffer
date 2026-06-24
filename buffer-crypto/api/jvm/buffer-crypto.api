@@ -183,6 +183,7 @@ public final class com/ditchoom/buffer/crypto/HardwareKeySpec {
 
 public final class com/ditchoom/buffer/crypto/HardwareKeysKt {
 	public static final fun getHardware (Lcom/ditchoom/buffer/crypto/CryptoCapabilities;)Lcom/ditchoom/buffer/crypto/HardwareSupport;
+	public static final fun getVerifyKey (Lcom/ditchoom/buffer/crypto/SigningKey;)Lcom/ditchoom/buffer/crypto/VerifyKey;
 }
 
 public abstract interface class com/ditchoom/buffer/crypto/HardwareSupport {

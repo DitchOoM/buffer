@@ -234,3 +234,56 @@ public func bcks_ecdsa_sign_from_scalar(
     }
     return emit(sig, sigOut, sigCap, sigLenOut)
 }
+
+// =============================================================================
+// Secure Enclave (hardware-backed P-256 signing) — CryptoKit SecureEnclave.P256.Signing
+// =============================================================================
+//
+// The Secure Enclave generates and holds the P-256 private key; the key never leaves the element.
+// `dataRepresentation` is an *encrypted* blob that only the same Enclave can restore — it is NOT the
+// private key and is safe to persist / pass around. Signing reconstructs the key handle from that
+// blob and signs inside the Enclave, emitting DER (matching the cross-platform ECDSA contract).
+//
+// AES-GCM is deliberately NOT offered: CryptoKit exposes no symmetric Secure Enclave key, and the
+// only "Enclave-tied" AES one could build (ECDH a P-256 Enclave key, derive a symmetric key, run
+// AES.GCM in software) would put the AES key in process memory — violating the non-exportable
+// hardware-key contract. So the Enclave provider backs signatures only.
+
+// 1 if a Secure Enclave is present on this device, else 0. (Presence only — actual usability also
+// depends on code-signing entitlements, which the Kotlin side probes by attempting a generation.)
+@_cdecl("bcks_secure_enclave_available")
+public func bcks_secure_enclave_available() -> Int32 {
+    return SecureEnclave.isAvailable ? 1 : 0
+}
+
+// Generate a P-256 signing key inside the Secure Enclave. Writes the persistent encrypted key blob
+// into blobOut and the uncompressed SEC1 public point (04 ‖ X ‖ Y) into pointOut.
+@_cdecl("bcks_secure_enclave_p256_generate")
+public func bcks_secure_enclave_p256_generate(
+    _ blobOut: UnsafeMutablePointer<UInt8>?, _ blobCap: Int,
+    _ blobLenOut: UnsafeMutablePointer<Int>?,
+    _ pointOut: UnsafeMutablePointer<UInt8>?, _ pointCap: Int,
+    _ pointLenOut: UnsafeMutablePointer<Int>?
+) -> Int32 {
+    guard SecureEnclave.isAvailable else { return BCKS_ERR_INTERNAL }
+    guard let key = try? SecureEnclave.P256.Signing.PrivateKey() else { return BCKS_ERR_INTERNAL }
+    let s = emit(key.dataRepresentation, blobOut, blobCap, blobLenOut)
+    if s != BCKS_OK { return s }
+    return emit(key.publicKey.x963Representation, pointOut, pointCap, pointLenOut)
+}
+
+// Sign message with the Enclave key reconstructed from its blob; emits a DER signature. Returns
+// BCKS_ERR_INPUT if the blob is not restorable by this Enclave.
+@_cdecl("bcks_secure_enclave_p256_sign")
+public func bcks_secure_enclave_p256_sign(
+    _ blobPtr: UnsafePointer<UInt8>?, _ blobLen: Int,
+    _ msgPtr: UnsafePointer<UInt8>?, _ msgLen: Int,
+    _ sigOut: UnsafeMutablePointer<UInt8>?, _ sigCap: Int,
+    _ sigLenOut: UnsafeMutablePointer<Int>?
+) -> Int32 {
+    guard let key = try? SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: bytes(blobPtr, blobLen)) else {
+        return BCKS_ERR_INPUT
+    }
+    guard let sig = try? key.signature(for: bytes(msgPtr, msgLen)) else { return BCKS_ERR_INTERNAL }
+    return emit(sig.derRepresentation, sigOut, sigCap, sigLenOut)
+}
