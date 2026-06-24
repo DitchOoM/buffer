@@ -143,6 +143,29 @@ public final class com/ditchoom/buffer/crypto/CryptoRandom_jvmCommonKt {
 	public static final fun cryptoRandomInto (Lcom/ditchoom/buffer/WriteBuffer;)V
 }
 
+public final class com/ditchoom/buffer/crypto/EcEncodingError : java/lang/Enum {
+	public static final field IntegerTooWide Lcom/ditchoom/buffer/crypto/EcEncodingError;
+	public static final field MalformedDer Lcom/ditchoom/buffer/crypto/EcEncodingError;
+	public static final field NegativeInteger Lcom/ditchoom/buffer/crypto/EcEncodingError;
+	public static final field NonMinimalInteger Lcom/ditchoom/buffer/crypto/EcEncodingError;
+	public static final field UnsupportedScheme Lcom/ditchoom/buffer/crypto/EcEncodingError;
+	public static final field WrongSignatureLength Lcom/ditchoom/buffer/crypto/EcEncodingError;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/ditchoom/buffer/crypto/EcEncodingError;
+	public static fun values ()[Lcom/ditchoom/buffer/crypto/EcEncodingError;
+}
+
+public final class com/ditchoom/buffer/crypto/EcEncodingException : com/ditchoom/buffer/crypto/CryptoMisuseException {
+	public final fun getError ()Lcom/ditchoom/buffer/crypto/EcEncodingError;
+}
+
+public final class com/ditchoom/buffer/crypto/EcInteropKt {
+	public static final fun ecdsaSignatureToDer (Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun ecdsaSignatureToDer$default (Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static final fun ecdsaSignatureToP1363 (Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun ecdsaSignatureToP1363$default (Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+}
+
 public final class com/ditchoom/buffer/crypto/EcdsaSignatureEncoding : java/lang/Enum {
 	public static final field Der Lcom/ditchoom/buffer/crypto/EcdsaSignatureEncoding;
 	public static final field P1363 Lcom/ditchoom/buffer/crypto/EcdsaSignatureEncoding;
