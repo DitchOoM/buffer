@@ -770,6 +770,8 @@ internal class CodecEmitter(
             is FieldSpec.LengthFromMessage -> appendDecodeLengthFromMessage(body, field)
             is FieldSpec.RemainingBytesProtocolMessageList ->
                 appendDecodeRemainingBytesProtocolMessageList(body, field)
+            is FieldSpec.CountPrefixedProtocolMessageList ->
+                appendDecodeCountPrefixedProtocolMessageList(body, field)
             is FieldSpec.RemainingBytesPayload -> appendDecodeRemainingBytesPayload(body, field)
             is FieldSpec.RemainingBytesString -> appendDecodeRemainingBytesString(body, field)
             is FieldSpec.UseCodecScalar -> appendDecodeUseCodecScalar(body, field)
@@ -853,6 +855,8 @@ internal class CodecEmitter(
             is FieldSpec.LengthFromMessage -> appendEncodeLengthFromMessage(body, field)
             is FieldSpec.RemainingBytesProtocolMessageList ->
                 appendEncodeRemainingBytesProtocolMessageList(body, field)
+            is FieldSpec.CountPrefixedProtocolMessageList ->
+                appendEncodeCountPrefixedProtocolMessageList(body, field)
             is FieldSpec.RemainingBytesPayload -> appendEncodeRemainingBytesPayload(body, field)
             is FieldSpec.RemainingBytesString -> appendEncodeRemainingBytesString(body, field)
             is FieldSpec.UseCodecScalar -> appendEncodeUseCodecScalar(body, field, shape)
@@ -1796,6 +1800,11 @@ internal class CodecEmitter(
             is FieldSpec.LengthFromString -> ClassName("kotlin", "String")
             is FieldSpec.LengthFromMessage -> field.messageType
             is FieldSpec.LengthFromList ->
+                ClassName("kotlin.collections", "List").parameterizedBy(field.elementClassName)
+            is FieldSpec.CountPrefixedProtocolMessageList ->
+                // Self-delimiting, so a `@Count` list may sit as a non-terminal
+                // header field ahead of a trailing RemainingBytesPayload; map it
+                // to its `List<Element>` Kotlin type (mirror of LengthFromList).
                 ClassName("kotlin.collections", "List").parameterizedBy(field.elementClassName)
             is FieldSpec.RemainingBytesProtocolMessageList ->
                 error(

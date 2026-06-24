@@ -140,6 +140,8 @@ internal object CodecSchemaDescriptor {
                     "codec=${field.payloadCodecType.canonicalName}"
             is FieldSpec.RemainingBytesProtocolMessageList ->
                 "list:${field.elementClassName.canonicalName} remaining reserved=${field.reservedTrailingBytes}B"
+            is FieldSpec.CountPrefixedProtocolMessageList ->
+                "list:${field.elementClassName.canonicalName} count-prefixed"
             is FieldSpec.LengthFromList ->
                 "list:${field.elementClassName.canonicalName} len-from=${describeLengthSource(field.source)}"
             is FieldSpec.LengthFromString ->

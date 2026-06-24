@@ -127,14 +127,26 @@ internal fun buildWireSizeFun(
         builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
         return builder.build()
     }
+    // `@Count List<E>` with a BackPatch-shaped element collapses to BackPatch
+    // for the same reason `@RemainingBytes List<E>` does: the runtime-Exact emit
+    // below casts each element wireSize `as Exact`, which would CCE on a
+    // BackPatch element variant.
+    if (shape.fields.any { it is FieldSpec.CountPrefixedProtocolMessageList && it.elementIsBackPatch }) {
+        builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+        return builder.build()
+    }
 
     // Runtime-Exact: the message's only variable-width fields are runtime-Exact — a
-    // `VariableLengthCodec`-backed `@UseCodec` scalar (reports `Exact(encodedLength)`), or an enum
-    // whose ordinal rides as an `UnsignedVarIntCodec` varint — and every other field is FixedSize.
+    // `VariableLengthCodec`-backed `@UseCodec` scalar (reports `Exact(encodedLength)`), an enum
+    // whose ordinal rides as an `UnsignedVarIntCodec` varint, or a `@Count` element-count list
+    // (varint(N) + sum of element wireSizes) — and every other field is FixedSize.
     // Sum the compile-time fixed bytes with each variable field's runtime `Exact` (the same
     // `as Exact` cast LengthPrefixedMessage uses) so enclosing messages keep the precompute path
     // instead of degrading to BackPatch. Mirrors the peekFrameSize walk's shape.
-    fun isRuntimeExactVar(f: FieldSpec): Boolean = (f is FieldSpec.UseCodecScalar && f.isVariableLength) || f is FieldSpec.EnumScalar
+    fun isRuntimeExactVar(f: FieldSpec): Boolean =
+        (f is FieldSpec.UseCodecScalar && f.isVariableLength) ||
+            f is FieldSpec.EnumScalar ||
+            f is FieldSpec.CountPrefixedProtocolMessageList
     val runtimeExactVarFields = shape.fields.filter { isRuntimeExactVar(it) }
     if (runtimeExactVarFields.isNotEmpty() &&
         shape.fields.all { it is FieldSpec.FixedSize || isRuntimeExactVar(it) }
@@ -158,6 +170,8 @@ internal fun buildWireSizeFun(
                         f.name,
                         WIRE_SIZE_CN,
                     )
+                is FieldSpec.CountPrefixedProtocolMessageList ->
+                    appendCountListWireSizeLocal(builder, f)
                 else -> {}
             }
         }
@@ -257,4 +271,34 @@ internal fun buildWireSizeFun(
         }
     }
     return builder.build()
+}
+
+/**
+ * Emit the `__<name>Size` local for a `@Count` element-count list inside the
+ * runtime-Exact wireSize sum: the varint width of the element count plus the
+ * sum of element wireSizes (each cast `as Exact`, the same convention the other
+ * runtime-Exact summations use). A BackPatch element variant CCEs on the cast —
+ * such shapes are diverted to BackPatch by the upfront `elementIsBackPatch`
+ * guard, so this branch only runs for Exact-measured elements.
+ */
+internal fun appendCountListWireSizeLocal(
+    builder: FunSpec.Builder,
+    field: FieldSpec.CountPrefixedProtocolMessageList,
+) {
+    val countSizeVar = "__${field.name}CountSize"
+    builder.addStatement(
+        "val %L = (%T.wireSize(value.%L.size.toUInt(), context) as %T.Exact).bytes",
+        countSizeVar,
+        UNSIGNED_VARINT_CODEC_CN,
+        field.name,
+        WIRE_SIZE_CN,
+    )
+    builder.addStatement(
+        "val %L = %L + value.%L.sumOf { (%T.wireSize(it, context) as %T.Exact).bytes }",
+        "__${field.name}Size",
+        countSizeVar,
+        field.name,
+        field.elementCodecClassName,
+        WIRE_SIZE_CN,
+    )
 }

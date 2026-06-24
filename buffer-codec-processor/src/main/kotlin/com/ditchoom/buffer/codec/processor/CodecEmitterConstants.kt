@@ -106,3 +106,10 @@ internal val STRING_NULLABLE_TN = ClassName("kotlin", "String").copy(nullable = 
 
 // The shipped unsigned-LEB128 codec a generated enum field rides its ordinal on.
 internal val UNSIGNED_VARINT_CODEC_CN = ClassName("com.ditchoom.buffer.codec", "UnsignedVarIntCodec")
+
+// Upper bound on the initial capacity a `@Count` list decode pre-allocates from
+// the decoded element count. A hostile varint can request up to 2^31-1 elements;
+// pre-sizing to that would let a few header bytes force a huge allocation. The
+// list still grows past this cap when a frame legitimately carries more elements
+// (the underlying buffer reads fail fast long before that on a truncated frame).
+internal const val COUNT_PREFETCH_CAP = 1024

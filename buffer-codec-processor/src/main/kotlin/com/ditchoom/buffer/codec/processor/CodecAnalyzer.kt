@@ -496,6 +496,7 @@ internal fun analyzeField(
     var remainingBytesAnn: KSAnnotation? = null
     var wireBytesAnn: KSAnnotation? = null
     var useCodecAnn: KSAnnotation? = null
+    var countAnn: KSAnnotation? = null
     for (ann in param.annotations) {
         when (ann.shortName.asString()) {
             "WireOrder" -> { /* allowed on scalars */ }
@@ -504,6 +505,7 @@ internal fun analyzeField(
             "RemainingBytes" -> remainingBytesAnn = ann
             "WireBytes" -> wireBytesAnn = ann
             "UseCodec" -> useCodecAnn = ann
+            "Count" -> countAnn = ann
             else ->
                 return FieldAnalysis.Err(
                     Diagnostic(
@@ -524,6 +526,36 @@ internal fun analyzeField(
         return FieldAnalysis.Err(
             Diagnostic("nullable field type requires @When (T? without @When is unsupported)", param),
         )
+    }
+
+    // `@Count val: List<@ProtocolMessage T>` — an element-count-prefixed
+    // list (varint(N) + N self-delimiting elements). Mutually exclusive with
+    // the byte-length list framings (@LengthPrefixed / @LengthFrom /
+    // @RemainingBytes) and with @WireBytes / @UseCodec — combining any is a
+    // compile error. The field-count framing is self-delimiting, so unlike
+    // the drain-to-limit shapes it is not terminal-only.
+    if (countAnn != null) {
+        if (lengthPrefixed != null || lengthFromAnn != null || remainingBytesAnn != null) {
+            return FieldAnalysis.Err(
+                Diagnostic(
+                    "@Count cannot be combined with @LengthPrefixed/@LengthFrom/@RemainingBytes " +
+                        "on the same field — these are alternative list framings (element-count " +
+                        "prefix vs. byte-length bound). Choose one.",
+                    param,
+                ),
+            )
+        }
+        if (wireBytesAnn != null || useCodecAnn != null) {
+            return FieldAnalysis.Err(
+                Diagnostic("@Count cannot be combined with @WireBytes/@UseCodec", param),
+            )
+        }
+        if (type.declaration.qualifiedName?.asString() != "kotlin.collections.List") {
+            return FieldAnalysis.Err(
+                Diagnostic("@Count supports only List<@ProtocolMessage>", param),
+            )
+        }
+        return analyzeCountListField(param, type, ownerSimpleName)
     }
 
     if (remainingBytesAnn != null) {
@@ -1312,6 +1344,77 @@ internal fun analyzeRemainingBytesProtocolMessageListField(
     }
     return FieldAnalysis.Ok(
         FieldSpec.RemainingBytesProtocolMessageList(
+            name = name,
+            ownerSimpleName = ownerSimpleName,
+            elementClassName = classNameOf(elementDecl),
+            elementCodecClassName =
+                ClassName(
+                    elementDecl.packageName.asString(),
+                    elementDecl.flattenedCodecName(),
+                ),
+            elementIsBackPatch = detectElementBackPatch(elementDecl),
+        ),
+    )
+}
+
+/**
+ * `@Count val: List<T>` where `T` is a `@ProtocolMessage data class`
+ * (or a sealed parent with `@DispatchOn`). The element-count complement to
+ * [analyzeRemainingBytesProtocolMessageListField]: same element-type
+ * universe (data class OR sealed parent, `@ProtocolMessage`-annotated,
+ * non-payload-generic) and the same by-name `${T.simpleName}Codec`
+ * resolution; only the framing differs (a varint element count vs. a
+ * caller-set byte limit). Produces [FieldSpec.CountPrefixedProtocolMessageList].
+ */
+internal fun analyzeCountListField(
+    param: KSValueParameter,
+    listType: KSType,
+    ownerSimpleName: String,
+): FieldAnalysis {
+    val name =
+        param.name?.asString() ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
+    val typeArgs = listType.arguments
+    if (typeArgs.size != 1) {
+        return FieldAnalysis.Err(Diagnostic("@Count List must have exactly one type argument", param))
+    }
+    val elementType =
+        typeArgs[0].type?.resolve()
+            ?: return FieldAnalysis.Err(Diagnostic("@Count List element type does not resolve", param))
+    if (elementType.isError || elementType.isMarkedNullable) {
+        return FieldAnalysis.Err(
+            Diagnostic("@Count List element must be a resolvable non-nullable type", param),
+        )
+    }
+    val elementDecl =
+        elementType.declaration as? KSClassDeclaration
+            ?: return FieldAnalysis.Err(Diagnostic("@Count List element is not a class declaration", param))
+    val isDataClass = Modifier.DATA in elementDecl.modifiers
+    val isSealed = Modifier.SEALED in elementDecl.modifiers
+    if (!isDataClass && !isSealed) {
+        return FieldAnalysis.Err(
+            Diagnostic("@Count List element must be a @ProtocolMessage data class or sealed parent", param),
+        )
+    }
+    val isProtocolMessage =
+        elementDecl.annotations.any { ann ->
+            ann.shortName.asString() == "ProtocolMessage" &&
+                ann.annotationType
+                    .resolve()
+                    .declaration.qualifiedName
+                    ?.asString() == PROTOCOL_MESSAGE_QNAME
+        }
+    if (!isProtocolMessage) {
+        return FieldAnalysis.Err(
+            Diagnostic("@Count List element must be annotated @ProtocolMessage", param),
+        )
+    }
+    if (detectPayloadTypeParameter(elementDecl) != null) {
+        return FieldAnalysis.Err(
+            Diagnostic("@Count List element cannot carry a <P : Payload> type parameter", param),
+        )
+    }
+    return FieldAnalysis.Ok(
+        FieldSpec.CountPrefixedProtocolMessageList(
             name = name,
             ownerSimpleName = ownerSimpleName,
             elementClassName = classNameOf(elementDecl),
@@ -2975,6 +3078,19 @@ internal fun classifyVariantWireSize(shape: CodecShape): VariantWireSize {
     ) {
         return VariantWireSize.BackPatch
     }
+    // `@Count List<E>` with a BackPatch-shaped element collapses to
+    // BackPatch for the same reason — see [buildWireSizeFun].
+    if (shape.fields.any { it is FieldSpec.CountPrefixedProtocolMessageList && it.elementIsBackPatch }) {
+        return VariantWireSize.BackPatch
+    }
+    // A `@Count List<E>` (Exact-element) is runtime-Exact: the variant
+    // codec's own wireSize sums the varint count width and the element
+    // wireSizes (the `as Exact` cast); the dispatcher forwards without
+    // re-deriving. Early-return (like the enum case) so a non-terminal
+    // `@Count` field isn't dropped by the terminal `when`'s FixedSize sum.
+    if (shape.fields.any { it is FieldSpec.CountPrefixedProtocolMessageList }) {
+        return VariantWireSize.RuntimeExact
+    }
     // Non-terminal `@RemainingBytes*` collapses the variant
     // codec's wireSize to BackPatch (see [buildWireSizeFun] above);
     // the dispatcher's per-variant size table mirrors that.
@@ -3013,6 +3129,10 @@ internal fun classifyVariantWireSize(shape: CodecShape): VariantWireSize {
         // sum of element wireSizes via runtime `as Exact` cast); the
         // dispatcher forwards without re-deriving.
         is FieldSpec.RemainingBytesProtocolMessageList -> VariantWireSize.RuntimeExact
+        // Handled by the upfront `any CountPrefixedProtocolMessageList` early-returns above
+        // (BackPatch for BackPatch-element, RuntimeExact otherwise); defensive branch keeps
+        // the `when` exhaustive.
+        is FieldSpec.CountPrefixedProtocolMessageList -> VariantWireSize.RuntimeExact
         is FieldSpec.Scalar, is FieldSpec.ValueClassScalar, null ->
             VariantWireSize.LiteralExact(shape.fields.sumOfFixedWireBytes().requireFixed("sumOfFixedWireBytes"))
         is FieldSpec.LengthPrefixedString, is FieldSpec.Conditional -> VariantWireSize.BackPatch

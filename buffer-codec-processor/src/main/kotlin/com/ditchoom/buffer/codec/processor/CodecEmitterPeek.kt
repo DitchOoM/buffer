@@ -223,6 +223,16 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
         builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
         return builder.build()
     }
+    // `@Count List<@ProtocolMessage T>` collapses peek to NoFraming. The
+    // element-count prefix gives the number of elements, not a byte span, so
+    // the total frame size can only be recovered by decoding each element
+    // (variable-width) — which peek must not do. A stream-side consumer frames
+    // such a message via its outer protocol, identical to the byte-length list
+    // shapes above.
+    if (shape.fields.any { it is FieldSpec.CountPrefixedProtocolMessageList }) {
+        builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+        return builder.build()
+    }
     // Same NoFraming collapse for `@RemainingBytes
     // @UseCodec val: P`. Body byte count is whatever the user codec
     // reads against the caller-set limit; 's outer
@@ -816,6 +826,11 @@ internal fun appendSequentialPeek(
                     "RemainingBytesProtocolMessageList should be handled by " +
                         "buildPeekFrameFun's upfront NoFraming short-circuit before reaching " +
                         "the sequential walk.",
+                )
+            is FieldSpec.CountPrefixedProtocolMessageList ->
+                error(
+                    "CountPrefixedProtocolMessageList should be handled by buildPeekFrameFun's " +
+                        "upfront NoFraming short-circuit before reaching the sequential walk.",
                 )
             is FieldSpec.RemainingBytesPayload ->
                 error(

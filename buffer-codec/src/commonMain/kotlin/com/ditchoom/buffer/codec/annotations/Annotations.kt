@@ -271,6 +271,52 @@ annotation class LengthFrom(
 )
 
 /**
+ * Marks an element-count-prefixed list field: a self-delimiting count of
+ * `N` elements (encoded as an unsigned LEB128 variable-length integer via
+ * the shipped `UnsignedVarIntCodec`), followed by exactly `N` encoded
+ * elements. Each element is self-delimiting through its own codec, so the
+ * decoder reads the count and then loops exactly `N` times — no byte-length
+ * bound is required.
+ *
+ * This is the element-count complement to the byte-length list framings
+ * ([LengthPrefixed], [LengthFrom], [RemainingBytes]), which all bound a
+ * list by a *byte span* and drain to a buffer limit. `@Count` instead
+ * carries the element *count*, so the field is self-delimiting and need
+ * not be the terminal constructor parameter.
+ *
+ * Accepted on `List<T>` where `T` is a `@ProtocolMessage` data class or
+ * sealed parent (the same element-type universe as `@RemainingBytes
+ * val: List<T>` / `@LengthFrom val: List<T>`). The element codec resolves
+ * by-name to `${T.simpleName}Codec` in `T`'s package.
+ *
+ * ```kotlin
+ * @ProtocolMessage
+ * data class Point(val x: Short, val y: Short)
+ *
+ * @ProtocolMessage
+ * data class Path(
+ *     val id: UInt,
+ *     @Count val points: List<Point>,   // varint(points.size) then each Point
+ * )
+ * ```
+ *
+ * Wire layout:
+ * ```text
+ *   +---------------------+----------------------------+
+ *   | varint(N)           | element_0 element_1 …      |
+ *   +---------------------+----------------------------+
+ * ```
+ *
+ * **Mutually exclusive** with [LengthPrefixed], [LengthFrom], and
+ * [RemainingBytes] on the same parameter — those are the alternative
+ * byte-length list framings. Combining `@Count` with any of them is a
+ * compile error.
+ */
+@Target(AnnotationTarget.VALUE_PARAMETER)
+@Retention(AnnotationRetention.BINARY)
+annotation class Count
+
+/**
  * Overrides the wire width of a numeric field. The [value] specifies the number
  * of bytes on the wire (1-8). Must not exceed the Kotlin type's natural size.
  * Cannot be used on `Float`, `Double`, or `Boolean`.
