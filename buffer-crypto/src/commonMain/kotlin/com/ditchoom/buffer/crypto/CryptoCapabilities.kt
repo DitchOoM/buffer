@@ -3,12 +3,12 @@ package com.ditchoom.buffer.crypto
 /**
  * One discoverable surface for the per-platform crypto capability flags that vary by platform.
  *
- * AEAD, signature, and key-agreement capability are **not** here — each is reified as a capability
- * witness ([Aead] / [OptionalAead] via [CryptoCapabilities.aesGcm] / [CryptoCapabilities.chaChaPoly];
- * [SignatureSupport] via [CryptoCapabilities.signatures]; [KeyAgreementSupport] via
- * [CryptoCapabilities.keyAgreement]), so an unsupported op is unrepresentable rather than a boolean
- * a caller might forget to check. The HPKE flag below remains a plain boolean pending its own
- * witness reshape.
+ * AEAD, signature, key-agreement, and HPKE capability are **not** here — each is reified as a
+ * capability witness ([Aead] / [OptionalAead] via [CryptoCapabilities.aesGcm] /
+ * [CryptoCapabilities.chaChaPoly]; [SignatureSupport] via [CryptoCapabilities.signatures];
+ * [KeyAgreementSupport] via [CryptoCapabilities.keyAgreement]; [HpkeSupport] via
+ * [CryptoCapabilities.hpke]), so an unsupported op is unrepresentable rather than a boolean a caller
+ * might forget to check.
  *
  * ```kotlin
  * // AEAD: exhaustive when over the witness — the web (AsyncOnly) cannot reach sealBlocking.
@@ -24,8 +24,11 @@ package com.ditchoom.buffer.crypto
  *     SignatureSupport.Unavailable  -> { /* not reachable here */ }
  * }
  *
- * // HPKE: check the whole suite before use.
- * if (CryptoCapabilities.hpke(suite)) { /* setup sender/receiver */ }
+ * // HPKE: the suite ops are reachable only through the Supported witness.
+ * when (val h = CryptoCapabilities.hpke(suite)) {
+ *     is HpkeSupport.Supported   -> h.ops.sealBase(recipientPublicKey, info, plaintext)
+ *     is HpkeSupport.Unsupported -> { /* h.missing names the absent primitive */ }
+ * }
  * ```
  */
 object CryptoCapabilities {
@@ -34,7 +37,4 @@ object CryptoCapabilities {
      * capability, not an op variant: ECDSA *verification* is available on every platform regardless).
      */
     val ecdsaSigningFromScalar: Boolean get() = supportsEcdsaSigningFromScalar
-
-    /** Whether the HPKE [suite] is usable on this platform — its KEM curve and AEAD are both available. */
-    fun hpke(suite: HpkeSuite): Boolean = hpkeSupported(suite)
 }

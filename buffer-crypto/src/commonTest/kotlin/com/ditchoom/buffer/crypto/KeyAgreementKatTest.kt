@@ -29,9 +29,9 @@ class KeyAgreementKatTest {
     ): String {
         val out =
             Hkdf.derive(
-                salt = CryptoTestVectors.ascii(katSalt),
+                salt = Salt.Of(CryptoTestVectors.ascii(katSalt)),
                 ikm = hexBuffer(rawSecretHex),
-                info = CryptoTestVectors.ascii(katInfo),
+                info = Info.Of(CryptoTestVectors.ascii(katInfo)),
                 length = length,
                 factory = BufferFactory.Default,
             )

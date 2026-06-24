@@ -33,10 +33,6 @@ import platform.posix.size_tVar
  * surfaces as BCL_AUTH_FAIL and we raise the opaque VerificationFailed.
  */
 
-internal actual val supportsSyncAesGcm: Boolean = true
-internal actual val supportsChaChaPoly: Boolean = true
-internal actual val supportsSyncChaChaPoly: Boolean = true
-
 /** AES-GCM is synchronous via BoringSSL's one-shot EVP_AEAD. */
 actual val CryptoCapabilities.aesGcm: Aead<AesGcmKey> get() = Aead.Blocking(AesGcmBlockingOps)
 

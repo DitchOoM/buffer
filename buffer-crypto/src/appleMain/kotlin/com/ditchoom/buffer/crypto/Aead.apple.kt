@@ -51,19 +51,13 @@ import platform.posix.size_tVar
  * pattern and the cross-platform KAT/Wycheproof suite gates them on Mac.
  */
 
-internal actual val supportsSyncAesGcm: Boolean = true
-
-internal actual val supportsChaChaPoly: Boolean = APPLE_CHACHA_POLY_AVAILABLE
-
-internal actual val supportsSyncChaChaPoly: Boolean = APPLE_CHACHA_POLY_AVAILABLE
-
 /** AES-GCM is synchronous via CommonCrypto's streaming GCM API. */
 actual val CryptoCapabilities.aesGcm: Aead<AesGcmKey> get() = Aead.Blocking(AesGcmBlockingOps)
 
 /** ChaCha20-Poly1305 is synchronous via CryptoKit when the bridge is present. */
 actual val CryptoCapabilities.chaChaPoly: OptionalAead<ChaChaPolyKey>
     get() =
-        if (supportsChaChaPoly) {
+        if (APPLE_CHACHA_POLY_AVAILABLE) {
             OptionalAead.Blocking(ChaChaPolyBlockingOps)
         } else {
             OptionalAead.Unavailable
@@ -241,7 +235,7 @@ internal actual fun chaChaPolySeal(
     plaintext: ReadBuffer,
     dest: WriteBuffer,
 ) {
-    if (!supportsSyncChaChaPoly) {
+    if (!APPLE_CHACHA_POLY_AVAILABLE) {
         throw UnsupportedOperationException("ChaCha20-Poly1305 is not supported on this platform")
     }
     requireNonce(nonce)
@@ -255,7 +249,7 @@ internal actual fun chaChaPolyOpen(
     ciphertextAndTag: ReadBuffer,
     dest: WriteBuffer,
 ) {
-    if (!supportsSyncChaChaPoly) {
+    if (!APPLE_CHACHA_POLY_AVAILABLE) {
         throw UnsupportedOperationException("ChaCha20-Poly1305 is not supported on this platform")
     }
     requireNonce(nonce)

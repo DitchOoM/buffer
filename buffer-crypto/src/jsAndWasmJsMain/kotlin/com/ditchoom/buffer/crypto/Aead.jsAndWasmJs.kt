@@ -9,12 +9,12 @@ import com.ditchoom.buffer.WriteBuffer
  * js/wasmJs AEAD.
  *
  * AES-GCM is provided only through the asynchronous WebCrypto path: SubtleCrypto.encrypt /
- * decrypt are Promise-based, so there is no synchronous AES-GCM on the web — supportsSyncAesGcm
+ * decrypt are Promise-based, so there is no synchronous AES-GCM on the web — the aesGcm witness
  * is false and the sync expect funs throw. Use aesGcmSealAsync / aesGcmOpenAsync, which await
  * WebCrypto.
  *
  * ChaCha20-Poly1305 is not part of WebCrypto (w3c/webcrypto#223) and is never polyfilled:
- * supportsChaChaPoly / supportsSyncChaChaPoly are false and every ChaCha entry point — sync and
+ * the chaChaPoly witness is Unavailable and every ChaCha entry point — sync and
  * async — throws UnsupportedOperationException.
  *
  * The bridge marshals key/nonce/AAD/data as lowercase hex strings to the per-target WebCrypto
@@ -25,12 +25,6 @@ import com.ditchoom.buffer.WriteBuffer
  */
 
 private const val NO_CHACHA_POLY = "ChaCha20-Poly1305 is not part of WebCrypto and is not polyfilled"
-
-internal actual val supportsSyncAesGcm: Boolean = false
-
-internal actual val supportsChaChaPoly: Boolean = false
-
-internal actual val supportsSyncChaChaPoly: Boolean = false
 
 /** AES-GCM on the web is async-only (WebCrypto `SubtleCrypto` is Promise-based). */
 actual val CryptoCapabilities.aesGcm: Aead<AesGcmKey> get() = Aead.AsyncOnly(AesGcmAsyncOps)

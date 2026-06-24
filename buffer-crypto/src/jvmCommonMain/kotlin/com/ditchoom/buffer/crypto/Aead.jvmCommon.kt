@@ -35,19 +35,13 @@ private val chaChaPolyAvailable: Boolean =
         false
     }
 
-internal actual val supportsSyncAesGcm: Boolean = true
-
-internal actual val supportsChaChaPoly: Boolean = chaChaPolyAvailable
-
-internal actual val supportsSyncChaChaPoly: Boolean = chaChaPolyAvailable
-
 /** AES-GCM is synchronous via JCA. */
 actual val CryptoCapabilities.aesGcm: Aead<AesGcmKey> get() = Aead.Blocking(AesGcmBlockingOps)
 
 /** ChaCha20-Poly1305 is synchronous via JCA when the transform is present (JDK 11+ / Conscrypt). */
 actual val CryptoCapabilities.chaChaPoly: OptionalAead<ChaChaPolyKey>
     get() =
-        if (supportsChaChaPoly) {
+        if (chaChaPolyAvailable) {
             OptionalAead.Blocking(ChaChaPolyBlockingOps)
         } else {
             OptionalAead.Unavailable
@@ -97,7 +91,7 @@ internal actual fun chaChaPolySeal(
     plaintext: ReadBuffer,
     dest: WriteBuffer,
 ) {
-    if (!supportsSyncChaChaPoly) {
+    if (!chaChaPolyAvailable) {
         throw UnsupportedOperationException("ChaCha20-Poly1305 is not supported on this platform")
     }
     requireNonce(nonce)
@@ -118,7 +112,7 @@ internal actual fun chaChaPolyOpen(
     ciphertextAndTag: ReadBuffer,
     dest: WriteBuffer,
 ) {
-    if (!supportsSyncChaChaPoly) {
+    if (!chaChaPolyAvailable) {
         throw UnsupportedOperationException("ChaCha20-Poly1305 is not supported on this platform")
     }
     requireNonce(nonce)

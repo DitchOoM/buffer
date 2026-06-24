@@ -28,13 +28,13 @@ sealed class HpkeContext protected constructor(
 
     /** RFC 9180 §5.3 secret export: `LabeledExpand(exporter_secret, "sec", context, L)`. */
     fun export(
-        exporterContext: ReadBuffer?,
+        exporterContext: Info,
         length: Int,
         factory: BufferFactory = BufferFactory.Default,
     ): ReadBuffer {
         require(length >= 0) { "export length must be non-negative, was $length" }
         val out = factory.allocate(length)
-        labeledExpand(suite.kdf, suite.suiteId(), exporterSecret, LABEL_SEC, exporterContext, length, out)
+        labeledExpand(suite.kdf, suite.suiteId(), exporterSecret, LABEL_SEC, exporterContext.bytesOrNull, length, out)
         out.resetForRead()
         return out
     }
@@ -96,12 +96,12 @@ sealed class HpkeContext protected constructor(
          */
         suspend fun seal(
             plaintext: ReadBuffer,
-            aad: ReadBuffer? = null,
+            aad: Aad = Aad.None,
             factory: BufferFactory = BufferFactory.Default,
         ): PlatformBuffer {
             val nonce = computeNonce()
             return try {
-                val ct = hpkeAeadSeal(suite.aead, key, nonce, aad, plaintext, factory)
+                val ct = hpkeAeadSeal(suite.aead, key, nonce, aad.bytesOrNull, plaintext, factory)
                 incrementSeq()
                 ct
             } finally {
@@ -127,12 +127,12 @@ sealed class HpkeContext protected constructor(
          */
         suspend fun open(
             ciphertext: ReadBuffer,
-            aad: ReadBuffer? = null,
+            aad: Aad = Aad.None,
             factory: BufferFactory = BufferFactory.Default,
         ): PlatformBuffer {
             val nonce = computeNonce()
             return try {
-                val pt = hpkeAeadOpen(suite.aead, key, nonce, aad, ciphertext, factory)
+                val pt = hpkeAeadOpen(suite.aead, key, nonce, aad.bytesOrNull, ciphertext, factory)
                 incrementSeq()
                 pt
             } finally {
@@ -147,14 +147,14 @@ sealed class HpkeContext protected constructor(
 // =============================================================================
 
 /** SetupBaseS: encapsulate to [recipientPublicKey] and build a Base-mode sender context. */
-suspend fun hpkeSetupBaseSender(
+internal suspend fun hpkeSetupBaseSender(
     suite: HpkeSuite,
     recipientPublicKey: HpkePublicKey,
     info: ReadBuffer,
 ): HpkeSenderSetup = hpkeSetupSender(suite, HpkeMode.Base, recipientPublicKey, info, null, null)
 
 /** SetupPSKS: PSK-mode sender context. */
-suspend fun hpkeSetupPskSender(
+internal suspend fun hpkeSetupPskSender(
     suite: HpkeSuite,
     recipientPublicKey: HpkePublicKey,
     info: ReadBuffer,
@@ -162,7 +162,7 @@ suspend fun hpkeSetupPskSender(
 ): HpkeSenderSetup = hpkeSetupSender(suite, HpkeMode.Psk, recipientPublicKey, info, psk, null)
 
 /** SetupAuthS: sender-authenticated context using the sender's static private key [senderPrivateKey]. */
-suspend fun hpkeSetupAuthSender(
+internal suspend fun hpkeSetupAuthSender(
     suite: HpkeSuite,
     recipientPublicKey: HpkePublicKey,
     info: ReadBuffer,
@@ -170,7 +170,7 @@ suspend fun hpkeSetupAuthSender(
 ): HpkeSenderSetup = hpkeSetupSender(suite, HpkeMode.Auth, recipientPublicKey, info, null, senderPrivateKey)
 
 /** SetupAuthPSKS: both PSK and sender authentication. */
-suspend fun hpkeSetupAuthPskSender(
+internal suspend fun hpkeSetupAuthPskSender(
     suite: HpkeSuite,
     recipientPublicKey: HpkePublicKey,
     info: ReadBuffer,
@@ -214,10 +214,10 @@ internal suspend fun hpkeSetupSenderInternal(
     val encap =
         when {
             authMode && ephemeral != null ->
-                dhkemAuthEncapWithEphemeral(suite.kem, recipientPublicKey.key, senderPrivateKey!!, ephemeral)
-            authMode -> dhkemAuthEncap(suite.kem, recipientPublicKey.key, senderPrivateKey!!)
-            ephemeral != null -> dhkemEncapWithEphemeral(suite.kem, recipientPublicKey.key, ephemeral)
-            else -> dhkemEncap(suite.kem, recipientPublicKey.key)
+                dhkemAuthEncapWithEphemeral(suite.kem, recipientPublicKey.keyAgreementKey(), senderPrivateKey!!, ephemeral)
+            authMode -> dhkemAuthEncap(suite.kem, recipientPublicKey.keyAgreementKey(), senderPrivateKey!!)
+            ephemeral != null -> dhkemEncapWithEphemeral(suite.kem, recipientPublicKey.keyAgreementKey(), ephemeral)
+            else -> dhkemEncap(suite.kem, recipientPublicKey.keyAgreementKey())
         }
 
     return try {
@@ -233,7 +233,7 @@ internal suspend fun hpkeSetupSenderInternal(
 // =============================================================================
 
 /** SetupBaseR: decapsulate [enc] with [recipientPrivateKey] and build a Base-mode receiver context. */
-suspend fun hpkeSetupBaseReceiver(
+internal suspend fun hpkeSetupBaseReceiver(
     suite: HpkeSuite,
     recipientPrivateKey: HpkePrivateKey,
     enc: ReadBuffer,
@@ -241,7 +241,7 @@ suspend fun hpkeSetupBaseReceiver(
 ): HpkeContext.Receiver = hpkeSetupReceiver(suite, HpkeMode.Base, recipientPrivateKey, enc, info, null, null)
 
 /** SetupPSKR: PSK-mode receiver context. */
-suspend fun hpkeSetupPskReceiver(
+internal suspend fun hpkeSetupPskReceiver(
     suite: HpkeSuite,
     recipientPrivateKey: HpkePrivateKey,
     enc: ReadBuffer,
@@ -250,7 +250,7 @@ suspend fun hpkeSetupPskReceiver(
 ): HpkeContext.Receiver = hpkeSetupReceiver(suite, HpkeMode.Psk, recipientPrivateKey, enc, info, psk, null)
 
 /** SetupAuthR: sender-authenticated receiver context, verifying the sender's static public key. */
-suspend fun hpkeSetupAuthReceiver(
+internal suspend fun hpkeSetupAuthReceiver(
     suite: HpkeSuite,
     recipientPrivateKey: HpkePrivateKey,
     enc: ReadBuffer,
@@ -259,7 +259,7 @@ suspend fun hpkeSetupAuthReceiver(
 ): HpkeContext.Receiver = hpkeSetupReceiver(suite, HpkeMode.Auth, recipientPrivateKey, enc, info, null, senderPublicKey)
 
 /** SetupAuthPSKR: both PSK and sender authentication. */
-suspend fun hpkeSetupAuthPskReceiver(
+internal suspend fun hpkeSetupAuthPskReceiver(
     suite: HpkeSuite,
     recipientPrivateKey: HpkePrivateKey,
     enc: ReadBuffer,
@@ -285,7 +285,7 @@ internal suspend fun hpkeSetupReceiver(
         if (mode == HpkeMode.Auth || mode == HpkeMode.AuthPsk) {
             requireNotNull(senderPublicKey)
             require(senderPublicKey.kem == suite.kem) { "sender key KEM does not match suite KEM" }
-            dhkemAuthDecap(suite.kem, enc, recipientPrivateKey, senderPublicKey.key)
+            dhkemAuthDecap(suite.kem, enc, recipientPrivateKey, senderPublicKey.keyAgreementKey())
         } else {
             dhkemDecap(suite.kem, enc, recipientPrivateKey)
         }
@@ -319,7 +319,7 @@ private fun validateModeParams(
 
 /**
  * Gates a setup call against the platform's capabilities. The AEAD must be available on some path
- * ([supportsAesGcmAnyPath] / [supportsChaChaPoly]); an unavailable AEAD (e.g. ChaCha on the web)
+ * (via the AEAD capability witness); an unavailable AEAD (e.g. ChaCha on the web)
  * throws immediately. The KEM curve must be usable synchronously *or* on the web (WebCrypto async);
  * if neither, it throws. A curve that the web engine claims but cannot actually provide (e.g. an
  * old browser without X25519) is caught by the underlying [dhRawSecret] / [generateKeyPairAsync],
@@ -328,8 +328,9 @@ private fun validateModeParams(
 internal fun requireSupported(suite: HpkeSuite) {
     val aeadOk =
         when (suite.aead) {
-            HpkeAead.Aes128Gcm, HpkeAead.Aes256Gcm -> supportsAesGcmAnyPath
-            HpkeAead.ChaCha20Poly1305 -> supportsChaChaPoly
+            // AES-GCM is reachable on every platform (witness is Blocking or AsyncOnly, never Unavailable).
+            HpkeAead.Aes128Gcm, HpkeAead.Aes256Gcm -> true
+            HpkeAead.ChaCha20Poly1305 -> chaChaPolyReachable
         }
     if (!aeadOk) {
         throw UnsupportedOperationException(
@@ -448,7 +449,7 @@ private fun keySchedule(
     }
 }
 
-private val EMPTY: ReadBuffer = BufferFactory.Default.allocate(0).also { it.resetForRead() }
+internal val EMPTY: ReadBuffer = BufferFactory.Default.allocate(0).also { it.resetForRead() }
 
 internal val LABEL_EAE_PRK: ByteArray = "eae_prk".encodeToByteArray()
 internal val LABEL_SHARED_SECRET: ByteArray = "shared_secret".encodeToByteArray()

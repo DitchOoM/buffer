@@ -47,7 +47,7 @@ internal fun deriveFromRawSecret(
         if (curve == KeyAgreementCurve.X25519 && isAllZero(rawSecret)) {
             throw InvalidPublicKey(curve.curveName)
         }
-        Hkdf.derive(salt = salt, ikm = rawSecret, info = info, length = length, factory = factory)
+        Hkdf.derive(salt = salt.toSalt(), ikm = rawSecret, info = info.toInfo(), length = length, factory = factory)
     } finally {
         rawSecret.freeNativeMemory()
     }

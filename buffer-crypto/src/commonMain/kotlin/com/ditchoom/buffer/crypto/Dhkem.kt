@@ -63,9 +63,9 @@ internal suspend fun dhkemDecap(
     require(enc.remaining() == kem.nEnc) { "enc must be ${kem.nEnc} bytes for ${kem.kemName}, was ${enc.remaining()}" }
     val pkE = KeyAgreementPublicKey.of(kem.curve, enc)
     // dh = DH(skR, pkE)
-    val dh = dhRawSecret(recipientPrivateKey.key, pkE)
+    val dh = dhRawSecret(recipientPrivateKey.keyAgreementKey(), pkE)
     return try {
-        val pkRm = recipientPrivateKey.publicKeyEncoded
+        val pkRm = recipientPrivateKey.publicKeyEncoded()
         val kemContext = concat(enc, pkRm)
         extractAndExpand(kem, dh, kemContext)
     } finally {
@@ -99,13 +99,13 @@ internal suspend fun dhkemAuthEncapWithEphemeral(
     try {
         copyInto(dh1, dh)
         dh1.freeNativeMemory()
-        val dh2 = dhRawSecret(senderPrivateKey.key, recipientPublicKey)
+        val dh2 = dhRawSecret(senderPrivateKey.keyAgreementKey(), recipientPublicKey)
         copyInto(dh2, dh)
         dh2.freeNativeMemory()
         dh.resetForRead()
 
         val enc = copyBuffer(ephemeral.publicKey.encoded, BufferFactory.Default)
-        val pkSm = senderPrivateKey.publicKeyEncoded
+        val pkSm = senderPrivateKey.publicKeyEncoded()
         // kem_context = enc || pkRm || pkSm
         val kemContext = concat3(enc, recipientPublicKey.encoded, pkSm)
         val shared = extractAndExpand(kem, dh, kemContext)
@@ -125,17 +125,17 @@ internal suspend fun dhkemAuthDecap(
     require(enc.remaining() == kem.nEnc) { "enc must be ${kem.nEnc} bytes for ${kem.kemName}, was ${enc.remaining()}" }
     val pkE = KeyAgreementPublicKey.of(kem.curve, enc)
     // dh = DH(skR, pkE) || DH(skR, pkS)
-    val dh1 = dhRawSecret(recipientPrivateKey.key, pkE)
+    val dh1 = dhRawSecret(recipientPrivateKey.keyAgreementKey(), pkE)
     val dh = secureScratch.allocate(kem.curve.sharedSecretBytes * 2)
     try {
         copyInto(dh1, dh)
         dh1.freeNativeMemory()
-        val dh2 = dhRawSecret(recipientPrivateKey.key, senderPublicKey)
+        val dh2 = dhRawSecret(recipientPrivateKey.keyAgreementKey(), senderPublicKey)
         copyInto(dh2, dh)
         dh2.freeNativeMemory()
         dh.resetForRead()
 
-        val pkRm = recipientPrivateKey.publicKeyEncoded
+        val pkRm = recipientPrivateKey.publicKeyEncoded()
         val pkSm = senderPublicKey.encoded
         val kemContext = concat3(enc, pkRm, pkSm)
         return extractAndExpand(kem, dh, kemContext)

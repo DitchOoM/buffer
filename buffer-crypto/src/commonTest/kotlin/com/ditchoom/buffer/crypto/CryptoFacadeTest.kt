@@ -75,40 +75,37 @@ class CryptoFacadeTest {
     }
 
     @Test
-    fun hpkeFacadeSupportedMatchesTopLevel() {
+    fun hpkeWitnessResolvesForSuite() {
         val suite =
             HpkeSuite(
                 HpkeKem.DhkemX25519HkdfSha256,
                 HpkeKdf.HkdfSha256,
                 HpkeAead.ChaCha20Poly1305,
             )
-        assertEquals(hpkeSupported(suite), Hpke.supported(suite))
+        // The witness must resolve to one of the two variants, consistent with the hpkeSupported helper.
+        when (CryptoCapabilities.hpke(suite)) {
+            is HpkeSupport.Supported -> assertTrue(hpkeSupported(suite))
+            is HpkeSupport.Unsupported -> assertTrue(!hpkeSupported(suite))
+        }
     }
 
     @Test
-    fun hpkeFacadeSealOpenRoundTrips() =
+    fun hpkeFacadeKeysFeedWitnessOps() =
         runTest {
+            // The HPKE facade keeps key construction (generateKeyPair / import); the seal/open ops live
+            // on the HpkeSupport witness. Prove the facade-built keys round-trip through the witness ops.
             val suite =
                 HpkeSuite(
                     HpkeKem.DhkemX25519HkdfSha256,
                     HpkeKdf.HkdfSha256,
                     HpkeAead.Aes256Gcm,
                 )
-            if (!Hpke.supported(suite)) return@runTest
+            val ops = (CryptoCapabilities.hpke(suite) as? HpkeSupport.Supported)?.ops ?: return@runTest
             val recipient = Hpke.generateKeyPair(suite.kem)
-            val info = ascii("hpke-facade")
+            val info = Info.Of(ascii("hpke-facade"))
             val pt = ascii("namespaced HPKE")
-            val sealed = Hpke.sealBase(suite, recipient.publicKey, info, pt, null, BufferFactory.Default)
-            val opened =
-                Hpke.openBase(
-                    suite,
-                    recipient.privateKey,
-                    sealed.enc,
-                    info,
-                    sealed.ciphertext,
-                    null,
-                    BufferFactory.Default,
-                )
+            val sealed = ops.sealBase(recipient.publicKey, info, pt)
+            val opened = ops.openBase(recipient.privateKey, sealed.enc, info, sealed.ciphertext)
             assertEquals(pt.toHex(), opened.toHex())
             recipient.close()
         }

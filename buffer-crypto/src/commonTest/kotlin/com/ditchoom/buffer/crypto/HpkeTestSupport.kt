@@ -62,13 +62,13 @@ internal object HpkeTestSupport {
         kem: HpkeKem,
         skHex: String,
         pkHex: String,
-    ): HpkePrivateKey = HpkePrivateKey(kem, importPrivateKey(kem.curve, hexBuffer(skHex)), hexBuffer(pkHex))
+    ): HpkePrivateKey = hpkePrivateKeyOf(kem, importPrivateKey(kem.curve, hexBuffer(skHex)), hexBuffer(pkHex))
 
     /** An [HpkePublicKey] from pinned `pk` hex. */
     fun publicKeyFromHex(
         kem: HpkeKem,
         pkHex: String,
-    ): HpkePublicKey = HpkePublicKey(kem, KeyAgreementPublicKey.of(kem.curve, hexBuffer(pkHex)))
+    ): HpkePublicKey = hpkePublicKeyOf(kem, KeyAgreementPublicKey.of(kem.curve, hexBuffer(pkHex)))
 
     /**
      * Whether every primitive a [suite] needs is available on this platform (KEM curve + AEAD). Uses
@@ -79,8 +79,8 @@ internal object HpkeTestSupport {
         val curveOk = asyncAgreementSupported(suite.kem.curve)
         val aeadOk =
             when (suite.aead) {
-                HpkeAead.Aes128Gcm, HpkeAead.Aes256Gcm -> supportsAesGcmAnyPath
-                HpkeAead.ChaCha20Poly1305 -> supportsChaChaPoly
+                HpkeAead.Aes128Gcm, HpkeAead.Aes256Gcm -> true
+                HpkeAead.ChaCha20Poly1305 -> chaChaPolyReachable
             }
         return curveOk && aeadOk
     }

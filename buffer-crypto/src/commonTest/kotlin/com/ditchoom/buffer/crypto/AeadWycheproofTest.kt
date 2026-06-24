@@ -37,7 +37,7 @@ class AeadWycheproofTest {
     @Test
     fun chaCha20Poly1305Vectors() =
         runTest {
-            if (!supportsChaChaPoly) return@runTest
+            if (!chaChaPolyReachable) return@runTest
             val summary =
                 Wycheproof.runSuspending(WycheproofVectorsChaChaPoly.JSON) { case ->
                     val key = ChaChaPolyKey.of(case.testHex("key"))

@@ -13,19 +13,22 @@ import kotlin.test.assertTrue
  */
 class CryptoCapabilitiesTest {
     @Test
-    fun aesGcmWitnessMatchesSyncCapability() {
+    fun aesGcmWitnessResolves() {
+        // The witness is the source of truth (the boolean flags are gone). AES-GCM has no Unavailable
+        // variant — it is reachable (Blocking on native, AsyncOnly on the web) on every platform.
         when (CryptoCapabilities.aesGcm) {
-            is Aead.Blocking -> assertTrue(supportsSyncAesGcm, "Blocking witness implies a sync path")
-            is Aead.AsyncOnly -> assertFalse(supportsSyncAesGcm, "AsyncOnly witness implies no sync path")
+            is Aead.Blocking -> Unit
+            is Aead.AsyncOnly -> Unit
         }
     }
 
     @Test
-    fun chaChaPolyWitnessMatchesCapability() {
+    fun chaChaPolyWitnessResolves() {
+        // The witness must resolve to one of the three variants on every platform.
         when (CryptoCapabilities.chaChaPoly) {
-            is OptionalAead.Blocking -> assertTrue(supportsChaChaPoly && supportsSyncChaChaPoly)
-            is OptionalAead.AsyncOnly -> assertTrue(supportsChaChaPoly)
-            OptionalAead.Unavailable -> assertFalse(supportsChaChaPoly)
+            is OptionalAead.Blocking -> Unit
+            is OptionalAead.AsyncOnly -> Unit
+            OptionalAead.Unavailable -> Unit
         }
     }
 

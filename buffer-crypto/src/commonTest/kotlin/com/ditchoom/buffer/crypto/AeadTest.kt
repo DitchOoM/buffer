@@ -149,7 +149,7 @@ class AeadTest {
 
     @Test
     fun chaChaPolyExplicitNonceKat() {
-        if (!supportsChaChaPoly) return
+        if (!chaChaPolyReachable) return
         val key = ChaChaPolyKey.of(hexBuffer(chachaRfc8439.key))
         val out = BufferFactory.Default.allocate(messageLen(chachaRfc8439.pt) + AEAD_TAG_BYTES)
         chaChaPolySeal(key, hexBuffer(chachaRfc8439.iv), hexBuffer(chachaRfc8439.aad), hexBuffer(chachaRfc8439.pt), out)
@@ -168,7 +168,7 @@ class AeadTest {
             }
             // Web: synchronous AES-GCM is unavailable (WebCrypto is async-only) — the witness is
             // AsyncOnly, so sealBlocking/openBlocking are simply not reachable from this branch.
-            is Aead.AsyncOnly -> assertEquals(false, supportsSyncAesGcm)
+            is Aead.AsyncOnly -> assertEquals(false, aesGcmBlockingAvailable)
         }
     }
 

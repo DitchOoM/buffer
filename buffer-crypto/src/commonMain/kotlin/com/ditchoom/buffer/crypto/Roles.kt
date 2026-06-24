@@ -89,3 +89,12 @@ internal val Info.bytesOrNull: ReadBuffer?
             Info.None -> null
             is Info.Of -> bytes
         }
+
+/** Wraps a nullable buffer as a [Salt] role value (`null` ⇒ [Salt.None]) — internal seam from the legacy path. */
+internal fun ReadBuffer?.toSalt(): Salt = if (this == null) Salt.None else Salt.Of(this)
+
+/** Wraps a nullable buffer as an [Info] role value (`null` ⇒ [Info.None]). */
+internal fun ReadBuffer?.toInfo(): Info = if (this == null) Info.None else Info.Of(this)
+
+/** Wraps a nullable buffer as an [Aad] role value (`null` ⇒ [Aad.None]). */
+internal fun ReadBuffer?.toAad(): Aad = if (this == null) Aad.None else Aad.Of(this)

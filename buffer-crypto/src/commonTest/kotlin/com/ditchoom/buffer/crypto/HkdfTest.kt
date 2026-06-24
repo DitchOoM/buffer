@@ -16,12 +16,12 @@ class HkdfTest {
         ikm: ReadBuffer,
         info: ReadBuffer?,
         length: Int,
-    ): String = Hkdf.derive(salt, ikm, info, length, BufferFactory.Default).toHex()
+    ): String = Hkdf.derive(salt.toSalt(), ikm, info.toInfo(), length, BufferFactory.Default).toHex()
 
     @Test
     fun rfc5869Case1Extract() {
         val prk = BufferFactory.Default.allocate(HMAC_SHA256_BYTES)
-        Hkdf.extractInto(salt = hexBuffer("000102030405060708090a0b0c"), ikm = repeatedByte(0x0b, 22), dest = prk)
+        Hkdf.extractInto(salt = Salt.Of(hexBuffer("000102030405060708090a0b0c")), ikm = repeatedByte(0x0b, 22), dest = prk)
         prk.resetForRead()
         assertEquals("077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5", prk.toHex())
     }
@@ -49,8 +49,8 @@ class HkdfTest {
 
     @Test
     fun expandProducesRequestedLength() {
-        assertEquals(1, Hkdf.derive(null, repeatedByte(1, 32), null, 1, BufferFactory.Default).remaining())
-        assertEquals(12, Hkdf.derive(null, repeatedByte(1, 32), null, 12, BufferFactory.Default).remaining())
-        assertEquals(80, Hkdf.derive(null, repeatedByte(1, 32), null, 80, BufferFactory.Default).remaining())
+        assertEquals(1, Hkdf.derive(Salt.None, repeatedByte(1, 32), Info.None, 1, BufferFactory.Default).remaining())
+        assertEquals(12, Hkdf.derive(Salt.None, repeatedByte(1, 32), Info.None, 12, BufferFactory.Default).remaining())
+        assertEquals(80, Hkdf.derive(Salt.None, repeatedByte(1, 32), Info.None, 80, BufferFactory.Default).remaining())
     }
 }

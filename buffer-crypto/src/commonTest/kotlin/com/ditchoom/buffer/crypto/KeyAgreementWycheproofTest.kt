@@ -35,9 +35,9 @@ class KeyAgreementWycheproofTest {
     ): String {
         val out =
             Hkdf.derive(
-                salt = CryptoTestVectors.ascii(wpSalt),
+                salt = Salt.Of(CryptoTestVectors.ascii(wpSalt)),
                 ikm = hexBuffer(sharedHex),
-                info = CryptoTestVectors.ascii(wpInfo),
+                info = Info.Of(CryptoTestVectors.ascii(wpInfo)),
                 length = length,
                 factory = BufferFactory.Default,
             )

@@ -193,7 +193,7 @@ class AeadTamperTest {
 
     @Test
     fun aesGcmShortCiphertextAndTagRejectedOnSyncOpen() {
-        if (!supportsSyncAesGcm) return
+        if (!aesGcmBlockingAvailable) return
         val key = AesGcmKey.of(hexBuffer(keyHex))
         val nonce = hexBuffer("000102030405060708090a0b")
         // ciphertext+tag with only 15 bytes — fewer than AEAD_TAG_BYTES — must reject on the sync open primitive.

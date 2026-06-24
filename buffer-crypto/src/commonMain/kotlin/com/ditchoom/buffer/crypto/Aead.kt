@@ -415,27 +415,19 @@ internal object ChaChaPolyBlockingOps : AeadBlockingOps<ChaChaPolyKey> {
 // These remain `internal`: the witness ops above (and the HPKE per-message AEAD glue) drive them.
 // They are explicit-nonce by design — the public seal path generates its own nonce.
 
-/**
- * Whether this platform supports the synchronous AES-GCM primitives.
- *
- * - JVM, Android, Apple, Linux: `true`.
- * - js/wasmJs: `false` — WebCrypto's `SubtleCrypto` is async-only.
- */
-internal expect val supportsSyncAesGcm: Boolean
+// Availability is read off the AEAD capability witness rather than standalone boolean flags: the
+// witness ([CryptoCapabilities.aesGcm] / [CryptoCapabilities.chaChaPoly]) is the single source of
+// truth for what each platform supports. These internal helpers exist for the in-module consumers
+// (HPKE gating, the explicit-nonce glue, and test skip-gating) that need a plain boolean.
 
-/**
- * Whether this platform supports ChaCha20-Poly1305 at all.
- *
- * - JVM (11+), Android, Apple, Linux: `true`.
- * - js/wasmJs: `false` — ChaCha20-Poly1305 is **not** part of WebCrypto and we never polyfill it.
- */
-internal expect val supportsChaChaPoly: Boolean
+/** Whether AES-GCM has a synchronous path here (the witness is [Aead.Blocking]). */
+internal val aesGcmBlockingAvailable: Boolean get() = CryptoCapabilities.aesGcm is Aead.Blocking
 
-/**
- * Whether this platform supports the synchronous ChaCha20-Poly1305 primitives. Equal to
- * [supportsChaChaPoly] today (no async ChaCha path exists on any current target).
- */
-internal expect val supportsSyncChaChaPoly: Boolean
+/** Whether ChaCha20-Poly1305 is reachable on any path here (the witness is not [OptionalAead.Unavailable]). */
+internal val chaChaPolyReachable: Boolean get() = CryptoCapabilities.chaChaPoly !is OptionalAead.Unavailable
+
+/** Whether ChaCha20-Poly1305 has a synchronous path here (the witness is [OptionalAead.Blocking]). */
+internal val chaChaPolyBlockingAvailable: Boolean get() = CryptoCapabilities.chaChaPoly is OptionalAead.Blocking
 
 /**
  * Seals [plaintext] with AES-GCM under [key] and [nonce], writing `ciphertext ‖ tag` into [dest]
