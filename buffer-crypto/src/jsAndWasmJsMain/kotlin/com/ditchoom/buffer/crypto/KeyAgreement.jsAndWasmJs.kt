@@ -25,22 +25,23 @@ import com.ditchoom.buffer.ReadBuffer
 private const val HEX_RADIX = 16
 private const val NIBBLE_BITS = 4
 
-actual val supportsSyncX25519: Boolean = false
-actual val supportsSyncEcdhP256: Boolean = false
-actual val supportsSyncEcdhP384: Boolean = false
-actual val supportsSyncEcdhP521: Boolean = false
+/** Web key agreement is async-only (WebCrypto is Promise-based); every curve resolves to AsyncOnly. */
+actual fun CryptoCapabilities.keyAgreement(curve: KeyAgreementCurve): KeyAgreementSupport =
+    KeyAgreementSupport.AsyncOnly(KeyAgreementAsyncOpsImpl(curve))
 
 private fun unsupportedSync(curve: KeyAgreementCurve): Nothing =
     throw UnsupportedOperationException(
         "${curve.curveName} key agreement is async-only on this platform (WebCrypto). Use the Async variant.",
     )
 
-actual fun generateKeyPair(curve: KeyAgreementCurve): KeyAgreementKeyPair = unsupportedSync(curve)
+// The web witness is AsyncOnly, so the synchronous primitives are never reached; they throw as a
+// fail-fast safety net (mirroring the Signatures web bridge).
+internal actual fun generateKeyPairPlatform(curve: KeyAgreementCurve): KeyAgreementKeyPair = unsupportedSync(curve)
 
-actual fun deriveSharedSecret(
+internal actual fun deriveSharedSecretPlatform(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,
-    info: ReadBuffer,
+    info: ReadBuffer?,
     length: Int,
     salt: ReadBuffer?,
     factory: BufferFactory,
@@ -79,7 +80,7 @@ private fun hexToBuffer(
     return b
 }
 
-actual suspend fun generateKeyPairAsync(curve: KeyAgreementCurve): KeyAgreementKeyPair {
+internal actual suspend fun generateKeyPairAsyncPlatform(curve: KeyAgreementCurve): KeyAgreementKeyPair {
     ensureSupported(curve)
     // WebCrypto returns "publicHex|privateHex" (raw public export, PKCS#8 private export), or the
     // sentinel "UNSUPPORTED" if the engine lacks the algorithm (e.g. X25519 on an older browser).
@@ -89,18 +90,18 @@ actual suspend fun generateKeyPairAsync(curve: KeyAgreementCurve): KeyAgreementK
     }
     val pubBuf = hexToBuffer(result.publicHex, BufferFactory.Default)
     val privBuf = hexToBuffer(result.privateHex, secureScratch)
-    val publicKey = KeyAgreementPublicKey(curve, pubBuf)
-    return KeyAgreementKeyPair(curve, KeyAgreementPrivateKey(curve, privBuf), publicKey)
+    val publicKey = KeyAgreementPublicKey.of(curve, pubBuf)
+    return keyAgreementKeyPairOf(curve, keyAgreementPrivateKeyOf(curve, privBuf), publicKey)
 }
 
 // A failed WebCrypto import/deriveBits is mapped to a single uniform InvalidPublicKey: Throwable is
 // caught and its cause intentionally dropped so a malformed/off-curve peer point cannot be told apart
 // by the engine's exception type (oracle avoidance).
 @Suppress("SwallowedException", "TooGenericExceptionCaught")
-actual suspend fun deriveSharedSecretAsync(
+internal actual suspend fun deriveSharedSecretAsyncPlatform(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,
-    info: ReadBuffer,
+    info: ReadBuffer?,
     length: Int,
     salt: ReadBuffer?,
     factory: BufferFactory,
@@ -111,7 +112,11 @@ actual suspend fun deriveSharedSecretAsync(
 
     val sharedHex =
         try {
-            webCryptoDeriveSharedSecret(curve.curveName, privateKey.encoded.toHex(), peerPublicKey.encoded.toHex())
+            webCryptoDeriveSharedSecret(
+                curve.curveName,
+                privateKey.requireInMemoryMaterial().toHex(),
+                peerPublicKey.encoded.toHex(),
+            )
         } catch (e: Throwable) {
             // A failed import / deriveBits means an off-curve / low-order / malformed peer point.
             throw InvalidPublicKey(curve.curveName)
@@ -138,7 +143,11 @@ internal actual suspend fun dhRawSecret(
 
     val sharedHex =
         try {
-            webCryptoDeriveSharedSecret(curve.curveName, privateKey.encoded.toHex(), peerPublicKey.encoded.toHex())
+            webCryptoDeriveSharedSecret(
+                curve.curveName,
+                privateKey.requireInMemoryMaterial().toHex(),
+                peerPublicKey.encoded.toHex(),
+            )
         } catch (e: Throwable) {
             throw InvalidPublicKey(curve.curveName)
         }

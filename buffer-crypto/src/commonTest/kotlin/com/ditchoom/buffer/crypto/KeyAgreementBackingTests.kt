@@ -37,7 +37,7 @@ class KeyAgreementBackingTests {
                 for (ik in CryptoBackings.inputs) {
                     // Re-back the peer public key in each backing flavour and re-derive.
                     val rebacked = CryptoBackings.place(ik, b.publicKey.encoded, pool)
-                    val pub = KeyAgreementPublicKey(curve, rebacked)
+                    val pub = KeyAgreementPublicKey.of(curve, rebacked)
                     val out = deriveSharedSecret(a.privateKey, pub, info, 32, salt).toHex()
                     assertEquals(reference, out, "${curve.curveName} public-key backing=$ik")
                 }

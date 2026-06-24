@@ -52,21 +52,27 @@ class CryptoFacadeTest {
         }
 
     @Test
-    fun kexFacadeDerivesSameSecretAsTopLevel() =
-        runTest {
-            val curve = KeyAgreementCurve.X25519
-            val a = generateKeyPairAsync(curve)
-            val b = generateKeyPairAsync(curve)
-            val info = ascii("kex-facade")
-            // Both sides derive the same shared secret; facade and top-level must agree.
-            val viaFacade =
-                Kex.deriveSharedSecretAsync(a.privateKey, b.publicKey, info, 32, null, BufferFactory.Default)
-            val viaTopLevel =
-                deriveSharedSecretAsync(b.privateKey, a.publicKey, info, 32, null, BufferFactory.Default)
-            assertEquals(viaTopLevel.toHex(), viaFacade.toHex())
-            a.close()
-            b.close()
+    fun kexFacadeImportMatchesTopLevel() {
+        // Key-agreement *operations* now live on the KeyAgreementSupport witness; the Kex facade only
+        // carries the platform-independent key import. Prove Kex.importPrivateKey delegates to the
+        // top-level importPrivateKey by deriving the same secret with each, against a shared peer.
+        val curve = KeyAgreementCurve.P256
+        if (!supportsRawScalarKat(curve) || !supportsSync(curve)) return
+        val scalarHex = "7d7dc5f71eb29ddaf80d6214632eeae03d9058af1fb6d22ed80badb62bc1a534"
+        val peer = generateKeyPair(curve)
+        val info = ascii("kex-facade")
+        val viaFacade = Kex.importPrivateKey(curve, hexBuffer(scalarHex))
+        val viaTopLevel = importPrivateKey(curve, hexBuffer(scalarHex))
+        try {
+            val a = deriveSharedSecret(viaFacade, peer.publicKey, info, 32)
+            val b = deriveSharedSecret(viaTopLevel, peer.publicKey, info, 32)
+            assertEquals(b.toHex(), a.toHex())
+        } finally {
+            viaFacade.close()
+            viaTopLevel.close()
+            peer.close()
         }
+    }
 
     @Test
     fun hpkeFacadeSupportedMatchesTopLevel() {

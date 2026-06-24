@@ -257,7 +257,7 @@ data class HpkeSuite(
      * only if its KEM curve, its (always-available) KDF, and its AEAD are all supported here.
      */
     val isSupported: Boolean
-        get() = supportsSync(kem.curve) && aeadSupported(aead)
+        get() = (CryptoCapabilities.keyAgreement(kem.curve) is KeyAgreementSupport.Blocking) && aeadSupported(aead)
 
     /** `suite_id = "HPKE" || I2OSP(kem_id, 2) || I2OSP(kdf_id, 2) || I2OSP(aead_id, 2)` (RFC 9180 §5.1). */
     internal fun suiteId(): ReadBuffer {
@@ -413,13 +413,13 @@ class HpkePrivateKey internal constructor(
 }
 
 /** Generates a fresh [kem] key pair from the platform CSPRNG. */
-suspend fun hpkeGenerateKeyPair(kem: HpkeKem): HpkeKeyPair = HpkeKeyPair(kem, generateKeyPairAsync(kem.curve))
+suspend fun hpkeGenerateKeyPair(kem: HpkeKem): HpkeKeyPair = HpkeKeyPair(kem, keyAgreementAsyncOps(kem.curve).generateKeyPair())
 
 /** Imports a recipient/sender public key for [kem] from its serialized encoding (`kem.nPk` bytes). */
 fun hpkeImportPublicKey(
     kem: HpkeKem,
     encoded: ReadBuffer,
-): HpkePublicKey = HpkePublicKey(kem, KeyAgreementPublicKey(kem.curve, encoded))
+): HpkePublicKey = HpkePublicKey(kem, KeyAgreementPublicKey.of(kem.curve, encoded))
 
 /**
  * Imports a recipient/sender private key for [kem] from its serialized scalar (`kem.nSk` bytes) and

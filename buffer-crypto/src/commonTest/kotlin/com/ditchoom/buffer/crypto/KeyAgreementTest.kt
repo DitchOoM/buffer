@@ -90,15 +90,14 @@ class KeyAgreementTest {
     fun syncDeriveThrowsWhenUnsupported() {
         for (curve in curves) {
             if (supportsSync(curve)) continue
-            val priv =
-                KeyAgreementPrivateKey(
-                    curve,
-                    BufferFactory.Default.allocate(curve.privateKeyBytes).also { it.resetForRead() },
-                )
+            val privBuf = BufferFactory.Default.allocate(curve.privateKeyBytes)
+            repeat(curve.privateKeyBytes) { privBuf.writeByte(0) }
+            privBuf.resetForRead()
+            val priv = importPrivateKey(curve, privBuf)
             val pubBuf = BufferFactory.Default.allocate(curve.publicKeyBytes)
             repeat(curve.publicKeyBytes) { pubBuf.writeByte(0) }
             pubBuf.resetForRead()
-            val pub = KeyAgreementPublicKey(curve, pubBuf)
+            val pub = KeyAgreementPublicKey.of(curve, pubBuf)
             assertFailsWith<UnsupportedOperationException>(
                 "${curve.curveName} sync derive must throw when unsupported",
             ) {
@@ -142,7 +141,7 @@ class KeyAgreementTest {
                     tampered.writeByte(if (i == n - 1) (byte.toInt() xor 0x01).toByte() else byte)
                 }
                 tampered.resetForRead()
-                val tamperedKey = KeyAgreementPublicKey(curve, tampered)
+                val tamperedKey = KeyAgreementPublicKey.of(curve, tampered)
                 val diverged =
                     try {
                         deriveSharedSecretAsync(a.privateKey, tamperedKey, info(), 32).toHex() != good
@@ -173,7 +172,7 @@ class KeyAgreementTest {
             repeat(coord - 1) { pt.writeByte(0) }
             pt.writeByte(1) // Y = 1  → off curve
             pt.resetForRead()
-            val offCurve = KeyAgreementPublicKey(curve, pt)
+            val offCurve = KeyAgreementPublicKey.of(curve, pt)
             assertFailsWith<InvalidPublicKey>("full-length off-curve point must be rejected") {
                 deriveSharedSecret(a.privateKey, offCurve, info(), 32)
             }
@@ -185,10 +184,10 @@ class KeyAgreementTest {
     @Test
     fun wrongLengthPublicKeyRejected() {
         assertFailsWith<IllegalArgumentException> {
-            KeyAgreementPublicKey(KeyAgreementCurve.P256, hexBuffer("04aa"))
+            KeyAgreementPublicKey.of(KeyAgreementCurve.P256, hexBuffer("04aa"))
         }
         assertFailsWith<IllegalArgumentException> {
-            KeyAgreementPublicKey(KeyAgreementCurve.X25519, hexBuffer("00"))
+            KeyAgreementPublicKey.of(KeyAgreementCurve.X25519, hexBuffer("00"))
         }
     }
 }

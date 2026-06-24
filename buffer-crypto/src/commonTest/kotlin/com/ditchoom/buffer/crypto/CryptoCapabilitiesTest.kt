@@ -55,7 +55,7 @@ class CryptoCapabilitiesTest {
     }
 
     @Test
-    fun keyAgreementMirrorsUnderlyingForEveryCurve() {
+    fun keyAgreementWitnessResolvesForEveryCurve() {
         val curves =
             listOf(
                 KeyAgreementCurve.X25519,
@@ -64,7 +64,18 @@ class CryptoCapabilitiesTest {
                 KeyAgreementCurve.P521,
             )
         for (curve in curves) {
-            assertEquals(supportsSync(curve), CryptoCapabilities.keyAgreementSync(curve), "curve $curve")
+            // The witness must resolve to one of the three variants on every platform, and a Blocking
+            // witness must agree with the sync helper.
+            when (CryptoCapabilities.keyAgreement(curve)) {
+                is KeyAgreementSupport.Blocking -> assertTrue(supportsSync(curve), "Blocking implies a sync path")
+                is KeyAgreementSupport.AsyncOnly -> assertFalse(supportsSync(curve), "AsyncOnly implies no sync path")
+                KeyAgreementSupport.Unavailable -> assertFalse(supportsSync(curve), "Unavailable implies no sync path")
+            }
+        }
+        // ECDH P-curves are agreed on every supported platform (sync native or async WebCrypto), so
+        // they are never Unavailable; X25519 may be absent on a provider/engine that lacks it.
+        for (curve in listOf(KeyAgreementCurve.P256, KeyAgreementCurve.P384, KeyAgreementCurve.P521)) {
+            assertTrue(CryptoCapabilities.keyAgreement(curve) != KeyAgreementSupport.Unavailable, "curve $curve")
         }
     }
 }

@@ -24,7 +24,7 @@ internal suspend fun dhkemEncap(
     kem: HpkeKem,
     recipientPublicKey: KeyAgreementPublicKey,
 ): DhkemEncapResult {
-    val ephemeral = generateKeyPairAsync(kem.curve)
+    val ephemeral = keyAgreementAsyncOps(kem.curve).generateKeyPair()
     return try {
         dhkemEncapWithEphemeral(kem, recipientPublicKey, ephemeral)
     } finally {
@@ -61,7 +61,7 @@ internal suspend fun dhkemDecap(
     recipientPrivateKey: HpkePrivateKey,
 ): PlatformBuffer {
     require(enc.remaining() == kem.nEnc) { "enc must be ${kem.nEnc} bytes for ${kem.kemName}, was ${enc.remaining()}" }
-    val pkE = KeyAgreementPublicKey(kem.curve, enc)
+    val pkE = KeyAgreementPublicKey.of(kem.curve, enc)
     // dh = DH(skR, pkE)
     val dh = dhRawSecret(recipientPrivateKey.key, pkE)
     return try {
@@ -79,7 +79,7 @@ internal suspend fun dhkemAuthEncap(
     recipientPublicKey: KeyAgreementPublicKey,
     senderPrivateKey: HpkePrivateKey,
 ): DhkemEncapResult {
-    val ephemeral = generateKeyPairAsync(kem.curve)
+    val ephemeral = keyAgreementAsyncOps(kem.curve).generateKeyPair()
     return try {
         dhkemAuthEncapWithEphemeral(kem, recipientPublicKey, senderPrivateKey, ephemeral)
     } finally {
@@ -123,7 +123,7 @@ internal suspend fun dhkemAuthDecap(
     senderPublicKey: KeyAgreementPublicKey,
 ): PlatformBuffer {
     require(enc.remaining() == kem.nEnc) { "enc must be ${kem.nEnc} bytes for ${kem.kemName}, was ${enc.remaining()}" }
-    val pkE = KeyAgreementPublicKey(kem.curve, enc)
+    val pkE = KeyAgreementPublicKey.of(kem.curve, enc)
     // dh = DH(skR, pkE) || DH(skR, pkS)
     val dh1 = dhRawSecret(recipientPrivateKey.key, pkE)
     val dh = secureScratch.allocate(kem.curve.sharedSecretBytes * 2)

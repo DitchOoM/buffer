@@ -336,7 +336,7 @@ internal fun requireSupported(suite: HpkeSuite) {
             "${suite.aead.aeadName} is not supported on this platform (HPKE suite ${suite.kem.kemName})",
         )
     }
-    if (!supportsSync(suite.kem.curve) && !isWebPlatformKa) {
+    if (CryptoCapabilities.keyAgreement(suite.kem.curve) !is KeyAgreementSupport.Blocking && !isWebPlatformKa) {
         throw UnsupportedOperationException("${suite.kem.kemName} is not supported on this platform")
     }
 }

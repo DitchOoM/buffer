@@ -4,10 +4,6 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.crypto.deriveSharedSecret as freeDeriveSharedSecret
-import com.ditchoom.buffer.crypto.deriveSharedSecretAsync as freeDeriveSharedSecretAsync
-import com.ditchoom.buffer.crypto.generateKeyPair as freeGenerateKeyPair
-import com.ditchoom.buffer.crypto.generateKeyPairAsync as freeGenerateKeyPairAsync
 import com.ditchoom.buffer.crypto.hpkeGenerateKeyPair as freeHpkeGenerateKeyPair
 import com.ditchoom.buffer.crypto.hpkeImportPrivateKey as freeHpkeImportPrivateKey
 import com.ditchoom.buffer.crypto.hpkeImportPublicKey as freeHpkeImportPublicKey
@@ -23,7 +19,6 @@ import com.ditchoom.buffer.crypto.hpkeSetupPskReceiver as freeHpkeSetupPskReceiv
 import com.ditchoom.buffer.crypto.hpkeSetupPskSender as freeHpkeSetupPskSender
 import com.ditchoom.buffer.crypto.hpkeSupported as freeHpkeSupported
 import com.ditchoom.buffer.crypto.importPrivateKey as freeImportPrivateKey
-import com.ditchoom.buffer.crypto.supportsSync as freeSupportsSync
 
 /*
  * Namespaced entry points for the crypto primitive families.
@@ -39,44 +34,18 @@ import com.ditchoom.buffer.crypto.supportsSync as freeSupportsSync
  */
 
 /**
- * Key-exchange / agreement (X25519, ECDH P-256/P-384/P-521) namespaced entry points. Delegates to
- * the top-level `generateKeyPair*` / `importPrivateKey` / `deriveSharedSecret*` functions.
+ * Key-exchange / agreement (X25519, ECDH P-256/P-384/P-521) namespaced entry points. Key-agreement
+ * *operations* (`generateKeyPair` / `deriveSharedSecret`, sync + async) now live on the
+ * [KeyAgreementSupport] capability witness reached via [CryptoCapabilities.keyAgreement], so this
+ * facade only carries the platform-independent key import. Public keys are constructed via
+ * [KeyAgreementPublicKey.of].
  */
 object Kex {
-    /** @see generateKeyPair */
-    fun generateKeyPair(curve: KeyAgreementCurve): KeyAgreementKeyPair = freeGenerateKeyPair(curve)
-
     /** @see importPrivateKey */
     fun importPrivateKey(
         curve: KeyAgreementCurve,
         encoded: ReadBuffer,
     ): KeyAgreementPrivateKey = freeImportPrivateKey(curve, encoded)
-
-    /** @see deriveSharedSecret */
-    fun deriveSharedSecret(
-        privateKey: KeyAgreementPrivateKey,
-        peerPublicKey: KeyAgreementPublicKey,
-        info: ReadBuffer,
-        length: Int,
-        salt: ReadBuffer? = null,
-        factory: BufferFactory = BufferFactory.Default,
-    ): ReadBuffer = freeDeriveSharedSecret(privateKey, peerPublicKey, info, length, salt, factory)
-
-    /** @see supportsSync */
-    fun supportsSync(curve: KeyAgreementCurve): Boolean = freeSupportsSync(curve)
-
-    /** @see generateKeyPairAsync */
-    suspend fun generateKeyPairAsync(curve: KeyAgreementCurve): KeyAgreementKeyPair = freeGenerateKeyPairAsync(curve)
-
-    /** @see deriveSharedSecretAsync */
-    suspend fun deriveSharedSecretAsync(
-        privateKey: KeyAgreementPrivateKey,
-        peerPublicKey: KeyAgreementPublicKey,
-        info: ReadBuffer,
-        length: Int,
-        salt: ReadBuffer? = null,
-        factory: BufferFactory = BufferFactory.Default,
-    ): ReadBuffer = freeDeriveSharedSecretAsync(privateKey, peerPublicKey, info, length, salt, factory)
 }
 
 /**

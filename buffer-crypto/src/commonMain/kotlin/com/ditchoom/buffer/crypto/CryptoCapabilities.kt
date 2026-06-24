@@ -3,11 +3,12 @@ package com.ditchoom.buffer.crypto
 /**
  * One discoverable surface for the per-platform crypto capability flags that vary by platform.
  *
- * AEAD and signature capability are **not** here — each is reified as a capability witness
- * ([Aead] / [OptionalAead] via [CryptoCapabilities.aesGcm] / [CryptoCapabilities.chaChaPoly];
- * [SignatureSupport] via [CryptoCapabilities.signatures]), so an unsupported op is unrepresentable
- * rather than a boolean a caller might forget to check. The key-agreement / HPKE flags below remain
- * plain booleans pending their own witness reshape.
+ * AEAD, signature, and key-agreement capability are **not** here — each is reified as a capability
+ * witness ([Aead] / [OptionalAead] via [CryptoCapabilities.aesGcm] / [CryptoCapabilities.chaChaPoly];
+ * [SignatureSupport] via [CryptoCapabilities.signatures]; [KeyAgreementSupport] via
+ * [CryptoCapabilities.keyAgreement]), so an unsupported op is unrepresentable rather than a boolean
+ * a caller might forget to check. The HPKE flag below remains a plain boolean pending its own
+ * witness reshape.
  *
  * ```kotlin
  * // AEAD: exhaustive when over the witness — the web (AsyncOnly) cannot reach sealBlocking.
@@ -33,9 +34,6 @@ object CryptoCapabilities {
      * capability, not an op variant: ECDSA *verification* is available on every platform regardless).
      */
     val ecdsaSigningFromScalar: Boolean get() = supportsEcdsaSigningFromScalar
-
-    /** Whether key agreement over [curve] (X25519 / P-256 / P-384 / P-521) has a synchronous path here. */
-    fun keyAgreementSync(curve: KeyAgreementCurve): Boolean = supportsSync(curve)
 
     /** Whether the HPKE [suite] is usable on this platform — its KEM curve and AEAD are both available. */
     fun hpke(suite: HpkeSuite): Boolean = hpkeSupported(suite)

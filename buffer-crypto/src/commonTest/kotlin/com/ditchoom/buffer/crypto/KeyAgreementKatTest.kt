@@ -47,7 +47,7 @@ class KeyAgreementKatTest {
         if (!supportsRawScalarKat(curve)) return
         val priv = importPrivateKey(curve, hexBuffer(privScalarHex))
         try {
-            val pub = KeyAgreementPublicKey(curve, hexBuffer(peerPublicHex))
+            val pub = KeyAgreementPublicKey.of(curve, hexBuffer(peerPublicHex))
             val derived: ReadBuffer =
                 deriveSharedSecret(
                     privateKey = priv,

@@ -53,8 +53,8 @@ internal object HpkeTestSupport {
         pkHex: String,
     ): KeyAgreementKeyPair {
         val priv = importPrivateKey(kem.curve, hexBuffer(skHex))
-        val pub = KeyAgreementPublicKey(kem.curve, hexBuffer(pkHex))
-        return KeyAgreementKeyPair(kem.curve, priv, pub)
+        val pub = KeyAgreementPublicKey.of(kem.curve, hexBuffer(pkHex))
+        return keyAgreementKeyPairOf(kem.curve, priv, pub)
     }
 
     /** An [HpkePrivateKey] from pinned `sk`/`pk` hex. */
@@ -68,7 +68,7 @@ internal object HpkeTestSupport {
     fun publicKeyFromHex(
         kem: HpkeKem,
         pkHex: String,
-    ): HpkePublicKey = HpkePublicKey(kem, KeyAgreementPublicKey(kem.curve, hexBuffer(pkHex)))
+    ): HpkePublicKey = HpkePublicKey(kem, KeyAgreementPublicKey.of(kem.curve, hexBuffer(pkHex)))
 
     /**
      * Whether every primitive a [suite] needs is available on this platform (KEM curve + AEAD). Uses
