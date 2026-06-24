@@ -5,7 +5,7 @@ androidGradlePlugin = "9.2.1"
 ktlint = "14.2.0"
 # detekt 2.0.0-alpha.3 is built against Kotlin 2.3.21 (exact match for `kotlin` above).
 # Plugin id moved to `dev.detekt` in 2.0. Run non-blocking with a committed baseline.
-detekt = "2.0.0-alpha.3"
+detekt = "2.0.0-alpha.5"
 # simdutf - SIMD-accelerated Unicode validation and transcoding (Linux only)
 simdutf = "8.0.0"
 simdutfSha256 = "3d9eef727f088abaeaae4d40962a1ca09871c6bbe6d23de7930488c43ab77643"
