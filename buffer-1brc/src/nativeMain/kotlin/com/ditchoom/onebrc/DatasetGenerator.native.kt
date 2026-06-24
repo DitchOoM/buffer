@@ -29,17 +29,17 @@ actual fun generateDataset(
             val station = stations[random.nextInt(count)]
             val temperature = station.mean + nextGaussian(random) * 10.0
             var tenths = round(temperature * 10.0).toInt()
-            if (tenths > 999) tenths = 999
-            if (tenths < -999) tenths = -999
+            if (tenths > DatasetGen.MAX_TENTHS) tenths = DatasetGen.MAX_TENTHS
+            if (tenths < DatasetGen.MIN_TENTHS) tenths = DatasetGen.MIN_TENTHS
 
             line.setLength(0)
             line.append(station.name).append(';')
             if (tenths < 0) line.append('-')
             val abs = if (tenths < 0) -tenths else tenths
             line
-                .append(abs / 10)
+                .append(abs / DatasetGen.TENTHS_PER_UNIT)
                 .append('.')
-                .append(abs % 10)
+                .append(abs % DatasetGen.TENTHS_PER_UNIT)
                 .append('\n')
             fputs(line.toString(), file)
             i++
@@ -52,7 +52,7 @@ actual fun generateDataset(
 /** Box–Muller transform — Kotlin's Random has no nextGaussian on Native. */
 private fun nextGaussian(random: Random): Double {
     var u1 = random.nextDouble()
-    if (u1 < 1e-12) u1 = 1e-12
+    if (u1 < DatasetGen.GAUSSIAN_EPSILON) u1 = DatasetGen.GAUSSIAN_EPSILON
     val u2 = random.nextDouble()
-    return sqrt(-2.0 * ln(u1)) * cos(2.0 * PI * u2)
+    return sqrt(DatasetGen.BOX_MULLER_COEFF * ln(u1)) * cos(2.0 * PI * u2)
 }

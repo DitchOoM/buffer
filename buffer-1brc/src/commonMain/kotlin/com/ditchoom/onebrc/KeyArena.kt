@@ -14,7 +14,7 @@ import com.ditchoom.buffer.ReadBuffer
  */
 internal class KeyArena(
     private val factory: BufferFactory,
-    initialCapacity: Int = 64 * 1024,
+    initialCapacity: Int = DEFAULT_INITIAL_CAPACITY,
 ) {
     private var buffer: PlatformBuffer = factory.allocate(initialCapacity)
     private var capacity: Int = initialCapacity
@@ -69,5 +69,10 @@ internal class KeyArena(
         buffer.freeNativeMemory()
         buffer = grown
         capacity = newCapacity
+    }
+
+    private companion object {
+        /** Initial arena size: 64 KiB, large enough for the full ~10k distinct station names. */
+        private const val DEFAULT_INITIAL_CAPACITY = 64 * 1024
     }
 }

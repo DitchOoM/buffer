@@ -40,7 +40,9 @@ private class WebMappedFile(
 
     override fun byteAt(offset: Long): Byte = buffer[offset.toInt()]
 
-    override fun close() {}
+    override fun close() {
+        // No-op: the staging buffer is GC-managed, so there is nothing to release.
+    }
 }
 
 actual fun openMappedFile(path: String): MappedFile = WebMappedFile(nodeReadFileUtf8(path))
