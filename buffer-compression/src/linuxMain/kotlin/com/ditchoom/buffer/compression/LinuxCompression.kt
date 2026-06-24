@@ -85,7 +85,11 @@ actual fun compress(
             val result = compressWithZStream(buffer, algorithm, level)
             CompressionResult.Success(result)
         }
-    } catch (e: Exception) {
+    } catch (e: CompressionException) {
+        CompressionResult.Failure("Compression failed: ${e.message}", e)
+    } catch (e: IllegalStateException) {
+        CompressionResult.Failure("Compression failed: ${e.message}", e)
+    } catch (e: IllegalArgumentException) {
         CompressionResult.Failure("Compression failed: ${e.message}", e)
     }
 
@@ -102,7 +106,11 @@ actual fun decompress(
             val result = decompressWithZStream(buffer, algorithm)
             CompressionResult.Success(result)
         }
-    } catch (e: Exception) {
+    } catch (e: CompressionException) {
+        CompressionResult.Failure("Decompression failed: ${e.message}", e)
+    } catch (e: IllegalStateException) {
+        CompressionResult.Failure("Decompression failed: ${e.message}", e)
+    } catch (e: IllegalArgumentException) {
         CompressionResult.Failure("Decompression failed: ${e.message}", e)
     }
 

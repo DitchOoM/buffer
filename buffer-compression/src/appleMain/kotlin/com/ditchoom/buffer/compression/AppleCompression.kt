@@ -37,6 +37,12 @@ import platform.zlib.inflateInit2
 import platform.zlib.z_stream
 
 /**
+ * zlib's `Z_BUF_ERROR` (-5): inflate made no progress because the output buffer is
+ * full or input was exhausted. Treated as "needs more output space", not a failure.
+ */
+private const val Z_BUF_ERROR_CODE = -5
+
+/**
  * Apple supports synchronous compression via system zlib.
  */
 actual val supportsSyncCompression: Boolean = true
@@ -87,7 +93,11 @@ actual fun compress(
             val result = compressWithZStream(buffer, algorithm, level)
             CompressionResult.Success(result)
         }
-    } catch (e: Exception) {
+    } catch (e: CompressionException) {
+        CompressionResult.Failure("Compression failed: ${e.message}", e)
+    } catch (e: IllegalStateException) {
+        CompressionResult.Failure("Compression failed: ${e.message}", e)
+    } catch (e: IllegalArgumentException) {
         CompressionResult.Failure("Compression failed: ${e.message}", e)
     }
 
@@ -104,7 +114,11 @@ actual fun decompress(
             val result = decompressWithZStream(buffer, algorithm)
             CompressionResult.Success(result)
         }
-    } catch (e: Exception) {
+    } catch (e: CompressionException) {
+        CompressionResult.Failure("Decompression failed: ${e.message}", e)
+    } catch (e: IllegalStateException) {
+        CompressionResult.Failure("Decompression failed: ${e.message}", e)
+    } catch (e: IllegalArgumentException) {
         CompressionResult.Failure("Decompression failed: ${e.message}", e)
     }
 
@@ -226,7 +240,7 @@ private fun decompressWithZStream(
 
                 when (result) {
                     Z_STREAM_END -> break
-                    Z_OK, -5 -> {
+                    Z_OK, Z_BUF_ERROR_CODE -> {
                         if (s.avail_out > 0u && s.avail_in == 0u) {
                             // No more input and output space available means inflate
                             // can't make progress. Stream is complete even without

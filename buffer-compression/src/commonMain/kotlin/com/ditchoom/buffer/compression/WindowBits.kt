@@ -24,6 +24,12 @@ value class WindowBits private constructor(
     val sizeLog2: Int,
 ) {
     companion object {
+        /** Smallest log2 window size zlib's `deflateInit2` accepts (512 bytes). */
+        private const val MIN_WINDOW_LOG2 = 9
+
+        /** Largest log2 window size (32 KB) — also the algorithm default. */
+        private const val MAX_WINDOW_LOG2 = 15
+
         /**
          * Sentinel meaning "use the algorithm's default window (15 bits / 32 KB)".
          * The internal [sizeLog2] of `Default` is `0` — do not read it directly;
@@ -32,17 +38,17 @@ value class WindowBits private constructor(
         val Default: WindowBits = WindowBits(0)
 
         /** Smallest window supported by zlib's `deflateInit2` (512 bytes). */
-        val Min: WindowBits = WindowBits(9)
+        val Min: WindowBits = WindowBits(MIN_WINDOW_LOG2)
 
         /** Largest window (32 KB) — also the algorithm default. */
-        val Max: WindowBits = WindowBits(15)
+        val Max: WindowBits = WindowBits(MAX_WINDOW_LOG2)
 
         /**
          * Constructs a [WindowBits] of the given log2 size. Only `9..15` is valid;
          * other values throw [IllegalArgumentException].
          */
         operator fun invoke(sizeLog2: Int): WindowBits {
-            require(sizeLog2 in 9..15) {
+            require(sizeLog2 in MIN_WINDOW_LOG2..MAX_WINDOW_LOG2) {
                 "windowBits must be in 9..15 (zlib's deflateInit2 rejects 8). " +
                     "Use WindowBits.Default for the algorithm's default. Got: $sizeLog2"
             }
@@ -50,6 +56,15 @@ value class WindowBits private constructor(
         }
     }
 }
+
+/** Default zlib-format window passed to `inflateInit2` (32 KB / 15 bits). */
+private const val DEFAULT_ZLIB_WINDOW_BITS = 15
+
+/** Default gzip window: positive zlib window with the gzip +16 offset applied. */
+private const val DEFAULT_GZIP_WINDOW_BITS = 31
+
+/** Offset zlib adds to a positive window size to select the gzip wrapper. */
+private const val GZIP_WINDOW_OFFSET = 16
 
 /**
  * Resolves a [WindowBits] + [CompressionAlgorithm] pair to the signed/offset value
@@ -67,14 +82,14 @@ internal fun resolveWindowBits(
 ): Int {
     if (windowBits == WindowBits.Default) {
         return when (algorithm) {
-            CompressionAlgorithm.Deflate -> 15
-            CompressionAlgorithm.Raw -> -15
-            CompressionAlgorithm.Gzip -> 31
+            CompressionAlgorithm.Deflate -> DEFAULT_ZLIB_WINDOW_BITS
+            CompressionAlgorithm.Raw -> -DEFAULT_ZLIB_WINDOW_BITS
+            CompressionAlgorithm.Gzip -> DEFAULT_GZIP_WINDOW_BITS
         }
     }
     return when (algorithm) {
         CompressionAlgorithm.Deflate -> windowBits.sizeLog2
         CompressionAlgorithm.Raw -> -windowBits.sizeLog2
-        CompressionAlgorithm.Gzip -> windowBits.sizeLog2 + 16
+        CompressionAlgorithm.Gzip -> windowBits.sizeLog2 + GZIP_WINDOW_OFFSET
     }
 }

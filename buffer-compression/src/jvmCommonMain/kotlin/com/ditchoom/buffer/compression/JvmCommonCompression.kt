@@ -3,6 +3,8 @@ package com.ditchoom.buffer.compression
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
+import java.io.IOException
+import java.util.zip.DataFormatException
 
 /**
  * JVM/Android supports synchronous compression via java.util.zip.
@@ -51,7 +53,11 @@ actual fun compress(
         result.resetForRead()
 
         CompressionResult.Success(result)
-    } catch (e: Exception) {
+    } catch (e: CompressionException) {
+        CompressionResult.Failure("Compression failed: ${e.message}", e)
+    } catch (e: IOException) {
+        CompressionResult.Failure("Compression failed: ${e.message}", e)
+    } catch (e: IllegalArgumentException) {
         CompressionResult.Failure("Compression failed: ${e.message}", e)
     }
 
@@ -85,6 +91,12 @@ actual fun decompress(
         result.resetForRead()
 
         CompressionResult.Success(result)
-    } catch (e: Exception) {
+    } catch (e: CompressionException) {
+        CompressionResult.Failure("Decompression failed: ${e.message}", e)
+    } catch (e: DataFormatException) {
+        CompressionResult.Failure("Decompression failed: ${e.message}", e)
+    } catch (e: IOException) {
+        CompressionResult.Failure("Decompression failed: ${e.message}", e)
+    } catch (e: IllegalArgumentException) {
         CompressionResult.Failure("Decompression failed: ${e.message}", e)
     }
