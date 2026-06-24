@@ -9,7 +9,6 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_x25519_agree
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_x25519_generate
-import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_x25519_public_key
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.IntVar
@@ -51,7 +50,7 @@ import platform.Security.kSecAttrKeyTypeECSECPrimeRandom
 import platform.Security.kSecKeyAlgorithmECDHKeyExchangeStandard
 import platform.posix.size_tVar
 
-/**
+/*
  * Apple key agreement.
  *
  * **ECDH P-256/384/521** is implemented against the Security framework (`SecKey*` /
@@ -356,8 +355,7 @@ private fun rawAgreeX25519(
     return out
 }
 
-internal actual suspend fun generateKeyPairAsyncPlatform(curve: KeyAgreementCurve): KeyAgreementKeyPair =
-    generateKeyPairPlatform(curve)
+internal actual suspend fun generateKeyPairAsyncPlatform(curve: KeyAgreementCurve): KeyAgreementKeyPair = generateKeyPairPlatform(curve)
 
 internal actual suspend fun deriveSharedSecretAsyncPlatform(
     privateKey: KeyAgreementPrivateKey,
