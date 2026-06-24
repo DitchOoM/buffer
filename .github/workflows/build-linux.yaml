@@ -135,6 +135,9 @@ jobs:
       - name: Run buffer-codec-test ARM64 tests via QEMU
         run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-codec-test/build/bin/linuxArm64/debugTest/test.kexe
 
+      - name: Run buffer-crypto ARM64 tests via QEMU
+        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-crypto/build/bin/linuxArm64/debugTest/test.kexe
+
       - name: Publish to Maven Local
         run: ./gradlew publishToMavenLocal --no-build-cache ${{ inputs.gradle-args }}
 
