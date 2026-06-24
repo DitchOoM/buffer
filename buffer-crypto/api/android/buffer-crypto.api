@@ -174,10 +174,22 @@ public final class com/ditchoom/buffer/crypto/EcInteropKt {
 	public static synthetic fun ecdsaSignatureToDer$default (Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 	public static final fun ecdsaSignatureToP1363 (Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
 	public static synthetic fun ecdsaSignatureToP1363$default (Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static final fun ed25519PrivateKeyToPkcs8 (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun ed25519PrivateKeyToPkcs8$default (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static final fun ed25519PublicKeyToSpki (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun ed25519PublicKeyToSpki$default (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 	public static final fun pkcs8ToEcPrivateKey (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
 	public static synthetic fun pkcs8ToEcPrivateKey$default (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static final fun pkcs8ToEd25519PrivateKey (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun pkcs8ToEd25519PrivateKey$default (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 	public static final fun spkiToEcPublicKey (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
 	public static synthetic fun spkiToEcPublicKey$default (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static final fun spkiToEd25519PublicKey (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun spkiToEd25519PublicKey$default (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static final fun spkiToX25519PublicKey (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun spkiToX25519PublicKey$default (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static final fun x25519PublicKeyToSpki (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun x25519PublicKeyToSpki$default (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 }
 
 public final class com/ditchoom/buffer/crypto/EcInterop_jvmCommonKt {

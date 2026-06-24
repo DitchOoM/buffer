@@ -351,6 +351,59 @@ class EcInteropTest {
         assertEquals(EcEncodingError.MalformedDer, e.error)
     }
 
+    // --- RFC 8410 raw-key transcoders: Ed25519 / X25519 (OpenSSL ground truth) -------
+
+    private val ed25519Seed = "9cfa792cd729b2f654447c6de446ad1b8e6ab05ba4e63881bd8048df2f559fa1"
+    private val ed25519Pkcs8 = "302e020100300506032b657004220420$ed25519Seed"
+    private val ed25519Public = "e55551cf661a77bcfe7fb50284931f6437335738c84c842f48a6fc9c827fce7a"
+    private val ed25519Spki = "302a300506032b6570032100$ed25519Public"
+    private val x25519Public = "1df2ea465caf9d4e21ba8f4025a60d3ac4012bc67e012003dcf59268c84cc868"
+    private val x25519Spki = "302a300506032b656e032100$x25519Public"
+    private val x25519Pkcs8 = "302e020100300506032b656e04220420$x25519Scalar"
+
+    @Test
+    fun ed25519Pkcs8EmitAndParse() {
+        assertEquals(ed25519Pkcs8, ed25519PrivateKeyToPkcs8(hexBuffer(ed25519Seed)).toHex())
+        assertEquals(ed25519Seed, pkcs8ToEd25519PrivateKey(hexBuffer(ed25519Pkcs8)).toHex())
+    }
+
+    @Test
+    fun ed25519SpkiEmitAndParse() {
+        assertEquals(ed25519Spki, ed25519PublicKeyToSpki(hexBuffer(ed25519Public)).toHex())
+        assertEquals(ed25519Public, spkiToEd25519PublicKey(hexBuffer(ed25519Spki)).toHex())
+    }
+
+    @Test
+    fun x25519SpkiEmitAndParse() {
+        assertEquals(x25519Spki, x25519PublicKeyToSpki(hexBuffer(x25519Public)).toHex())
+        assertEquals(x25519Public, spkiToX25519PublicKey(hexBuffer(x25519Spki)).toHex())
+    }
+
+    @Test
+    fun rfc8410RejectsWrongAlgorithmOid() {
+        // Ed25519 (id-Ed25519 2b6570) vs X25519 (id-X25519 2b656e) must not cross-decode.
+        assertEquals(
+            EcEncodingError.CurveMismatch,
+            assertFailsWith<EcEncodingException> { spkiToX25519PublicKey(hexBuffer(ed25519Spki)) }.error,
+        )
+        assertEquals(
+            EcEncodingError.CurveMismatch,
+            assertFailsWith<EcEncodingException> { pkcs8ToEd25519PrivateKey(hexBuffer(x25519Pkcs8)) }.error,
+        )
+    }
+
+    @Test
+    fun rfc8410RejectsWrongKeyLength() {
+        assertEquals(
+            EcEncodingError.WrongKeyLength,
+            assertFailsWith<EcEncodingException> { ed25519PrivateKeyToPkcs8(hexBuffer(ed25519Seed + "ff")) }.error,
+        )
+        assertEquals(
+            EcEncodingError.WrongKeyLength,
+            assertFailsWith<EcEncodingException> { ed25519PublicKeyToSpki(hexBuffer(ed25519Public.dropLast(2))) }.error,
+        )
+    }
+
     // --- round-trips against the platform's own freshly-generated EC points ------
 
     @Test

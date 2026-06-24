@@ -235,6 +235,14 @@ val point = spkiToEcPublicKey(KeyAgreementCurve.P256, spki)             // 04 �
 // --- EC public key: point compression --------------------------------------------
 val compressed = ecPublicKeyCompress(KeyAgreementCurve.P256, point)      // 02/03 ‖ X (33 bytes)
 val recovered = ecPublicKeyDecompress(KeyAgreementCurve.P256, compressed) // back to 04 ‖ X ‖ Y
+
+// --- Ed25519 / X25519 keys: raw <-> RFC 8410 PKCS#8 / SPKI -----------------------
+// Edwards/Montgomery keys are a single canonical 32-byte raw value (no point, no decompression).
+val edPkcs8 = ed25519PrivateKeyToPkcs8(rawSeed)          // id-Ed25519 PKCS#8
+val edSeed = pkcs8ToEd25519PrivateKey(edPkcs8)
+val edSpki = ed25519PublicKeyToSpki(rawPublicKey)        // id-Ed25519 SPKI
+val x25519Spki = x25519PublicKeyToSpki(rawPublicKey)     // id-X25519 SPKI
+// (X25519 *private* keys use ecPrivateKeyToPkcs8(KeyAgreementCurve.X25519, ...) above.)
 ```
 
 Compression (`ecPublicKeyCompress`) is pure — it drops Y and records its parity in the `0x02`/`0x03` prefix. **Decompression** (`ecPublicKeyDecompress`) recovers Y by solving `y² = x³ − 3x + b` over the curve field; an `x` with no square root is rejected with `EcEncodingError.PointNotOnCurve`, so the result is always a genuine on-curve point. It is uniformly available on every platform with no capability gap: JVM/Android compute the field sqrt with `java.math.BigInteger`, JS/WASM with the host `BigInt`, and Apple/Linux through the native CryptoKit / BoringSSL stack. The math runs only on the *public* X coordinate (no secret material), so a variable-time implementation leaks nothing. All three NIST primes (P-256/384/521) are `p ≡ 3 (mod 4)`, so the sqrt is a single modular exponentiation.

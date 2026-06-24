@@ -59,8 +59,8 @@ enum class EcEncodingError {
 
     /**
      * A wrapped encoding named a different curve/algorithm than requested: the embedded `namedCurve`
-     * OID, or the `id-ecPublicKey` / `id-X25519` algorithm OID, did not match the [KeyAgreementCurve]
-     * passed in.
+     * OID, or the `id-ecPublicKey` / `id-X25519` / `id-Ed25519` algorithm OID, did not match the
+     * algorithm passed in.
      */
     CurveMismatch,
 
@@ -328,7 +328,11 @@ fun ecdsaSignatureToDer(
 // OID *value* bytes (the content of an OID TLV, without the 0x06 tag / length). Fixed non-secret
 // templates used both to emit and to match — never as a data structure.
 private val OID_ID_EC_PUBLIC_KEY = byteArrayOf(0x2a, 0x86.toByte(), 0x48, 0xce.toByte(), 0x3d, 0x02, 0x01)
-private val OID_X25519 = byteArrayOf(0x2b, 0x65, 0x6e)
+private val OID_X25519 = byteArrayOf(0x2b, 0x65, 0x6e) // id-X25519 1.3.101.110
+private val OID_ED25519 = byteArrayOf(0x2b, 0x65, 0x70) // id-Ed25519 1.3.101.112
+
+/** Raw key width (bytes) for the RFC 8410 algorithms (Ed25519 seed / public, X25519 scalar / public). */
+private const val RFC8410_KEY_BYTES = 32
 private val OID_P256 = byteArrayOf(0x2a, 0x86.toByte(), 0x48, 0xce.toByte(), 0x3d, 0x03, 0x01, 0x07)
 private val OID_P384 = byteArrayOf(0x2b, 0x81.toByte(), 0x04, 0x00, 0x22)
 private val OID_P521 = byteArrayOf(0x2b, 0x81.toByte(), 0x04, 0x00, 0x23)
@@ -406,22 +410,8 @@ fun ecPrivateKeyToPkcs8(
     if (rawScalar.remaining() != field) fail(EcEncodingError.WrongKeyLength)
     val scalarStart = rawScalar.position()
 
-    if (curve == KeyAgreementCurve.X25519) {
-        val innerOctet = tlvSize(field) // CurvePrivateKey ::= OCTET STRING (scalar)
-        val pkOctet = tlvSize(innerOctet) // privateKey OCTET STRING wraps the CurvePrivateKey
-        val algIdContent = tlvSize(OID_X25519.size)
-        val pkInfoContent = INT_VERSION_TLV + tlvSize(algIdContent) + pkOctet
-        val dest = factory.allocate(tlvSize(pkInfoContent))
-        writeTlvHeader(dest, DER_SEQUENCE, pkInfoContent)
-        writeIntVersion(dest, 0)
-        writeTlvHeader(dest, DER_SEQUENCE, algIdContent)
-        writeOidElement(dest, OID_X25519)
-        writeTlvHeader(dest, DER_OCTET_STRING, innerOctet)
-        writeTlvHeader(dest, DER_OCTET_STRING, field)
-        copyWindow(rawScalar, scalarStart, field, dest)
-        dest.resetForRead()
-        return dest
-    }
+    // X25519 is the RFC 8410 raw-key form (id-X25519 + an OCTET STRING-wrapped scalar), shared with Ed25519.
+    if (curve == KeyAgreementCurve.X25519) return rawKeyToPkcs8(OID_X25519, rawScalar, factory)
 
     val named = namedCurveOid(curve)
     val ecPrivContent = INT_VERSION_TLV + tlvSize(field) // version(1) + privateKey OCTET STRING(scalar)
@@ -454,24 +444,15 @@ fun pkcs8ToEcPrivateKey(
     pkcs8: ReadBuffer,
     factory: BufferFactory = BufferFactory.Default,
 ): ReadBuffer {
+    // X25519 is the RFC 8410 raw-key form (id-X25519, OCTET STRING-wrapped scalar), shared with Ed25519.
+    if (curve == KeyAgreementCurve.X25519) return pkcs8ToRawKey(OID_X25519, pkcs8, factory)
+
     val field = fieldBytes(curve)
     val outer = DerCursor(pkcs8, pkcs8.position(), pkcs8.position() + pkcs8.remaining())
     val info = outer.scoped(outer.element(DER_SEQUENCE))
     outer.ensureFullyConsumed()
     info.expectIntegerValue(0) // PrivateKeyInfo version 0
     val algId = info.scoped(info.element(DER_SEQUENCE))
-    if (curve == KeyAgreementCurve.X25519) {
-        if (!algId.matchOid(OID_X25519)) fail(EcEncodingError.CurveMismatch)
-        algId.ensureFullyConsumed() // RFC 8410: id-X25519 AlgorithmIdentifier has no parameters
-        val pkOctet = info.scoped(info.element(DER_OCTET_STRING))
-        val scalar = pkOctet.element(DER_OCTET_STRING) // CurvePrivateKey OCTET STRING(scalar)
-        if (scalar.len != field) fail(EcEncodingError.WrongKeyLength)
-        val dest = factory.allocate(field)
-        copyWindow(pkcs8, scalar.start, field, dest)
-        dest.resetForRead()
-        return dest
-    }
-
     if (!algId.matchOid(OID_ID_EC_PUBLIC_KEY)) fail(EcEncodingError.CurveMismatch)
     if (!algId.matchOid(namedCurveOid(curve))) fail(EcEncodingError.CurveMismatch)
     algId.ensureFullyConsumed() // no trailing bytes after id-ecPublicKey + namedCurve
@@ -558,6 +539,150 @@ fun spkiToEcPublicKey(
     dest.resetForRead()
     return dest
 }
+
+// =============================================================================
+// RFC 8410 raw-key keys: Ed25519 / X25519 <-> PKCS#8 (private) and SPKI (public)
+// =============================================================================
+//
+// Ed25519 (id-Ed25519) and X25519 (id-X25519) wrap a single canonical 32-byte raw key — no field
+// math, no SEC1 point, one encoding everywhere — so these are pure commonMain (no per-platform paths).
+// The private (PKCS#8) and public (SPKI) shapes are identical for both algorithms apart from the OID;
+// the only difference from the NIST-curve forms is that there is no `namedCurve` parameter and the
+// public key is the raw key (not an `0x04 ‖ X ‖ Y` point) inside the BIT STRING.
+
+/** RFC 8410 PKCS#8: `SEQ { INTEGER 0, SEQ { oid }, OCTET STRING ( OCTET STRING(rawKey) ) }`. */
+private fun rawKeyToPkcs8(
+    oid: ByteArray,
+    rawKey: ReadBuffer,
+    factory: BufferFactory,
+): ReadBuffer {
+    if (rawKey.remaining() != RFC8410_KEY_BYTES) fail(EcEncodingError.WrongKeyLength)
+    val start = rawKey.position()
+    val innerOctet = tlvSize(RFC8410_KEY_BYTES) // CurvePrivateKey ::= OCTET STRING (rawKey)
+    val pkOctet = tlvSize(innerOctet) // privateKey OCTET STRING wraps the CurvePrivateKey
+    val algIdContent = tlvSize(oid.size)
+    val pkInfoContent = INT_VERSION_TLV + tlvSize(algIdContent) + pkOctet
+    val dest = factory.allocate(tlvSize(pkInfoContent))
+    writeTlvHeader(dest, DER_SEQUENCE, pkInfoContent)
+    writeIntVersion(dest, 0)
+    writeTlvHeader(dest, DER_SEQUENCE, algIdContent)
+    writeOidElement(dest, oid)
+    writeTlvHeader(dest, DER_OCTET_STRING, innerOctet)
+    writeTlvHeader(dest, DER_OCTET_STRING, RFC8410_KEY_BYTES)
+    copyWindow(rawKey, start, RFC8410_KEY_BYTES, dest)
+    dest.resetForRead()
+    return dest
+}
+
+/** Strict inverse of [rawKeyToPkcs8]: version 0, [oid] match (no params), 32-byte inner OCTET STRING. */
+private fun pkcs8ToRawKey(
+    oid: ByteArray,
+    pkcs8: ReadBuffer,
+    factory: BufferFactory,
+): ReadBuffer {
+    val outer = DerCursor(pkcs8, pkcs8.position(), pkcs8.position() + pkcs8.remaining())
+    val info = outer.scoped(outer.element(DER_SEQUENCE))
+    outer.ensureFullyConsumed()
+    info.expectIntegerValue(0) // PrivateKeyInfo version 0
+    val algId = info.scoped(info.element(DER_SEQUENCE))
+    if (!algId.matchOid(oid)) fail(EcEncodingError.CurveMismatch)
+    algId.ensureFullyConsumed() // RFC 8410 AlgorithmIdentifier has no parameters
+    val pkOctet = info.scoped(info.element(DER_OCTET_STRING))
+    val key = pkOctet.element(DER_OCTET_STRING) // CurvePrivateKey OCTET STRING(rawKey)
+    if (key.len != RFC8410_KEY_BYTES) fail(EcEncodingError.WrongKeyLength)
+    val dest = factory.allocate(RFC8410_KEY_BYTES)
+    copyWindow(pkcs8, key.start, RFC8410_KEY_BYTES, dest)
+    dest.resetForRead()
+    return dest
+}
+
+/** RFC 8410 SPKI: `SEQ { SEQ { oid }, BIT STRING ( 0x00 ‖ rawKey ) }` (raw key, no point prefix). */
+private fun rawKeyToSpki(
+    oid: ByteArray,
+    rawKey: ReadBuffer,
+    factory: BufferFactory,
+): ReadBuffer {
+    if (rawKey.remaining() != RFC8410_KEY_BYTES) fail(EcEncodingError.WrongKeyLength)
+    val start = rawKey.position()
+    val algIdContent = tlvSize(oid.size)
+    val bitStrContent = 1 + RFC8410_KEY_BYTES // leading "unused bits" byte (0x00) + the raw key
+    val spkiContent = tlvSize(algIdContent) + tlvSize(bitStrContent)
+    val dest = factory.allocate(tlvSize(spkiContent))
+    writeTlvHeader(dest, DER_SEQUENCE, spkiContent)
+    writeTlvHeader(dest, DER_SEQUENCE, algIdContent)
+    writeOidElement(dest, oid)
+    writeTlvHeader(dest, DER_BIT_STRING, bitStrContent)
+    dest.writeByte(0) // 0 unused bits
+    copyWindow(rawKey, start, RFC8410_KEY_BYTES, dest)
+    dest.resetForRead()
+    return dest
+}
+
+/** Strict inverse of [rawKeyToSpki]: [oid] match (no params), BIT STRING with 0 unused bits + 32 bytes. */
+private fun spkiToRawKey(
+    oid: ByteArray,
+    spki: ReadBuffer,
+    factory: BufferFactory,
+): ReadBuffer {
+    val outer = DerCursor(spki, spki.position(), spki.position() + spki.remaining())
+    val info = outer.scoped(outer.element(DER_SEQUENCE))
+    outer.ensureFullyConsumed()
+    val algId = info.scoped(info.element(DER_SEQUENCE))
+    if (!algId.matchOid(oid)) fail(EcEncodingError.CurveMismatch)
+    algId.ensureFullyConsumed()
+    val bits = info.element(DER_BIT_STRING)
+    info.ensureFullyConsumed()
+    if (bits.len != 1 + RFC8410_KEY_BYTES) fail(EcEncodingError.WrongKeyLength)
+    if ((spki.get(bits.start).toInt() and BYTE_MASK) != 0) fail(EcEncodingError.MalformedDer) // unused bits
+    val dest = factory.allocate(RFC8410_KEY_BYTES)
+    copyWindow(spki, bits.start + 1, RFC8410_KEY_BYTES, dest)
+    dest.resetForRead()
+    return dest
+}
+
+/**
+ * Wraps a raw 32-byte Ed25519 private seed in an RFC 8410 PKCS#8 `OneAsymmetricKey` (the form
+ * OpenSSL / PEM / WebCrypto consume). The seed must be 32 bytes ([WrongKeyLength] otherwise).
+ * Allocated from [factory], read-ready.
+ */
+fun ed25519PrivateKeyToPkcs8(
+    rawSeed: ReadBuffer,
+    factory: BufferFactory = BufferFactory.Default,
+): ReadBuffer = rawKeyToPkcs8(OID_ED25519, rawSeed, factory)
+
+/** Extracts the raw 32-byte Ed25519 seed from an RFC 8410 PKCS#8 (the inverse of [ed25519PrivateKeyToPkcs8]). */
+fun pkcs8ToEd25519PrivateKey(
+    pkcs8: ReadBuffer,
+    factory: BufferFactory = BufferFactory.Default,
+): ReadBuffer = pkcs8ToRawKey(OID_ED25519, pkcs8, factory)
+
+/** Wraps a raw 32-byte Ed25519 public key in an RFC 8410 X.509 `SubjectPublicKeyInfo`. */
+fun ed25519PublicKeyToSpki(
+    rawPublicKey: ReadBuffer,
+    factory: BufferFactory = BufferFactory.Default,
+): ReadBuffer = rawKeyToSpki(OID_ED25519, rawPublicKey, factory)
+
+/** Extracts the raw 32-byte Ed25519 public key from an RFC 8410 SPKI (the inverse of [ed25519PublicKeyToSpki]). */
+fun spkiToEd25519PublicKey(
+    spki: ReadBuffer,
+    factory: BufferFactory = BufferFactory.Default,
+): ReadBuffer = spkiToRawKey(OID_ED25519, spki, factory)
+
+/**
+ * Wraps a raw 32-byte X25519 public key in an RFC 8410 X.509 `SubjectPublicKeyInfo`. (The X25519
+ * *private* key is handled by [ecPrivateKeyToPkcs8] / [pkcs8ToEcPrivateKey], which take its
+ * [KeyAgreementCurve].)
+ */
+fun x25519PublicKeyToSpki(
+    rawPublicKey: ReadBuffer,
+    factory: BufferFactory = BufferFactory.Default,
+): ReadBuffer = rawKeyToSpki(OID_X25519, rawPublicKey, factory)
+
+/** Extracts the raw 32-byte X25519 public key from an RFC 8410 SPKI (the inverse of [x25519PublicKeyToSpki]). */
+fun spkiToX25519PublicKey(
+    spki: ReadBuffer,
+    factory: BufferFactory = BufferFactory.Default,
+): ReadBuffer = spkiToRawKey(OID_X25519, spki, factory)
 
 // =============================================================================
 // EC public key: point compression (pure) and decompression (per-platform bignum / native stack)
