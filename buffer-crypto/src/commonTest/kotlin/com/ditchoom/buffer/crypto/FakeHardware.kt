@@ -66,9 +66,18 @@ internal class FakeHardware(
         val hardware =
             HardwareAesGcmKey(
                 sizeBits = spec.aesKeySizeBits,
-                gatedSeal = { nonce, aad, plaintext, factory ->
+                gatedSeal = { aad, plaintext, factory ->
                     if (!auth.authorize()) throw AuthorizationFailed()
-                    aesGcmSealWithNonceAsync(inner, nonce, aad, plaintext, factory)
+                    // A real secure element generates the nonce itself, so the seam hands the closure
+                    // none: the fake mints a fresh CSPRNG nonce and frames nonce ‖ ciphertext ‖ tag,
+                    // exactly as the Android keystore path frames its keystore-chosen IV.
+                    val nonce = cryptoRandom(AEAD_NONCE_BYTES)
+                    val ctTag = aesGcmSealWithNonceAsync(inner, nonce, aad, plaintext, factory)
+                    val out = allocateFramed(plaintext.remaining(), factory)
+                    out.write(nonce)
+                    out.write(ctTag)
+                    out.resetForRead()
+                    out
                 },
                 gatedOpen = { nonce, aad, ciphertextAndTag, factory ->
                     if (!auth.authorize()) throw AuthorizationFailed()

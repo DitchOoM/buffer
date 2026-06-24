@@ -190,23 +190,17 @@ internal fun ChaChaPolyKey.requireInMemoryMaterial(): PlatformBuffer =
     }
 
 /**
- * Seals [plaintext] through a hardware key's gated closure and frames the result as
- * `nonce ‖ ciphertext ‖ tag`, identically to the in-memory async path. Shared by the async- and
- * blocking-witness ops so a hardware key behaves the same regardless of which witness resolved.
+ * Seals [plaintext] through a hardware key's gated closure. The closure returns the fully framed
+ * `nonce ‖ ciphertext ‖ tag` directly — the secure element picks the nonce itself (a keystore key
+ * generates its own GCM IV; the library must never hand it one, since a single reused GCM nonce is
+ * catastrophic), so this is a passthrough. Shared by the async- and blocking-witness ops so a
+ * hardware key behaves the same regardless of which witness resolved.
  */
 private suspend fun HardwareAesGcmKey.sealFramed(
     plaintext: ReadBuffer,
     aad: Aad,
     factory: BufferFactory,
-): PlatformBuffer {
-    val nonce = cryptoRandom(AEAD_NONCE_BYTES)
-    val ctTag = gatedSeal(nonce, aad.bytesOrNull, plaintext, factory)
-    val out = allocateFramed(plaintext.remaining(), factory)
-    out.write(nonce)
-    out.write(ctTag)
-    out.resetForRead()
-    return out
-}
+): PlatformBuffer = gatedSeal(aad.bytesOrNull, plaintext, factory)
 
 /** Opens a `nonce ‖ ciphertext ‖ tag` buffer through a hardware key's gated closure. */
 private suspend fun HardwareAesGcmKey.openFramed(

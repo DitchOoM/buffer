@@ -183,9 +183,15 @@ internal expect fun platformHardwareKeyProvider(): HardwareKeyProvider?
 // module: each key holds suspend closures the provider supplies, so commonMain never references the
 // test fake (or any future TEE backend). The closures embed the authorization gate.
 
-/** A gated AES-GCM seal-with-explicit-nonce: yields `ciphertext ‖ tag` or throws [AuthorizationFailed]. */
+/**
+ * A gated AES-GCM seal: yields a fully self-framed `nonce ‖ ciphertext ‖ tag` buffer, or throws
+ * [AuthorizationFailed]. The *secure element generates the nonce* (an Android Keystore / Enclave key
+ * picks its own GCM IV at `init`, and one reused GCM nonce is catastrophic), so — unlike the open
+ * seam — no nonce crosses in. The closure is responsible for framing the keystore-chosen nonce ahead
+ * of the ciphertext so the standard [splitFramed] open path works unchanged.
+ */
 internal typealias HardwareAesGcmSeal =
-    suspend (nonce: ReadBuffer, aad: ReadBuffer?, plaintext: ReadBuffer, factory: BufferFactory) -> PlatformBuffer
+    suspend (aad: ReadBuffer?, plaintext: ReadBuffer, factory: BufferFactory) -> PlatformBuffer
 
 /** A gated AES-GCM open-with-explicit-nonce: yields recovered plaintext, throws on bad tag or denied auth. */
 internal typealias HardwareAesGcmOpen =
