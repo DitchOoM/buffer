@@ -11,7 +11,7 @@ import com.ditchoom.buffer.ReadBuffer
  * - AES-GCM uses the explicit-nonce async seam (aesGcmSealWithNonceAsync / aesGcmOpenWithNonceAsync),
  *   which works on every platform including the web (WebCrypto).
  * - ChaCha20-Poly1305 uses the synchronous native primitives (chaChaPolySeal / chaChaPolyOpen); it is
- *   unavailable on the web and that suite is gated false by supportsChaChaPoly.
+ *   unavailable on the web and that suite is gated false by the AEAD capability witness.
  *
  * Both seal/open take `ct || tag` (no nonce prefix) — HPKE never prepends the nonce, it is derived
  * from the context's base nonce and sequence number.
@@ -32,7 +32,7 @@ internal suspend fun hpkeAeadSeal(
             aesGcmSealWithNonceAsync(gcmKey, nonce, aad, plaintext, factory)
         }
         HpkeAead.ChaCha20Poly1305 -> {
-            if (!supportsChaChaPoly) {
+            if (!chaChaPolyReachable) {
                 throw UnsupportedOperationException("ChaCha20-Poly1305 is not supported on this platform")
             }
             val ccKey = ChaChaPolyKey.of(viewRemaining(key), secureScratch)
@@ -58,7 +58,7 @@ internal suspend fun hpkeAeadOpen(
             aesGcmOpenWithNonceAsync(gcmKey, nonce, aad, ciphertextAndTag, factory)
         }
         HpkeAead.ChaCha20Poly1305 -> {
-            if (!supportsChaChaPoly) {
+            if (!chaChaPolyReachable) {
                 throw UnsupportedOperationException("ChaCha20-Poly1305 is not supported on this platform")
             }
             val ccKey = ChaChaPolyKey.of(viewRemaining(key), secureScratch)

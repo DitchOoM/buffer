@@ -24,32 +24,32 @@ class AeadKeyCloseTest {
     @Test
     fun aesGcmKeyCloseWipesMaterial() {
         val key = AesGcmKey.of(hexBuffer(aes128Key), secureManaged)
-        val len = key.material.limit()
+        val len = key.requireInMemoryMaterial().limit()
         assertEquals(AES_128_KEY_BYTES, len)
         // Material is non-zero before close (it is the key bytes).
         var anyNonZero = false
-        for (i in 0 until len) if (key.material.get(i).toInt() != 0) anyNonZero = true
+        for (i in 0 until len) if (key.requireInMemoryMaterial().get(i).toInt() != 0) anyNonZero = true
         assertEquals(true, anyNonZero, "key material should be non-zero before close")
         key.close()
-        for (i in 0 until len) assertEquals(0, key.material.get(i).toInt(), "byte $i not wiped")
+        for (i in 0 until len) assertEquals(0, key.requireInMemoryMaterial().get(i).toInt(), "byte $i not wiped")
     }
 
     @Test
     fun aesGcm256KeyCloseWipesMaterial() {
         val key = AesGcmKey.of(hexBuffer(aes256Key), secureManaged)
-        val len = key.material.limit()
+        val len = key.requireInMemoryMaterial().limit()
         assertEquals(AES_256_KEY_BYTES, len)
         key.close()
-        for (i in 0 until len) assertEquals(0, key.material.get(i).toInt(), "byte $i not wiped")
+        for (i in 0 until len) assertEquals(0, key.requireInMemoryMaterial().get(i).toInt(), "byte $i not wiped")
     }
 
     @Test
     fun chaChaPolyKeyCloseWipesMaterial() {
         val key = ChaChaPolyKey.of(hexBuffer(chachaKey), secureManaged)
-        val len = key.material.limit()
+        val len = key.requireInMemoryMaterial().limit()
         assertEquals(CHACHA_KEY_BYTES, len)
         key.close()
-        for (i in 0 until len) assertEquals(0, key.material.get(i).toInt(), "byte $i not wiped")
+        for (i in 0 until len) assertEquals(0, key.requireInMemoryMaterial().get(i).toInt(), "byte $i not wiped")
     }
 
     @Test
@@ -57,7 +57,7 @@ class AeadKeyCloseTest {
         val key = AesGcmKey.of(hexBuffer(aes128Key), secureManaged)
         key.close()
         key.close() // second close must not throw
-        for (i in 0 until key.material.limit()) assertEquals(0, key.material.get(i).toInt())
+        for (i in 0 until key.requireInMemoryMaterial().limit()) assertEquals(0, key.requireInMemoryMaterial().get(i).toInt())
     }
 
     @Test
@@ -65,6 +65,6 @@ class AeadKeyCloseTest {
         val key = ChaChaPolyKey.of(hexBuffer(chachaKey), secureManaged)
         key.close()
         key.close()
-        for (i in 0 until key.material.limit()) assertEquals(0, key.material.get(i).toInt())
+        for (i in 0 until key.requireInMemoryMaterial().limit()) assertEquals(0, key.requireInMemoryMaterial().get(i).toInt())
     }
 }

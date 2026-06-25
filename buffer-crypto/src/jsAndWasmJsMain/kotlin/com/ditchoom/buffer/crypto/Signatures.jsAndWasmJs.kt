@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
@@ -8,10 +9,9 @@ import com.ditchoom.buffer.WriteBuffer
 /**
  * js/wasmJs signature support.
  *
- * WebCrypto's `SubtleCrypto.sign` / `.verify` are **async-only**, so the synchronous entry points
- * ([signInto], [verify]) are unsupported here and throw [UnsupportedOperationException] — their
- * capability flags ([supportsSyncEd25519], [supportsSyncEcdsa]) are `false`. The real work is in
- * the suspending [signAsync] / [verifyAsync], which call WebCrypto through a per-engine bridge
+ * WebCrypto's `SubtleCrypto.sign` / `.verify` are **async-only**, so every scheme's witness is
+ * [SignatureSupport.AsyncOnly] — the synchronous ops are not members of it and cannot be reached.
+ * The real work is in the async witness ops, which call WebCrypto through a per-engine bridge
  * (`dynamic` on JS, `@JsFun` externals on wasmJs).
  *
  * ECDSA signatures on WebCrypto are **raw P1363** (`r ‖ s`, fixed-width), pinned by
@@ -22,23 +22,32 @@ import com.ditchoom.buffer.WriteBuffer
  * [UnsupportedOperationException], matching the capability contract.
  */
 
-actual val supportsSyncEd25519: Boolean get() = false
-
-actual val supportsSyncEcdsa: Boolean get() = false
-
 actual val ecdsaSignatureEncoding: EcdsaSignatureEncoding get() = EcdsaSignatureEncoding.P1363
 
-actual fun signInto(
+/**
+ * WebCrypto's sign/verify are `suspend`-only, so every scheme is [SignatureSupport.AsyncOnly] — the
+ * synchronous ops are not reachable. Ed25519's actual engine support is feature-detected at call
+ * time (see [ed25519AsyncAvailable]); the async ops throw [UnsupportedOperationException] if absent.
+ */
+actual fun CryptoCapabilities.signatures(scheme: SignatureScheme): SignatureSupport =
+    SignatureSupport.AsyncOnly(SignatureAsyncOpsImpl(scheme))
+
+internal actual fun signIntoPlatform(
     key: SigningKey,
     message: ReadBuffer,
     dest: WriteBuffer,
-): Int = throw UnsupportedOperationException("synchronous signing is unavailable on JS/WASM; use signAsync")
+): Int = throw UnsupportedOperationException("synchronous signing is unavailable on JS/WASM; use the async ops")
 
-actual fun verify(
+internal actual fun generateSigningKeyPlatform(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey = throw UnsupportedOperationException("synchronous key generation is unavailable on JS/WASM; use the async ops")
+
+internal actual fun verifyPlatform(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,
-): Boolean = throw UnsupportedOperationException("synchronous verification is unavailable on JS/WASM; use verifyAsync")
+): Boolean = throw UnsupportedOperationException("synchronous verification is unavailable on JS/WASM; use the async ops")
 
 // ---------------------------------------------------------------------------
 // Per-engine WebCrypto bridge (dynamic on JS, @JsFun on wasmJs).
@@ -63,6 +72,14 @@ internal expect suspend fun webCryptoVerify(
     messageHex: String,
     signatureHex: String,
 ): Boolean
+
+/**
+ * WebCrypto key generation for [scheme]. Returns `"<privHex>:<pubHex>"` — the raw private material
+ * (Ed25519 32-byte seed / ECDSA big-endian scalar) and the raw public key (Ed25519 32-byte point /
+ * ECDSA uncompressed SEC1 point), both lowercase hex. Throws (engine rejection) for an unsupported
+ * scheme (e.g. Ed25519 where the engine lacks it).
+ */
+internal expect suspend fun webCryptoGenerateKeyPair(scheme: SignatureScheme): String
 
 // ---------------------------------------------------------------------------
 // Hex <-> buffer helpers (no ByteArray staging beyond the WebCrypto string boundary).
@@ -184,7 +201,7 @@ private fun pkcs8EcdsaHex(
 }
 
 private fun privateMaterialHex(key: SigningKey): String {
-    val material = key.requireOpen()
+    val material = key.requireInMemoryMaterial()
     return when (key.scheme) {
         SignatureScheme.Ed25519 -> pkcs8Ed25519Hex(material)
         else -> pkcs8EcdsaHex(key.scheme, material)
@@ -195,7 +212,7 @@ private fun privateMaterialHex(key: SigningKey): String {
 // Suspending API
 // ---------------------------------------------------------------------------
 
-actual suspend fun signAsync(
+internal actual suspend fun signAsyncPlatform(
     key: SigningKey,
     message: ReadBuffer,
     factory: BufferFactory,
@@ -207,7 +224,7 @@ actual suspend fun signAsync(
     return hexToBuffer(sigHex, factory)
 }
 
-actual suspend fun verifyAsync(
+internal actual suspend fun verifyAsyncPlatform(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,
@@ -217,7 +234,7 @@ actual suspend fun verifyAsync(
     }
     return webCryptoVerify(
         key.scheme,
-        key.material.toHexString(),
+        key.requireInMemoryMaterial().toHexString(),
         message.toHexString(),
         signature.toHexString(),
     )
@@ -226,3 +243,21 @@ actual suspend fun verifyAsync(
 actual suspend fun ed25519AsyncAvailable(): Boolean = webCryptoEd25519Available()
 
 actual val supportsEcdsaSigningFromScalar: Boolean get() = true
+
+internal actual suspend fun generateSigningKeyAsyncPlatform(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey {
+    if (scheme == SignatureScheme.Ed25519 && !webCryptoEd25519Available()) {
+        throw UnsupportedOperationException("Ed25519 is not available on this WebCrypto engine")
+    }
+    val parts = webCryptoGenerateKeyPair(scheme).split(":")
+    val verifyKey = verifyKeyOf(scheme, hexToBuffer(parts[1], BufferFactory.Default))
+    // Stage the secret private material in a wiped buffer; the import factory copies it into `factory`.
+    val privBuf = hexToBuffer(parts[0], secureScratch)
+    return try {
+        signingKeyOf(scheme, privBuf, verifyKey, factory)
+    } finally {
+        privBuf.freeNativeMemory()
+    }
+}

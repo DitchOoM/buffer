@@ -194,6 +194,81 @@ public func bcks_x25519_agree(
 }
 
 // =============================================================================
+// ECDH X9.63 reconstruction from a bare scalar — CryptoKit P256/P384/P521.KeyAgreement
+// =============================================================================
+//
+// The key-agreement private encoding is the raw big-endian scalar on every platform. Apple's
+// Security-framework agreement (SecKeyCreateWithData) needs the full X9.63 private representation
+// (04 ‖ X ‖ Y ‖ K) and cannot derive the public point from the scalar, so this reconstructs it via
+// CryptoKit's P###.KeyAgreement.PrivateKey(rawRepresentation:).x963Representation just before the
+// Security-framework exchange.
+
+private func ecdhX963(_ curve: Int32, _ scalar: Data) -> Data? {
+    switch curve {
+    case 256:
+        return (try? P256.KeyAgreement.PrivateKey(rawRepresentation: scalar))?.x963Representation
+    case 384:
+        return (try? P384.KeyAgreement.PrivateKey(rawRepresentation: scalar))?.x963Representation
+    case 521:
+        return (try? P521.KeyAgreement.PrivateKey(rawRepresentation: scalar))?.x963Representation
+    default:
+        return nil
+    }
+}
+
+// Emit the X9.63 private representation (04 ‖ X ‖ Y ‖ K) for a curve's raw scalar (256/384/521).
+@_cdecl("bcks_ecdh_x963_from_scalar")
+public func bcks_ecdh_x963_from_scalar(
+    _ curve: Int32,
+    _ scalarPtr: UnsafePointer<UInt8>?, _ scalarLen: Int,
+    _ x963Out: UnsafeMutablePointer<UInt8>?, _ x963Cap: Int,
+    _ x963LenOut: UnsafeMutablePointer<Int>?
+) -> Int32 {
+    guard let x963 = ecdhX963(curve, bytes(scalarPtr, scalarLen)) else {
+        return BCKS_ERR_INPUT
+    }
+    return emit(x963, x963Out, x963Cap, x963LenOut)
+}
+
+// =============================================================================
+// EC point decompression — CryptoKit P256/P384/P521.KeyAgreement
+// =============================================================================
+//
+// Recovers the uncompressed point (04 ‖ X ‖ Y) from a SEC1 compressed point (02/03 ‖ X). CryptoKit's
+// compressed-point initializers require macOS 13 / iOS 16 / watchOS 9 / tvOS 16; on older systems the
+// caller is told (BCKS_ERR_INTERNAL) so it can surface a capability error rather than a wrong answer.
+
+@available(macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, *)
+private func ecDecompress(_ curve: Int32, _ point: Data) -> Data? {
+    switch curve {
+    case 256:
+        return (try? P256.KeyAgreement.PublicKey(compressedRepresentation: point))?.x963Representation
+    case 384:
+        return (try? P384.KeyAgreement.PublicKey(compressedRepresentation: point))?.x963Representation
+    case 521:
+        return (try? P521.KeyAgreement.PublicKey(compressedRepresentation: point))?.x963Representation
+    default:
+        return nil
+    }
+}
+
+@_cdecl("bcks_ec_decompress")
+public func bcks_ec_decompress(
+    _ curve: Int32,
+    _ pointPtr: UnsafePointer<UInt8>?, _ pointLen: Int,
+    _ out: UnsafeMutablePointer<UInt8>?, _ outCap: Int,
+    _ outLenOut: UnsafeMutablePointer<Int>?
+) -> Int32 {
+    guard #available(macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, *) else {
+        return BCKS_ERR_INTERNAL // CryptoKit lacks compressed-point support on this OS
+    }
+    guard let uncompressed = ecDecompress(curve, bytes(pointPtr, pointLen)) else {
+        return BCKS_ERR_INPUT // off-curve / malformed compressed point
+    }
+    return emit(uncompressed, out, outCap, outLenOut)
+}
+
+// =============================================================================
 // ECDSA signing from a bare scalar — CryptoKit P256/P384/P521.Signing
 // =============================================================================
 //
@@ -233,4 +308,57 @@ public func bcks_ecdsa_sign_from_scalar(
         return BCKS_ERR_INPUT
     }
     return emit(sig, sigOut, sigCap, sigLenOut)
+}
+
+// =============================================================================
+// Secure Enclave (hardware-backed P-256 signing) — CryptoKit SecureEnclave.P256.Signing
+// =============================================================================
+//
+// The Secure Enclave generates and holds the P-256 private key; the key never leaves the element.
+// `dataRepresentation` is an *encrypted* blob that only the same Enclave can restore — it is NOT the
+// private key and is safe to persist / pass around. Signing reconstructs the key handle from that
+// blob and signs inside the Enclave, emitting DER (matching the cross-platform ECDSA contract).
+//
+// AES-GCM is deliberately NOT offered: CryptoKit exposes no symmetric Secure Enclave key, and the
+// only "Enclave-tied" AES one could build (ECDH a P-256 Enclave key, derive a symmetric key, run
+// AES.GCM in software) would put the AES key in process memory — violating the non-exportable
+// hardware-key contract. So the Enclave provider backs signatures only.
+
+// 1 if a Secure Enclave is present on this device, else 0. (Presence only — actual usability also
+// depends on code-signing entitlements, which the Kotlin side probes by attempting a generation.)
+@_cdecl("bcks_secure_enclave_available")
+public func bcks_secure_enclave_available() -> Int32 {
+    return SecureEnclave.isAvailable ? 1 : 0
+}
+
+// Generate a P-256 signing key inside the Secure Enclave. Writes the persistent encrypted key blob
+// into blobOut and the uncompressed SEC1 public point (04 ‖ X ‖ Y) into pointOut.
+@_cdecl("bcks_secure_enclave_p256_generate")
+public func bcks_secure_enclave_p256_generate(
+    _ blobOut: UnsafeMutablePointer<UInt8>?, _ blobCap: Int,
+    _ blobLenOut: UnsafeMutablePointer<Int>?,
+    _ pointOut: UnsafeMutablePointer<UInt8>?, _ pointCap: Int,
+    _ pointLenOut: UnsafeMutablePointer<Int>?
+) -> Int32 {
+    guard SecureEnclave.isAvailable else { return BCKS_ERR_INTERNAL }
+    guard let key = try? SecureEnclave.P256.Signing.PrivateKey() else { return BCKS_ERR_INTERNAL }
+    let s = emit(key.dataRepresentation, blobOut, blobCap, blobLenOut)
+    if s != BCKS_OK { return s }
+    return emit(key.publicKey.x963Representation, pointOut, pointCap, pointLenOut)
+}
+
+// Sign message with the Enclave key reconstructed from its blob; emits a DER signature. Returns
+// BCKS_ERR_INPUT if the blob is not restorable by this Enclave.
+@_cdecl("bcks_secure_enclave_p256_sign")
+public func bcks_secure_enclave_p256_sign(
+    _ blobPtr: UnsafePointer<UInt8>?, _ blobLen: Int,
+    _ msgPtr: UnsafePointer<UInt8>?, _ msgLen: Int,
+    _ sigOut: UnsafeMutablePointer<UInt8>?, _ sigCap: Int,
+    _ sigLenOut: UnsafeMutablePointer<Int>?
+) -> Int32 {
+    guard let key = try? SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: bytes(blobPtr, blobLen)) else {
+        return BCKS_ERR_INPUT
+    }
+    guard let sig = try? key.signature(for: bytes(msgPtr, msgLen)) else { return BCKS_ERR_INTERNAL }
+    return emit(sig.derRepresentation, sigOut, sigCap, sigLenOut)
 }

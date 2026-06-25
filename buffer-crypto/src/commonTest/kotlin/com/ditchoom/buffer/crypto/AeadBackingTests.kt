@@ -35,7 +35,7 @@ class AeadBackingTests {
             // Sync seal/open exercise the per-backing bridge branches; on the web they throw
             // (WebCrypto is async-only), so the matrix runs on JVM/Apple. Web backing coverage
             // comes from the async round-trip + Wycheproof suites.
-            if (!supportsSyncAesGcm) return@runTest
+            if (!aesGcmBlockingAvailable) return@runTest
             val pool = BufferPool()
             val gcmKey = AesGcmKey.of(hexBuffer(key))
             val ptLen = pt.length / 2
@@ -57,7 +57,7 @@ class AeadBackingTests {
     @Test
     fun aesGcmOpenAcrossInputAadDestBackings() =
         runTest {
-            if (!supportsSyncAesGcm) return@runTest
+            if (!aesGcmBlockingAvailable) return@runTest
             val pool = BufferPool()
             val gcmKey = AesGcmKey.of(hexBuffer(key))
             val ptLen = pt.length / 2
@@ -101,7 +101,7 @@ class AeadBackingTests {
 
     @Test
     fun chaChaPolySealOpenAcrossBackings() {
-        if (!supportsChaChaPoly) return
+        if (!chaChaPolyReachable) return
         val pool = BufferPool()
         // RFC 8439 ChaCha20-Poly1305 vector.
         val ccKey = ChaChaPolyKey.of(hexBuffer("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f"))

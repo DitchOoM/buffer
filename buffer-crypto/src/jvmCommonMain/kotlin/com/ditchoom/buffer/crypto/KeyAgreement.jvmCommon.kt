@@ -51,7 +51,7 @@ private fun probe(block: () -> Unit): Boolean =
         false
     }
 
-actual val supportsSyncX25519: Boolean =
+private val supportsSyncX25519: Boolean =
     probe {
         KeyPairGenerator.getInstance("XDH").initialize(NamedParameterSpec.X25519)
         JcaKeyAgreement.getInstance("XDH")
@@ -63,9 +63,26 @@ private fun probeEc(curve: String): Boolean =
         JcaKeyAgreement.getInstance("ECDH")
     }
 
-actual val supportsSyncEcdhP256: Boolean = probeEc("secp256r1")
-actual val supportsSyncEcdhP384: Boolean = probeEc("secp384r1")
-actual val supportsSyncEcdhP521: Boolean = probeEc("secp521r1")
+private val supportsSyncEcdhP256: Boolean = probeEc("secp256r1")
+private val supportsSyncEcdhP384: Boolean = probeEc("secp384r1")
+private val supportsSyncEcdhP521: Boolean = probeEc("secp521r1")
+
+/** Whether [curve] has a synchronous JCA path on this runtime (X25519 needs XDH; Android 14+). */
+private fun jvmSupportsSync(curve: KeyAgreementCurve): Boolean =
+    when (curve) {
+        KeyAgreementCurve.X25519 -> supportsSyncX25519
+        KeyAgreementCurve.P256 -> supportsSyncEcdhP256
+        KeyAgreementCurve.P384 -> supportsSyncEcdhP384
+        KeyAgreementCurve.P521 -> supportsSyncEcdhP521
+    }
+
+/** JVM/Android have a synchronous JCA KA for every curve the provider supports; else [Unavailable]. */
+actual fun CryptoCapabilities.keyAgreement(curve: KeyAgreementCurve): KeyAgreementSupport =
+    if (jvmSupportsSync(curve)) {
+        KeyAgreementSupport.Blocking(KeyAgreementBlockingOpsImpl(curve))
+    } else {
+        KeyAgreementSupport.Unavailable
+    }
 
 private fun jcaCurveName(curve: KeyAgreementCurve): String =
     when (curve) {
@@ -76,7 +93,7 @@ private fun jcaCurveName(curve: KeyAgreementCurve): String =
     }
 
 private fun requireSupported(curve: KeyAgreementCurve) {
-    if (!supportsSync(curve)) {
+    if (!jvmSupportsSync(curve)) {
         throw UnsupportedOperationException("${curve.curveName} key agreement is not available on this platform")
     }
 }
@@ -211,7 +228,7 @@ private fun putFixedBe(
 
 // ---- glue -------------------------------------------------------------------
 
-actual fun generateKeyPair(curve: KeyAgreementCurve): KeyAgreementKeyPair {
+internal actual fun generateKeyPairPlatform(curve: KeyAgreementCurve): KeyAgreementKeyPair {
     requireSupported(curve)
     return when (curve) {
         KeyAgreementCurve.X25519 -> {
@@ -225,7 +242,7 @@ actual fun generateKeyPair(curve: KeyAgreementCurve): KeyAgreementKeyPair {
             val scalar = extractX25519Scalar(kp.private.encoded)
             val priv = secureBufferOf(curve.privateKeyBytes) { it.writeBytes(scalar) }
             scalar.fill(0)
-            KeyAgreementKeyPair(curve, KeyAgreementPrivateKey(curve, priv), publicKeyOf(curve, rawPub))
+            keyAgreementKeyPairOf(curve, keyAgreementPrivateKeyOf(curve, priv), publicKeyOf(curve, rawPub))
         }
         else -> {
             val kpg = KeyPairGenerator.getInstance("EC")
@@ -237,7 +254,7 @@ actual fun generateKeyPair(curve: KeyAgreementCurve): KeyAgreementKeyPair {
             putFixedBe(s, scalar, 0, curve.privateKeyBytes)
             val priv = secureBufferOf(curve.privateKeyBytes) { it.writeBytes(scalar) }
             scalar.fill(0)
-            KeyAgreementKeyPair(curve, KeyAgreementPrivateKey(curve, priv), publicKeyOf(curve, rawPub))
+            keyAgreementKeyPairOf(curve, keyAgreementPrivateKeyOf(curve, priv), publicKeyOf(curve, rawPub))
         }
     }
 }
@@ -257,7 +274,7 @@ private fun publicKeyOf(
     val buf = BufferFactory.Default.allocate(raw.size)
     buf.writeBytes(raw)
     buf.resetForRead()
-    return KeyAgreementPublicKey(curve, buf)
+    return KeyAgreementPublicKey.of(curve, buf)
 }
 
 private inline fun secureBufferOf(
@@ -274,10 +291,10 @@ private inline fun secureBufferOf(
 // intentionally dropped and RuntimeException is intentionally caught so a bad/off-curve point
 // cannot be distinguished by exception type or cause (oracle avoidance across JCA providers).
 @Suppress("SwallowedException", "TooGenericExceptionCaught", "ThrowsCount")
-actual fun deriveSharedSecret(
+internal actual fun deriveSharedSecretPlatform(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,
-    info: ReadBuffer,
+    info: ReadBuffer?,
     length: Int,
     salt: ReadBuffer?,
     factory: BufferFactory,
@@ -293,7 +310,7 @@ actual fun deriveSharedSecret(
             throw e
         } catch (e: GeneralSecurityException) {
             // Invalid-curve / off-curve / infinity points surface as a JCA exception → reject.
-            throw InvalidPublicKey(curve.curveName)
+            throw InvalidPublicKey(curve)
         } catch (e: RuntimeException) {
             // Some JCA providers (and SunEC for certain malformed points) reject a bad public point
             // with an *unchecked* exception (ProviderException / IllegalArgumentException /
@@ -301,7 +318,7 @@ actual fun deriveSharedSecret(
             // uniform InvalidPublicKey so an off-curve probe can't be distinguished by exception
             // type and the documented rejection contract holds across providers. (IllegalArgument
             // from our own require()s is thrown before dispatch, so it never reaches here.)
-            throw InvalidPublicKey(curve.curveName)
+            throw InvalidPublicKey(curve)
         }
 
     // Move the raw secret into a wiped SecureBuffer, then hand to the single audited KDF gate.
@@ -317,7 +334,7 @@ private fun rawAgree(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,
 ): ByteArray {
-    val privScalar = privateKey.encoded.toBytes()
+    val privScalar = privateKey.requireInMemoryMaterial().toBytes()
     val rawPub = peerPublicKey.encoded.toBytes()
     return try {
         when (curve) {
@@ -371,11 +388,11 @@ internal actual suspend fun dhRawSecret(
         } catch (e: InvalidPublicKey) {
             throw e
         } catch (e: GeneralSecurityException) {
-            throw InvalidPublicKey(curve.curveName)
+            throw InvalidPublicKey(curve)
         } catch (e: RuntimeException) {
             // Unchecked provider rejections (ProviderException / IllegalState / IllegalArgument from
             // the provider) map to the same uniform InvalidPublicKey — no exception-type oracle.
-            throw InvalidPublicKey(curve.curveName)
+            throw InvalidPublicKey(curve)
         }
 
     val raw = secureScratch.allocate(curve.sharedSecretBytes)
@@ -387,13 +404,13 @@ internal actual suspend fun dhRawSecret(
 
 // Async wrappers: JVM/Android have a synchronous native KA, so just delegate.
 
-actual suspend fun generateKeyPairAsync(curve: KeyAgreementCurve): KeyAgreementKeyPair = generateKeyPair(curve)
+internal actual suspend fun generateKeyPairAsyncPlatform(curve: KeyAgreementCurve): KeyAgreementKeyPair = generateKeyPairPlatform(curve)
 
-actual suspend fun deriveSharedSecretAsync(
+internal actual suspend fun deriveSharedSecretAsyncPlatform(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,
-    info: ReadBuffer,
+    info: ReadBuffer?,
     length: Int,
     salt: ReadBuffer?,
     factory: BufferFactory,
-): ReadBuffer = deriveSharedSecret(privateKey, peerPublicKey, info, length, salt, factory)
+): ReadBuffer = deriveSharedSecretPlatform(privateKey, peerPublicKey, info, length, salt, factory)

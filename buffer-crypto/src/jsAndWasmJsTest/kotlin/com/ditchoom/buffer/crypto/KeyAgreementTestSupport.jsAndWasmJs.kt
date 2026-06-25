@@ -11,5 +11,9 @@ actual fun asyncAgreementSupported(curve: KeyAgreementCurve): Boolean =
 
 actual val isWebPlatform: Boolean = true
 
-// WebCrypto imports PKCS#8 private keys, not raw scalars.
+// The KA private encoding is now the raw big-endian scalar on web too (generation stores the JWK `d`
+// scalar; import stores the raw scalar, wrapped to PKCS#8 only transiently for the WebCrypto
+// exchange) — so raw-scalar import is byte-portable here. But the KAT/Wycheproof suites drive the
+// *synchronous* witness path, which web lacks (WebCrypto is async-only), so they stay skipped here;
+// the web raw-scalar import is covered by the async round-trip test instead (see KeyAgreementTest).
 actual fun supportsRawScalarKat(curve: KeyAgreementCurve): Boolean = false

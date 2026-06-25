@@ -55,11 +55,11 @@ class SignatureKatTest {
      * them with randomness, so the exact-bytes assertion only applies where signing is deterministic.
      */
     private suspend fun ed25519IsDeterministic(): Boolean {
-        val seed = ed25519Vectors.first().seed
+        val v0 = ed25519Vectors.first()
         val msg = hexBuffer("ab")
-        signingKey(SignatureScheme.Ed25519, seed).use { sk ->
+        signingKey(SignatureScheme.Ed25519, v0.seed, v0.pub).use { sk ->
             val a = signAsync(sk, msg).toHex()
-            val b = signingKey(SignatureScheme.Ed25519, seed).use { sk2 -> signAsync(sk2, hexBuffer("ab")).toHex() }
+            val b = signingKey(SignatureScheme.Ed25519, v0.seed, v0.pub).use { sk2 -> signAsync(sk2, hexBuffer("ab")).toHex() }
             return a == b
         }
     }
@@ -70,7 +70,7 @@ class SignatureKatTest {
             if (!ed25519AsyncAvailable()) return@runTest
             val deterministic = ed25519IsDeterministic()
             for (v in ed25519Vectors) {
-                signingKey(SignatureScheme.Ed25519, v.seed).use { sk ->
+                signingKey(SignatureScheme.Ed25519, v.seed, v.pub).use { sk ->
                     val produced = signAsync(sk, hexBuffer(v.msg))
                     if (deterministic) {
                         // RFC 8032 deterministic signing must reproduce the published vector exactly.
@@ -162,7 +162,7 @@ class SignatureKatTest {
                 )
             val message = CryptoTestVectors.ascii("buffer-crypto round-trip")
             for (kp in kps) {
-                signingKey(kp.scheme, kp.scalar).use { sk ->
+                signingKey(kp.scheme, kp.scalar, kp.point).use { sk ->
                     val sig = signAsync(sk, message)
                     val ok = verifyAsync(verifyKey(kp.scheme, kp.point), message, sig)
                     assertTrue(ok, "${kp.scheme.schemeName} sign→verify round-trip")

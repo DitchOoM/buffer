@@ -3,11 +3,14 @@
 package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.crypto.cinterop.boringssl.BCL_OK
 import com.ditchoom.buffer.crypto.cinterop.boringssl.bcl_ecdsa_sign
 import com.ditchoom.buffer.crypto.cinterop.boringssl.bcl_ecdsa_verify
+import com.ditchoom.buffer.crypto.cinterop.boringssl.bcl_ed25519_keypair
 import com.ditchoom.buffer.crypto.cinterop.boringssl.bcl_ed25519_sign
 import com.ditchoom.buffer.crypto.cinterop.boringssl.bcl_ed25519_verify
 import kotlinx.cinterop.ByteVar
@@ -36,13 +39,15 @@ import platform.posix.size_tVar
  * same gate the JVM backend applies.
  *
  * **Ed25519**: raw 32-byte seed / public key, 64-byte signature, via BoringSSL `ED25519_sign` /
- * `ED25519_verify`. [supportsSyncEd25519] is `true`.
+ * `ED25519_verify`. The Ed25519 witness is [SignatureSupport.Blocking].
  */
 
-actual val supportsSyncEd25519: Boolean = true
-actual val supportsSyncEcdsa: Boolean = true
 actual val ecdsaSignatureEncoding: EcdsaSignatureEncoding = EcdsaSignatureEncoding.Der
 actual val supportsEcdsaSigningFromScalar: Boolean = true
+
+/** BoringSSL provides a synchronous path for every scheme (ECDSA + Ed25519). */
+actual fun CryptoCapabilities.signatures(scheme: SignatureScheme): SignatureSupport =
+    SignatureSupport.Blocking(SignatureBlockingOpsImpl(scheme))
 
 private const val P256_CURVE_BITS = 256
 private const val P384_CURVE_BITS = 384
@@ -167,7 +172,7 @@ private fun ed25519Sign(
     key: SigningKey,
     message: ReadBuffer,
 ): ByteArray {
-    val seed = key.requireOpen()
+    val seed = key.requireInMemoryMaterial()
     require(seed.remaining() == ED25519_KEY_BYTES) { "Ed25519 seed must be 32 bytes" }
     val msgLen = message.remaining()
     return memScoped {
@@ -193,7 +198,7 @@ private fun ecdsaSign(
     key: SigningKey,
     message: ReadBuffer,
 ): ByteArray {
-    val scalar = key.requireOpen()
+    val scalar = key.requireInMemoryMaterial()
     val cap = maxSignatureBytes(key.scheme)
     val curveCode = ecdsaCurveCode(key.scheme)
     val msgLen = message.remaining()
@@ -237,11 +242,12 @@ private fun ed25519Verify(
     message: ReadBuffer,
     signature: ReadBuffer,
 ): Boolean {
-    if (key.material.remaining() != ED25519_KEY_BYTES) return false
+    val pubKey = key.requireInMemoryMaterial()
+    if (pubKey.remaining() != ED25519_KEY_BYTES) return false
     if (signature.remaining() != ED25519_SIGNATURE_BYTES) return false
     val msgLen = message.remaining()
     var status = -1
-    key.material.withRemainingBytes { pubPtr, _ ->
+    pubKey.withRemainingBytes { pubPtr, _ ->
         message.withRemainingBytes2(msgLen) { msgPtr ->
             signature.withRemainingBytes { sigPtr, _ ->
                 status =
@@ -267,7 +273,7 @@ private fun ecdsaVerify(
     val curveCode = ecdsaCurveCode(key.scheme)
     val msgLen = message.remaining()
     var status = -1
-    key.material.withRemainingBytes { pubPtr, pubLen ->
+    key.requireInMemoryMaterial().withRemainingBytes { pubPtr, pubLen ->
         message.withRemainingBytes2(msgLen) { msgPtr ->
             signature.withRemainingBytes { sigPtr, sigLen ->
                 status =
@@ -286,7 +292,7 @@ private fun ecdsaVerify(
     return status == BCL_OK
 }
 
-actual fun signInto(
+internal actual fun signIntoPlatform(
     key: SigningKey,
     message: ReadBuffer,
     dest: WriteBuffer,
@@ -297,7 +303,7 @@ actual fun signInto(
     return sig.size
 }
 
-actual fun verify(
+internal actual fun verifyPlatform(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,
@@ -308,7 +314,7 @@ actual fun verify(
         ecdsaVerify(key, message, signature)
     }
 
-actual suspend fun signAsync(
+internal actual suspend fun signAsyncPlatform(
     key: SigningKey,
     message: ReadBuffer,
     factory: BufferFactory,
@@ -320,10 +326,67 @@ actual suspend fun signAsync(
     return out
 }
 
-actual suspend fun verifyAsync(
+internal actual suspend fun verifyAsyncPlatform(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,
-): Boolean = verify(key, message, signature)
+): Boolean = verifyPlatform(key, message, signature)
 
 actual suspend fun ed25519AsyncAvailable(): Boolean = true
+
+// ---------------------------------------------------------------------------
+// Ed25519 key generation (ECDSA generation is common, reusing key agreement).
+// BoringSSL's ED25519_keypair generates a fresh seed and its matching public key in one call.
+// ---------------------------------------------------------------------------
+
+/** Read-ready buffer wrapping [bytes] (a fresh copy). */
+private fun bufferOf(bytes: ByteArray): PlatformBuffer {
+    val b = BufferFactory.Default.allocate(bytes.size)
+    b.writeBytes(bytes)
+    b.resetForRead()
+    return b
+}
+
+private fun generateEd25519(factory: BufferFactory): SyncCapableSigningKey {
+    val seed = ByteArray(ED25519_KEY_BYTES)
+    val pub = ByteArray(ED25519_KEY_BYTES)
+    memScoped {
+        val pubOut = allocArray<ByteVar>(ED25519_KEY_BYTES)
+        val seedOut = allocArray<ByteVar>(ED25519_KEY_BYTES)
+        val status = bcl_ed25519_keypair(pubOut.reinterpret(), seedOut.reinterpret())
+        check(status == BCL_OK) { "Ed25519 keypair generation failed (status=$status)" }
+        for (i in 0 until ED25519_KEY_BYTES) {
+            pub[i] = pubOut[i]
+            seed[i] = seedOut[i]
+        }
+    }
+    val verifyKey = VerifyKey.ed25519(bufferOf(pub))
+    val seedBuf =
+        secureScratch.allocate(ED25519_KEY_BYTES).also {
+            it.writeBytes(seed)
+            it.resetForRead()
+        }
+    return try {
+        signingKeyOf(SignatureScheme.Ed25519, seedBuf, verifyKey, factory)
+    } finally {
+        seedBuf.freeNativeMemory()
+        seed.fill(0)
+    }
+}
+
+internal actual fun generateSigningKeyPlatform(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey =
+    if (scheme == SignatureScheme.Ed25519) {
+        generateEd25519(factory)
+    } else {
+        // ECDSA: the key-agreement generator over the same NIST curve yields the identical raw scalar
+        // (private) and uncompressed point (public) the signing key needs.
+        ecdsaSigningKeyFromKeyAgreement(scheme, generateKeyPairPlatform(scheme.toKeyAgreementCurve()), factory)
+    }
+
+internal actual suspend fun generateSigningKeyAsyncPlatform(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey = generateSigningKeyPlatform(scheme, factory)

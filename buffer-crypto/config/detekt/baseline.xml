@@ -7,7 +7,53 @@
     <ID>CyclomaticComplexMethod:Signatures.jvmCommon.kt:private fun parseCanonicalEcdsaDer: Pair&lt;BigInteger, BigInteger>?</ID>
     <ID>CyclomaticComplexMethod:Signatures.linux.kt:private fun isCanonicalEcdsaDer: Boolean</ID>
     <ID>LongMethod:HpkeKatTest.kt:HpkeKatTest$private suspend fun runVector: Int</ID>
+    <ID>LoopWithTooManyJumpStatements:SignatureGenerateTest.kt:SignatureGenerateTest$for</ID>
+    <ID>MagicNumber:EcInterop.jsAndWasmJs.kt:4</ID>
+    <ID>MagicNumber:EcInterop.kt:3</ID>
+    <ID>MagicNumber:EcInterop.kt:32</ID>
+    <ID>MagicNumber:EcInterop.kt:48</ID>
+    <ID>MagicNumber:EcInterop.kt:65</ID>
+    <ID>MagicNumber:EcInterop.kt:66</ID>
+    <ID>MagicNumber:Signatures.apple.kt:32</ID>
+    <ID>MagicNumber:Signatures.apple.kt:48</ID>
+    <ID>MagicNumber:Signatures.apple.kt:66</ID>
+    <ID>MatchingDeclarationName:NativeCryptoException.apple.kt:NativeCryptoException : Exception</ID>
+    <ID>MatchingDeclarationName:NativeCryptoException.jsAndWasmJs.kt:NativeCryptoException : Exception</ID>
+    <ID>MatchingDeclarationName:NativeCryptoException.linux.kt:NativeCryptoException : Exception</ID>
+    <ID>MaxLineLength:AeadKeyCloseTest.kt:AeadKeyCloseTest$for (i in 0 until key.requireInMemoryMaterial().limit()) assertEquals(0, key.requireInMemoryMaterial().get(i).toInt())</ID>
+    <ID>MaxLineLength:AeadTamperTest.kt:AeadTamperTest$assertFailsWith&lt;VerificationFailed> { ops.open(sealed, wrongKey, Aad.Of(ascii(aad)), BufferFactory.Default) }</ID>
+    <ID>MaxLineLength:EcInteropTest.kt:EcInteropTest$assertEquals(1 + curve.privateKeyBytes, compressed.remaining(), "${curve.curveName} compressed width")</ID>
+    <ID>MaxLineLength:EcInteropTest.kt:EcInteropTest$private fun ByteArray.toHexString: String</ID>
+    <ID>MaxLineLength:EcInteropTest.kt:EcInteropTest$val e = assertFailsWith&lt;EcEncodingException> { ecPublicKeyDecompress(KeyAgreementCurve.P256, hexBuffer("02$pHex")) }</ID>
+    <ID>MaxLineLength:EcInteropTest.kt:EcInteropTest$val e = assertFailsWith&lt;EcEncodingException> { ecdsaSignatureToP1363(SignatureScheme.EcdsaP256, hexBuffer(der)) }</ID>
+    <ID>MaxLineLength:FakeHardware.kt:FakeHardware$override fun eligible: Boolean</ID>
+    <ID>MaxLineLength:FakeHardware.kt:FakeHardware$require</ID>
+    <ID>MaxLineLength:HardwareKeys.kt:suspend (nonce: ReadBuffer, aad: ReadBuffer?, ciphertextAndTag: ReadBuffer, factory: BufferFactory) -> PlatformBuffer</ID>
+    <ID>MaxLineLength:HkdfSha384Sha512Test.kt:HkdfSha384Sha512Test$assertEquals(max384, HkdfSha384.derive(Salt.Of(salt), ikm, Info.Of(info), max384, BufferFactory.Default).remaining())</ID>
+    <ID>MaxLineLength:HkdfSha384Sha512Test.kt:HkdfSha384Sha512Test$assertEquals(max512, HkdfSha512.derive(Salt.Of(salt), ikm, Info.Of(info), max512, BufferFactory.Default).remaining())</ID>
+    <ID>MaxLineLength:HkdfSha384Sha512Test.kt:HkdfSha384Sha512Test$val okm = HkdfSha512.derive(salt = Salt.None, ikm = ikm, info = Info.None, length = 42, factory = BufferFactory.Default)</ID>
+    <ID>MaxLineLength:HkdfTest.kt:HkdfTest$Hkdf.extractInto(salt = Salt.Of(hexBuffer("000102030405060708090a0b0c")), ikm = repeatedByte(0x0b, 22), dest = prk)</ID>
+    <ID>MaxLineLength:Hpke.kt:HpkeOpsImpl$)</ID>
+    <ID>MaxLineLength:Hpke.kt:suspend</ID>
+    <ID>MaxLineLength:HpkeContext.kt:)</ID>
+    <ID>MaxLineLength:HpkeContext.kt:dhkemAuthEncapWithEphemeral(suite.kem, recipientPublicKey.keyAgreementKey(), senderPrivateKey, ephemeral)</ID>
+    <ID>MaxLineLength:KeyAgreement.apple.kt:internal actual suspend fun generateKeyPairAsyncPlatform: KeyAgreementKeyPair</ID>
+    <ID>MaxLineLength:KeyAgreement.jvmCommon.kt:internal actual suspend fun generateKeyPairAsyncPlatform: KeyAgreementKeyPair</ID>
+    <ID>MaxLineLength:KeyAgreement.kt:KeyAgreementAsyncOpsImpl$)</ID>
+    <ID>MaxLineLength:KeyAgreement.kt:KeyAgreementBlockingOpsImpl$)</ID>
+    <ID>MaxLineLength:KeyAgreement.linux.kt:internal actual suspend fun generateKeyPairAsyncPlatform: KeyAgreementKeyPair</ID>
+    <ID>MaxLineLength:KeyAgreementTest.kt:KeyAgreementTest$assertEquals(viaOriginal, viaReimport, "${curve.curveName} re-imported private key must derive the same secret")</ID>
+    <ID>MaxLineLength:KeyAgreementWitnessSupport.kt:?:</ID>
+    <ID>MaxLineLength:KeyAgreementWitnessSupport.kt:internal</ID>
+    <ID>MaxLineLength:SignatureBackingTest.kt:SignatureBackingTest$val sig = SigningKey.ecdsaP256(scalar, VerifyKey.ecdsaP256(hexBuffer(p256Point))).use { signAsync(it, message) }</ID>
+    <ID>MaxLineLength:SignatureBackingTest.kt:SignatureBackingTest$val sig = SigningKey.ed25519(seed, VerifyKey.ed25519(hexBuffer(edPub))).use { signAsync(it, message) }</ID>
+    <ID>MaxLineLength:SignatureGenerateTest.kt:SignatureGenerateTest$assertTrue(ops.verify(sk.verifyKey, message, sig), "$scheme generated key verifies its own signature")</ID>
+    <ID>MaxLineLength:SignatureKatTest.kt:SignatureKatTest$val b = signingKey(SignatureScheme.Ed25519, v0.seed, v0.pub).use { sk2 -> signAsync(sk2, hexBuffer("ab")).toHex() }</ID>
+    <ID>MaxLineLength:Signatures.jsAndWasmJs.kt:)</ID>
+    <ID>MaxLineLength:Signatures.kt:SignatureBlockingOpsImpl$override fun generateSigningKeyBlocking: SyncCapableSigningKey</ID>
+    <ID>MaxLineLength:Signatures.kt:SignatureBlockingOpsImpl$override suspend fun generateSigningKey: SyncCapableSigningKey</ID>
     <ID>NestedBlockDepth:HkdfCore.kt:HkdfEngine$fun expandInto</ID>
+    <ID>ReturnCount:EcInterop.kt:DerCursor$fun matchOid: Boolean</ID>
     <ID>ReturnCount:HpkeKatTest.kt:HpkeKatTest$private suspend fun runVector: Int</ID>
     <ID>ReturnCount:Signatures.apple.kt:private fun appleEcdsaVerify: Boolean</ID>
     <ID>ReturnCount:Signatures.apple.kt:private fun isCanonicalEcdsaDer: Boolean</ID>
@@ -19,17 +65,20 @@
     <ID>ReturnCount:Signatures.linux.kt:private fun ed25519Verify: Boolean</ID>
     <ID>ReturnCount:Signatures.linux.kt:private fun inRangeOneToOrder: Boolean</ID>
     <ID>ReturnCount:Signatures.linux.kt:private fun isCanonicalEcdsaDer: Boolean</ID>
-    <ID>TooManyFunctions:Aead.apple.kt:com.ditchoom.buffer.crypto.Aead.apple.kt</ID>
-    <ID>TooManyFunctions:Aead.jsAndWasmJs.kt:com.ditchoom.buffer.crypto.Aead.jsAndWasmJs.kt</ID>
     <ID>TooManyFunctions:Aead.jvmCommon.kt:com.ditchoom.buffer.crypto.Aead.jvmCommon.kt</ID>
     <ID>TooManyFunctions:Aead.kt:com.ditchoom.buffer.crypto.Aead.kt</ID>
-    <ID>TooManyFunctions:Aead.linux.kt:com.ditchoom.buffer.crypto.Aead.linux.kt</ID>
+    <ID>TooManyFunctions:EcInterop.kt:com.ditchoom.buffer.crypto.EcInterop.kt</ID>
+    <ID>TooManyFunctions:Hpke.kt:com.ditchoom.buffer.crypto.Hpke.kt</ID>
     <ID>TooManyFunctions:HpkeContext.kt:com.ditchoom.buffer.crypto.HpkeContext.kt</ID>
     <ID>TooManyFunctions:KeyAgreement.apple.kt:com.ditchoom.buffer.crypto.KeyAgreement.apple.kt</ID>
+    <ID>TooManyFunctions:KeyAgreement.jsAndWasmJs.kt:com.ditchoom.buffer.crypto.KeyAgreement.jsAndWasmJs.kt</ID>
     <ID>TooManyFunctions:KeyAgreement.jvmCommon.kt:com.ditchoom.buffer.crypto.KeyAgreement.jvmCommon.kt</ID>
+    <ID>TooManyFunctions:KeyAgreement.linux.kt:com.ditchoom.buffer.crypto.KeyAgreement.linux.kt</ID>
     <ID>TooManyFunctions:Signatures.apple.kt:com.ditchoom.buffer.crypto.Signatures.apple.kt</ID>
+    <ID>TooManyFunctions:Signatures.js.kt:com.ditchoom.buffer.crypto.Signatures.js.kt</ID>
     <ID>TooManyFunctions:Signatures.jsAndWasmJs.kt:com.ditchoom.buffer.crypto.Signatures.jsAndWasmJs.kt</ID>
     <ID>TooManyFunctions:Signatures.jvmCommon.kt:com.ditchoom.buffer.crypto.Signatures.jvmCommon.kt</ID>
+    <ID>TooManyFunctions:Signatures.kt:com.ditchoom.buffer.crypto.Signatures.kt</ID>
     <ID>TooManyFunctions:Signatures.linux.kt:com.ditchoom.buffer.crypto.Signatures.linux.kt</ID>
   </CurrentIssues>
 </SmellBaseline>

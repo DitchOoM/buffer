@@ -17,8 +17,8 @@ import com.ditchoom.buffer.use
  *     It is rejected with [InvalidPublicKey] — never fed to the KDF — using a constant-time scan so
  *     the check itself is not a timing oracle.
  *  2. **KDF.** The raw secret is run through HKDF-Extract-then-Expand keyed on the secret, with the
- *     caller's [info] (required, for domain separation) and optional [salt]. The library never
- *     returns the raw secret.
+ *     caller's [info] (for domain separation; `null`/[Info.None] ⇒ empty context) and optional
+ *     [salt]. The library never returns the raw secret.
  *
  * The [rawSecret] buffer is wiped and freed before this returns, on every path including the
  * rejection path. [rawSecret] must be a wiped [SecureBuffer] (it is, by construction in the glue).
@@ -26,7 +26,7 @@ import com.ditchoom.buffer.use
 internal fun deriveFromRawSecret(
     curve: KeyAgreementCurve,
     rawSecret: PlatformBuffer,
-    info: ReadBuffer,
+    info: ReadBuffer?,
     length: Int,
     salt: ReadBuffer?,
     factory: BufferFactory,
@@ -45,9 +45,9 @@ internal fun deriveFromRawSecret(
         // invalid/off-curve/infinity points are already rejected by the native provider — so the
         // zero check must not be applied there or it would reject those valid edge vectors.
         if (curve == KeyAgreementCurve.X25519 && isAllZero(rawSecret)) {
-            throw InvalidPublicKey(curve.curveName)
+            throw InvalidPublicKey(curve)
         }
-        Hkdf.derive(salt = salt, ikm = rawSecret, info = info, length = length, factory = factory)
+        Hkdf.derive(salt = salt.toSalt(), ikm = rawSecret, info = info.toInfo(), length = length, factory = factory)
     } finally {
         rawSecret.freeNativeMemory()
     }

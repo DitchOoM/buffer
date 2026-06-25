@@ -26,12 +26,13 @@ class AeadTamperTest {
 
     private suspend fun sealOnce(): ReadBuffer {
         val key = AesGcmKey.of(hexBuffer(keyHex))
-        return aesGcmSealAsync(key, ascii(plaintext), ascii(aad), BufferFactory.Default)
+        return aesGcmAsyncOps().seal(key, ascii(plaintext), Aad.Of(ascii(aad)), BufferFactory.Default)
     }
 
     @Test
     fun aesGcmEveryByteFlipRejected() =
         runTest {
+            val ops = aesGcmAsyncOps()
             val key = AesGcmKey.of(hexBuffer(keyHex))
             val sealed = sealOnce()
             val n = sealed.remaining()
@@ -39,7 +40,7 @@ class AeadTamperTest {
             for (i in 0 until n) {
                 val mutated = flipByte(sealed, i)
                 assertFailsWith<VerificationFailed>("byte $i flip must reject") {
-                    aesGcmOpenAsync(mutated, key, ascii(aad), BufferFactory.Default)
+                    ops.open(mutated, key, Aad.Of(ascii(aad)), BufferFactory.Default)
                 }
             }
         }
@@ -47,76 +48,82 @@ class AeadTamperTest {
     @Test
     fun aesGcmAadSwapRejected() =
         runTest {
+            val ops = aesGcmAsyncOps()
             val key = AesGcmKey.of(hexBuffer(keyHex))
             val sealed = sealOnce()
             // Right key+ciphertext, wrong AAD → must reject.
             assertFailsWith<VerificationFailed> {
-                aesGcmOpenAsync(sealed, key, ascii("different-context"), BufferFactory.Default)
+                ops.open(sealed, key, Aad.Of(ascii("different-context")), BufferFactory.Default)
             }
             // Dropping AAD entirely also breaks authentication.
             assertFailsWith<VerificationFailed> {
-                aesGcmOpenAsync(sealed, key, null, BufferFactory.Default)
+                ops.open(sealed, key, Aad.None, BufferFactory.Default)
             }
         }
 
     @Test
     fun aesGcmWrongKeyRejected() =
         runTest {
+            val ops = aesGcmAsyncOps()
             val sealed = sealOnce()
             val wrongKey =
                 AesGcmKey.of(hexBuffer("00000000000000000000000000000000" + "00000000000000000000000000000000"))
             assertFailsWith<VerificationFailed> {
-                aesGcmOpenAsync(sealed, wrongKey, ascii(aad), BufferFactory.Default)
+                ops.open(sealed, wrongKey, Aad.Of(ascii(aad)), BufferFactory.Default)
             }
         }
 
     @Test
     fun aesGcmEmptyPlaintextAndAadRoundTrip() =
         runTest {
+            val ops = aesGcmAsyncOps()
             val key = AesGcmKey.of(hexBuffer(keyHex))
             // Empty plaintext, empty/no AAD — the length off-by-one edge.
             val empty = BufferFactory.Default.allocate(0).also { it.resetForRead() }
-            val sealed = aesGcmSealAsync(key, empty, null, BufferFactory.Default)
+            val sealed = ops.seal(key, empty, Aad.None, BufferFactory.Default)
             assertEquals(AEAD_NONCE_BYTES + AEAD_TAG_BYTES, sealed.remaining())
-            val opened = aesGcmOpenAsync(sealed, key, null, BufferFactory.Default)
+            val opened = ops.open(sealed, key, Aad.None, BufferFactory.Default)
             assertEquals(0, opened.remaining(), "empty plaintext must round-trip to empty")
         }
 
     @Test
     fun aesGcmTruncatedFrameRejected() =
         runTest {
+            val ops = aesGcmAsyncOps()
             val key = AesGcmKey.of(hexBuffer(keyHex))
             val sealed = sealOnce()
             // Drop the last tag byte: a too-short frame must not authenticate.
             val truncated = absolute(sealed, 0, sealed.remaining() - 1)
             assertFailsWith<Exception> {
-                aesGcmOpenAsync(truncated, key, ascii(aad), BufferFactory.Default)
+                ops.open(truncated, key, Aad.Of(ascii(aad)), BufferFactory.Default)
             }
         }
 
     @Test
-    fun chaChaPolyEveryByteFlipRejected() {
-        if (!supportsChaChaPoly) return
-        val key = ChaChaPolyKey.of(hexBuffer("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f"))
-        val sealed = chaChaPolySeal(key, ascii(plaintext), ascii(aad), BufferFactory.Default)
-        val n = sealed.remaining()
-        for (i in 0 until n) {
-            val mutated = flipByte(sealed, i)
-            assertFailsWith<VerificationFailed>("ChaCha byte $i flip must reject") {
-                chaChaPolyOpen(mutated, key, ascii(aad), BufferFactory.Default)
+    fun chaChaPolyEveryByteFlipRejected() =
+        runTest {
+            val ops = chaChaPolyAsyncOrNull() ?: return@runTest
+            val key = ChaChaPolyKey.of(hexBuffer("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f"))
+            val sealed = ops.seal(key, ascii(plaintext), Aad.Of(ascii(aad)), BufferFactory.Default)
+            val n = sealed.remaining()
+            for (i in 0 until n) {
+                val mutated = flipByte(sealed, i)
+                assertFailsWith<VerificationFailed>("ChaCha byte $i flip must reject") {
+                    ops.open(mutated, key, Aad.Of(ascii(aad)), BufferFactory.Default)
+                }
             }
         }
-    }
 
     @Test
-    fun chaChaPolyAadSwapAndWrongKeyRejected() {
-        if (!supportsChaChaPoly) return
-        val key = ChaChaPolyKey.of(hexBuffer("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f"))
-        val sealed = chaChaPolySeal(key, ascii(plaintext), ascii(aad), BufferFactory.Default)
-        assertFailsWith<VerificationFailed> { chaChaPolyOpen(sealed, key, ascii("wrong"), BufferFactory.Default) }
-        val wrongKey = ChaChaPolyKey.of(hexBuffer("00".repeat(CHACHA_KEY_BYTES)))
-        assertFailsWith<VerificationFailed> { chaChaPolyOpen(sealed, wrongKey, ascii(aad), BufferFactory.Default) }
-    }
+    fun chaChaPolyAadSwapAndWrongKeyRejected() =
+        runTest {
+            val ops = chaChaPolyAsyncOrNull() ?: return@runTest
+            val key = ChaChaPolyKey.of(hexBuffer("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f"))
+            val sealed = ops.seal(key, ascii(plaintext), Aad.Of(ascii(aad)), BufferFactory.Default)
+            assertFailsWith<VerificationFailed> { ops.open(sealed, key, Aad.Of(ascii("wrong")), BufferFactory.Default) }
+            val wrongKey = ChaChaPolyKey.of(hexBuffer("00".repeat(CHACHA_KEY_BYTES)))
+            assertFailsWith<VerificationFailed> { ops.open(sealed, wrongKey, Aad.Of(ascii(aad)), BufferFactory.Default) }
+        }
 
     // --- nonce-length / tag-length defenses (the Wycheproof subset never exercises these) ---
 
@@ -176,16 +183,17 @@ class AeadTamperTest {
     @Test
     fun aesGcmShortFramedBlobRejectedOnOpen() =
         runTest {
+            val ops = aesGcmAsyncOps()
             val key = AesGcmKey.of(hexBuffer(keyHex))
             // A frame shorter than nonce(12)+tag(16) can't carry a tag — splitFramed must reject.
             assertFailsWith<IllegalArgumentException>("15-byte frame must reject") {
-                aesGcmOpenAsync(hexBuffer("000102030405060708090a0b0c0d0e"), key, ascii(aad), BufferFactory.Default)
+                ops.open(hexBuffer("000102030405060708090a0b0c0d0e"), key, Aad.Of(ascii(aad)), BufferFactory.Default)
             }
         }
 
     @Test
     fun aesGcmShortCiphertextAndTagRejectedOnSyncOpen() {
-        if (!supportsSyncAesGcm) return
+        if (!aesGcmBlockingAvailable) return
         val key = AesGcmKey.of(hexBuffer(keyHex))
         val nonce = hexBuffer("000102030405060708090a0b")
         // ciphertext+tag with only 15 bytes — fewer than AEAD_TAG_BYTES — must reject on the sync open primitive.

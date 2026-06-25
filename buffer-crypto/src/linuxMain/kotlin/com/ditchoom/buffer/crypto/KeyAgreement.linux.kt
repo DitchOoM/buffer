@@ -39,10 +39,8 @@ import platform.posix.size_tVar
  * Private scalars are stored in a wiped [SecureBuffer] (via [secureScratch]).
  */
 
-actual val supportsSyncX25519: Boolean = true
-actual val supportsSyncEcdhP256: Boolean = true
-actual val supportsSyncEcdhP384: Boolean = true
-actual val supportsSyncEcdhP521: Boolean = true
+actual fun CryptoCapabilities.keyAgreement(curve: KeyAgreementCurve): KeyAgreementSupport =
+    KeyAgreementSupport.Blocking(KeyAgreementBlockingOpsImpl(curve))
 
 private const val P256_CURVE_BITS = 256
 private const val P384_CURVE_BITS = 384
@@ -56,7 +54,7 @@ private fun curveCode(curve: KeyAgreementCurve): Int =
         KeyAgreementCurve.X25519 -> error("X25519 is not a NIST curve code")
     }
 
-actual fun generateKeyPair(curve: KeyAgreementCurve): KeyAgreementKeyPair =
+internal actual fun generateKeyPairPlatform(curve: KeyAgreementCurve): KeyAgreementKeyPair =
     if (curve == KeyAgreementCurve.X25519) generateX25519() else generateEc(curve)
 
 private fun generateX25519(): KeyAgreementKeyPair {
@@ -73,10 +71,10 @@ private fun generateX25519(): KeyAgreementKeyPair {
     }
     privBuf.resetForRead()
     pubBuf.resetForRead()
-    return KeyAgreementKeyPair(
+    return keyAgreementKeyPairOf(
         curve,
-        KeyAgreementPrivateKey(curve, privBuf),
-        KeyAgreementPublicKey(curve, pubBuf),
+        keyAgreementPrivateKeyOf(curve, privBuf),
+        KeyAgreementPublicKey.of(curve, pubBuf),
     )
 }
 
@@ -106,17 +104,17 @@ private fun generateEc(curve: KeyAgreementCurve): KeyAgreementKeyPair {
     }
     privBuf.resetForRead()
     pubBuf.resetForRead()
-    return KeyAgreementKeyPair(
+    return keyAgreementKeyPairOf(
         curve,
-        KeyAgreementPrivateKey(curve, privBuf),
-        KeyAgreementPublicKey(curve, pubBuf),
+        keyAgreementPrivateKeyOf(curve, privBuf),
+        KeyAgreementPublicKey.of(curve, pubBuf),
     )
 }
 
-actual fun deriveSharedSecret(
+internal actual fun deriveSharedSecretPlatform(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,
-    info: ReadBuffer,
+    info: ReadBuffer?,
     length: Int,
     salt: ReadBuffer?,
     factory: BufferFactory,
@@ -154,14 +152,14 @@ private fun rawAgreeX25519(
     memScoped {
         val secretOut = allocArray<ByteVar>(curve.sharedSecretBytes)
         var status = -1
-        privateKey.encoded.withRemainingBytes { privPtr, _ ->
+        privateKey.requireInMemoryMaterial().withRemainingBytes { privPtr, _ ->
             peerPublicKey.encoded.withRemainingBytes { peerPtr, _ ->
                 status = bcl_x25519(privPtr.reinterpret(), peerPtr.reinterpret(), secretOut.reinterpret())
             }
         }
         if (status != BCL_OK) {
             out.freeNativeMemory()
-            throw InvalidPublicKey(curve.curveName)
+            throw InvalidPublicKey(curve)
         }
         for (i in 0 until curve.sharedSecretBytes) out.writeByte(secretOut[i])
     }
@@ -179,7 +177,7 @@ private fun rawAgreeEc(
         val secretOut = allocArray<ByteVar>(curve.sharedSecretBytes)
         val secretLen = alloc<size_tVar>()
         var status = -1
-        privateKey.encoded.withRemainingBytes { privPtr, privLen ->
+        privateKey.requireInMemoryMaterial().withRemainingBytes { privPtr, privLen ->
             peerPublicKey.encoded.withRemainingBytes { peerPtr, peerLen ->
                 status =
                     bcl_ecdh(
@@ -196,7 +194,7 @@ private fun rawAgreeEc(
         }
         if (status != BCL_OK || secretLen.value.toInt() != curve.sharedSecretBytes) {
             out.freeNativeMemory()
-            throw InvalidPublicKey(curve.curveName)
+            throw InvalidPublicKey(curve)
         }
         for (i in 0 until curve.sharedSecretBytes) out.writeByte(secretOut[i])
     }
@@ -204,13 +202,13 @@ private fun rawAgreeEc(
     return out
 }
 
-actual suspend fun generateKeyPairAsync(curve: KeyAgreementCurve): KeyAgreementKeyPair = generateKeyPair(curve)
+internal actual suspend fun generateKeyPairAsyncPlatform(curve: KeyAgreementCurve): KeyAgreementKeyPair = generateKeyPairPlatform(curve)
 
-actual suspend fun deriveSharedSecretAsync(
+internal actual suspend fun deriveSharedSecretAsyncPlatform(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,
-    info: ReadBuffer,
+    info: ReadBuffer?,
     length: Int,
     salt: ReadBuffer?,
     factory: BufferFactory,
-): ReadBuffer = deriveSharedSecret(privateKey, peerPublicKey, info, length, salt, factory)
+): ReadBuffer = deriveSharedSecretPlatform(privateKey, peerPublicKey, info, length, salt, factory)

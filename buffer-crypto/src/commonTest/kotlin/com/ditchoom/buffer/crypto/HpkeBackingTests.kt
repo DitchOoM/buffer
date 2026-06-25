@@ -39,11 +39,9 @@ class HpkeBackingTests {
                         val sender =
                             hpkeSetupSenderInternal(
                                 suite,
-                                HpkeMode.Base,
+                                HpkeSenderMode.Base,
                                 recipientPub,
                                 info,
-                                psk = null,
-                                senderPrivateKey = null,
                                 ephemeral = ephemeral,
                             )
                         assertEquals(vec.enc, sender.enc.toHex(), "enc info=$infoKind pt=$ptKind aad=$aadKind")

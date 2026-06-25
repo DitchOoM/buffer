@@ -13,9 +13,9 @@ expect val isWebPlatform: Boolean
 
 /**
  * Whether [importPrivateKey] accepts a **raw scalar** for [curve] on this platform — required for
- * the RFC 7748 / NIST known-answer vectors, which are specified as raw private scalars. True on
- * JVM/Android (JCA imports raw scalars directly). On Apple the private encoding is the Security
- * external representation and on web it is PKCS#8, so raw-scalar KAT import is not available there;
- * those platforms still get full round-trip + Wycheproof coverage.
+ * the RFC 7748 / NIST known-answer vectors, which are specified as raw private scalars. The
+ * key-agreement private encoding is the raw big-endian scalar on **every** platform (JVM/Android via
+ * JCA, Linux via BoringSSL, Apple via a CryptoKit X9.63-from-scalar reconstruction, web via a
+ * scalar→PKCS#8 wrap for WebCrypto), so this is `true` wherever the curve itself is supported.
  */
 expect fun supportsRawScalarKat(curve: KeyAgreementCurve): Boolean

@@ -51,11 +51,17 @@ import platform.posix.size_tVar
  * pattern and the cross-platform KAT/Wycheproof suite gates them on Mac.
  */
 
-actual val supportsSyncAesGcm: Boolean = true
+/** AES-GCM is synchronous via CommonCrypto's streaming GCM API. */
+actual val CryptoCapabilities.aesGcm: Aead<AesGcmKey, SyncCapableAesGcmKey> get() = Aead.Blocking(AesGcmBlockingOps)
 
-actual val supportsChaChaPoly: Boolean = APPLE_CHACHA_POLY_AVAILABLE
-
-actual val supportsSyncChaChaPoly: Boolean = APPLE_CHACHA_POLY_AVAILABLE
+/** ChaCha20-Poly1305 is synchronous via CryptoKit when the bridge is present. */
+actual val CryptoCapabilities.chaChaPoly: OptionalAead<ChaChaPolyKey>
+    get() =
+        if (APPLE_CHACHA_POLY_AVAILABLE) {
+            OptionalAead.Blocking(ChaChaPolyBlockingOps)
+        } else {
+            OptionalAead.Unavailable
+        }
 
 internal actual fun aesGcmSeal(
     key: AesGcmKey,
@@ -71,7 +77,7 @@ internal actual fun aesGcmSeal(
     }
     memScoped {
         val tag = allocArray<ByteVar>(AEAD_TAG_BYTES)
-        key.material.withRemainingBytes { keyPtr, keyLen ->
+        key.requireInMemoryMaterial().withRemainingBytes { keyPtr, keyLen ->
             nonce.withRemainingBytes { ivPtr, ivLen ->
                 withOptionalBytes(aad) { aadPtr, aadLen ->
                     plaintext.withRemainingBytes2(ptLen) { ptPtr ->
@@ -120,7 +126,7 @@ internal actual fun aesGcmOpen(
     memScoped {
         val computedTag = allocArray<ByteVar>(AEAD_TAG_BYTES)
         val destStart = dest.position()
-        key.material.withRemainingBytes { keyPtr, keyLen ->
+        key.requireInMemoryMaterial().withRemainingBytes { keyPtr, keyLen ->
             nonce.withRemainingBytes { ivPtr, ivLen ->
                 withOptionalBytes(aad) { aadPtr, aadLen ->
                     ctView.withRemainingBytes2(ctLen) { ctPtr ->
@@ -229,7 +235,7 @@ internal actual fun chaChaPolySeal(
     plaintext: ReadBuffer,
     dest: WriteBuffer,
 ) {
-    if (!supportsSyncChaChaPoly) {
+    if (!APPLE_CHACHA_POLY_AVAILABLE) {
         throw UnsupportedOperationException("ChaCha20-Poly1305 is not supported on this platform")
     }
     requireNonce(nonce)
@@ -243,42 +249,14 @@ internal actual fun chaChaPolyOpen(
     ciphertextAndTag: ReadBuffer,
     dest: WriteBuffer,
 ) {
-    if (!supportsSyncChaChaPoly) {
+    if (!APPLE_CHACHA_POLY_AVAILABLE) {
         throw UnsupportedOperationException("ChaCha20-Poly1305 is not supported on this platform")
     }
     requireNonce(nonce)
     appleChaChaPolyOpen(key, nonce, aad, ciphertextAndTag, dest)
 }
 
-actual suspend fun aesGcmSealAsync(
-    key: AesGcmKey,
-    plaintext: ReadBuffer,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = aesGcmSeal(key, plaintext, aad, factory)
-
-actual suspend fun aesGcmOpenAsync(
-    sealed: ReadBuffer,
-    key: AesGcmKey,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = aesGcmOpen(sealed, key, aad, factory)
-
-actual suspend fun chaChaPolySealAsync(
-    key: ChaChaPolyKey,
-    plaintext: ReadBuffer,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = chaChaPolySeal(key, plaintext, aad, factory)
-
-actual suspend fun chaChaPolyOpenAsync(
-    sealed: ReadBuffer,
-    key: ChaChaPolyKey,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = chaChaPolyOpen(sealed, key, aad, factory)
-
-actual suspend fun aesGcmSealWithNonceAsync(
+internal actual suspend fun aesGcmSealWithNonceAsync(
     key: AesGcmKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
@@ -291,7 +269,7 @@ actual suspend fun aesGcmSealWithNonceAsync(
     return out
 }
 
-actual suspend fun aesGcmOpenWithNonceAsync(
+internal actual suspend fun aesGcmOpenWithNonceAsync(
     key: AesGcmKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,

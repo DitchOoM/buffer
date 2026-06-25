@@ -66,9 +66,9 @@ class HpkeCapabilityTest {
                     assertTrue(
                         !supportsSync(suite.kem.curve) ||
                             (
-                                suite.aead == HpkeAead.ChaCha20Poly1305 && !supportsChaChaPoly
+                                suite.aead == HpkeAead.ChaCha20Poly1305 && !chaChaPolyReachable
                             ) ||
-                            (suite.aead != HpkeAead.ChaCha20Poly1305 && !supportsSyncAesGcm),
+                            (suite.aead != HpkeAead.ChaCha20Poly1305 && !aesGcmBlockingAvailable),
                         "hpkeSupported=false must reflect a genuinely-missing sync primitive",
                     )
                 }
@@ -79,7 +79,7 @@ class HpkeCapabilityTest {
     fun chaChaSuitesUnsupportedWhereChaChaIsUnavailable() =
         runTest {
             val suite = HpkeSuite(HpkeKem.DhkemX25519HkdfSha256, HpkeKdf.HkdfSha256, HpkeAead.ChaCha20Poly1305)
-            if (!supportsChaChaPoly) {
+            if (!chaChaPolyReachable) {
                 assertFailsWith<UnsupportedOperationException>("ChaCha suite must throw where ChaCha is absent") {
                     val recipient = hpkeGenerateKeyPair(suite.kem)
                     hpkeSetupBaseSender(suite, recipient.publicKey, ascii("x"))

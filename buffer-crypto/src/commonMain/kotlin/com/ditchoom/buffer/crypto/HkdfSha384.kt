@@ -11,38 +11,38 @@ import com.ditchoom.buffer.WriteBuffer
 object HkdfSha384 {
     private val engine = HkdfEngine(HMAC_SHA384_BYTES, ::sha384HkdfMac)
 
-    /** HKDF-Extract: writes `PRK = HMAC(salt, ikm)` (48 bytes) into [dest]. Null/empty salt ⇒ zero block. */
+    /** HKDF-Extract: writes `PRK = HMAC(salt, ikm)` (48 bytes) into [dest]. [Salt.None]/empty ⇒ zero block. */
     fun extractInto(
-        salt: ReadBuffer?,
+        salt: Salt,
         ikm: ReadBuffer,
         dest: WriteBuffer,
-    ) = engine.extractInto(salt, ikm, dest)
+    ) = engine.extractInto(salt.bytesOrNull, ikm, dest)
 
     /** HKDF-Expand: writes [length] bytes of OKM into [dest] from [prk] (48 bytes) and optional [info]. */
     fun expandInto(
         prk: ReadBuffer,
-        info: ReadBuffer?,
+        info: Info,
         length: Int,
         dest: WriteBuffer,
-    ) = engine.expandInto(prk, info, length, dest)
+    ) = engine.expandInto(prk, info.bytesOrNull, length, dest)
 
     /** One-shot HKDF-SHA384: extract then expand to [length] bytes, written into [dest]. */
     fun deriveInto(
-        salt: ReadBuffer?,
+        salt: Salt,
         ikm: ReadBuffer,
-        info: ReadBuffer?,
+        info: Info,
         length: Int,
         dest: WriteBuffer,
-    ) = engine.deriveInto(salt, ikm, info, length, dest)
+    ) = engine.deriveInto(salt.bytesOrNull, ikm, info.bytesOrNull, length, dest)
 
     /** One-shot HKDF-SHA384 returning a freshly allocated, read-ready buffer of [length] bytes from [factory]. */
     fun derive(
-        salt: ReadBuffer?,
+        salt: Salt,
         ikm: ReadBuffer,
-        info: ReadBuffer?,
+        info: Info,
         length: Int,
         factory: BufferFactory,
-    ): ReadBuffer = engine.derive(salt, ikm, info, length, factory)
+    ): ReadBuffer = engine.derive(salt.bytesOrNull, ikm, info.bytesOrNull, length, factory)
 }
 
 private fun sha384HkdfMac(key: ReadBuffer): HkdfMac {

@@ -159,14 +159,14 @@ sealed interface HpkeKdf {
             salt: ReadBuffer?,
             ikm: ReadBuffer,
             dest: WriteBuffer,
-        ) = Hkdf.extractInto(salt, ikm, dest)
+        ) = Hkdf.extractInto(salt.toSalt(), ikm, dest)
 
         override fun expandInto(
             prk: ReadBuffer,
             info: ReadBuffer?,
             length: Int,
             dest: WriteBuffer,
-        ) = Hkdf.expandInto(prk, info, length, dest)
+        ) = Hkdf.expandInto(prk, info.toInfo(), length, dest)
     }
 
     data object HkdfSha384 : HpkeKdf {
@@ -178,7 +178,7 @@ sealed interface HpkeKdf {
             ikm: ReadBuffer,
             dest: WriteBuffer,
         ) = com.ditchoom.buffer.crypto.HkdfSha384
-            .extractInto(salt, ikm, dest)
+            .extractInto(salt.toSalt(), ikm, dest)
 
         override fun expandInto(
             prk: ReadBuffer,
@@ -186,7 +186,7 @@ sealed interface HpkeKdf {
             length: Int,
             dest: WriteBuffer,
         ) = com.ditchoom.buffer.crypto.HkdfSha384
-            .expandInto(prk, info, length, dest)
+            .expandInto(prk, info.toInfo(), length, dest)
     }
 
     data object HkdfSha512 : HpkeKdf {
@@ -198,7 +198,7 @@ sealed interface HpkeKdf {
             ikm: ReadBuffer,
             dest: WriteBuffer,
         ) = com.ditchoom.buffer.crypto.HkdfSha512
-            .extractInto(salt, ikm, dest)
+            .extractInto(salt.toSalt(), ikm, dest)
 
         override fun expandInto(
             prk: ReadBuffer,
@@ -206,7 +206,7 @@ sealed interface HpkeKdf {
             length: Int,
             dest: WriteBuffer,
         ) = com.ditchoom.buffer.crypto.HkdfSha512
-            .expandInto(prk, info, length, dest)
+            .expandInto(prk, info.toInfo(), length, dest)
     }
 }
 
@@ -252,13 +252,6 @@ data class HpkeSuite(
     val kdf: HpkeKdf,
     val aead: HpkeAead,
 ) {
-    /**
-     * Whether every primitive in this suite is available on the current platform. A suite is usable
-     * only if its KEM curve, its (always-available) KDF, and its AEAD are all supported here.
-     */
-    val isSupported: Boolean
-        get() = supportsSync(kem.curve) && aeadSupported(aead)
-
     /** `suite_id = "HPKE" || I2OSP(kem_id, 2) || I2OSP(kdf_id, 2) || I2OSP(aead_id, 2)` (RFC 9180 §5.1). */
     internal fun suiteId(): ReadBuffer {
         val out = BufferFactory.Default.allocate(4 + 6)
@@ -343,46 +336,261 @@ private const val MESSAGE_LIMIT_MESSAGE = "HPKE message sequence number would ov
 class MessageLimitReached internal constructor() : CryptoMisuseException(MESSAGE_LIMIT_MESSAGE)
 
 // =============================================================================
-// Capability flags
+// Capability witness: operations live ON the witness the platform supplies
 // =============================================================================
-
-/** Whether [suite] is usable on this platform (all three primitives supported). */
-fun hpkeSupported(suite: HpkeSuite): Boolean = suite.isSupported
 
 private fun aeadSupported(aead: HpkeAead): Boolean =
     when (aead) {
-        HpkeAead.Aes128Gcm, HpkeAead.Aes256Gcm -> supportsAesGcmAnyPath
-        HpkeAead.ChaCha20Poly1305 -> supportsChaChaPoly
+        // AES-GCM is reachable on every platform: its witness [CryptoCapabilities.aesGcm] is always
+        // Blocking (native) or AsyncOnly (web), never Unavailable — and HPKE is suspend throughout.
+        HpkeAead.Aes128Gcm, HpkeAead.Aes256Gcm -> true
+        HpkeAead.ChaCha20Poly1305 -> chaChaPolyReachable
     }
 
 /**
- * Whether AES-GCM is available on *some* path (sync native or async WebCrypto). The web has no
- * synchronous AES-GCM but provides it via WebCrypto, so HPKE — which is `suspend` throughout — can
- * use AES-GCM there. This differs from [supportsSyncAesGcm].
+ * HPKE operations for a supported suite. Every operation is `suspend` (HPKE drives WebCrypto on the
+ * web, where there is no synchronous path), so unlike AEAD/signatures/key-agreement there is no
+ * blocking variant — hence the two-state [HpkeSupport] witness. Single-shot seal/open and the four
+ * RFC 9180 setup modes take [Info] / [Aad] role types (never `null`). The per-message
+ * [HpkeContext.Sender.seal] / [HpkeContext.Receiver.open] / [HpkeContext.export] live on the
+ * context these return.
  */
-internal expect val supportsAesGcmAnyPath: Boolean
+interface HpkeOps {
+    /** The suite these ops are bound to. */
+    val suite: HpkeSuite
+
+    /** Single-shot Base-mode seal (RFC 9180 §6.1): `enc || ciphertext`. */
+    suspend fun sealBase(
+        recipientPublicKey: HpkePublicKey,
+        info: Info,
+        plaintext: ReadBuffer,
+        aad: Aad = Aad.None,
+        factory: BufferFactory = BufferFactory.Default,
+    ): HpkeSealed
+
+    /** Single-shot Base-mode open (RFC 9180 §6.1). */
+    suspend fun openBase(
+        recipientPrivateKey: HpkePrivateKey,
+        enc: ReadBuffer,
+        info: Info,
+        ciphertext: ReadBuffer,
+        aad: Aad = Aad.None,
+        factory: BufferFactory = BufferFactory.Default,
+    ): PlatformBuffer
+
+    /** SetupBaseS: a Base-mode sender context + the encapsulated key. */
+    suspend fun setupBaseSender(
+        recipientPublicKey: HpkePublicKey,
+        info: Info,
+    ): HpkeSenderSetup
+
+    /** SetupPSKS: a PSK-mode sender context. */
+    suspend fun setupPskSender(
+        recipientPublicKey: HpkePublicKey,
+        info: Info,
+        psk: HpkePsk,
+    ): HpkeSenderSetup
+
+    /** SetupAuthS: a sender-authenticated context using the sender's static private key. */
+    suspend fun setupAuthSender(
+        recipientPublicKey: HpkePublicKey,
+        info: Info,
+        senderPrivateKey: HpkePrivateKey,
+    ): HpkeSenderSetup
+
+    /** SetupAuthPSKS: PSK + sender authentication. */
+    suspend fun setupAuthPskSender(
+        recipientPublicKey: HpkePublicKey,
+        info: Info,
+        psk: HpkePsk,
+        senderPrivateKey: HpkePrivateKey,
+    ): HpkeSenderSetup
+
+    /** SetupBaseR: a Base-mode receiver context. */
+    suspend fun setupBaseReceiver(
+        recipientPrivateKey: HpkePrivateKey,
+        enc: ReadBuffer,
+        info: Info,
+    ): HpkeContext.Receiver
+
+    /** SetupPSKR: a PSK-mode receiver context. */
+    suspend fun setupPskReceiver(
+        recipientPrivateKey: HpkePrivateKey,
+        enc: ReadBuffer,
+        info: Info,
+        psk: HpkePsk,
+    ): HpkeContext.Receiver
+
+    /** SetupAuthR: a sender-authenticated receiver context. */
+    suspend fun setupAuthReceiver(
+        recipientPrivateKey: HpkePrivateKey,
+        enc: ReadBuffer,
+        info: Info,
+        senderPublicKey: HpkePublicKey,
+    ): HpkeContext.Receiver
+
+    /** SetupAuthPSKR: PSK + sender authentication. */
+    suspend fun setupAuthPskReceiver(
+        recipientPrivateKey: HpkePrivateKey,
+        enc: ReadBuffer,
+        info: Info,
+        psk: HpkePsk,
+        senderPublicKey: HpkePublicKey,
+    ): HpkeContext.Receiver
+}
+
+/**
+ * Capability witness for an HPKE [HpkeSuite] on this platform. HPKE is `suspend`-only, so there are
+ * just two states: [Supported] (every primitive — KEM curve and AEAD — is reachable; the [ops] are
+ * usable) and [Unsupported] (a primitive is absent — e.g. ChaCha20-Poly1305 on the web, or a curve
+ * the provider lacks). Reached via [CryptoCapabilities.hpke]; an unsupported suite's ops are not a
+ * member of the resolved witness, so they are unrepresentable rather than a runtime throw.
+ */
+sealed interface HpkeSupport {
+    /** The suite cannot be used here; [missing] names the absent primitive(s), for diagnostics. */
+    data class Unsupported(
+        val missing: String,
+    ) : HpkeSupport
+
+    /** The suite is usable; [ops] performs its operations. */
+    data class Supported(
+        val ops: HpkeOps,
+    ) : HpkeSupport
+}
+
+/**
+ * The HPKE capability for [suite] on this platform: [HpkeSupport.Supported] when its KEM curve is
+ * reachable (synchronously on native, or via async WebCrypto on the web) and its AEAD is available,
+ * else [HpkeSupport.Unsupported] naming what is missing. Whether the web engine actually provides a
+ * curve it advertises (e.g. X25519) is feature-detected at op time, exactly as the key-agreement
+ * witness reports [KeyAgreementSupport.AsyncOnly] there.
+ */
+fun CryptoCapabilities.hpke(suite: HpkeSuite): HpkeSupport {
+    val missing =
+        buildList {
+            if (CryptoCapabilities.keyAgreement(suite.kem.curve) is KeyAgreementSupport.Unavailable) {
+                add(suite.kem.kemName)
+            }
+            if (!aeadSupported(suite.aead)) add(suite.aead.aeadName)
+        }
+    return if (missing.isEmpty()) {
+        HpkeSupport.Supported(HpkeOpsImpl(suite))
+    } else {
+        HpkeSupport.Unsupported(missing.joinToString(", "))
+    }
+}
+
+/** Common HPKE ops over the internal setup / single-shot functions; converts role types to bytes. */
+internal class HpkeOpsImpl(
+    override val suite: HpkeSuite,
+) : HpkeOps {
+    private fun Info.orEmpty(): ReadBuffer = bytesOrNull ?: EMPTY
+
+    override suspend fun sealBase(
+        recipientPublicKey: HpkePublicKey,
+        info: Info,
+        plaintext: ReadBuffer,
+        aad: Aad,
+        factory: BufferFactory,
+    ): HpkeSealed = hpkeSealBase(suite, recipientPublicKey, info.orEmpty(), plaintext, aad.bytesOrNull, factory)
+
+    override suspend fun openBase(
+        recipientPrivateKey: HpkePrivateKey,
+        enc: ReadBuffer,
+        info: Info,
+        ciphertext: ReadBuffer,
+        aad: Aad,
+        factory: BufferFactory,
+    ): PlatformBuffer = hpkeOpenBase(suite, recipientPrivateKey, enc, info.orEmpty(), ciphertext, aad.bytesOrNull, factory)
+
+    override suspend fun setupBaseSender(
+        recipientPublicKey: HpkePublicKey,
+        info: Info,
+    ): HpkeSenderSetup = hpkeSetupBaseSender(suite, recipientPublicKey, info.orEmpty())
+
+    override suspend fun setupPskSender(
+        recipientPublicKey: HpkePublicKey,
+        info: Info,
+        psk: HpkePsk,
+    ): HpkeSenderSetup = hpkeSetupPskSender(suite, recipientPublicKey, info.orEmpty(), psk)
+
+    override suspend fun setupAuthSender(
+        recipientPublicKey: HpkePublicKey,
+        info: Info,
+        senderPrivateKey: HpkePrivateKey,
+    ): HpkeSenderSetup = hpkeSetupAuthSender(suite, recipientPublicKey, info.orEmpty(), senderPrivateKey)
+
+    override suspend fun setupAuthPskSender(
+        recipientPublicKey: HpkePublicKey,
+        info: Info,
+        psk: HpkePsk,
+        senderPrivateKey: HpkePrivateKey,
+    ): HpkeSenderSetup = hpkeSetupAuthPskSender(suite, recipientPublicKey, info.orEmpty(), psk, senderPrivateKey)
+
+    override suspend fun setupBaseReceiver(
+        recipientPrivateKey: HpkePrivateKey,
+        enc: ReadBuffer,
+        info: Info,
+    ): HpkeContext.Receiver = hpkeSetupBaseReceiver(suite, recipientPrivateKey, enc, info.orEmpty())
+
+    override suspend fun setupPskReceiver(
+        recipientPrivateKey: HpkePrivateKey,
+        enc: ReadBuffer,
+        info: Info,
+        psk: HpkePsk,
+    ): HpkeContext.Receiver = hpkeSetupPskReceiver(suite, recipientPrivateKey, enc, info.orEmpty(), psk)
+
+    override suspend fun setupAuthReceiver(
+        recipientPrivateKey: HpkePrivateKey,
+        enc: ReadBuffer,
+        info: Info,
+        senderPublicKey: HpkePublicKey,
+    ): HpkeContext.Receiver = hpkeSetupAuthReceiver(suite, recipientPrivateKey, enc, info.orEmpty(), senderPublicKey)
+
+    override suspend fun setupAuthPskReceiver(
+        recipientPrivateKey: HpkePrivateKey,
+        enc: ReadBuffer,
+        info: Info,
+        psk: HpkePsk,
+        senderPublicKey: HpkePublicKey,
+    ): HpkeContext.Receiver = hpkeSetupAuthPskReceiver(suite, recipientPrivateKey, enc, info.orEmpty(), psk, senderPublicKey)
+}
 
 // =============================================================================
 // Public KEM key types (thin typed wrappers over the key-agreement family)
 // =============================================================================
 
 /** An HPKE recipient/sender key pair for [kem]. Close to wipe the private key. */
-class HpkeKeyPair internal constructor(
-    val kem: HpkeKem,
-    internal val keyPair: KeyAgreementKeyPair,
-) : AutoCloseable {
-    /** The serialized public key (`pkX`/`pkR`), `kem.nPk` bytes, read-ready. */
-    val publicKey: HpkePublicKey get() = HpkePublicKey(kem, keyPair.publicKey)
+sealed interface HpkeKeyPair : AutoCloseable {
+    /** The KEM this pair belongs to. */
+    val kem: HpkeKem
 
-    /** The serialized public-key bytes, `kem.nPk` bytes, read-ready. */
-    val publicKeyBytes: ReadBuffer get() = keyPair.publicKey.encoded
+    /** Whether the key material is in software memory or hardware-backed. */
+    val provenance: KeyProvenance
+
+    /** The public key. */
+    val publicKey: HpkePublicKey
+
+    /** The serialized public-key bytes (`kem.nPk` bytes), read-ready. */
+    val publicKeyBytes: ReadBuffer
 
     /**
      * The private key, carrying its paired public key (DHKEM `Decap`/`AuthEncap` need `pkRm`/`pkSm`,
      * which cannot be re-derived from a bare scalar without a native op). Sharing the underlying
      * key-agreement private key — do not close this independently of the pair.
      */
-    val privateKey: HpkePrivateKey get() = HpkePrivateKey(kem, keyPair.privateKey, keyPair.publicKey.encoded)
+    val privateKey: HpkePrivateKey
+}
+
+/** In-memory [HpkeKeyPair] wrapping a software key-agreement pair. */
+internal class InMemoryHpkeKeyPair(
+    override val kem: HpkeKem,
+    val keyPair: KeyAgreementKeyPair,
+) : HpkeKeyPair {
+    override val provenance: KeyProvenance get() = keyPair.privateKey.provenance
+    override val publicKey: HpkePublicKey get() = hpkePublicKeyOf(kem, keyPair.publicKey)
+    override val publicKeyBytes: ReadBuffer get() = keyPair.publicKey.encoded
+    override val privateKey: HpkePrivateKey get() = hpkePrivateKeyOf(kem, keyPair.privateKey, keyPair.publicKey.encoded)
 
     override fun close() {
         keyPair.close()
@@ -390,36 +598,93 @@ class HpkeKeyPair internal constructor(
 }
 
 /** A recipient/sender public key for [kem] (not secret). */
-class HpkePublicKey internal constructor(
-    val kem: HpkeKem,
-    internal val key: KeyAgreementPublicKey,
-) {
+sealed interface HpkePublicKey {
+    /** The KEM this key belongs to. */
+    val kem: HpkeKem
+
+    /** Whether the key material is in software memory or hardware-backed. */
+    val provenance: KeyProvenance
+
     /** The serialized public-key bytes (`kem.nPk` bytes), read-ready. */
-    val encoded: ReadBuffer get() = key.encoded
+    val encoded: ReadBuffer
+}
+
+/** In-memory [HpkePublicKey] wrapping a software key-agreement public key. */
+internal class InMemoryHpkePublicKey(
+    override val kem: HpkeKem,
+    val key: KeyAgreementPublicKey,
+) : HpkePublicKey {
+    override val provenance: KeyProvenance get() = key.provenance
+    override val encoded: ReadBuffer get() = key.encoded
 }
 
 /**
  * A recipient/sender private key for [kem], carrying its paired public key (required by DHKEM, which
  * needs `pkRm`/`pkSm` and cannot derive a public key from a bare scalar). Close to wipe the scalar.
  */
-class HpkePrivateKey internal constructor(
-    val kem: HpkeKem,
-    internal val key: KeyAgreementPrivateKey,
-    internal val publicKeyEncoded: ReadBuffer,
-) : AutoCloseable {
+sealed interface HpkePrivateKey : AutoCloseable {
+    /** The KEM this key belongs to. */
+    val kem: HpkeKem
+
+    /** Whether the key material is in software memory or hardware-backed. */
+    val provenance: KeyProvenance
+}
+
+/** In-memory [HpkePrivateKey] wrapping a software key-agreement private key + its paired public key. */
+internal class InMemoryHpkePrivateKey(
+    override val kem: HpkeKem,
+    val key: KeyAgreementPrivateKey,
+    val publicKeyEncoded: ReadBuffer,
+) : HpkePrivateKey {
+    override val provenance: KeyProvenance get() = key.provenance
+
     override fun close() {
         key.close()
     }
 }
 
+internal fun hpkeKeyPairOf(
+    kem: HpkeKem,
+    keyPair: KeyAgreementKeyPair,
+): HpkeKeyPair = InMemoryHpkeKeyPair(kem, keyPair)
+
+internal fun hpkePublicKeyOf(
+    kem: HpkeKem,
+    key: KeyAgreementPublicKey,
+): HpkePublicKey = InMemoryHpkePublicKey(kem, key)
+
+internal fun hpkePrivateKeyOf(
+    kem: HpkeKem,
+    key: KeyAgreementPrivateKey,
+    publicKeyEncoded: ReadBuffer,
+): HpkePrivateKey = InMemoryHpkePrivateKey(kem, key, publicKeyEncoded)
+
+/** The wrapped key-agreement public key — internal seam (only in-memory keys reach it today). */
+internal fun HpkePublicKey.keyAgreementKey(): KeyAgreementPublicKey =
+    when (this) {
+        is InMemoryHpkePublicKey -> key
+    }
+
+/** The wrapped key-agreement private key — internal seam. */
+internal fun HpkePrivateKey.keyAgreementKey(): KeyAgreementPrivateKey =
+    when (this) {
+        is InMemoryHpkePrivateKey -> key
+    }
+
+/** The paired public key encoding carried alongside a private key (DHKEM `pkRm`/`pkSm`). */
+internal fun HpkePrivateKey.publicKeyEncoded(): ReadBuffer =
+    when (this) {
+        is InMemoryHpkePrivateKey -> publicKeyEncoded
+    }
+
 /** Generates a fresh [kem] key pair from the platform CSPRNG. */
-suspend fun hpkeGenerateKeyPair(kem: HpkeKem): HpkeKeyPair = HpkeKeyPair(kem, generateKeyPairAsync(kem.curve))
+suspend fun hpkeGenerateKeyPair(kem: HpkeKem): HpkeKeyPair = hpkeKeyPairOf(kem, keyAgreementAsyncOps(kem.curve).generateKeyPair())
 
 /** Imports a recipient/sender public key for [kem] from its serialized encoding (`kem.nPk` bytes). */
 fun hpkeImportPublicKey(
     kem: HpkeKem,
     encoded: ReadBuffer,
-): HpkePublicKey = HpkePublicKey(kem, KeyAgreementPublicKey(kem.curve, encoded))
+): HpkePublicKey = hpkePublicKeyOf(kem, KeyAgreementPublicKey.of(kem.curve, encoded))
 
 /**
  * Imports a recipient/sender private key for [kem] from its serialized scalar (`kem.nSk` bytes) and
@@ -435,7 +700,7 @@ fun hpkeImportPrivateKey(
         "${kem.kemName} public key must be ${kem.nPk} bytes, was ${publicEncoded.remaining()}"
     }
     val pubCopy = copyBuffer(publicEncoded, BufferFactory.Default)
-    return HpkePrivateKey(kem, importPrivateKey(kem.curve, privateEncoded), pubCopy)
+    return hpkePrivateKeyOf(kem, importPrivateKey(kem.curve, privateEncoded), pubCopy)
 }
 
 // =============================================================================
@@ -458,7 +723,7 @@ class HpkeSenderSetup internal constructor(
  * encrypts [plaintext] with [aad], and returns `enc || ciphertext` framing via [HpkeSealed].
  * The returned context-equivalent state is discarded (single message).
  */
-suspend fun hpkeSealBase(
+internal suspend fun hpkeSealBase(
     suite: HpkeSuite,
     recipientPublicKey: HpkePublicKey,
     info: ReadBuffer,
@@ -467,12 +732,12 @@ suspend fun hpkeSealBase(
     factory: BufferFactory = BufferFactory.Default,
 ): HpkeSealed {
     val setup = hpkeSetupBaseSender(suite, recipientPublicKey, info)
-    val ct = setup.context.seal(plaintext, aad, factory)
+    val ct = setup.context.seal(plaintext, aad.toAad(), factory)
     return HpkeSealed(copyBuffer(setup.enc, factory), ct)
 }
 
 /** Single-shot HPKE open (RFC 9180 §6.1, Base mode): decapsulates [enc] and decrypts. */
-suspend fun hpkeOpenBase(
+internal suspend fun hpkeOpenBase(
     suite: HpkeSuite,
     recipientPrivateKey: HpkePrivateKey,
     enc: ReadBuffer,
@@ -482,7 +747,7 @@ suspend fun hpkeOpenBase(
     factory: BufferFactory = BufferFactory.Default,
 ): PlatformBuffer {
     val ctx = hpkeSetupBaseReceiver(suite, recipientPrivateKey, enc, info)
-    return ctx.open(ciphertext, aad, factory)
+    return ctx.open(ciphertext, aad.toAad(), factory)
 }
 
 /** `enc || ciphertext` output of [hpkeSealBase]. Both buffers are read-ready. */

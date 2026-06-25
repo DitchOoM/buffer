@@ -7,9 +7,9 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_ecdh_x963_from_scalar
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_x25519_agree
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_x25519_generate
-import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_x25519_public_key
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.IntVar
@@ -51,7 +51,7 @@ import platform.Security.kSecAttrKeyTypeECSECPrimeRandom
 import platform.Security.kSecKeyAlgorithmECDHKeyExchangeStandard
 import platform.posix.size_tVar
 
-/**
+/*
  * Apple key agreement.
  *
  * **ECDH P-256/384/521** is implemented against the Security framework (`SecKey*` /
@@ -64,17 +64,84 @@ import platform.posix.size_tVar
  * It is wired through the `cryptokitshim` cinterop ([bcks_x25519_generate] / [bcks_x25519_public_key]
  * / [bcks_x25519_agree]), which calls CryptoKit `Curve25519.KeyAgreement`. Keys use the RFC 7748 raw
  * encoding (32-byte little-endian scalar / u-coordinate) directly, matching the cross-platform
- * contract. [supportsSyncX25519] is therefore `true`. The RFC 7748 §6.1 all-zero rejection is applied
- * by the shared [validateRawSecret] post-check (the `deriveSharedSecret` path runs it via the KDF).
+ * contract. X25519's [keyAgreement] witness is therefore [KeyAgreementSupport.Blocking]. The RFC 7748
+ * §6.1 all-zero rejection is applied by the shared [validateRawSecret] post-check (the
+ * `deriveSharedSecret` path runs it via the KDF).
  *
- * EC private keys are stored as the Security framework external representation (`0x04‖X‖Y‖scalar`) in
- * a wiped [SecureBuffer]; that encoding round-trips through `SecKeyCreateWithData` for the agreement.
+ * EC private keys are stored as the **raw big-endian scalar** in a wiped [SecureBuffer] — the same
+ * cross-platform encoding the contract pins — so [KeyAgreementPrivateKey.exportEncoded] /
+ * [importPrivateKey] are byte-portable with JVM/Android/Linux. The Security-framework exchange needs
+ * the full X9.63 representation (`0x04‖X‖Y‖scalar`), which it cannot derive from a bare scalar, so the
+ * scalar is reconstructed to X9.63 via the CryptoKit shim ([bcks_ecdh_x963_from_scalar]) just before
+ * `SecKeyCreateWithData` in [rawAgreeApple].
  */
 
-actual val supportsSyncX25519: Boolean = true
-actual val supportsSyncEcdhP256: Boolean = true
-actual val supportsSyncEcdhP384: Boolean = true
-actual val supportsSyncEcdhP521: Boolean = true
+/** CryptoKit curve code (256/384/521) for the X9.63-from-scalar shim. */
+private fun ecCurveCode(curve: KeyAgreementCurve): Int =
+    when (curve) {
+        KeyAgreementCurve.P256 -> P256_KEY_BITS
+        KeyAgreementCurve.P384 -> P384_KEY_BITS
+        KeyAgreementCurve.P521 -> P521_KEY_BITS
+        KeyAgreementCurve.X25519 -> error("X25519 has no X9.63 representation")
+    }
+
+/** Copies the trailing `curve.privateKeyBytes` (the raw scalar K) out of an X9.63 `04‖X‖Y‖K` blob. */
+private fun ecScalarFromX963(
+    data: CFDataRef,
+    curve: KeyAgreementCurve,
+): PlatformBuffer {
+    val len = CFDataGetLength(data).toInt()
+    val src = CFDataGetBytePtr(data)
+    val field = curve.privateKeyBytes
+    val out = secureScratch.allocate(field)
+    for (i in 0 until field) out.writeByte(src!![len - field + i].toByte())
+    out.resetForRead()
+    return out
+}
+
+/** Reconstructs the X9.63 private representation (`04‖X‖Y‖K`) from a raw scalar via the CryptoKit shim. */
+private fun ecX963FromScalar(
+    curve: KeyAgreementCurve,
+    scalar: ReadBuffer,
+): NSData {
+    val cap = 1 + 3 * curve.privateKeyBytes
+    memScoped {
+        val out = allocArray<ByteVar>(cap)
+        val outLen = alloc<size_tVar>()
+        var status = -1
+        scalar.withRemainingBytes { ptr, len ->
+            status =
+                bcks_ecdh_x963_from_scalar(
+                    ecCurveCode(curve),
+                    ptr.reinterpret(),
+                    len.convert(),
+                    out.reinterpret(),
+                    cap.convert(),
+                    outLen.ptr,
+                )
+        }
+        check(status == BCKS_OK) { "X9.63 reconstruction failed (status=$status)" }
+        return NSData.dataWithBytes(out, outLen.value.convert())
+    }
+}
+
+/** Whether [curve] has a synchronous native KA on Apple. Every supported curve does (X25519 via
+ *  CryptoKit, the NIST P-curves via Security.framework). */
+private fun appleSupportsSync(curve: KeyAgreementCurve): Boolean =
+    when (curve) {
+        KeyAgreementCurve.X25519 -> true
+        KeyAgreementCurve.P256 -> true
+        KeyAgreementCurve.P384 -> true
+        KeyAgreementCurve.P521 -> true
+    }
+
+/** Apple has a synchronous native KA for every curve; else [Unavailable]. */
+actual fun CryptoCapabilities.keyAgreement(curve: KeyAgreementCurve): KeyAgreementSupport =
+    if (appleSupportsSync(curve)) {
+        KeyAgreementSupport.Blocking(KeyAgreementBlockingOpsImpl(curve))
+    } else {
+        KeyAgreementSupport.Unavailable
+    }
 
 private const val P256_KEY_BITS = 256
 private const val P384_KEY_BITS = 384
@@ -89,13 +156,13 @@ private fun keySizeBits(curve: KeyAgreementCurve): Int =
     }
 
 private fun requireSupported(curve: KeyAgreementCurve) {
-    if (!supportsSync(curve)) {
+    if (!appleSupportsSync(curve)) {
         throw UnsupportedOperationException("${curve.curveName} key agreement is not available on this platform")
     }
 }
 
 private fun requireEc(curve: KeyAgreementCurve) {
-    if (curve == KeyAgreementCurve.X25519 || !supportsSync(curve)) {
+    if (curve == KeyAgreementCurve.X25519 || !appleSupportsSync(curve)) {
         throw UnsupportedOperationException("${curve.curveName} EC key agreement is not available on this platform")
     }
 }
@@ -147,26 +214,28 @@ private fun attributes(
 // Each Security-framework null result is a distinct failure point mapped to InvalidPublicKey while
 // CFRelease cleanup runs in try/finally; the multiple throws are inherent to that resource pattern.
 @Suppress("ThrowsCount")
-actual fun generateKeyPair(curve: KeyAgreementCurve): KeyAgreementKeyPair {
+internal actual fun generateKeyPairPlatform(curve: KeyAgreementCurve): KeyAgreementKeyPair {
     requireSupported(curve)
     if (curve == KeyAgreementCurve.X25519) return generateX25519KeyPair()
     val attrs = attributes(curve, kSecAttrKeyClassPrivate)
     val privKey =
         SecKeyCreateRandomKey(attrs, null) ?: run {
             CFRelease(attrs)
-            throw InvalidPublicKey(curve.curveName)
+            throw InvalidPublicKey(curve)
         }
     CFRelease(attrs)
     try {
-        val pubKey = SecKeyCopyPublicKey(privKey) ?: throw InvalidPublicKey(curve.curveName)
+        val pubKey = SecKeyCopyPublicKey(privKey) ?: throw InvalidPublicKey(curve)
         try {
-            val pubData = SecKeyCopyExternalRepresentation(pubKey, null) ?: throw InvalidPublicKey(curve.curveName)
-            val privData = SecKeyCopyExternalRepresentation(privKey, null) ?: throw InvalidPublicKey(curve.curveName)
+            val pubData = SecKeyCopyExternalRepresentation(pubKey, null) ?: throw InvalidPublicKey(curve)
+            val privData = SecKeyCopyExternalRepresentation(privKey, null) ?: throw InvalidPublicKey(curve)
             try {
                 val rawPubBuf = cfDataToBuffer(pubData, BufferFactory.Default)
-                val publicKey = KeyAgreementPublicKey(curve, rawPubBuf)
-                val privBuf = cfDataToBuffer(privData, secureScratch)
-                return KeyAgreementKeyPair(curve, KeyAgreementPrivateKey(curve, privBuf), publicKey)
+                val publicKey = KeyAgreementPublicKey.of(curve, rawPubBuf)
+                // Store the raw big-endian scalar (the trailing K of the X9.63 04‖X‖Y‖K export), the
+                // cross-platform private encoding; rawAgreeApple reconstructs X9.63 for the exchange.
+                val privBuf = ecScalarFromX963(privData, curve)
+                return keyAgreementKeyPairOf(curve, keyAgreementPrivateKeyOf(curve, privBuf), publicKey)
             } finally {
                 CFRelease(pubData)
                 CFRelease(privData)
@@ -179,10 +248,10 @@ actual fun generateKeyPair(curve: KeyAgreementCurve): KeyAgreementKeyPair {
     }
 }
 
-actual fun deriveSharedSecret(
+internal actual fun deriveSharedSecretPlatform(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,
-    info: ReadBuffer,
+    info: ReadBuffer?,
     length: Int,
     salt: ReadBuffer?,
     factory: BufferFactory,
@@ -217,19 +286,20 @@ private fun rawAgreeApple(
     if (curve == KeyAgreementCurve.X25519) return rawAgreeX25519(privateKey, peerPublicKey)
     requireEc(curve)
 
-    val privData = privateKey.encoded.toNsData()
+    // The private key holds the raw scalar; Security.framework needs the X9.63 form, so reconstruct it.
+    val privData = ecX963FromScalar(curve, privateKey.requireInMemoryMaterial())
     val pubData = peerPublicKey.encoded.toNsData()
     val privAttrs = attributes(curve, kSecAttrKeyClassPrivate)
     val pubAttrs = attributes(curve, kSecAttrKeyClassPublic)
     try {
         val secPriv =
             SecKeyCreateWithData(CFBridgingRetain(privData) as CFDataRef, privAttrs, null)
-                ?: throw InvalidPublicKey(curve.curveName)
+                ?: throw InvalidPublicKey(curve)
         val secPub =
             SecKeyCreateWithData(CFBridgingRetain(pubData) as CFDataRef, pubAttrs, null)
                 ?: run {
                     CFRelease(secPriv)
-                    throw InvalidPublicKey(curve.curveName)
+                    throw InvalidPublicKey(curve)
                 }
         try {
             val params =
@@ -248,7 +318,7 @@ private fun rawAgreeApple(
                     null,
                 ) ?: run {
                     CFRelease(params)
-                    throw InvalidPublicKey(curve.curveName)
+                    throw InvalidPublicKey(curve)
                 }
             CFRelease(params)
             try {
@@ -295,10 +365,10 @@ private fun generateX25519KeyPair(): KeyAgreementKeyPair {
         val pubBuf = BufferFactory.Default.allocate(X25519_BYTES)
         for (i in 0 until X25519_BYTES) pubBuf.writeByte(pubOut[i])
         pubBuf.resetForRead()
-        return KeyAgreementKeyPair(
+        return keyAgreementKeyPairOf(
             KeyAgreementCurve.X25519,
-            KeyAgreementPrivateKey(KeyAgreementCurve.X25519, privBuf),
-            KeyAgreementPublicKey(KeyAgreementCurve.X25519, pubBuf),
+            keyAgreementPrivateKeyOf(KeyAgreementCurve.X25519, privBuf),
+            KeyAgreementPublicKey.of(KeyAgreementCurve.X25519, pubBuf),
         )
     }
 }
@@ -318,7 +388,7 @@ private fun rawAgreeX25519(
         val secretOut = allocArray<ByteVar>(X25519_BYTES)
         val secretLen = alloc<size_tVar>()
         var status = -1
-        privateKey.encoded.withRemainingBytes { privPtr, privLen ->
+        privateKey.requireInMemoryMaterial().withRemainingBytes { privPtr, privLen ->
             peerPublicKey.encoded.withRemainingBytes { peerPtr, peerLen ->
                 status =
                     bcks_x25519_agree(
@@ -334,7 +404,7 @@ private fun rawAgreeX25519(
         }
         if (status != BCKS_OK) {
             out.freeNativeMemory()
-            throw InvalidPublicKey(KeyAgreementCurve.X25519.curveName)
+            throw InvalidPublicKey(KeyAgreementCurve.X25519)
         }
         for (i in 0 until X25519_BYTES) out.writeByte(secretOut[i])
     }
@@ -342,13 +412,13 @@ private fun rawAgreeX25519(
     return out
 }
 
-actual suspend fun generateKeyPairAsync(curve: KeyAgreementCurve): KeyAgreementKeyPair = generateKeyPair(curve)
+internal actual suspend fun generateKeyPairAsyncPlatform(curve: KeyAgreementCurve): KeyAgreementKeyPair = generateKeyPairPlatform(curve)
 
-actual suspend fun deriveSharedSecretAsync(
+internal actual suspend fun deriveSharedSecretAsyncPlatform(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,
-    info: ReadBuffer,
+    info: ReadBuffer?,
     length: Int,
     salt: ReadBuffer?,
     factory: BufferFactory,
-): ReadBuffer = deriveSharedSecret(privateKey, peerPublicKey, info, length, salt, factory)
+): ReadBuffer = deriveSharedSecretPlatform(privateKey, peerPublicKey, info, length, salt, factory)

@@ -16,6 +16,7 @@
     <ID>LongMethod:JsBuffer.kt:JsBuffer$override fun xorMaskCopy</ID>
     <ID>LongMethod:SimdByteSwapTest.kt:SimdByteSwapTest$@Test fun `bulk byte swap operations performance`</ID>
     <ID>LongMethod:WriteStringBenchmarkTest.kt:WriteStringBenchmarkTest$@Test fun benchmarkWriteStringApproaches</ID>
+    <ID>MaxLineLength:StreamingStringDecoder.linux.kt:actual fun StreamingStringDecoder: StreamingStringDecoder</ID>
     <ID>NestedBlockDepth:JvmBuffer.kt:JvmBuffer.Companion.&lt;no name provided>$override fun createFromParcel: JvmBuffer</ID>
     <ID>ReturnCount:BaseJvmBuffer.kt:BaseJvmBuffer$override fun indexOf: Int</ID>
     <ID>ReturnCount:BufferComparison.kt:internal inline fun bulkCompareEquals: Boolean</ID>
