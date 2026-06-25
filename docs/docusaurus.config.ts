@@ -85,6 +85,11 @@ const config: Config = {
           position: 'left',
         },
         {
+          to: '/playground',
+          label: 'Playground',
+          position: 'left',
+        },
+        {
           to: '/performance',
           label: 'Performance',
           position: 'left',
