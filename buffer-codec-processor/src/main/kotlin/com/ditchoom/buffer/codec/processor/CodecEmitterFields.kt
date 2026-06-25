@@ -21,7 +21,7 @@ import com.squareup.kotlinpoet.TypeName
  * verified by the snapshot suite.
  */
 
-internal fun scalarHeaderBytes(shape: CodecShape): Int = shape.fields.sumOfFixedWireBytes().requireFixed("scalarHeaderBytes")
+internal fun CodecShape.scalarHeaderBytes(): Int = fields.sumOfFixedWireBytes().requireFixed("scalarHeaderBytes")
 
 internal fun appendDecodeScalar(
     body: CodeBlock.Builder,
@@ -247,9 +247,9 @@ internal fun appendEncodeGuard(
     val accessor = "value.${field.name}"
     val (lhs, maxLit) =
         when (field.kind) {
-            ScalarKind.ULong -> accessor to "((1uL shl ${8 * field.wireBytes}) - 1uL)"
-            ScalarKind.UInt -> accessor to "((1u shl ${8 * field.wireBytes}) - 1u)"
-            ScalarKind.UShort -> "$accessor.toUInt()" to "((1u shl ${8 * field.wireBytes}) - 1u)"
+            ScalarKind.ULong -> accessor to "((1uL shl ${Byte.SIZE_BITS * field.wireBytes}) - 1uL)"
+            ScalarKind.UInt -> accessor to "((1u shl ${Byte.SIZE_BITS * field.wireBytes}) - 1u)"
+            ScalarKind.UShort -> "$accessor.toUInt()" to "((1u shl ${Byte.SIZE_BITS * field.wireBytes}) - 1u)"
             // wireBytes < 1 is rejected by analyzeField
             ScalarKind.UByte -> return
             // signed kinds reject @WireBytes narrowing in analyzeField
@@ -946,8 +946,8 @@ internal fun appendEncodeConditionalLengthPrefixedUseCodecPayload(
     body.addStatement("%T.encode(buffer, %L, context)", inner.payloadCodecType, accessor)
     body.addStatement("val %L = buffer.position()", endPosVar)
     body.addStatement("val %L = %L - %L", byteCountVar, endPosVar, bodyStartVar)
-    if (inner.prefixWidth < 4) {
-        val maxValue = (1L shl (inner.prefixWidth * 8)) - 1
+    if (inner.prefixWidth < Int.SIZE_BYTES) {
+        val maxValue = (1L shl (inner.prefixWidth * Byte.SIZE_BITS)) - 1
         val widthName =
             when (inner.prefixWidth) {
                 1 -> "Byte"
@@ -1187,8 +1187,8 @@ internal fun appendLengthPrefixedStringEncode(
     // Runtime overflow guard. For 4-byte prefixes the max (UInt.MAX_VALUE =
     // 2^32-1) exceeds Int.MAX_VALUE, so a position-delta byte count can never
     // overflow it — the check would be dead code.
-    if (prefixWidth < 4) {
-        val maxValue = (1L shl (prefixWidth * 8)) - 1
+    if (prefixWidth < Int.SIZE_BYTES) {
+        val maxValue = (1L shl (prefixWidth * Byte.SIZE_BITS)) - 1
         val widthName =
             when (prefixWidth) {
                 1 -> "Byte"
@@ -1566,6 +1566,59 @@ internal fun appendEncodeRemainingBytesProtocolMessageList(
 }
 
 /**
+ * Emit decode for `@Count val: List<T>` where `T` is a `@ProtocolMessage`
+ * element. Reads the element COUNT as an unsigned LEB128 varint (the shipped
+ * `UnsignedVarIntCodec`, the same self-delimiting encoding an enum ordinal
+ * rides on), then loops exactly that many times decoding one element each
+ * iteration. Self-delimiting — no buffer-limit bound is consulted.
+ *
+ * Generated shape:
+ * ```
+ * val __<name>Count = UnsignedVarIntCodec.decode(buffer, context).toInt()
+ * val <name> = ArrayList<ElementType>(__<name>Count.coerceAtMost(<CAP>))
+ * repeat(__<name>Count) {
+ *     <name> += ElementCodec.decode(buffer, context)
+ * }
+ * ```
+ */
+internal fun appendDecodeCountPrefixedProtocolMessageList(
+    body: CodeBlock.Builder,
+    field: FieldSpec.CountPrefixedProtocolMessageList,
+) {
+    val countVar = "__${field.name}Count"
+    body.addStatement("val %L = %T.decode(buffer, context).toInt()", countVar, UNSIGNED_VARINT_CODEC_CN)
+    // Pre-size the list to the count, capped so a hostile varint can't
+    // request a multi-gigabyte allocation up front; the element decodes
+    // still fail fast on a truncated buffer well before the list grows.
+    body.addStatement(
+        "val %L = ArrayList<%T>(%L.coerceIn(0, %L))",
+        field.name,
+        field.elementClassName,
+        countVar,
+        COUNT_PREFETCH_CAP,
+    )
+    body.beginControlFlow("repeat(%L)", countVar)
+    body.addStatement("%L += %T.decode(buffer, context)", field.name, field.elementCodecClassName)
+    body.endControlFlow()
+}
+
+/**
+ * Emit encode for `@Count val: List<T>`. Writes the element count as an
+ * unsigned LEB128 varint, then each element via the element codec. The count
+ * is derived from `list.size`, so the wire form is always self-consistent —
+ * no user-trust contract (unlike the byte-length `@LengthFrom` list shapes).
+ */
+internal fun appendEncodeCountPrefixedProtocolMessageList(
+    body: CodeBlock.Builder,
+    field: FieldSpec.CountPrefixedProtocolMessageList,
+) {
+    body.addStatement("%T.encode(buffer, value.%L.size.toUInt(), context)", UNSIGNED_VARINT_CODEC_CN, field.name)
+    body.beginControlFlow("for (__elem in value.%L)", field.name)
+    body.addStatement("%T.encode(buffer, __elem, context)", field.elementCodecClassName)
+    body.endControlFlow()
+}
+
+/**
  * Emit decode for bare `@UseCodec val: <scalar>`.
  * Delegates to the user-supplied codec object's `decode(buffer,
  * context)`. When the codec implements [BoundingLengthCodec], the
@@ -1625,7 +1678,8 @@ internal fun appendDecodeEnum(
         )
     } else {
         body.addStatement(
-            "val %L = %T.entries.getOrElse(__%LOrdinal) { throw %T(fieldPath = %S, bufferPosition = buffer.position(), expected = %S, actual = __%LOrdinal.toString()) }",
+            "val %L = %T.entries.getOrElse(__%LOrdinal) { throw %T(fieldPath = %S, " +
+                "bufferPosition = buffer.position(), expected = %S, actual = __%LOrdinal.toString()) }",
             field.name,
             field.enumType,
             field.name,
@@ -1844,8 +1898,8 @@ internal fun appendEncodeLengthPrefixedUseCodecPayload(
     )
     body.addStatement("val %L = buffer.position()", endPosVar)
     body.addStatement("val %L = %L - %L", byteCountVar, endPosVar, bodyStartVar)
-    if (field.prefixWidth < 4) {
-        val maxValue = (1L shl (field.prefixWidth * 8)) - 1
+    if (field.prefixWidth < Int.SIZE_BYTES) {
+        val maxValue = (1L shl (field.prefixWidth * Byte.SIZE_BITS)) - 1
         val widthName =
             when (field.prefixWidth) {
                 1 -> "Byte"

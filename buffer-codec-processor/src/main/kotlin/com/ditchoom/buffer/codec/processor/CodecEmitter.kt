@@ -322,7 +322,8 @@ internal class CodecEmitter(
             body.beginControlFlow("require(__framingHeaderSize is %T.Exact)", WIRE_SIZE_CN)
             body.addStatement(
                 "%S",
-                "framing header codec returned a non-Exact wire size for ${shape.ownerSimpleName}.${variableAfter.name}",
+                "framing header codec returned a non-Exact wire size for " +
+                    "${shape.ownerSimpleName}.${variableAfter.name}",
             )
             body.endControlFlow()
         }
@@ -770,6 +771,8 @@ internal class CodecEmitter(
             is FieldSpec.LengthFromMessage -> appendDecodeLengthFromMessage(body, field)
             is FieldSpec.RemainingBytesProtocolMessageList ->
                 appendDecodeRemainingBytesProtocolMessageList(body, field)
+            is FieldSpec.CountPrefixedProtocolMessageList ->
+                appendDecodeCountPrefixedProtocolMessageList(body, field)
             is FieldSpec.RemainingBytesPayload -> appendDecodeRemainingBytesPayload(body, field)
             is FieldSpec.RemainingBytesString -> appendDecodeRemainingBytesString(body, field)
             is FieldSpec.UseCodecScalar -> appendDecodeUseCodecScalar(body, field)
@@ -853,6 +856,8 @@ internal class CodecEmitter(
             is FieldSpec.LengthFromMessage -> appendEncodeLengthFromMessage(body, field)
             is FieldSpec.RemainingBytesProtocolMessageList ->
                 appendEncodeRemainingBytesProtocolMessageList(body, field)
+            is FieldSpec.CountPrefixedProtocolMessageList ->
+                appendEncodeCountPrefixedProtocolMessageList(body, field)
             is FieldSpec.RemainingBytesPayload -> appendEncodeRemainingBytesPayload(body, field)
             is FieldSpec.RemainingBytesString -> appendEncodeRemainingBytesString(body, field)
             is FieldSpec.UseCodecScalar -> appendEncodeUseCodecScalar(body, field, shape)
@@ -966,7 +971,7 @@ internal class CodecEmitter(
                         bestCount = count
                         bestSize = prefixSize
                     }
-                    if (prefixSize >= 8) break
+                    if (prefixSize >= MAX_BATCH_BYTES) break
                 }
                 if (bestCount >= 2) {
                     val groupParts = current.subList(0, bestCount).map { it.second }
@@ -999,7 +1004,7 @@ internal class CodecEmitter(
             }
             val groupOrder = current.firstOrNull()?.second?.wireOrder
             val orderMismatch = groupOrder != null && groupOrder != part.wireOrder
-            if (currentBytes + part.sizeBytes > 8 || orderMismatch) flush()
+            if (currentBytes + part.sizeBytes > MAX_BATCH_BYTES || orderMismatch) flush()
             current.add(field to part)
             currentBytes += part.sizeBytes
         }
@@ -1034,9 +1039,9 @@ internal class CodecEmitter(
 
     private fun batchReadInfo(totalBytes: Int): Triple<String, String, Int> =
         when (totalBytes) {
-            2 -> Triple("readShort", "Int", 16)
-            4 -> Triple("readInt", "Int", 32)
-            8 -> Triple("readLong", "Long", 64)
+            SHORT_BATCH_BYTES -> Triple("readShort", "Int", SHORT_BATCH_BITS)
+            INT_BATCH_BYTES -> Triple("readInt", "Int", INT_BATCH_BITS)
+            LONG_BATCH_BYTES -> Triple("readLong", "Long", LONG_BATCH_BITS)
             else -> error("unsupported batch size $totalBytes")
         }
 
@@ -1184,7 +1189,8 @@ internal class CodecEmitter(
     private fun batchPartTypeRender(part: BatchablePart): String {
         if (part.valueClass != null) {
             val pkg = part.valueClass.packageName
-            return if (pkg.isEmpty()) part.valueClass.simpleName else "$pkg.${part.valueClass.simpleNames.joinToString(".")}"
+            val nested = part.valueClass.simpleNames.joinToString(".")
+            return if (pkg.isEmpty()) part.valueClass.simpleName else "$pkg.$nested"
         }
         return when (part.kind) {
             ScalarKind.Boolean -> "kotlin.Boolean"
@@ -1241,7 +1247,10 @@ internal class CodecEmitter(
             ScalarKind.Int -> if (accumulatorType == "Long") "$rawExpr.toInt()" else rawExpr
             ScalarKind.ULong -> "$rawExpr.toULong()"
             ScalarKind.Long -> rawExpr
-            ScalarKind.Float -> if (accumulatorType == "Long") "Float.fromBits($rawExpr.toInt())" else "Float.fromBits($rawExpr)"
+            ScalarKind.Float -> {
+                val bitsExpr = if (accumulatorType == "Long") "$rawExpr.toInt()" else rawExpr
+                "Float.fromBits($bitsExpr)"
+            }
             ScalarKind.Double -> "Double.fromBits($rawExpr)"
             ScalarKind.Boolean -> error("Boolean is not batchable")
         }
@@ -1345,12 +1354,12 @@ internal class CodecEmitter(
         when (totalBytes) {
             // size-2 batches use an Int accumulator (so shift/or arithmetic
             // stays in Int) but writeShort takes Short — narrow at the call.
-            2 -> "($combined).toShort()"
+            SHORT_BATCH_BYTES -> "($combined).toShort()"
             // size-4 / size-8 accumulators are already Int / Long, so emit
             // bare expressions. Wrapping in .toInt()/.toLong() triggers the
             // "Redundant call of conversion method" compiler warning.
-            4 -> combined
-            8 -> combined
+            INT_BATCH_BYTES -> combined
+            LONG_BATCH_BYTES -> combined
             else -> error("unsupported batch size $totalBytes")
         }
 
@@ -1422,9 +1431,6 @@ internal class CodecEmitter(
         return true
     }
 
-    /** Index of the (single) `RemainingBytesPayload` field, or -1. */
-    private fun payloadFieldIndex(shape: CodecShape): Int = shape.fields.indexOfFirst { it is FieldSpec.RemainingBytesPayload }
-
     /**
      * Emit the nested `Partial` class. The `Partial`
      * captures the buffer and context so `complete(...)` can defer the
@@ -1456,7 +1462,7 @@ internal class CodecEmitter(
         shape: CodecShape,
         payloadTypeParameter: PayloadTypeParameter?,
     ): TypeSpec {
-        val payloadIndex = payloadFieldIndex(shape)
+        val payloadIndex = shape.payloadFieldIndex()
         val payloadField =
             (shape.fields.getOrNull(payloadIndex) as? FieldSpec.RemainingBytesPayload)
                 ?: error("buildPartialClassTypeSpec called for shape without a RemainingBytesPayload")
@@ -1663,7 +1669,7 @@ internal class CodecEmitter(
         shape: CodecShape,
         payloadTypeParameter: PayloadTypeParameter?,
     ): FunSpec {
-        val payloadIndex = payloadFieldIndex(shape)
+        val payloadIndex = shape.payloadFieldIndex()
         val payloadField = shape.fields[payloadIndex] as FieldSpec.RemainingBytesPayload
         val beforeFields = shape.fields.subList(0, payloadIndex)
         val afterFields = shape.fields.subList(payloadIndex + 1, shape.fields.size)
@@ -1797,6 +1803,11 @@ internal class CodecEmitter(
             is FieldSpec.LengthFromMessage -> field.messageType
             is FieldSpec.LengthFromList ->
                 ClassName("kotlin.collections", "List").parameterizedBy(field.elementClassName)
+            is FieldSpec.CountPrefixedProtocolMessageList ->
+                // Self-delimiting, so a `@Count` list may sit as a non-terminal
+                // header field ahead of a trailing RemainingBytesPayload; map it
+                // to its `List<Element>` Kotlin type (mirror of LengthFromList).
+                ClassName("kotlin.collections", "List").parameterizedBy(field.elementClassName)
             is FieldSpec.RemainingBytesProtocolMessageList ->
                 error(
                     "partialFieldTypeName called on a RemainingBytesProtocolMessageList field — " +
@@ -1826,6 +1837,9 @@ internal class CodecEmitter(
             is FieldSpec.EnumScalar -> field.enumType
         }
 }
+
+/** Index of the (single) `RemainingBytesPayload` field, or -1. */
+private fun CodecShape.payloadFieldIndex(): Int = fields.indexOfFirst { it is FieldSpec.RemainingBytesPayload }
 
 /**
  * Emits the framed-body truncation guard between the framing codec's `decode`

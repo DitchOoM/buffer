@@ -100,8 +100,15 @@ class HpkeKatTest {
             }
 
         // --- Sender setup with the pinned ephemeral ---
+        val senderMode =
+            when (mode) {
+                HpkeMode.Base -> HpkeSenderMode.Base
+                HpkeMode.Psk -> HpkeSenderMode.Psk(psk!!)
+                HpkeMode.Auth -> HpkeSenderMode.Auth(senderPriv!!)
+                HpkeMode.AuthPsk -> HpkeSenderMode.AuthPsk(senderPriv!!, psk!!)
+            }
         val senderSetup =
-            hpkeSetupSenderInternal(suite, mode, recipientPub, info, psk, senderPriv, ephemeral)
+            hpkeSetupSenderInternal(suite, senderMode, recipientPub, info, ephemeral)
         assertEquals(v.str("enc"), senderSetup.enc.toHex(), "$name: enc")
 
         // --- Receiver setup ---
@@ -155,7 +162,7 @@ class HpkeKatTest {
 
     private fun emptyBuffer(): ReadBuffer = hexBuffer("")
 
-    private fun JsonObject.str(name: String): String = this[name]?.jsonPrimitive?.content ?: error("missing field '$name'")
+    private fun JsonObject.str(key: String): String = this[key]?.jsonPrimitive?.content ?: error("missing field '$key'")
 
     private fun JsonObject.int(name: String): Int = this[name]?.jsonPrimitive?.int ?: error("missing int '$name'")
 }

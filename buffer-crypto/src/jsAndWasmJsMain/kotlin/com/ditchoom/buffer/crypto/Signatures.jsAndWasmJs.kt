@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
@@ -8,10 +9,9 @@ import com.ditchoom.buffer.WriteBuffer
 /**
  * js/wasmJs signature support.
  *
- * WebCrypto's `SubtleCrypto.sign` / `.verify` are **async-only**, so the synchronous entry points
- * ([signInto], [verify]) are unsupported here and throw [UnsupportedOperationException] — their
- * capability flags ([supportsSyncEd25519], [supportsSyncEcdsa]) are `false`. The real work is in
- * the suspending [signAsync] / [verifyAsync], which call WebCrypto through a per-engine bridge
+ * WebCrypto's `SubtleCrypto.sign` / `.verify` are **async-only**, so every scheme's witness is
+ * [SignatureSupport.AsyncOnly] — the synchronous ops are not members of it and cannot be reached.
+ * The real work is in the async witness ops, which call WebCrypto through a per-engine bridge
  * (`dynamic` on JS, `@JsFun` externals on wasmJs).
  *
  * ECDSA signatures on WebCrypto are **raw P1363** (`r ‖ s`, fixed-width), pinned by
@@ -22,23 +22,32 @@ import com.ditchoom.buffer.WriteBuffer
  * [UnsupportedOperationException], matching the capability contract.
  */
 
-actual val supportsSyncEd25519: Boolean get() = false
-
-actual val supportsSyncEcdsa: Boolean get() = false
-
 actual val ecdsaSignatureEncoding: EcdsaSignatureEncoding get() = EcdsaSignatureEncoding.P1363
 
-actual fun signInto(
+/**
+ * WebCrypto's sign/verify are `suspend`-only, so every scheme is [SignatureSupport.AsyncOnly] — the
+ * synchronous ops are not reachable. Ed25519's actual engine support is feature-detected at call
+ * time (see [ed25519AsyncAvailable]); the async ops throw [UnsupportedOperationException] if absent.
+ */
+actual fun CryptoCapabilities.signatures(scheme: SignatureScheme): SignatureSupport =
+    SignatureSupport.AsyncOnly(SignatureAsyncOpsImpl(scheme))
+
+internal actual fun signIntoPlatform(
     key: SigningKey,
     message: ReadBuffer,
     dest: WriteBuffer,
-): Int = throw UnsupportedOperationException("synchronous signing is unavailable on JS/WASM; use signAsync")
+): Int = throw UnsupportedOperationException("synchronous signing is unavailable on JS/WASM; use the async ops")
 
-actual fun verify(
+internal actual fun generateSigningKeyPlatform(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey = throw UnsupportedOperationException("synchronous key generation is unavailable on JS/WASM; use the async ops")
+
+internal actual fun verifyPlatform(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,
-): Boolean = throw UnsupportedOperationException("synchronous verification is unavailable on JS/WASM; use verifyAsync")
+): Boolean = throw UnsupportedOperationException("synchronous verification is unavailable on JS/WASM; use the async ops")
 
 // ---------------------------------------------------------------------------
 // Per-engine WebCrypto bridge (dynamic on JS, @JsFun on wasmJs).
@@ -64,11 +73,33 @@ internal expect suspend fun webCryptoVerify(
     signatureHex: String,
 ): Boolean
 
+/**
+ * WebCrypto key generation for [scheme]. Returns `"<privHex>:<pubHex>"` — the raw private material
+ * (Ed25519 32-byte seed / ECDSA big-endian scalar) and the raw public key (Ed25519 32-byte point /
+ * ECDSA uncompressed SEC1 point), both lowercase hex. Throws (engine rejection) for an unsupported
+ * scheme (e.g. Ed25519 where the engine lacks it).
+ */
+internal expect suspend fun webCryptoGenerateKeyPair(scheme: SignatureScheme): String
+
 // ---------------------------------------------------------------------------
 // Hex <-> buffer helpers (no ByteArray staging beyond the WebCrypto string boundary).
 // ---------------------------------------------------------------------------
 
 private const val HEX = "0123456789abcdef"
+private const val NIBBLE_BITS = 4
+private const val NIBBLE_MASK = 0xF
+private const val BYTE_MASK = 0xFF
+private const val BYTE_BITS = 8
+
+// EC private-scalar / coordinate widths (bytes) per curve.
+private const val P256_SCALAR_BYTES = 32
+private const val P384_SCALAR_BYTES = 48
+private const val P521_SCALAR_BYTES = 66
+private const val ED25519_SEED_BYTES = 32
+
+// DER definite-length encoding thresholds.
+private const val DER_SHORT_LEN_LIMIT = 0x80 // lengths below use the single-byte short form
+private const val DER_ONE_BYTE_LIMIT = 0x100 // lengths below fit in one long-form byte (0x81 LL)
 
 private fun ReadBuffer.toHexString(): String {
     val start = position()
@@ -76,8 +107,8 @@ private fun ReadBuffer.toHexString(): String {
     val sb = StringBuilder(n * 2)
     for (i in 0 until n) {
         val v = get(start + i).toInt() and 0xFF
-        sb.append(HEX[v ushr 4])
-        sb.append(HEX[v and 0xF])
+        sb.append(HEX[v ushr NIBBLE_BITS])
+        sb.append(HEX[v and NIBBLE_MASK])
     }
     return sb.toString()
 }
@@ -91,7 +122,7 @@ private fun hexToBuffer(
     for (i in 0 until n) {
         val hi = HEX.indexOf(hex[i * 2].lowercaseChar())
         val lo = HEX.indexOf(hex[i * 2 + 1].lowercaseChar())
-        b.writeByte(((hi shl 4) or lo).toByte())
+        b.writeByte(((hi shl NIBBLE_BITS) or lo).toByte())
     }
     b.resetForRead()
     return b
@@ -104,16 +135,16 @@ private fun hexToBuffer(
 // ---------------------------------------------------------------------------
 
 private fun pkcs8Ed25519Hex(seed: ReadBuffer): String {
-    require(seed.remaining() == 32) { "Ed25519 seed must be 32 bytes" }
+    require(seed.remaining() == ED25519_SEED_BYTES) { "Ed25519 seed must be 32 bytes" }
     return "302e020100300506032b657004220420" + seed.toHexString()
 }
 
 /** Curve byte length for the private scalar (also the coordinate width). */
 private fun ecScalarBytes(scheme: SignatureScheme): Int =
     when (scheme) {
-        SignatureScheme.EcdsaP256 -> 32
-        SignatureScheme.EcdsaP384 -> 48
-        SignatureScheme.EcdsaP521 -> 66
+        SignatureScheme.EcdsaP256 -> P256_SCALAR_BYTES
+        SignatureScheme.EcdsaP384 -> P384_SCALAR_BYTES
+        SignatureScheme.EcdsaP521 -> P521_SCALAR_BYTES
         SignatureScheme.Ed25519 -> error("not ECDSA")
     }
 
@@ -128,12 +159,12 @@ private fun curveOidHex(scheme: SignatureScheme): String =
 
 private fun derLenHex(len: Int): String =
     when {
-        len < 0x80 -> twoHex(len)
-        len < 0x100 -> "81" + twoHex(len)
-        else -> "82" + twoHex(len ushr 8) + twoHex(len and 0xFF)
+        len < DER_SHORT_LEN_LIMIT -> twoHex(len)
+        len < DER_ONE_BYTE_LIMIT -> "81" + twoHex(len)
+        else -> "82" + twoHex(len ushr BYTE_BITS) + twoHex(len and BYTE_MASK)
     }
 
-private fun twoHex(v: Int): String = HEX[(v ushr 4) and 0xF].toString() + HEX[v and 0xF]
+private fun twoHex(v: Int): String = HEX[(v ushr NIBBLE_BITS) and NIBBLE_MASK].toString() + HEX[v and NIBBLE_MASK]
 
 private fun derTlv(
     tagHex: String,
@@ -170,7 +201,7 @@ private fun pkcs8EcdsaHex(
 }
 
 private fun privateMaterialHex(key: SigningKey): String {
-    val material = key.requireOpen()
+    val material = key.requireInMemoryMaterial()
     return when (key.scheme) {
         SignatureScheme.Ed25519 -> pkcs8Ed25519Hex(material)
         else -> pkcs8EcdsaHex(key.scheme, material)
@@ -181,7 +212,7 @@ private fun privateMaterialHex(key: SigningKey): String {
 // Suspending API
 // ---------------------------------------------------------------------------
 
-actual suspend fun signAsync(
+internal actual suspend fun signAsyncPlatform(
     key: SigningKey,
     message: ReadBuffer,
     factory: BufferFactory,
@@ -193,7 +224,7 @@ actual suspend fun signAsync(
     return hexToBuffer(sigHex, factory)
 }
 
-actual suspend fun verifyAsync(
+internal actual suspend fun verifyAsyncPlatform(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,
@@ -203,7 +234,7 @@ actual suspend fun verifyAsync(
     }
     return webCryptoVerify(
         key.scheme,
-        key.material.toHexString(),
+        key.requireInMemoryMaterial().toHexString(),
         message.toHexString(),
         signature.toHexString(),
     )
@@ -212,3 +243,21 @@ actual suspend fun verifyAsync(
 actual suspend fun ed25519AsyncAvailable(): Boolean = webCryptoEd25519Available()
 
 actual val supportsEcdsaSigningFromScalar: Boolean get() = true
+
+internal actual suspend fun generateSigningKeyAsyncPlatform(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey {
+    if (scheme == SignatureScheme.Ed25519 && !webCryptoEd25519Available()) {
+        throw UnsupportedOperationException("Ed25519 is not available on this WebCrypto engine")
+    }
+    val parts = webCryptoGenerateKeyPair(scheme).split(":")
+    val verifyKey = verifyKeyOf(scheme, hexToBuffer(parts[1], BufferFactory.Default))
+    // Stage the secret private material in a wiped buffer; the import factory copies it into `factory`.
+    val privBuf = hexToBuffer(parts[0], secureScratch)
+    return try {
+        signingKeyOf(scheme, privBuf, verifyKey, factory)
+    } finally {
+        privBuf.freeNativeMemory()
+    }
+}

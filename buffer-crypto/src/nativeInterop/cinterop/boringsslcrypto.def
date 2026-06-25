@@ -330,6 +330,40 @@ done:
     return rc;
 }
 
+/* Decompresses a SEC1 compressed point (0x02/0x03 || X) to uncompressed (0x04 || X || Y).
+ * EC_POINT_oct2point parses the compressed encoding and recovers Y; we re-reject off-curve /
+ * infinity defensively. Returns BCL_OK with the uncompressed point + length, else BCL_ERR. */
+static inline int bcl_ec_decompress(
+    int curve_code,
+    const uint8_t *in_point, size_t in_len,
+    uint8_t *out_point, size_t out_cap, size_t *out_len) {
+    int rc = BCL_ERR;
+    int nid = bcl_ec_nid(curve_code);
+    if (nid == 0) return BCL_ERR;
+    EC_GROUP *group = EC_GROUP_new_by_curve_name(nid);
+    EC_POINT *pt = NULL;
+    BN_CTX *bnctx = NULL;
+    if (!group) return BCL_ERR;
+    bnctx = BN_CTX_new();
+    if (!bnctx) goto done;
+    pt = EC_POINT_new(group);
+    if (!pt) goto done;
+    if (!EC_POINT_oct2point(group, pt, in_point, in_len, bnctx)) goto done;
+    if (!EC_POINT_is_on_curve(group, pt, bnctx)) goto done;
+    if (EC_POINT_is_at_infinity(group, pt)) goto done;
+    {
+        size_t n = EC_POINT_point2oct(group, pt, POINT_CONVERSION_UNCOMPRESSED, out_point, out_cap, bnctx);
+        if (n == 0) goto done;
+        *out_len = n;
+        rc = BCL_OK;
+    }
+done:
+    if (pt) EC_POINT_free(pt);
+    if (bnctx) BN_CTX_free(bnctx);
+    if (group) EC_GROUP_free(group);
+    return rc;
+}
+
 /* Generates an EC key pair: raw scalar (left-padded to field width) and uncompressed point. */
 static inline int bcl_ec_generate(
     int curve_code,

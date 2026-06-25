@@ -133,7 +133,11 @@ class FramedEncoderPoolLifecycleTests {
         assertEquals(0, pool.stats().currentPoolSize, "Buffer still held by caller — pool must be empty")
 
         (result as PlatformBuffer).freeNativeMemory()
-        assertEquals(1, pool.stats().currentPoolSize, "freeNativeMemory on the encoded slice must return the chunk to the pool")
+        assertEquals(
+            1,
+            pool.stats().currentPoolSize,
+            "freeNativeMemory on the encoded slice must return the chunk to the pool",
+        )
         pool.clear()
     }
 
@@ -169,7 +173,11 @@ class FramedEncoderPoolLifecycleTests {
         }
 
         val stats = pool.stats()
-        assertEquals(iterations.toLong(), stats.totalAllocations, "Each iteration must hit the pool factory exactly once")
+        assertEquals(
+            iterations.toLong(),
+            stats.totalAllocations,
+            "Each iteration must hit the pool factory exactly once",
+        )
         assertTrue(
             stats.poolMisses <= 2,
             "After warmup the pool must service every acquire; got misses=${stats.poolMisses}",
@@ -340,7 +348,11 @@ class FramedEncoderPoolLifecycleTests {
         label: String,
     ) {
         assertNotNull(actual, label)
-        assertEquals(expected.size, actual.size, "$label: size mismatch (expected ${expected.size}, got ${actual.size})")
+        assertEquals(
+            expected.size,
+            actual.size,
+            "$label: size mismatch (expected ${expected.size}, got ${actual.size})",
+        )
         for (i in expected.indices) {
             if (expected[i] != actual[i]) {
                 kotlin.test.fail(

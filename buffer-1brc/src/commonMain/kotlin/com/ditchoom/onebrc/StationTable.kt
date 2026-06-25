@@ -135,7 +135,7 @@ internal class StationTable(
     ): Long {
         // Mean temperature in tenths = sum / count, rounded to nearest with ties toward +infinity
         // (matches the reference 1BRC's Math.round semantics).
-        return floor(sum.toDouble() / count.toDouble() + 0.5).toLong()
+        return floor(sum.toDouble() / count.toDouble() + ROUND_HALF).toLong()
     }
 
     private fun appendTenths(
@@ -144,8 +144,16 @@ internal class StationTable(
     ) {
         if (tenths < 0) sb.append('-')
         val abs = if (tenths < 0) -tenths else tenths
-        sb.append(abs / 10)
+        sb.append(abs / TENTHS_PER_UNIT)
         sb.append('.')
-        sb.append(abs % 10)
+        sb.append(abs % TENTHS_PER_UNIT)
+    }
+
+    private companion object {
+        /** Rounding bias added before floor() to round-half-up to the nearest tenth. */
+        private const val ROUND_HALF = 0.5
+
+        /** Scale factor between whole degrees and tenths-of-a-degree fixed point. */
+        private const val TENTHS_PER_UNIT = 10
     }
 }

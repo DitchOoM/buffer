@@ -32,9 +32,9 @@ class Sha512FamilyWycheproofTest {
                 // which the runner treats as rejection — matching the `invalid` verdict.
                 val okm =
                     HkdfSha512.derive(
-                        salt = case.testHexOrNull("salt"),
+                        salt = case.testHexOrNull("salt").toSalt(),
                         ikm = case.testHex("ikm"),
-                        info = case.testHexOrNull("info"),
+                        info = case.testHexOrNull("info").toInfo(),
                         length = case.testInt("size"),
                         factory = BufferFactory.Default,
                     )

@@ -12,6 +12,54 @@ plugins {
     alias(libs.plugins.atomicfu) apply false
     alias(libs.plugins.dokka) apply false
     alias(libs.plugins.kotlinx.benchmark) apply false
+    // Applied (apply false here) so every module can pull it in via the allprojects block below.
+    // detekt is the only static analyzer that sees the Kotlin/Native (appleMain, linuxMain) and
+    // JS/WASM source sets — CodeQL's java-kotlin extractor only traces JVM bytecode, so detekt
+    // fills the multiplatform coverage gap. Run non-blocking with committed per-module baselines.
+    alias(libs.plugins.detekt) apply false
+}
+
+// ---- detekt: multiplatform static analysis (non-blocking; see .github/workflows/detekt.yaml) ----
+// Applied to every project so each module gets its own `detekt` / `detektBaseline` task that
+// covers commonMain + every platform actual (appleMain, linuxMain, jsMain, wasmJsMain,
+// androidMain, jvmMain). The root `detektAll` aggregate fans out to all of them.
+// Findings are surfaced, not enforced: the CI run is non-blocking and committed per-module
+// baselines (<module>/config/detekt/baseline.xml) suppress existing findings so only NEW
+// issues show up. Regenerate with `./gradlew detektBaseline`.
+allprojects {
+    apply(plugin = "dev.detekt")
+
+    extensions.configure<dev.detekt.gradle.extensions.DetektExtension> {
+        // Apply detekt's bundled default ruleset (no custom config file needed for the rollout).
+        buildUponDefaultConfig.set(true)
+        // Suppress all findings recorded at rollout time; new findings still surface.
+        baseline.set(layout.projectDirectory.file("config/detekt/baseline.xml"))
+        parallel.set(true)
+        // The CI workflow is already non-blocking (continue-on-error), but keep the task from
+        // red-failing local `./gradlew detekt` runs on pre-existing findings too.
+        ignoreFailures.set(true)
+        // detekt's default source roots are the JVM layout (src/main/kotlin, src/test/kotlin),
+        // which a Kotlin Multiplatform module does NOT use — its sources live under
+        // src/<sourceSet>/kotlin (commonMain, appleMain, linuxMain, jsMain, wasmJsMain, ...).
+        // Point detekt at every existing src/*/kotlin dir so the analysis actually covers the
+        // Native/JS/WASM actuals that CodeQL can't see. This is what makes detekt the
+        // multiplatform-coverage tool here. Missing dirs are ignored by detekt at runtime.
+        val ktSourceRoots = layout.projectDirectory.dir("src").asFile
+            .listFiles { f -> f.isDirectory }
+            ?.map { layout.projectDirectory.dir("src/${it.name}/kotlin") }
+            ?: emptyList()
+        if (ktSourceRoots.isNotEmpty()) {
+            source.setFrom(ktSourceRoots)
+        }
+    }
+}
+
+// Aggregate detekt run across every module — the entry point CI invokes.
+tasks.register("detektAll") {
+    description = "Run detekt static analysis across all modules and Kotlin source sets (non-blocking)."
+    group = "verification"
+    dependsOn(subprojects.map { "${it.path}:detekt" })
+    dependsOn("detekt")
 }
 
 // Aggregate tasks for convenience
@@ -133,7 +181,7 @@ tasks.register("connectedAndroidTestCompatible") {
 tasks.register<Copy>("copyDokkaToDocusaurus") {
     description = "Generate and copy API documentation to Docusaurus"
     group = "documentation"
-    dependsOn(":buffer:dokkaGenerateHtml", ":buffer-compression:dokkaGenerateHtml", ":buffer-flow:dokkaGenerateHtml", ":buffer-codec:dokkaGenerateHtml")
+    dependsOn(":buffer:dokkaGenerateHtml", ":buffer-compression:dokkaGenerateHtml", ":buffer-flow:dokkaGenerateHtml", ":buffer-codec:dokkaGenerateHtml", ":buffer-crypto:dokkaGenerateHtml")
 
     from(layout.projectDirectory.dir("buffer/build/dokka/html")) {
         into("buffer")
@@ -146,6 +194,9 @@ tasks.register<Copy>("copyDokkaToDocusaurus") {
     }
     from(layout.projectDirectory.dir("buffer-codec/build/dokka/html")) {
         into("buffer-codec")
+    }
+    from(layout.projectDirectory.dir("buffer-crypto/build/dokka/html")) {
+        into("buffer-crypto")
     }
     into(layout.projectDirectory.dir("docs/static/api"))
 }

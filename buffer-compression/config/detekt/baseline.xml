@@ -1,0 +1,29 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:JvmCommonStreamingCompression.kt:JvmGzipStreamingDecompressor$private fun parseOptionalGzipFields: Boolean</ID>
+    <ID>LargeClass:CompressionStressTests.kt:CompressionStressTests</ID>
+    <ID>LargeClass:StreamingCompressionTests.kt:StreamingCompressionTests</ID>
+    <ID>LongMethod:StreamProcessorIntegrationTests.kt:StreamProcessorIntegrationTests$@Test fun interleavedReadAndAppendWithSuspendingProcessor</ID>
+    <ID>LoopWithTooManyJumpStatements:AppleCompression.kt:while</ID>
+    <ID>LoopWithTooManyJumpStatements:JsInteropActual.kt:while</ID>
+    <ID>LoopWithTooManyJumpStatements:LinuxCompression.kt:while</ID>
+    <ID>ReturnCount:CompressionStressTests.kt:CompressionStressTests$private fun findMismatchOptimized: Int</ID>
+    <ID>ReturnCount:JsInteropActual.kt:internal actual fun ReadBuffer.toJsByteArray: JsByteArray</ID>
+    <ID>ReturnCount:JsInteropActual.kt:internal actual fun ReadBuffer.toJsByteArrayView: JsByteArray</ID>
+    <ID>ReturnCount:JvmCommonStreamingCompression.kt:JvmGzipStreamingDecompressor$private fun parseOptionalGzipFields: Boolean</ID>
+    <ID>ReturnCount:JvmCommonStreamingCompression.kt:private fun CRC32.updateFrom: Int</ID>
+    <ID>ReturnCount:JvmCommonStreamingCompression.kt:private fun Deflater.deflateInto: Int</ID>
+    <ID>ReturnCount:JvmCommonStreamingCompression.kt:private fun Inflater.inflateInto: Int</ID>
+    <ID>ReturnCount:JvmCommonStreamingCompression.kt:private fun Inflater.setInputFrom</ID>
+    <ID>ReturnCount:JvmCommonStreamingCompression.kt:private inline fun emitPartialBuffer: Boolean</ID>
+    <ID>TooManyFunctions:Compression.kt:com.ditchoom.buffer.compression.Compression.kt</ID>
+    <ID>TooManyFunctions:JsInterop.kt:com.ditchoom.buffer.compression.JsInterop.kt</ID>
+    <ID>TooManyFunctions:JsInteropActual.kt:com.ditchoom.buffer.compression.JsInteropActual.kt</ID>
+    <ID>TooManyFunctions:JvmCommonStreamingCompression.kt:com.ditchoom.buffer.compression.JvmCommonStreamingCompression.kt</ID>
+    <ID>TooManyFunctions:StreamProcessorExtensions.kt:SuspendingDecompressingStreamProcessor : SuspendingStreamProcessor</ID>
+    <ID>TooManyFunctions:StreamingCompression.kt:com.ditchoom.buffer.compression.StreamingCompression.kt</ID>
+    <ID>TooManyFunctions:StreamingCompressionBenchmark.kt:StreamingCompressionBenchmark</ID>
+  </CurrentIssues>
+</SmellBaseline>

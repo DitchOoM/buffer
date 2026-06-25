@@ -20,6 +20,10 @@ actual val supportsStatefulFlush: Boolean by lazy(LazyThreadSafetyMode.NONE) { i
 // (SuspendingStreamingCompressor.Companion.create) doesn't take it; future API expansion.
 actual val supportsCustomWindowBits: Boolean by lazy(LazyThreadSafetyMode.NONE) { isNodeJs }
 
+// JsInterop. Node's synchronous zlib throws an opaque JS `Error` on malformed
+// input; across the Kotlin/JS FFI boundary that surfaces only as a broad type,
+// so the catch is intentionally wide. The cause is preserved in the Failure.
+@Suppress("TooGenericExceptionCaught")
 actual fun compress(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm,
@@ -40,6 +44,7 @@ actual fun compress(
         )
     }
 
+@Suppress("TooGenericExceptionCaught") // JS FFI: Node zlib throws opaque JS Error; cause preserved.
 actual fun decompress(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm,

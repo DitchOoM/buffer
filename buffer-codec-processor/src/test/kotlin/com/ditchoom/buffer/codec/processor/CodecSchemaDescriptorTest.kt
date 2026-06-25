@@ -179,7 +179,10 @@ class CodecSchemaDescriptorTest {
     }
 
     /** Concrete (non-sealed) leaf classes reachable through a sealed hierarchy. */
-    private fun leaves(k: KClass<*>): List<KClass<*>> = if (k.isSealed) k.sealedSubclasses.flatMap { leaves(it) } else listOf(k)
+    private fun leaves(k: KClass<*>): List<KClass<*>> {
+        if (!k.isSealed) return listOf(k)
+        return k.sealedSubclasses.flatMap { leaves(it) }
+    }
 
     // ---- IR samples -------------------------------------------------------
 
@@ -330,6 +333,7 @@ class CodecSchemaDescriptorTest {
             FieldSpec.LengthPrefixedUseCodecList("props", "Owner", listSpec),
             FieldSpec.LengthPrefixedUseCodecPayload("blob", "Owner", cn, codec, 2, Endianness.Big),
             FieldSpec.RemainingBytesProtocolMessageList("topics", "Owner", cn, codec, elementIsBackPatch = false),
+            FieldSpec.CountPrefixedProtocolMessageList("points", "Owner", cn, codec, elementIsBackPatch = false),
             FieldSpec.LengthFromList("items", "Owner", LengthSource.Sibling("count", ScalarKind.UByte), cn, codec),
             FieldSpec.LengthFromString("text", "Owner", LengthSource.Sibling("len", ScalarKind.UShort)),
             FieldSpec.ValueClassScalar("packetId", "Owner", cn, ScalarKind.UShort, "raw", 2, Endianness.Big),

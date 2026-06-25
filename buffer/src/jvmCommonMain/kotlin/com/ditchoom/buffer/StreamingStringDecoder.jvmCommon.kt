@@ -21,6 +21,9 @@ private class JvmStreamingStringDecoder(
 ) : StreamingStringDecoder {
     companion object {
         private val EMPTY_BYTE_BUFFER: ByteBuffer = ByteBuffer.allocate(0).asReadOnlyBuffer()
+
+        /** Minimum capacity for the reusable scratch/combined ByteBuffer (8 KiB). */
+        private const val DEFAULT_SCRATCH_BUFFER_SIZE = 8192
     }
 
     private val javaCharset =
@@ -91,7 +94,8 @@ private class JvmStreamingStringDecoder(
                         pendingCount = unconsumed
                         pendingLong = 0L
                         for (i in 0 until unconsumed) {
-                            pendingLong = pendingLong or ((byteBuffer.get().toLong() and 0xFF) shl (i * 8))
+                            val maskedByte = byteBuffer.get().toLong() and Utf8.BYTE_MASK.toLong()
+                            pendingLong = pendingLong or (maskedByte shl (i * Utf8.BITS_PER_BYTE))
                         }
                     } else {
                         pendingCount = 0
@@ -99,8 +103,8 @@ private class JvmStreamingStringDecoder(
                     break
                 }
                 result.isOverflow -> {
-                    // CharBuffer full, continue loop to process more
-                    continue
+                    // CharBuffer full; fall through to the loop condition to process more.
+                    Unit
                 }
                 result.isMalformed || result.isUnmappable -> {
                     pendingCount = 0
@@ -141,7 +145,7 @@ private class JvmStreamingStringDecoder(
         // Fallback: copy to temporary buffer
         var cb = combinedBuffer
         if (cb == null || cb.capacity() < remaining) {
-            cb = ByteBuffer.allocate(maxOf(remaining, 8192))
+            cb = ByteBuffer.allocate(maxOf(remaining, DEFAULT_SCRATCH_BUFFER_SIZE))
             combinedBuffer = cb
         }
         (cb as java.nio.Buffer).clear()
@@ -164,14 +168,14 @@ private class JvmStreamingStringDecoder(
         // Ensure combined buffer is large enough
         var cb = combinedBuffer
         if (cb == null || cb.capacity() < totalSize) {
-            cb = ByteBuffer.allocate(maxOf(totalSize, 8192))
+            cb = ByteBuffer.allocate(maxOf(totalSize, DEFAULT_SCRATCH_BUFFER_SIZE))
             combinedBuffer = cb
         }
         (cb as java.nio.Buffer).clear()
 
         // Add pending bytes first (unpack from Long)
         for (i in 0 until pendingCount) {
-            cb.put(((pendingLong ushr (i * 8)) and 0xFF).toByte())
+            cb.put(((pendingLong ushr (i * Utf8.BITS_PER_BYTE)) and Utf8.BYTE_MASK.toLong()).toByte())
         }
         pendingCount = 0
 
@@ -193,12 +197,12 @@ private class JvmStreamingStringDecoder(
             // Unpack pending Long into a temporary ByteBuffer
             var cb = combinedBuffer
             if (cb == null || cb.capacity() < pendingCount) {
-                cb = ByteBuffer.allocate(maxOf(pendingCount, 8192))
+                cb = ByteBuffer.allocate(maxOf(pendingCount, DEFAULT_SCRATCH_BUFFER_SIZE))
                 combinedBuffer = cb
             }
             (cb as java.nio.Buffer).clear()
             for (i in 0 until pendingCount) {
-                cb.put(((pendingLong ushr (i * 8)) and 0xFF).toByte())
+                cb.put(((pendingLong ushr (i * Utf8.BITS_PER_BYTE)) and Utf8.BYTE_MASK.toLong()).toByte())
             }
             (cb as java.nio.Buffer).flip()
             val byteBuffer = cb
@@ -283,4 +287,6 @@ private fun DecoderErrorAction.toCodingErrorAction(): CodingErrorAction =
         DecoderErrorAction.REPLACE -> CodingErrorAction.REPLACE
     }
 
+// ktlint (no .editorconfig) collapses this expression body onto one line, so it cannot be wrapped.
+@Suppress("MaxLineLength")
 actual fun StreamingStringDecoder(config: StreamingStringDecoderConfig): StreamingStringDecoder = JvmStreamingStringDecoder(config)

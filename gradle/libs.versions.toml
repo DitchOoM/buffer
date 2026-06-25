@@ -3,16 +3,19 @@
 kotlin = "2.3.21"
 androidGradlePlugin = "9.2.1"
 ktlint = "14.2.0"
+# detekt 2.0.0-alpha.3 is built against Kotlin 2.3.21 (exact match for `kotlin` above).
+# Plugin id moved to `dev.detekt` in 2.0. Run non-blocking with a committed baseline.
+detekt = "2.0.0-alpha.3"
 # simdutf - SIMD-accelerated Unicode validation and transcoding (Linux only)
 simdutf = "8.0.0"
 simdutfSha256 = "3d9eef727f088abaeaae4d40962a1ca09871c6bbe6d23de7930488c43ab77643"
-mavenPublish = "0.36.0"
+mavenPublish = "0.37.0"
 atomicfu = "0.33.0"
 dokka = "2.2.0"
 kover = "0.9.8"
 kotlinxCoroutines = "1.11.0"
 # kotlinx-serialization — buffer-crypto test-only: parsing vendored Wycheproof KAT vectors
-kotlinxSerialization = "1.9.0"
+kotlinxSerialization = "1.11.0"
 kotlinxBenchmark = "0.4.17"
 androidxBenchmark = "1.4.1"
 androidxTestRunner = "1.7.0"
@@ -24,6 +27,7 @@ ksp = "2.3.9"
 # kctfork 0.13.0-alpha01 requires Kotlin 2.4.0-Beta1; hold at 0.12.0-alpha01 for Kotlin 2.3.x
 kctfork = "0.12.0-alpha01"
 kotlinpoet = "2.3.0"
+binaryCompatibilityValidator = "0.18.1"
 # androidx.collection — multiplatform Swiss-table maps used by the :buffer-1brc showcase only
 androidxCollection = "1.6.0"
 
@@ -51,9 +55,11 @@ kotlin-allopen = { id = "org.jetbrains.kotlin.plugin.allopen", version.ref = "ko
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 android-library = { id = "com.android.library", version.ref = "androidGradlePlugin" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }
+detekt = { id = "dev.detekt", version.ref = "detekt" }
 maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "mavenPublish" }
 atomicfu = { id = "org.jetbrains.kotlinx.atomicfu", version.ref = "atomicfu" }
 dokka = { id = "org.jetbrains.dokka", version.ref = "dokka" }
 kover = { id = "org.jetbrains.kotlinx.kover", version.ref = "kover" }
 kotlinx-benchmark = { id = "org.jetbrains.kotlinx.benchmark", version.ref = "kotlinxBenchmark" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+binary-compatibility-validator = { id = "org.jetbrains.kotlinx.binary-compatibility-validator", version.ref = "binaryCompatibilityValidator" }

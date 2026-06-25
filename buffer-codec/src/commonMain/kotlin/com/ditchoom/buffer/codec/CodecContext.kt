@@ -68,7 +68,7 @@ private class DecodeMapContext(
         value: T,
     ): DecodeContext = DecodeMapContext(elements + (key to value))
 
-    override fun toString(): String = elements.entries.joinToString(prefix = "DecodeContext(", postfix = ")") { "${it.key}=${it.value}" }
+    override fun toString(): String = formatContext("DecodeContext", elements)
 }
 
 private class EncodeMapContext(
@@ -82,5 +82,10 @@ private class EncodeMapContext(
         value: T,
     ): EncodeContext = EncodeMapContext(elements + (key to value))
 
-    override fun toString(): String = elements.entries.joinToString(prefix = "EncodeContext(", postfix = ")") { "${it.key}=${it.value}" }
+    override fun toString(): String = formatContext("EncodeContext", elements)
 }
+
+private fun formatContext(
+    label: String,
+    elements: Map<*, *>,
+): String = elements.entries.joinToString(prefix = "$label(", postfix = ")") { "${it.key}=${it.value}" }

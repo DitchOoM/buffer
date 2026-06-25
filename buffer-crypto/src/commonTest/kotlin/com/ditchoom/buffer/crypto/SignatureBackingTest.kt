@@ -31,7 +31,7 @@ class SignatureBackingTest {
                     for (sigK in CryptoBackings.inputs) {
                         val message = CryptoBackings.place(msgK, ascii("backing-matrix"), pool)
                         val seed = CryptoBackings.place(keyK, hexBuffer(edSeed), pool)
-                        val sig = SigningKey.ed25519(seed).use { signAsync(it, message) }
+                        val sig = SigningKey.ed25519(seed, VerifyKey.ed25519(hexBuffer(edPub))).use { signAsync(it, message) }
                         val sigPlaced = CryptoBackings.place(sigK, sig, pool)
                         val pub = VerifyKey.ed25519(CryptoBackings.place(keyK, hexBuffer(edPub), pool))
                         assertTrue(
@@ -54,7 +54,7 @@ class SignatureBackingTest {
                     for (sigK in CryptoBackings.inputs) {
                         val message = CryptoBackings.place(msgK, ascii("backing-matrix"), pool)
                         val scalar = CryptoBackings.place(keyK, hexBuffer(p256Scalar), pool)
-                        val sig = SigningKey.ecdsaP256(scalar).use { signAsync(it, message) }
+                        val sig = SigningKey.ecdsaP256(scalar, VerifyKey.ecdsaP256(hexBuffer(p256Point))).use { signAsync(it, message) }
                         val sigPlaced = CryptoBackings.place(sigK, sig, pool)
                         val pub = VerifyKey.ecdsaP256(CryptoBackings.place(keyK, hexBuffer(p256Point), pool))
                         assertTrue(

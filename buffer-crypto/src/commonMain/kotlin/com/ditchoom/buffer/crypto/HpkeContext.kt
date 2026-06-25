@@ -27,13 +27,13 @@ sealed class HpkeContext protected constructor(
 
     /** RFC 9180 §5.3 secret export: `LabeledExpand(exporter_secret, "sec", context, L)`. */
     fun export(
-        exporterContext: ReadBuffer?,
+        exporterContext: Info,
         length: Int,
         factory: BufferFactory = BufferFactory.Default,
     ): ReadBuffer {
         require(length >= 0) { "export length must be non-negative, was $length" }
         val out = factory.allocate(length)
-        labeledExpand(suite.kdf, suite.suiteId(), exporterSecret, LABEL_SEC, exporterContext, length, out)
+        labeledExpand(suite.kdf, suite.suiteId(), exporterSecret, LABEL_SEC, exporterContext.bytesOrNull, length, out)
         out.resetForRead()
         return out
     }
@@ -95,12 +95,12 @@ sealed class HpkeContext protected constructor(
          */
         suspend fun seal(
             plaintext: ReadBuffer,
-            aad: ReadBuffer? = null,
+            aad: Aad = Aad.None,
             factory: BufferFactory = BufferFactory.Default,
         ): PlatformBuffer {
             val nonce = computeNonce()
             return try {
-                val ct = hpkeAeadSeal(suite.aead, key, nonce, aad, plaintext, factory)
+                val ct = hpkeAeadSeal(suite.aead, key, nonce, aad.bytesOrNull, plaintext, factory)
                 incrementSeq()
                 ct
             } finally {
@@ -126,12 +126,12 @@ sealed class HpkeContext protected constructor(
          */
         suspend fun open(
             ciphertext: ReadBuffer,
-            aad: ReadBuffer? = null,
+            aad: Aad = Aad.None,
             factory: BufferFactory = BufferFactory.Default,
         ): PlatformBuffer {
             val nonce = computeNonce()
             return try {
-                val pt = hpkeAeadOpen(suite.aead, key, nonce, aad, ciphertext, factory)
+                val pt = hpkeAeadOpen(suite.aead, key, nonce, aad.bytesOrNull, ciphertext, factory)
                 incrementSeq()
                 pt
             } finally {
@@ -142,49 +142,134 @@ sealed class HpkeContext protected constructor(
 }
 
 // =============================================================================
+// Establishment modes carrying their per-mode parameters (RFC 9180 §5.1)
+// =============================================================================
+//
+// Each sender/receiver mode bundles the wire `mode` byte with EXACTLY the parameters that mode
+// requires, so an impossible combination (a Base mode carrying a PSK, an Auth mode with no sender
+// key) is unrepresentable rather than rejected by a runtime check. `internal`: the public surface is
+// the per-mode setup functions below, which construct the right variant from their typed arguments.
+
+/** A sender-side establishment mode bundled with the parameters that mode requires. */
+internal sealed interface HpkeSenderMode {
+    /** The wire `mode` byte (RFC 9180 §5.1) this establishment mode encodes to. */
+    val wire: HpkeMode
+
+    /** The pre-shared key, for the PSK-bearing modes; `null` otherwise. */
+    val psk: HpkePsk? get() = null
+
+    /** The sender's static private key, for the authenticated modes; `null` otherwise. */
+    val senderPrivateKey: HpkePrivateKey? get() = null
+
+    /** Base mode: no PSK, no sender authentication. */
+    data object Base : HpkeSenderMode {
+        override val wire: HpkeMode get() = HpkeMode.Base
+    }
+
+    /** PSK mode: carries the pre-shared key. */
+    data class Psk(
+        override val psk: HpkePsk,
+    ) : HpkeSenderMode {
+        override val wire: HpkeMode get() = HpkeMode.Psk
+    }
+
+    /** Auth mode: carries the sender's static private key. */
+    data class Auth(
+        override val senderPrivateKey: HpkePrivateKey,
+    ) : HpkeSenderMode {
+        override val wire: HpkeMode get() = HpkeMode.Auth
+    }
+
+    /** AuthPSK mode: carries both the sender's static private key and the pre-shared key. */
+    data class AuthPsk(
+        override val senderPrivateKey: HpkePrivateKey,
+        override val psk: HpkePsk,
+    ) : HpkeSenderMode {
+        override val wire: HpkeMode get() = HpkeMode.AuthPsk
+    }
+}
+
+/** A receiver-side establishment mode bundled with the parameters that mode requires. */
+internal sealed interface HpkeReceiverMode {
+    /** The wire `mode` byte (RFC 9180 §5.1) this establishment mode encodes to. */
+    val wire: HpkeMode
+
+    /** The pre-shared key, for the PSK-bearing modes; `null` otherwise. */
+    val psk: HpkePsk? get() = null
+
+    /** The sender's static public key, for the authenticated modes; `null` otherwise. */
+    val senderPublicKey: HpkePublicKey? get() = null
+
+    /** Base mode: no PSK, no sender authentication. */
+    data object Base : HpkeReceiverMode {
+        override val wire: HpkeMode get() = HpkeMode.Base
+    }
+
+    /** PSK mode: carries the pre-shared key. */
+    data class Psk(
+        override val psk: HpkePsk,
+    ) : HpkeReceiverMode {
+        override val wire: HpkeMode get() = HpkeMode.Psk
+    }
+
+    /** Auth mode: carries the sender's static public key. */
+    data class Auth(
+        override val senderPublicKey: HpkePublicKey,
+    ) : HpkeReceiverMode {
+        override val wire: HpkeMode get() = HpkeMode.Auth
+    }
+
+    /** AuthPSK mode: carries both the sender's static public key and the pre-shared key. */
+    data class AuthPsk(
+        override val senderPublicKey: HpkePublicKey,
+        override val psk: HpkePsk,
+    ) : HpkeReceiverMode {
+        override val wire: HpkeMode get() = HpkeMode.AuthPsk
+    }
+}
+
+// =============================================================================
 // Setup — sender side (RFC 9180 §5.1)
 // =============================================================================
 
 /** SetupBaseS: encapsulate to [recipientPublicKey] and build a Base-mode sender context. */
-suspend fun hpkeSetupBaseSender(
+internal suspend fun hpkeSetupBaseSender(
     suite: HpkeSuite,
     recipientPublicKey: HpkePublicKey,
     info: ReadBuffer,
-): HpkeSenderSetup = hpkeSetupSender(suite, HpkeMode.Base, recipientPublicKey, info, null, null)
+): HpkeSenderSetup = hpkeSetupSender(suite, HpkeSenderMode.Base, recipientPublicKey, info)
 
 /** SetupPSKS: PSK-mode sender context. */
-suspend fun hpkeSetupPskSender(
+internal suspend fun hpkeSetupPskSender(
     suite: HpkeSuite,
     recipientPublicKey: HpkePublicKey,
     info: ReadBuffer,
     psk: HpkePsk,
-): HpkeSenderSetup = hpkeSetupSender(suite, HpkeMode.Psk, recipientPublicKey, info, psk, null)
+): HpkeSenderSetup = hpkeSetupSender(suite, HpkeSenderMode.Psk(psk), recipientPublicKey, info)
 
 /** SetupAuthS: sender-authenticated context using the sender's static private key [senderPrivateKey]. */
-suspend fun hpkeSetupAuthSender(
+internal suspend fun hpkeSetupAuthSender(
     suite: HpkeSuite,
     recipientPublicKey: HpkePublicKey,
     info: ReadBuffer,
     senderPrivateKey: HpkePrivateKey,
-): HpkeSenderSetup = hpkeSetupSender(suite, HpkeMode.Auth, recipientPublicKey, info, null, senderPrivateKey)
+): HpkeSenderSetup = hpkeSetupSender(suite, HpkeSenderMode.Auth(senderPrivateKey), recipientPublicKey, info)
 
 /** SetupAuthPSKS: both PSK and sender authentication. */
-suspend fun hpkeSetupAuthPskSender(
+internal suspend fun hpkeSetupAuthPskSender(
     suite: HpkeSuite,
     recipientPublicKey: HpkePublicKey,
     info: ReadBuffer,
     psk: HpkePsk,
     senderPrivateKey: HpkePrivateKey,
-): HpkeSenderSetup = hpkeSetupSender(suite, HpkeMode.AuthPsk, recipientPublicKey, info, psk, senderPrivateKey)
+): HpkeSenderSetup = hpkeSetupSender(suite, HpkeSenderMode.AuthPsk(senderPrivateKey, psk), recipientPublicKey, info)
 
 internal suspend fun hpkeSetupSender(
     suite: HpkeSuite,
-    mode: HpkeMode,
+    mode: HpkeSenderMode,
     recipientPublicKey: HpkePublicKey,
     info: ReadBuffer,
-    psk: HpkePsk?,
-    senderPrivateKey: HpkePrivateKey?,
-): HpkeSenderSetup = hpkeSetupSenderInternal(suite, mode, recipientPublicKey, info, psk, senderPrivateKey, null)
+): HpkeSenderSetup = hpkeSetupSenderInternal(suite, mode, recipientPublicKey, info, null)
 
 /**
  * Sender setup with an optionally-injected ephemeral key pair. The public setup functions pass
@@ -194,33 +279,32 @@ internal suspend fun hpkeSetupSender(
  */
 internal suspend fun hpkeSetupSenderInternal(
     suite: HpkeSuite,
-    mode: HpkeMode,
+    mode: HpkeSenderMode,
     recipientPublicKey: HpkePublicKey,
     info: ReadBuffer,
-    psk: HpkePsk?,
-    senderPrivateKey: HpkePrivateKey?,
     ephemeral: KeyAgreementKeyPair?,
 ): HpkeSenderSetup {
     requireSupported(suite)
     require(recipientPublicKey.kem == suite.kem) { "recipient key KEM does not match suite KEM" }
-    validateModeParams(mode, psk, senderPrivateKey)
 
-    val authMode = mode == HpkeMode.Auth || mode == HpkeMode.AuthPsk
-    if (authMode) {
-        requireNotNull(senderPrivateKey)
+    // The mode carries its own sender key (only the authenticated modes have one), so the auth branch
+    // is keyed off its presence rather than a separately-passed nullable + a runtime mode/param check.
+    val senderPrivateKey = mode.senderPrivateKey
+    if (senderPrivateKey != null) {
         require(senderPrivateKey.kem == suite.kem) { "sender key KEM does not match suite KEM" }
     }
     val encap =
         when {
-            authMode && ephemeral != null ->
-                dhkemAuthEncapWithEphemeral(suite.kem, recipientPublicKey.key, senderPrivateKey!!, ephemeral)
-            authMode -> dhkemAuthEncap(suite.kem, recipientPublicKey.key, senderPrivateKey!!)
-            ephemeral != null -> dhkemEncapWithEphemeral(suite.kem, recipientPublicKey.key, ephemeral)
-            else -> dhkemEncap(suite.kem, recipientPublicKey.key)
+            senderPrivateKey != null && ephemeral != null ->
+                dhkemAuthEncapWithEphemeral(suite.kem, recipientPublicKey.keyAgreementKey(), senderPrivateKey, ephemeral)
+            senderPrivateKey != null ->
+                dhkemAuthEncap(suite.kem, recipientPublicKey.keyAgreementKey(), senderPrivateKey)
+            ephemeral != null -> dhkemEncapWithEphemeral(suite.kem, recipientPublicKey.keyAgreementKey(), ephemeral)
+            else -> dhkemEncap(suite.kem, recipientPublicKey.keyAgreementKey())
         }
 
     return try {
-        val ctx = keyScheduleSender(suite, mode, encap.sharedSecret, info, psk)
+        val ctx = keyScheduleSender(suite, mode.wire, encap.sharedSecret, info, mode.psk)
         HpkeSenderSetup(ctx, encap.enc)
     } finally {
         encap.sharedSecret.freeNativeMemory()
@@ -232,89 +316,72 @@ internal suspend fun hpkeSetupSenderInternal(
 // =============================================================================
 
 /** SetupBaseR: decapsulate [enc] with [recipientPrivateKey] and build a Base-mode receiver context. */
-suspend fun hpkeSetupBaseReceiver(
+internal suspend fun hpkeSetupBaseReceiver(
     suite: HpkeSuite,
     recipientPrivateKey: HpkePrivateKey,
     enc: ReadBuffer,
     info: ReadBuffer,
-): HpkeContext.Receiver = hpkeSetupReceiver(suite, HpkeMode.Base, recipientPrivateKey, enc, info, null, null)
+): HpkeContext.Receiver = hpkeSetupReceiver(suite, HpkeReceiverMode.Base, recipientPrivateKey, enc, info)
 
 /** SetupPSKR: PSK-mode receiver context. */
-suspend fun hpkeSetupPskReceiver(
+internal suspend fun hpkeSetupPskReceiver(
     suite: HpkeSuite,
     recipientPrivateKey: HpkePrivateKey,
     enc: ReadBuffer,
     info: ReadBuffer,
     psk: HpkePsk,
-): HpkeContext.Receiver = hpkeSetupReceiver(suite, HpkeMode.Psk, recipientPrivateKey, enc, info, psk, null)
+): HpkeContext.Receiver = hpkeSetupReceiver(suite, HpkeReceiverMode.Psk(psk), recipientPrivateKey, enc, info)
 
 /** SetupAuthR: sender-authenticated receiver context, verifying the sender's static public key. */
-suspend fun hpkeSetupAuthReceiver(
+internal suspend fun hpkeSetupAuthReceiver(
     suite: HpkeSuite,
     recipientPrivateKey: HpkePrivateKey,
     enc: ReadBuffer,
     info: ReadBuffer,
     senderPublicKey: HpkePublicKey,
-): HpkeContext.Receiver = hpkeSetupReceiver(suite, HpkeMode.Auth, recipientPrivateKey, enc, info, null, senderPublicKey)
+): HpkeContext.Receiver = hpkeSetupReceiver(suite, HpkeReceiverMode.Auth(senderPublicKey), recipientPrivateKey, enc, info)
 
 /** SetupAuthPSKR: both PSK and sender authentication. */
-suspend fun hpkeSetupAuthPskReceiver(
+internal suspend fun hpkeSetupAuthPskReceiver(
     suite: HpkeSuite,
     recipientPrivateKey: HpkePrivateKey,
     enc: ReadBuffer,
     info: ReadBuffer,
     psk: HpkePsk,
     senderPublicKey: HpkePublicKey,
-): HpkeContext.Receiver = hpkeSetupReceiver(suite, HpkeMode.AuthPsk, recipientPrivateKey, enc, info, psk, senderPublicKey)
+): HpkeContext.Receiver = hpkeSetupReceiver(suite, HpkeReceiverMode.AuthPsk(senderPublicKey, psk), recipientPrivateKey, enc, info)
 
 internal suspend fun hpkeSetupReceiver(
     suite: HpkeSuite,
-    mode: HpkeMode,
+    mode: HpkeReceiverMode,
     recipientPrivateKey: HpkePrivateKey,
     enc: ReadBuffer,
     info: ReadBuffer,
-    psk: HpkePsk?,
-    senderPublicKey: HpkePublicKey?,
 ): HpkeContext.Receiver {
     requireSupported(suite)
     require(recipientPrivateKey.kem == suite.kem) { "recipient key KEM does not match suite KEM" }
-    validateModeParams(mode, psk, senderPublicKey)
 
+    // The mode carries its own sender public key (only the authenticated modes have one), so the auth
+    // branch is keyed off its presence rather than a separately-passed nullable + a runtime check.
+    val senderPublicKey = mode.senderPublicKey
     val shared =
-        if (mode == HpkeMode.Auth || mode == HpkeMode.AuthPsk) {
-            requireNotNull(senderPublicKey)
+        if (senderPublicKey != null) {
             require(senderPublicKey.kem == suite.kem) { "sender key KEM does not match suite KEM" }
-            dhkemAuthDecap(suite.kem, enc, recipientPrivateKey, senderPublicKey.key)
+            dhkemAuthDecap(suite.kem, enc, recipientPrivateKey, senderPublicKey.keyAgreementKey())
         } else {
             dhkemDecap(suite.kem, enc, recipientPrivateKey)
         }
 
     return try {
-        keyScheduleReceiver(suite, mode, shared, info, psk)
+        keyScheduleReceiver(suite, mode.wire, shared, info, mode.psk)
     } finally {
         shared.freeNativeMemory()
     }
 }
 
-/** Validates that PSK / sender-key presence matches [mode] (RFC 9180 §5.1 inputs). */
-private fun validateModeParams(
-    mode: HpkeMode,
-    psk: HpkePsk?,
-    senderKey: Any?,
-) {
-    val needsPsk = mode == HpkeMode.Psk || mode == HpkeMode.AuthPsk
-    val needsSender = mode == HpkeMode.Auth || mode == HpkeMode.AuthPsk
-    require(needsPsk == (psk != null)) {
-        if (needsPsk) "mode ${mode.value} requires a PSK" else "a PSK must not be supplied in mode ${mode.value}"
-    }
-    require(needsSender == (senderKey != null)) {
-        if (needsSender) "mode ${mode.value} requires a sender key" else "a sender key must not be supplied in mode ${mode.value}"
-    }
-}
-
 /**
  * Gates a setup call against the platform's capabilities. The AEAD must be available on some path
- * ([supportsAesGcmAnyPath] / [supportsChaChaPoly]); an unavailable AEAD (e.g. ChaCha on the web)
+ * (via the AEAD capability witness); an unavailable AEAD (e.g. ChaCha on the web)
  * throws immediately. The KEM curve must be usable synchronously *or* on the web (WebCrypto async);
  * if neither, it throws. A curve that the web engine claims but cannot actually provide (e.g. an
  * old browser without X25519) is caught by the underlying [dhRawSecret] / [generateKeyPairAsync],
@@ -323,15 +390,16 @@ private fun validateModeParams(
 internal fun requireSupported(suite: HpkeSuite) {
     val aeadOk =
         when (suite.aead) {
-            HpkeAead.Aes128Gcm, HpkeAead.Aes256Gcm -> supportsAesGcmAnyPath
-            HpkeAead.ChaCha20Poly1305 -> supportsChaChaPoly
+            // AES-GCM is reachable on every platform (witness is Blocking or AsyncOnly, never Unavailable).
+            HpkeAead.Aes128Gcm, HpkeAead.Aes256Gcm -> true
+            HpkeAead.ChaCha20Poly1305 -> chaChaPolyReachable
         }
     if (!aeadOk) {
         throw UnsupportedOperationException(
             "${suite.aead.aeadName} is not supported on this platform (HPKE suite ${suite.kem.kemName})",
         )
     }
-    if (!supportsSync(suite.kem.curve) && !isWebPlatformKa) {
+    if (CryptoCapabilities.keyAgreement(suite.kem.curve) !is KeyAgreementSupport.Blocking && !isWebPlatformKa) {
         throw UnsupportedOperationException("${suite.kem.kemName} is not supported on this platform")
     }
 }
@@ -443,7 +511,7 @@ private fun keySchedule(
     }
 }
 
-private val EMPTY: ReadBuffer = BufferFactory.Default.allocate(0).also { it.resetForRead() }
+internal val EMPTY: ReadBuffer = BufferFactory.Default.allocate(0).also { it.resetForRead() }
 
 internal val LABEL_EAE_PRK: ByteArray = "eae_prk".encodeToByteArray()
 internal val LABEL_SHARED_SECRET: ByteArray = "shared_secret".encodeToByteArray()

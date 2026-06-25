@@ -49,8 +49,8 @@ class CloseableBufferTests {
     fun useBlockFreesEvenOnException() {
         val buf = BufferFactory.Default.allocate(8)
         try {
-            buf.use { throw RuntimeException("test") }
-        } catch (_: RuntimeException) {
+            buf.use { error("test") }
+        } catch (_: IllegalStateException) {
             // expected
         }
         if (buf is CloseableBuffer) {

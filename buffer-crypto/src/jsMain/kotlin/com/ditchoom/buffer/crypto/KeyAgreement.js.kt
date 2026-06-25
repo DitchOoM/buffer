@@ -32,7 +32,8 @@ internal actual suspend fun webCryptoDeriveSharedSecret(
 
 private fun jsSubtleAvailable(): Boolean =
     js(
-        "(function(){ try { var s=(globalThis.crypto&&globalThis.crypto.subtle); return !!(s&&typeof s.generateKey==='function'); } catch(e){ return false; } })()",
+        "(function(){ try { var s=(globalThis.crypto&&globalThis.crypto.subtle); " +
+            "return !!(s&&typeof s.generateKey==='function'); } catch(e){ return false; } })()",
     ) as Boolean
 
 private fun jsGenerateKeyPair(curveName: String): Promise<String> {
@@ -41,9 +42,10 @@ private fun jsGenerateKeyPair(curveName: String): Promise<String> {
     return js(
         """
         subtle.generateKey(alg, true, ['deriveBits']).then(function(kp){
-          return Promise.all([ subtle.exportKey('raw', kp.publicKey), subtle.exportKey('pkcs8', kp.privateKey) ]).then(function(arr){
+          return Promise.all([ subtle.exportKey('raw', kp.publicKey), subtle.exportKey('jwk', kp.privateKey) ]).then(function(arr){
             function hx(u8){ var s=''; for(var i=0;i<u8.length;i++){ var h=u8[i].toString(16); if(h.length<2)h='0'+h; s+=h; } return s; }
-            return hx(new Uint8Array(arr[0])) + '|' + hx(new Uint8Array(arr[1]));
+            function b64uToHex(s){ s=s.replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4){ s+='='; } var bin=atob(s); var h=''; for(var i=0;i<bin.length;i++){ h+=bin.charCodeAt(i).toString(16).padStart(2,'0'); } return h; }
+            return hx(new Uint8Array(arr[0])) + '|' + b64uToHex(arr[1].d);
           });
         }).catch(function(e){
           if (e && (e.name === 'NotSupportedError' || e.name === 'SyntaxError')) return 'UNSUPPORTED';
@@ -53,6 +55,7 @@ private fun jsGenerateKeyPair(curveName: String): Promise<String> {
     )
 }
 
+@Suppress("UnusedParameter") // referenced inside the js(...) template
 private fun jsDeriveSharedSecret(
     curveName: String,
     privateHex: String,
@@ -88,4 +91,5 @@ private fun jsDeriveSharedSecret(
     )
 }
 
+@Suppress("UnusedParameter") // referenced inside the js(...) template
 private fun jsEcdhAlg(curveName: String): dynamic = js("({ name: 'ECDH', namedCurve: curveName })")

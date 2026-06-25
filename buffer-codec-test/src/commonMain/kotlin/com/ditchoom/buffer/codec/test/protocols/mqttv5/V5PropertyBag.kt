@@ -490,7 +490,9 @@ object V5PropertyBagCodec : Codec<V5PropertyBag> {
                         willDelayInterval = prop
                     }
                     is MqttV5Property.RequestResponseInformation -> {
-                        if (requestResponseInformation != null) duplicate(entryStart, "RequestResponseInformation", 0x19)
+                        if (requestResponseInformation != null) {
+                            duplicate(entryStart, "RequestResponseInformation", 0x19)
+                        }
                         requestResponseInformation = prop
                     }
                     is MqttV5Property.ResponseInformation -> {
@@ -531,15 +533,21 @@ object V5PropertyBagCodec : Codec<V5PropertyBag> {
                         maximumPacketSize = prop
                     }
                     is MqttV5Property.WildcardSubscriptionAvailable -> {
-                        if (wildcardSubscriptionAvailable != null) duplicate(entryStart, "WildcardSubscriptionAvailable", 0x28)
+                        if (wildcardSubscriptionAvailable != null) {
+                            duplicate(entryStart, "WildcardSubscriptionAvailable", 0x28)
+                        }
                         wildcardSubscriptionAvailable = prop
                     }
                     is MqttV5Property.SubscriptionIdentifiersAvailable -> {
-                        if (subscriptionIdentifiersAvailable != null) duplicate(entryStart, "SubscriptionIdentifiersAvailable", 0x29)
+                        if (subscriptionIdentifiersAvailable != null) {
+                            duplicate(entryStart, "SubscriptionIdentifiersAvailable", 0x29)
+                        }
                         subscriptionIdentifiersAvailable = prop
                     }
                     is MqttV5Property.SharedSubscriptionAvailable -> {
-                        if (sharedSubscriptionAvailable != null) duplicate(entryStart, "SharedSubscriptionAvailable", 0x2A)
+                        if (sharedSubscriptionAvailable != null) {
+                            duplicate(entryStart, "SharedSubscriptionAvailable", 0x2A)
+                        }
                         sharedSubscriptionAvailable = prop
                     }
                 }
@@ -609,7 +617,9 @@ object V5PropertyBagCodec : Codec<V5PropertyBag> {
         throw DecodeException(
             fieldPath = "V5PropertyBag.$name",
             bufferPosition = position,
-            expected = "single occurrence (spec §2.2.2 — $name 0x${id.toString(16).padStart(2, '0')} appears at most once)",
+            expected =
+                "single occurrence (spec §2.2.2 — $name 0x${id.toString(16).padStart(2, '0')} " +
+                    "appears at most once)",
             actual = "duplicate property identifier 0x${id.toString(16).padStart(2, '0')}",
         )
 

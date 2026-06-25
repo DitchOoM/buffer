@@ -40,8 +40,12 @@ class AeadTest {
             key = "feffe9928665731c6d6a8f9467308308",
             iv = "cafebabefacedbaddecaf888",
             aad = "feedfacedeadbeeffeedfacedeadbeefabaddad2",
-            pt = "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
-            ct = "42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329aca12e21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e091",
+            pt =
+                "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a31" +
+                    "8a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
+            ct =
+                "42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329ac" +
+                    "a12e21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e091",
             tag = "5bc94fbc3221a5db94fae95ae7121a47",
         )
 
@@ -51,8 +55,12 @@ class AeadTest {
             key = "feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308",
             iv = "cafebabefacedbaddecaf888",
             aad = "feedfacedeadbeeffeedfacedeadbeefabaddad2",
-            pt = "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
-            ct = "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662",
+            pt =
+                "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a31" +
+                    "8a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
+            ct =
+                "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555" +
+                    "d1aa8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662",
             tag = "76fc6ece0f4e1768cddf8853bb2d551b",
         )
 
@@ -66,7 +74,8 @@ class AeadTest {
                 val sealed = aesGcmSealWithNonceAsync(key, hexBuffer(v.iv), aad, hexBuffer(v.pt), BufferFactory.Default)
                 assertEquals(v.ct + v.tag, sealed.toHex(), "AES-GCM ct+tag for key=${v.key.length * 4}bit")
                 // Decrypt the same ct+tag back to the plaintext.
-                val opened = aesGcmOpenWithNonceAsync(key, hexBuffer(v.iv), aad, hexBuffer(v.ct + v.tag), BufferFactory.Default)
+                val opened =
+                    aesGcmOpenWithNonceAsync(key, hexBuffer(v.iv), aad, hexBuffer(v.ct + v.tag), BufferFactory.Default)
                 assertEquals(v.pt, opened.toHex(), "AES-GCM decrypt")
             }
         }
@@ -74,23 +83,25 @@ class AeadTest {
     @Test
     fun aesGcmSelfFramingRoundTrip() =
         runTest {
+            val ops = aesGcmAsyncOps()
             val key = AesGcmKey.of(hexBuffer(aes128WithAad.key))
-            val aad = ascii("context-v1")
+            val aad = Aad.Of(ascii("context-v1"))
             val plaintext = ascii("the quick brown fox jumps over the lazy dog")
-            val sealed = aesGcmSealAsync(key, plaintext, aad, BufferFactory.Default)
+            val sealed = ops.seal(key, plaintext, aad, BufferFactory.Default)
             // nonce(12) ‖ ct(len) ‖ tag(16)
             assertEquals(AEAD_NONCE_BYTES + plaintext.remaining() + AEAD_TAG_BYTES, sealed.remaining())
-            val opened = aesGcmOpenAsync(sealed, key, aad, BufferFactory.Default)
+            val opened = ops.open(sealed, key, aad, BufferFactory.Default)
             assertEquals(plaintext.toHex(), opened.toHex())
         }
 
     @Test
     fun aesGcmFreshNonceEachSeal() =
         runTest {
+            val ops = aesGcmAsyncOps()
             val key = AesGcmKey.of(hexBuffer(aes256WithAad.key))
             val pt = ascii("same plaintext")
-            val a = aesGcmSealAsync(key, pt, null, BufferFactory.Default)
-            val b = aesGcmSealAsync(key, pt, null, BufferFactory.Default)
+            val a = ops.seal(key, pt, Aad.None, BufferFactory.Default)
+            val b = ops.seal(key, pt, Aad.None, BufferFactory.Default)
             // The 12-byte nonce prefix must differ between two seals of the same plaintext.
             val aNonce = a.toHex().substring(0, AEAD_NONCE_BYTES * 2)
             val bNonce = b.toHex().substring(0, AEAD_NONCE_BYTES * 2)
@@ -121,27 +132,24 @@ class AeadTest {
     fun chaChaPolyCapabilityContract() =
         runTest {
             val key = ChaChaPolyKey.of(hexBuffer(chachaRfc8439.key))
-            val aad = hexBuffer(chachaRfc8439.aad)
-            if (supportsChaChaPoly) {
+            val aad = Aad.Of(hexBuffer(chachaRfc8439.aad))
+            val ops = chaChaPolyAsyncOrNull()
+            if (ops != null) {
                 // Self-framing round-trip (the framing seal generates its own nonce). The exact
                 // RFC 8439 ct+tag is pinned separately in chaChaPolyExplicitNonceKat.
-                val sealed = chaChaPolySeal(key, hexBuffer(chachaRfc8439.pt), aad, BufferFactory.Default)
-                val opened = chaChaPolyOpen(sealed, key, aad, BufferFactory.Default)
+                val sealed = ops.seal(key, hexBuffer(chachaRfc8439.pt), aad, BufferFactory.Default)
+                val opened = ops.open(sealed, key, aad, BufferFactory.Default)
                 assertEquals(chachaRfc8439.pt, opened.toHex(), "ChaCha20-Poly1305 round-trip")
             } else {
-                // Web: ChaCha is not in WebCrypto and never polyfilled — both surfaces must throw.
-                assertFailsWith<UnsupportedOperationException> {
-                    chaChaPolySeal(key, ascii("x"), aad, BufferFactory.Default)
-                }
-                assertFailsWith<UnsupportedOperationException> {
-                    chaChaPolySealAsync(key, ascii("x"), aad, BufferFactory.Default)
-                }
+                // Web: ChaCha is not in WebCrypto and never polyfilled — the witness reifies that as
+                // Unavailable, so there is no op to call (impossible by construction, not a throw).
+                assertEquals(OptionalAead.Unavailable, CryptoCapabilities.chaChaPoly)
             }
         }
 
     @Test
     fun chaChaPolyExplicitNonceKat() {
-        if (!supportsChaChaPoly) return
+        if (!chaChaPolyReachable) return
         val key = ChaChaPolyKey.of(hexBuffer(chachaRfc8439.key))
         val out = BufferFactory.Default.allocate(messageLen(chachaRfc8439.pt) + AEAD_TAG_BYTES)
         chaChaPolySeal(key, hexBuffer(chachaRfc8439.iv), hexBuffer(chachaRfc8439.aad), hexBuffer(chachaRfc8439.pt), out)
@@ -151,16 +159,16 @@ class AeadTest {
 
     @Test
     fun aesGcmSyncCapabilityContract() {
-        if (supportsSyncAesGcm) {
-            val key = AesGcmKey.of(hexBuffer(aes128WithAad.key))
-            val sealed = aesGcmSeal(key, ascii("hello"), null, BufferFactory.Default)
-            val opened = aesGcmOpen(sealed, key, null, BufferFactory.Default)
-            assertEquals(ascii("hello").toHex(), opened.toHex())
-        } else {
-            // Web: synchronous AES-GCM is unavailable (WebCrypto is async-only).
-            assertFailsWith<UnsupportedOperationException> {
-                aesGcmSeal(AesGcmKey.of(hexBuffer(aes128WithAad.key)), ascii("x"), null, BufferFactory.Default)
+        when (val gcm = CryptoCapabilities.aesGcm) {
+            is Aead.Blocking -> {
+                val key = AesGcmKey.of(hexBuffer(aes128WithAad.key))
+                val sealed = gcm.ops.sealBlocking(key, ascii("hello"), Aad.None, BufferFactory.Default)
+                val opened = gcm.ops.openBlocking(sealed, key, Aad.None, BufferFactory.Default)
+                assertEquals(ascii("hello").toHex(), opened.toHex())
             }
+            // Web: synchronous AES-GCM is unavailable (WebCrypto is async-only) — the witness is
+            // AsyncOnly, so sealBlocking/openBlocking are simply not reachable from this branch.
+            is Aead.AsyncOnly -> assertEquals(false, aesGcmBlockingAvailable)
         }
     }
 

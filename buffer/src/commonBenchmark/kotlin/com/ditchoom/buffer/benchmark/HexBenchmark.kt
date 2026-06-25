@@ -76,7 +76,7 @@ open class HexBenchmark {
         var i = 0
         while (i < size64k) {
             val b = raw.get(i).toInt() and 0xFF
-            encodeDest.writeByte(nibble(b ushr 4))
+            encodeDest.writeByte(nibble(b ushr NIBBLE_BITS))
             encodeDest.writeByte(nibble(b and 0x0F))
             i++
         }
@@ -101,19 +101,33 @@ open class HexBenchmark {
         while (i < hexSize) {
             val hi = hexVal(hex.get(i).toInt() and 0xFF)
             val lo = hexVal(hex.get(i + 1).toInt() and 0xFF)
-            decodeDest.writeByte(((hi shl 4) or lo).toByte())
+            decodeDest.writeByte(((hi shl NIBBLE_BITS) or lo).toByte())
             i += 2
         }
         return decodeDest.get(0).toInt()
     }
 
-    private fun nibble(n: Int): Byte = (if (n < 10) n + 0x30 else n - 10 + 0x61).toByte()
+    private fun nibble(n: Int): Byte {
+        val ascii = if (n < DECIMAL_BASE) n + ASCII_ZERO else n - DECIMAL_BASE + ASCII_LOWER_A
+        return ascii.toByte()
+    }
 
     private fun hexVal(c: Int): Int =
         when (c) {
-            in 0x30..0x39 -> c - 0x30
-            in 0x61..0x66 -> c - 0x61 + 10
-            in 0x41..0x46 -> c - 0x41 + 10
+            in ASCII_ZERO..ASCII_NINE -> c - ASCII_ZERO
+            in ASCII_LOWER_A..ASCII_LOWER_F -> c - ASCII_LOWER_A + DECIMAL_BASE
+            in ASCII_UPPER_A..ASCII_UPPER_F -> c - ASCII_UPPER_A + DECIMAL_BASE
             else -> 0
         }
+
+    private companion object {
+        private const val NIBBLE_BITS = 4
+        private const val DECIMAL_BASE = 10
+        private const val ASCII_ZERO = 0x30
+        private const val ASCII_NINE = 0x39
+        private const val ASCII_LOWER_A = 0x61
+        private const val ASCII_LOWER_F = 0x66
+        private const val ASCII_UPPER_A = 0x41
+        private const val ASCII_UPPER_F = 0x46
+    }
 }

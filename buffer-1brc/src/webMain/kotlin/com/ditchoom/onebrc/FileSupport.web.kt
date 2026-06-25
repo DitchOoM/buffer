@@ -17,13 +17,17 @@ internal actual fun onebrcWriteText(
 
 internal actual fun onebrcDeleteFile(path: String) = nodeRemoveFile(path)
 
+// Parameters below are consumed inside the js(...) bodies, which detekt cannot see (interop).
+@Suppress("UnusedParameter")
 internal fun nodeReadFileUtf8(path: String): String = js("require('fs').readFileSync(path, 'utf8')")
 
+@Suppress("UnusedParameter")
 internal fun nodeWriteFileUtf8(
     path: String,
     data: String,
 ): Unit = js("require('fs').writeFileSync(path, data)")
 
+@Suppress("UnusedParameter")
 internal fun nodeRemoveFile(path: String): Unit = js("require('fs').rmSync(path, { force: true })")
 
 private fun nodeTmpDir(): String = js("require('os').tmpdir()")

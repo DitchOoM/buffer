@@ -14,7 +14,8 @@ import org.junit.runner.RunWith
  * Android-specific benchmarks using AndroidX Benchmark library.
  *
  * Run benchmarks only:
- * ./gradlew connectedBenchmarkAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.ditchoom.buffer.AndroidBufferBenchmark
+ * ./gradlew connectedBenchmarkAndroidTest
+ *   -Pandroid.testInstrumentationRunnerArguments.class=com.ditchoom.buffer.AndroidBufferBenchmark
  *
  * Run all instrumented tests (includes benchmarks):
  * ./gradlew connectedBenchmarkAndroidTest

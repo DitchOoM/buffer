@@ -1,5 +1,13 @@
 package com.ditchoom.buffer
 
+import com.ditchoom.buffer.BufferConstants.BYTE_1_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_2_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_3_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_MASK
+import com.ditchoom.buffer.BufferConstants.INT_MASK
+import com.ditchoom.buffer.BufferConstants.LAST_WORD_BYTE_INDEX
+import com.ditchoom.buffer.BufferConstants.WORD_BYTE_MASK
+
 /**
  * Buffer implementation backed by a Kotlin ByteArray.
  *
@@ -129,12 +137,12 @@ class ByteArrayBuffer(
 
     private fun getShortUnchecked(index: Int): Short {
         val abs = offset + index
-        val b0 = data[abs].toInt() and 0xFF
-        val b1 = data[abs + 1].toInt() and 0xFF
+        val b0 = data[abs].toInt() and BYTE_MASK
+        val b1 = data[abs + 1].toInt() and BYTE_MASK
         return if (littleEndian) {
-            (b0 or (b1 shl 8)).toShort()
+            (b0 or (b1 shl BYTE_1_SHIFT)).toShort()
         } else {
-            ((b0 shl 8) or b1).toShort()
+            ((b0 shl BYTE_1_SHIFT) or b1).toShort()
         }
     }
 
@@ -152,14 +160,14 @@ class ByteArrayBuffer(
 
     private fun getIntUnchecked(index: Int): Int {
         val abs = offset + index
-        val b0 = data[abs].toInt() and 0xFF
-        val b1 = data[abs + 1].toInt() and 0xFF
-        val b2 = data[abs + 2].toInt() and 0xFF
-        val b3 = data[abs + 3].toInt() and 0xFF
+        val b0 = data[abs].toInt() and BYTE_MASK
+        val b1 = data[abs + 1].toInt() and BYTE_MASK
+        val b2 = data[abs + 2].toInt() and BYTE_MASK
+        val b3 = data[abs + 3].toInt() and BYTE_MASK
         return if (littleEndian) {
-            b0 or (b1 shl 8) or (b2 shl 16) or (b3 shl 24)
+            b0 or (b1 shl BYTE_1_SHIFT) or (b2 shl BYTE_2_SHIFT) or (b3 shl BYTE_3_SHIFT)
         } else {
-            (b0 shl 24) or (b1 shl 16) or (b2 shl 8) or b3
+            (b0 shl BYTE_3_SHIFT) or (b1 shl BYTE_2_SHIFT) or (b2 shl BYTE_1_SHIFT) or b3
         }
     }
 
@@ -176,12 +184,12 @@ class ByteArrayBuffer(
     }
 
     override fun getLongUnchecked(index: Int): Long {
-        val first = getIntUnchecked(index).toLong() and 0xFFFFFFFFL
-        val second = getIntUnchecked(index + 4).toLong() and 0xFFFFFFFFL
+        val first = getIntUnchecked(index).toLong() and INT_MASK
+        val second = getIntUnchecked(index + Int.SIZE_BYTES).toLong() and INT_MASK
         return if (littleEndian) {
-            (second shl 32) or first
+            (second shl Int.SIZE_BITS) or first
         } else {
-            (first shl 32) or second
+            (first shl Int.SIZE_BITS) or second
         }
     }
 
@@ -236,9 +244,9 @@ class ByteArrayBuffer(
         val abs = offset + index
         if (littleEndian) {
             data[abs] = v.toByte()
-            data[abs + 1] = (v shr 8).toByte()
+            data[abs + 1] = (v shr BYTE_1_SHIFT).toByte()
         } else {
-            data[abs] = (v shr 8).toByte()
+            data[abs] = (v shr BYTE_1_SHIFT).toByte()
             data[abs + 1] = v.toByte()
         }
     }
@@ -266,14 +274,14 @@ class ByteArrayBuffer(
         val abs = offset + index
         if (littleEndian) {
             data[abs] = int.toByte()
-            data[abs + 1] = (int shr 8).toByte()
-            data[abs + 2] = (int shr 16).toByte()
-            data[abs + 3] = (int shr 24).toByte()
+            data[abs + 1] = (int shr BYTE_1_SHIFT).toByte()
+            data[abs + 2] = (int shr BYTE_2_SHIFT).toByte()
+            data[abs + LAST_WORD_BYTE_INDEX] = (int shr BYTE_3_SHIFT).toByte()
         } else {
-            data[abs] = (int shr 24).toByte()
-            data[abs + 1] = (int shr 16).toByte()
-            data[abs + 2] = (int shr 8).toByte()
-            data[abs + 3] = int.toByte()
+            data[abs] = (int shr BYTE_3_SHIFT).toByte()
+            data[abs + 1] = (int shr BYTE_2_SHIFT).toByte()
+            data[abs + 2] = (int shr BYTE_1_SHIFT).toByte()
+            data[abs + LAST_WORD_BYTE_INDEX] = int.toByte()
         }
     }
 
@@ -299,10 +307,10 @@ class ByteArrayBuffer(
     ) {
         if (littleEndian) {
             setIntUnchecked(index, long.toInt())
-            setIntUnchecked(index + 4, (long shr 32).toInt())
+            setIntUnchecked(index + Int.SIZE_BYTES, (long shr Int.SIZE_BITS).toInt())
         } else {
-            setIntUnchecked(index, (long shr 32).toInt())
-            setIntUnchecked(index + 4, long.toInt())
+            setIntUnchecked(index, (long shr Int.SIZE_BITS).toInt())
+            setIntUnchecked(index + Int.SIZE_BYTES, long.toInt())
         }
     }
 
@@ -366,27 +374,28 @@ class ByteArrayBuffer(
         val basePos = offset + pos
 
         // Rotate mask so byte at (maskOffset % 4) becomes byte 0
-        val shift = (maskOffset and 3) * 8
-        val rotated = if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
+        val shift = (maskOffset and WORD_BYTE_MASK) * Byte.SIZE_BITS
+        val rotated = if (shift == 0) mask else (mask shl shift) or (mask ushr (Int.SIZE_BITS - shift))
 
-        val rb0 = (rotated ushr 24).toByte()
-        val rb1 = (rotated ushr 16).toByte()
-        val rb2 = (rotated ushr 8).toByte()
+        val rb0 = (rotated ushr BYTE_3_SHIFT).toByte()
+        val rb1 = (rotated ushr BYTE_2_SHIFT).toByte()
+        val rb2 = (rotated ushr BYTE_1_SHIFT).toByte()
         val rb3 = rotated.toByte()
 
         var i = 0
         // Process 4 bytes at a time with rotated mask
-        while (i + 4 <= size) {
+        while (i + Int.SIZE_BYTES <= size) {
             data[basePos + i] = (data[basePos + i].toInt() xor rb0.toInt()).toByte()
             data[basePos + i + 1] = (data[basePos + i + 1].toInt() xor rb1.toInt()).toByte()
             data[basePos + i + 2] = (data[basePos + i + 2].toInt() xor rb2.toInt()).toByte()
-            data[basePos + i + 3] = (data[basePos + i + 3].toInt() xor rb3.toInt()).toByte()
-            i += 4
+            val l3 = basePos + i + LAST_WORD_BYTE_INDEX
+            data[l3] = (data[l3].toInt() xor rb3.toInt()).toByte()
+            i += Int.SIZE_BYTES
         }
         // Handle remaining bytes (at most 3)
         while (i < size) {
             val maskByte =
-                when (i and 3) {
+                when (i and WORD_BYTE_MASK) {
                     0 -> rb0
                     1 -> rb1
                     2 -> rb2
@@ -421,27 +430,28 @@ class ByteArrayBuffer(
             val dstAbsPos = offset + positionValue
 
             // Rotate mask so byte at (maskOffset % 4) becomes byte 0
-            val shift = (maskOffset and 3) * 8
-            val rotated = if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
+            val shift = (maskOffset and WORD_BYTE_MASK) * Byte.SIZE_BITS
+            val rotated = if (shift == 0) mask else (mask shl shift) or (mask ushr (Int.SIZE_BITS - shift))
 
-            val rb0 = (rotated ushr 24).toByte()
-            val rb1 = (rotated ushr 16).toByte()
-            val rb2 = (rotated ushr 8).toByte()
+            val rb0 = (rotated ushr BYTE_3_SHIFT).toByte()
+            val rb1 = (rotated ushr BYTE_2_SHIFT).toByte()
+            val rb2 = (rotated ushr BYTE_1_SHIFT).toByte()
             val rb3 = rotated.toByte()
 
             var i = 0
             // Process 4 bytes at a time with rotated mask
-            while (i + 4 <= size) {
+            while (i + Int.SIZE_BYTES <= size) {
                 data[dstAbsPos + i] = (srcData[srcAbsPos + i].toInt() xor rb0.toInt()).toByte()
                 data[dstAbsPos + i + 1] = (srcData[srcAbsPos + i + 1].toInt() xor rb1.toInt()).toByte()
                 data[dstAbsPos + i + 2] = (srcData[srcAbsPos + i + 2].toInt() xor rb2.toInt()).toByte()
-                data[dstAbsPos + i + 3] = (srcData[srcAbsPos + i + 3].toInt() xor rb3.toInt()).toByte()
-                i += 4
+                val l3 = LAST_WORD_BYTE_INDEX
+                data[dstAbsPos + i + l3] = (srcData[srcAbsPos + i + l3].toInt() xor rb3.toInt()).toByte()
+                i += Int.SIZE_BYTES
             }
             // Handle remaining bytes
             while (i < size) {
                 val maskByte =
-                    when (i and 3) {
+                    when (i and WORD_BYTE_MASK) {
                         0 -> rb0
                         1 -> rb1
                         2 -> rb2

@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:CodecSnapshotTest.kt:CodecSnapshotTest$@Test fun `generated codec output matches checked-in baselines`</ID>
+    <ID>CyclomaticComplexMethod:V5PropertyBag.kt:V5PropertyBag$fun isEmpty: Boolean</ID>
+    <ID>CyclomaticComplexMethod:V5PropertyBag.kt:V5PropertyBag$private fun approximateCount: Int</ID>
+    <ID>CyclomaticComplexMethod:V5PropertyBag.kt:V5PropertyBagCodec$override fun decode: V5PropertyBag</ID>
+    <ID>CyclomaticComplexMethod:V5PropertyBag.kt:V5PropertyBagCodec$private fun computeBodyByteCount: Int</ID>
+    <ID>CyclomaticComplexMethod:V5PropertyBag.kt:fun List&lt;MqttV5Property>.toV5PropertyBag: V5PropertyBag</ID>
+    <ID>LongMethod:CodecSnapshotTest.kt:CodecSnapshotTest$@Test fun `generated codec output matches checked-in baselines`</ID>
+    <ID>LongMethod:MqttSubAckCodecTest.kt:MqttSubAckCodecTest$@Test fun dataObjectVariantsSelfFrameDiscriminatorByte</ID>
+    <ID>LongMethod:V5PropertyBag.kt:V5PropertyBagCodec$override fun decode: V5PropertyBag</ID>
+    <ID>LongMethod:V5PropertyBag.kt:fun List&lt;MqttV5Property>.toV5PropertyBag: V5PropertyBag</ID>
+    <ID>LongMethod:V5PropertyBagCodecTest.kt:V5PropertyBagCodecTest$@Test fun roundTripsBagWithEveryUniqueVariantPopulated</ID>
+    <ID>ReturnCount:QuicVarintCodec.kt:QuicVarintCodec$override fun peekValue: VarLenPeek&lt;ULong></ID>
+    <ID>ReturnCount:WsFrame.kt:WsFrame.Companion$override fun peekFrameSize: PeekResult</ID>
+  </CurrentIssues>
+</SmellBaseline>

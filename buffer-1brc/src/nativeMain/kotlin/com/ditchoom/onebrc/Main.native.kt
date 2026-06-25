@@ -57,7 +57,9 @@ fun main(args: Array<String>) {
     println("Output: $preview")
 }
 
+private const val MILLIS_PER_SECOND = 1000.0
+
 private fun secondsSince(mark: TimeSource.Monotonic.ValueTimeMark): String {
     val millis = mark.elapsedNow().inWholeMilliseconds
-    return (millis / 1000.0).toString()
+    return (millis / MILLIS_PER_SECOND).toString()
 }

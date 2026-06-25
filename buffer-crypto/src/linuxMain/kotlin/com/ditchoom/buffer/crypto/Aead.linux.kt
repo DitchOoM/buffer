@@ -33,9 +33,12 @@ import platform.posix.size_tVar
  * surfaces as BCL_AUTH_FAIL and we raise the opaque VerificationFailed.
  */
 
-actual val supportsSyncAesGcm: Boolean = true
-actual val supportsChaChaPoly: Boolean = true
-actual val supportsSyncChaChaPoly: Boolean = true
+/** AES-GCM is synchronous via BoringSSL's one-shot EVP_AEAD. */
+actual val CryptoCapabilities.aesGcm: Aead<AesGcmKey, SyncCapableAesGcmKey> get() = Aead.Blocking(AesGcmBlockingOps)
+
+/** ChaCha20-Poly1305 is synchronous via BoringSSL on Linux. */
+actual val CryptoCapabilities.chaChaPoly: OptionalAead<ChaChaPolyKey>
+    get() = OptionalAead.Blocking(ChaChaPolyBlockingOps)
 
 /** Which BoringSSL AEAD wrapper a seal/open call dispatches to. */
 private enum class AeadAlg { AES_GCM, CHACHA }
@@ -245,7 +248,7 @@ internal actual fun aesGcmSeal(
     aad: ReadBuffer?,
     plaintext: ReadBuffer,
     dest: WriteBuffer,
-) = aeadSeal(AeadAlg.AES_GCM, key.material, nonce, aad, plaintext, dest)
+) = aeadSeal(AeadAlg.AES_GCM, key.requireInMemoryMaterial(), nonce, aad, plaintext, dest)
 
 internal actual fun aesGcmOpen(
     key: AesGcmKey,
@@ -253,7 +256,7 @@ internal actual fun aesGcmOpen(
     aad: ReadBuffer?,
     ciphertextAndTag: ReadBuffer,
     dest: WriteBuffer,
-) = aeadOpen(AeadAlg.AES_GCM, key.material, nonce, aad, ciphertextAndTag, dest)
+) = aeadOpen(AeadAlg.AES_GCM, key.requireInMemoryMaterial(), nonce, aad, ciphertextAndTag, dest)
 
 internal actual fun chaChaPolySeal(
     key: ChaChaPolyKey,
@@ -261,7 +264,7 @@ internal actual fun chaChaPolySeal(
     aad: ReadBuffer?,
     plaintext: ReadBuffer,
     dest: WriteBuffer,
-) = aeadSeal(AeadAlg.CHACHA, key.material, nonce, aad, plaintext, dest)
+) = aeadSeal(AeadAlg.CHACHA, key.requireInMemoryMaterial(), nonce, aad, plaintext, dest)
 
 internal actual fun chaChaPolyOpen(
     key: ChaChaPolyKey,
@@ -269,37 +272,9 @@ internal actual fun chaChaPolyOpen(
     aad: ReadBuffer?,
     ciphertextAndTag: ReadBuffer,
     dest: WriteBuffer,
-) = aeadOpen(AeadAlg.CHACHA, key.material, nonce, aad, ciphertextAndTag, dest)
+) = aeadOpen(AeadAlg.CHACHA, key.requireInMemoryMaterial(), nonce, aad, ciphertextAndTag, dest)
 
-// Async wrappers — Linux has a synchronous native AEAD, so delegate to the framed one-shots.
-
-actual suspend fun aesGcmSealAsync(
-    key: AesGcmKey,
-    plaintext: ReadBuffer,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = aesGcmSeal(key, plaintext, aad, factory)
-
-actual suspend fun aesGcmOpenAsync(
-    sealed: ReadBuffer,
-    key: AesGcmKey,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = aesGcmOpen(sealed, key, aad, factory)
-
-actual suspend fun chaChaPolySealAsync(
-    key: ChaChaPolyKey,
-    plaintext: ReadBuffer,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = chaChaPolySeal(key, plaintext, aad, factory)
-
-actual suspend fun chaChaPolyOpenAsync(
-    sealed: ReadBuffer,
-    key: ChaChaPolyKey,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = chaChaPolyOpen(sealed, key, aad, factory)
+// Async with-nonce seam — Linux has a synchronous native AEAD, so delegate to the sync primitives.
 
 internal actual suspend fun aesGcmSealWithNonceAsync(
     key: AesGcmKey,

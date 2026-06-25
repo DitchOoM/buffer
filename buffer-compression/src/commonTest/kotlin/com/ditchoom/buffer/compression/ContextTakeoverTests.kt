@@ -58,8 +58,6 @@ class ContextTakeoverTests {
             if (chunk.remaining() > 0) chunks.add(chunk)
         }
 
-        if (chunks.isEmpty()) return ""
-
         if (chunks.size == 1) {
             val chunk = chunks[0]
             return chunk.readString(chunk.remaining(), Charset.UTF8)
@@ -277,7 +275,6 @@ class ContextTakeoverTests {
 
         decompressor.flush { collectChunk(it) }
 
-        if (chunks.isEmpty()) return ""
         if (chunks.size == 1) {
             val chunk = chunks[0]
             return chunk.readString(chunk.remaining(), Charset.UTF8)
@@ -344,7 +341,6 @@ class ContextTakeoverTests {
 
             decompressor.flush { collectChunk(it) }
 
-            if (chunks.isEmpty()) return ""
             if (chunks.size == 1) {
                 val chunk = chunks[0]
                 return chunk.readString(chunk.remaining(), Charset.UTF8)

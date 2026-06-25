@@ -32,7 +32,7 @@ class SignatureTamperTest {
             if (!supportsEcdsaSigningFromScalar) return@runTest // need to produce a sig to tamper
             val message = ascii("tamper me")
             val pub = verifyKey(SignatureScheme.EcdsaP256, p256Point)
-            val sig = signingKey(SignatureScheme.EcdsaP256, p256Scalar).use { signAsync(it, message) }
+            val sig = signingKey(SignatureScheme.EcdsaP256, p256Scalar, p256Point).use { signAsync(it, message) }
             assertTrue(verifyAsync(pub, message, sig), "baseline ECDSA sig must verify")
 
             // Flip every byte of the signature → reject.
@@ -47,7 +47,7 @@ class SignatureTamperTest {
             if (!ed25519AsyncAvailable()) return@runTest
             val message = ascii("tamper me")
             val pub = verifyKey(SignatureScheme.Ed25519, edPub)
-            val sig = signingKey(SignatureScheme.Ed25519, edSeed).use { signAsync(it, message) }
+            val sig = signingKey(SignatureScheme.Ed25519, edSeed, edPub).use { signAsync(it, message) }
             assertTrue(verifyAsync(pub, message, sig), "baseline Ed25519 sig must verify")
 
             tamperEachByte(sig) { mutant -> verifyAsync(pub, message, mutant) }
@@ -63,7 +63,7 @@ class SignatureTamperTest {
         runTest {
             if (!ed25519AsyncAvailable()) return@runTest
             val message = ascii("hello")
-            val sig = signingKey(SignatureScheme.Ed25519, edSeed).use { signAsync(it, message) }
+            val sig = signingKey(SignatureScheme.Ed25519, edSeed, edPub).use { signAsync(it, message) }
 
             // A different (RFC 8032 TEST 2) public key must not verify this signature.
             val wrongPub =

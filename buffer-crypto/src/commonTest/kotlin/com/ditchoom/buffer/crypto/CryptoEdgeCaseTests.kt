@@ -38,7 +38,14 @@ class CryptoEdgeCaseTests {
 
     @Test
     fun hkdfZeroLengthProducesEmptyOutput() {
-        val out = Hkdf.derive(salt = null, ikm = repeatedByte(0x0b, 22), info = null, length = 0, factory = BufferFactory.Default)
+        val out =
+            Hkdf.derive(
+                salt = Salt.None,
+                ikm = repeatedByte(0x0b, 22),
+                info = Info.None,
+                length = 0,
+                factory = BufferFactory.Default,
+            )
         assertEquals(0, out.remaining())
     }
 
@@ -47,9 +54,9 @@ class CryptoEdgeCaseTests {
         // RFC 5869 caps Expand output at 255 * HashLen = 8160 bytes.
         val out =
             Hkdf.derive(
-                salt = null,
+                salt = Salt.None,
                 ikm = repeatedByte(0x0b, 22),
-                info = null,
+                info = Info.None,
                 length = 255 * SHA256_DIGEST_BYTES,
                 factory = BufferFactory.Default,
             )
@@ -60,9 +67,9 @@ class CryptoEdgeCaseTests {
     fun hkdfOverMaxLengthThrows() {
         assertFailsWith<IllegalArgumentException> {
             Hkdf.derive(
-                salt = null,
+                salt = Salt.None,
                 ikm = repeatedByte(0x0b, 22),
-                info = null,
+                info = Info.None,
                 length = 255 * SHA256_DIGEST_BYTES + 1,
                 factory = BufferFactory.Default,
             )

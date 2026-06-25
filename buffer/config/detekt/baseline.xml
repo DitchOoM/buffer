@@ -1,0 +1,101 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:JsBuffer.kt:JsBuffer$override fun xorMaskCopy</ID>
+    <ID>CyclomaticComplexMethod:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$private fun decodeUtf8CodePointToAppendable: Int</ID>
+    <ID>CyclomaticComplexMethod:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$private fun decodeUtf8CodePointToAppendable: Int</ID>
+    <ID>LargeClass:BaseJvmBuffer.kt:BaseJvmBuffer : PlatformBuffer</ID>
+    <ID>LargeClass:BufferComparisonTest.kt:BufferComparisonTest</ID>
+    <ID>LargeClass:BufferPoolTests.kt:BufferPoolTests</ID>
+    <ID>LargeClass:BufferStreamTests.kt:BufferStreamTests</ID>
+    <ID>LargeClass:BufferTests.kt:BufferTests</ID>
+    <ID>LargeClass:WrapperTransparencyTests.kt:WrapperTransparencyTests</ID>
+    <ID>LongMethod:BaseJvmBuffer.kt:BaseJvmBuffer$override fun xorMaskCopy</ID>
+    <ID>LongMethod:FastDirectByteBufferTest.kt:FastDirectByteBufferTest$@Test fun `byte order conversion performance`</ID>
+    <ID>LongMethod:JsBuffer.kt:JsBuffer$override fun xorMaskCopy</ID>
+    <ID>LongMethod:SimdByteSwapTest.kt:SimdByteSwapTest$@Test fun `bulk byte swap operations performance`</ID>
+    <ID>LongMethod:WriteStringBenchmarkTest.kt:WriteStringBenchmarkTest$@Test fun benchmarkWriteStringApproaches</ID>
+    <ID>MaxLineLength:StreamingStringDecoder.linux.kt:actual fun StreamingStringDecoder: StreamingStringDecoder</ID>
+    <ID>NestedBlockDepth:JvmBuffer.kt:JvmBuffer.Companion.&lt;no name provided>$override fun createFromParcel: JvmBuffer</ID>
+    <ID>ReturnCount:BaseJvmBuffer.kt:BaseJvmBuffer$override fun indexOf: Int</ID>
+    <ID>ReturnCount:BufferComparison.kt:internal inline fun bulkCompareEquals: Boolean</ID>
+    <ID>ReturnCount:BufferComparison.kt:internal inline fun bulkCompareEqualsInt: Boolean</ID>
+    <ID>ReturnCount:BufferComparison.kt:internal inline fun bulkIndexOf: Int</ID>
+    <ID>ReturnCount:BufferComparison.kt:internal inline fun bulkIndexOfInt: Int</ID>
+    <ID>ReturnCount:BufferComparison.kt:internal inline fun bulkMismatch: Int</ID>
+    <ID>ReturnCount:BufferComparison.kt:internal inline fun bulkMismatchInt: Int</ID>
+    <ID>ReturnCount:BufferStream.kt:DefaultStreamProcessor$override fun &lt;T> readBufferScoped: T</ID>
+    <ID>ReturnCount:BufferStream.kt:DefaultStreamProcessor$override fun peekBuffer: ReadBuffer?</ID>
+    <ID>ReturnCount:BufferStream.kt:DefaultStreamProcessor$override fun peekMismatch: Int</ID>
+    <ID>ReturnCount:BufferStream.kt:DefaultStreamProcessor$override fun readBuffer: ReadBuffer</ID>
+    <ID>ReturnCount:BulkOperationsBenchmark.kt:BulkOperationsBenchmark$@Benchmark fun contentEquals64kBaseline: Boolean</ID>
+    <ID>ReturnCount:BulkOperationsBenchmark.kt:BulkOperationsBenchmark$@Benchmark fun indexOfByte64kBaseline: Int</ID>
+    <ID>ReturnCount:BulkOperationsBenchmark.kt:BulkOperationsBenchmark$@Benchmark fun mismatch64kBaseline: Int</ID>
+    <ID>ReturnCount:JsBuffer.kt:JsBuffer$override fun contentEquals: Boolean</ID>
+    <ID>ReturnCount:JsBuffer.kt:JsBuffer$override fun xorMaskCopy</ID>
+    <ID>ReturnCount:LinearBuffer.kt:LinearBuffer$override fun contentEquals: Boolean</ID>
+    <ID>ReturnCount:MutableDataBuffer.kt:MutableDataBuffer$override fun contentEquals: Boolean</ID>
+    <ID>ReturnCount:MutableDataBuffer.kt:MutableDataBuffer$override fun mismatch: Int</ID>
+    <ID>ReturnCount:MutableDataBuffer.kt:MutableDataBuffer$override fun readString: String</ID>
+    <ID>ReturnCount:MutableDataBuffer.kt:MutableDataBuffer$override fun xorMaskCopy</ID>
+    <ID>ReturnCount:MutableDataBuffer.kt:MutableDataBufferSlice$override fun readString: String</ID>
+    <ID>ReturnCount:NSDataBuffer.kt:NSDataBuffer$override fun contentEquals: Boolean</ID>
+    <ID>ReturnCount:NativeBuffer.kt:NativeBuffer$override fun contentEquals: Boolean</ID>
+    <ID>ReturnCount:NativeBuffer.kt:NativeBuffer$override fun mismatch: Int</ID>
+    <ID>ReturnCount:NativeBuffer.kt:NativeBuffer$override fun write</ID>
+    <ID>ReturnCount:NativeBuffer.kt:NativeBuffer$override fun xorMaskCopy</ID>
+    <ID>ReturnCount:NativeBuffer.kt:NativeBufferSlice$override fun write</ID>
+    <ID>ReturnCount:NativeBuffer.kt:private fun simdutfDecodeUtf8: String</ID>
+    <ID>ReturnCount:ReadBuffer.kt:@Suppress("DEPRECATION") fun ReadBuffer.unwrapFully: ReadBuffer</ID>
+    <ID>ReturnCount:ReadBuffer.kt:ReadBuffer$fun contentEquals: Boolean</ID>
+    <ID>ReturnCount:ReadBuffer.kt:ReadBuffer$fun indexOf: Int</ID>
+    <ID>ReturnCount:ReadBuffer.kt:ReadBuffer$fun readNumberWithByteSize: Long</ID>
+    <ID>ReturnCount:ReadBuffer.kt:fun bufferEquals: Boolean</ID>
+    <ID>ReturnCount:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$override fun decode: Int</ID>
+    <ID>ReturnCount:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$private fun completePendingSequence: DecodeResult</ID>
+    <ID>ReturnCount:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$private fun convertUtf8PtrToAppendable: Int</ID>
+    <ID>ReturnCount:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$private fun decodeUtf8CodePointToAppendable: Int</ID>
+    <ID>ReturnCount:StreamingStringDecoder.apple.kt:AppleStreamingStringDecoder$private fun findUtf8Boundary: Int</ID>
+    <ID>ReturnCount:StreamingStringDecoder.jvmCommon.kt:JvmStreamingStringDecoder$private fun getByteBuffer: ByteBuffer</ID>
+    <ID>ReturnCount:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$override fun decode: Int</ID>
+    <ID>ReturnCount:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$private fun completePendingSequence: DecodeResult</ID>
+    <ID>ReturnCount:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$private fun convertUtf8PtrToAppendable: Int</ID>
+    <ID>ReturnCount:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder$private fun decodeUtf8CodePointToAppendable: Int</ID>
+    <ID>ReturnCount:StreamingStringDecoder.wasmJs.kt:WasmJsStreamingStringDecoder$private fun decodeChunk: String</ID>
+    <ID>ReturnCount:UnsafeMemoryTest.kt:UnsafeMemoryTest$@Test fun testCopyMemory</ID>
+    <ID>ReturnCount:UnsafeMemoryTest.kt:UnsafeMemoryTest$@Test fun testLargeBufferOperations</ID>
+    <ID>TooManyFunctions:AutoFillingSuspendingStreamProcessor.kt:AutoFillingSuspendingStreamProcessor : SuspendingStreamProcessor</ID>
+    <ID>TooManyFunctions:BaseJvmBuffer.kt:BaseJvmBuffer : PlatformBuffer</ID>
+    <ID>TooManyFunctions:BaseWebBuffer.kt:BaseWebBuffer : PlatformBuffer</ID>
+    <ID>TooManyFunctions:BufferBaselineBenchmark.kt:BufferBaselineBenchmark</ID>
+    <ID>TooManyFunctions:BufferComparison.kt:com.ditchoom.buffer.BufferComparison.kt</ID>
+    <ID>TooManyFunctions:BufferStream.kt:DefaultStreamProcessor : StreamProcessor</ID>
+    <ID>TooManyFunctions:BufferStream.kt:StreamProcessor</ID>
+    <ID>TooManyFunctions:BulkOperationsBenchmark.kt:BulkOperationsBenchmark</ID>
+    <ID>TooManyFunctions:ByteArrayBuffer.kt:ByteArrayBuffer : PlatformBufferManagedMemoryAccess</ID>
+    <ID>TooManyFunctions:JsBuffer.kt:JsBuffer : BaseWebBufferNativeMemoryAccessManagedMemoryAccessSharedMemoryAccess</ID>
+    <ID>TooManyFunctions:LinearBuffer.kt:LinearBuffer : BaseWebBufferNativeMemoryAccess</ID>
+    <ID>TooManyFunctions:MemoryManager.kt:LinearMemoryAllocator</ID>
+    <ID>TooManyFunctions:MutableDataBuffer.kt:MutableDataBuffer : PlatformBufferParcelableNativeMemoryAccess</ID>
+    <ID>TooManyFunctions:MutableDataBuffer.kt:MutableDataBufferSlice : PlatformBufferNativeMemoryAccess</ID>
+    <ID>TooManyFunctions:NSDataBuffer.kt:NSDataBuffer : ReadBufferNativeMemoryAccess</ID>
+    <ID>TooManyFunctions:NSDataBuffer.kt:NSDataBufferSlice : ReadBufferNativeMemoryAccess</ID>
+    <ID>TooManyFunctions:NSDataBufferTest.kt:NSDataBufferTest</ID>
+    <ID>TooManyFunctions:NativeBuffer.kt:NativeBuffer : PlatformBufferNativeMemoryAccessCloseableBuffer</ID>
+    <ID>TooManyFunctions:NativeBuffer.kt:NativeBufferSlice : PlatformBufferNativeMemoryAccess</ID>
+    <ID>TooManyFunctions:NativeDataConversionJvmTest.kt:NativeDataConversionJvmTest</ID>
+    <ID>TooManyFunctions:PooledBuffer.kt:PooledBuffer : PlatformBuffer</ID>
+    <ID>TooManyFunctions:ReadBuffer.kt:ReadBuffer : PositionBuffer</ID>
+    <ID>TooManyFunctions:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder : StreamingStringDecoder</ID>
+    <ID>TooManyFunctions:SuspendingStreamProcessor.kt:SuspendingStreamProcessor</ID>
+    <ID>TooManyFunctions:SuspendingStreamProcessor.kt:SyncToSuspendingProcessor : SuspendingStreamProcessor</ID>
+    <ID>TooManyFunctions:UnsafeMemory.apple.kt:UnsafeMemory</ID>
+    <ID>TooManyFunctions:UnsafeMemory.js.kt:UnsafeMemory</ID>
+    <ID>TooManyFunctions:UnsafeMemory.jvmCommon.kt:UnsafeMemory</ID>
+    <ID>TooManyFunctions:UnsafeMemory.kt:UnsafeMemory</ID>
+    <ID>TooManyFunctions:UnsafeMemory.linux.kt:UnsafeMemory</ID>
+    <ID>TooManyFunctions:UnsafeMemory.wasmJs.kt:UnsafeMemory</ID>
+    <ID>TooManyFunctions:WriteBuffer.kt:WriteBuffer : PositionBuffer</ID>
+  </CurrentIssues>
+</SmellBaseline>

@@ -303,7 +303,8 @@ class MqttV5CascadingAcksCodecTest {
         // body = 1 (rc) + 1 (propLen=5) + 5 (MessageExpiry) = 7
         val original =
             MqttV5Packet.Disconnect(
-                reasonCode = V5DisconnectReasonCode.NormalDisconnection(), // Normal disconnection (with reason for properties to attach)
+                // Normal disconnection (with reason for properties to attach)
+                reasonCode = V5DisconnectReasonCode.NormalDisconnection(),
                 properties = V5PropertyBag.of(MqttV5Property.MessageExpiryInterval(seconds = 60u)),
             )
         val buf = encode(original)

@@ -35,9 +35,9 @@ class KeyAgreementWycheproofTest {
     ): String {
         val out =
             Hkdf.derive(
-                salt = CryptoTestVectors.ascii(wpSalt),
+                salt = Salt.Of(CryptoTestVectors.ascii(wpSalt)),
                 ikm = hexBuffer(sharedHex),
-                info = CryptoTestVectors.ascii(wpInfo),
+                info = Info.Of(CryptoTestVectors.ascii(wpInfo)),
                 length = length,
                 factory = BufferFactory.Default,
             )
@@ -50,7 +50,7 @@ class KeyAgreementWycheproofTest {
     ): Boolean {
         val priv = importPrivateKey(curve, case.testHex("private"))
         return try {
-            val pub = KeyAgreementPublicKey(curve, case.testHex("public"))
+            val pub = KeyAgreementPublicKey.of(curve, case.testHex("public"))
             val derived: ReadBuffer =
                 deriveSharedSecret(
                     privateKey = priv,
@@ -112,7 +112,7 @@ class KeyAgreementWycheproofTest {
                     assertFailsWith<InvalidPublicKey>("tcId ${case.tcId}: zero-shared point must be rejected") {
                         deriveSharedSecret(
                             priv,
-                            KeyAgreementPublicKey(curve, case.testHex("public")),
+                            KeyAgreementPublicKey.of(curve, case.testHex("public")),
                             CryptoTestVectors.ascii(wpInfo),
                             32,
                             CryptoTestVectors.ascii(wpSalt),

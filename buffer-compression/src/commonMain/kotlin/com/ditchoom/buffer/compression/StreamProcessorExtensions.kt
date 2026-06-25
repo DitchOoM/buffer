@@ -36,7 +36,7 @@ internal class DecompressionSpec(
     private val algorithm: CompressionAlgorithm,
     private val bufferFactory: BufferFactory,
 ) : TransformSpec {
-    override fun wrapSync(inner: StreamProcessor): StreamProcessor = DecompressingStreamProcessor(inner, algorithm, bufferFactory)
+    override fun wrapSync(inner: StreamProcessor) = DecompressingStreamProcessor(inner, algorithm, bufferFactory)
 
     override fun wrapSuspending(inner: SuspendingStreamProcessor): SuspendingStreamProcessor =
         SuspendingDecompressingStreamProcessor(inner, algorithm, bufferFactory)

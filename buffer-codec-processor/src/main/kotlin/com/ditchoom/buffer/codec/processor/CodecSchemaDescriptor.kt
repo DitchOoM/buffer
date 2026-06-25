@@ -140,6 +140,8 @@ internal object CodecSchemaDescriptor {
                     "codec=${field.payloadCodecType.canonicalName}"
             is FieldSpec.RemainingBytesProtocolMessageList ->
                 "list:${field.elementClassName.canonicalName} remaining reserved=${field.reservedTrailingBytes}B"
+            is FieldSpec.CountPrefixedProtocolMessageList ->
+                "list:${field.elementClassName.canonicalName} count-prefixed"
             is FieldSpec.LengthFromList ->
                 "list:${field.elementClassName.canonicalName} len-from=${describeLengthSource(field.source)}"
             is FieldSpec.LengthFromString ->
@@ -257,7 +259,7 @@ internal object CodecSchemaDescriptor {
         format: LabelFormat,
     ): String =
         when (format) {
-            LabelFormat.Hex -> "0x" + value.toString(16).uppercase().padStart(2, '0')
+            LabelFormat.Hex -> "0x" + value.toString(HEX_RADIX).uppercase().padStart(HEX_BYTE_PAD, '0')
             LabelFormat.Decimal -> value.toString()
         }
 }

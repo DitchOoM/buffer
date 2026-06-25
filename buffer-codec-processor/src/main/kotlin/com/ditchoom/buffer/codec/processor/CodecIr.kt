@@ -842,6 +842,41 @@ internal sealed interface FieldSpec {
     ) : FieldSpec
 
     /**
+     * `@Count val: List<T>` where `T` is a `@ProtocolMessage data class`
+     * (or a sealed parent with `@DispatchOn`). The element-count complement
+     * to the byte-length list framings ([RemainingBytesProtocolMessageList],
+     * [LengthFromList]): instead of a byte span that the decoder drains to a
+     * limit, an unsigned LEB128 varint carries the element COUNT `N`, and the
+     * decoder reads exactly `N` elements via the element codec.
+     *
+     * Wire shape: `varint(N)` (the shipped `UnsignedVarIntCodec`, the same
+     * self-delimiting encoding an enum ordinal rides on) followed by `N`
+     * self-delimiting elements. Because the count is explicit the field is
+     * self-delimiting — unlike the drain-to-limit list shapes it need NOT be
+     * the terminal constructor parameter.
+     *
+     * Decode: read the varint count, then `repeat(N)` appending
+     * `<E>Codec.decode(buffer, context)`. Encode: write
+     * `UnsignedVarIntCodec.encode(buffer, list.size.toUInt(), context)` then
+     * iterate. wireSize = varint width of the count + sum of element
+     * wireSizes (each cast to `Exact` at runtime — same convention as
+     * [RemainingBytesProtocolMessageList]); the containing message collapses
+     * to BackPatch when the element is BackPatch-shaped.
+     *
+     * `elementIsBackPatch` mirrors [RemainingBytesProtocolMessageList]'s flag:
+     * when `true` the containing message's wireSize / variant classification
+     * collapses to BackPatch (the runtime `as Exact` cast would CCE on
+     * BackPatch element variants).
+     */
+    data class CountPrefixedProtocolMessageList(
+        override val name: String,
+        val ownerSimpleName: String,
+        val elementClassName: ClassName,
+        val elementCodecClassName: ClassName,
+        val elementIsBackPatch: Boolean,
+    ) : FieldSpec
+
+    /**
      * /
      * `@LengthFrom("ref") val: String`. The body wire bytes are
      * determined by a non-adjacent length carrier decoded
@@ -1266,20 +1301,20 @@ internal enum class ScalarKind(
     Boolean(1, false),
     UByte(1, false),
     UShort(2, false),
-    UInt(4, false),
-    ULong(8, false),
+    UInt(kotlin.Int.SIZE_BYTES, false),
+    ULong(kotlin.Long.SIZE_BYTES, false),
     Byte(1, true),
     Short(2, true),
-    Int(4, true),
-    Long(8, true),
+    Int(kotlin.Int.SIZE_BYTES, true),
+    Long(kotlin.Long.SIZE_BYTES, true),
 
     // IEEE 754 floating point — wire form is the raw bit pattern of
     // toRawBits() / fromBits() at fixed natural width. Treated as
     // signed only insofar as @WireBytes narrowing is rejected (same
     // rule as integer signed types — partial-read sign extension is
     // out of scope).
-    Float(4, true),
-    Double(8, true),
+    Float(kotlin.Int.SIZE_BYTES, true),
+    Double(kotlin.Long.SIZE_BYTES, true),
     ;
 
     /**

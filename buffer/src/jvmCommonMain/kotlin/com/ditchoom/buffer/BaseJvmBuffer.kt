@@ -6,6 +6,10 @@ import java.nio.ByteBuffer
 import java.nio.CharBuffer
 import java.nio.charset.CodingErrorAction
 
+// IndexOutOfBoundsException is exactly the type the JDK throws from absolute-index
+// ByteBuffer.get/put(index, ...) and System.arraycopy; it is the most specific catchable
+// type here and is translated (with cause preserved) into the library's buffer exceptions.
+@Suppress("TooGenericExceptionCaught")
 abstract class BaseJvmBuffer(
     open val byteBuffer: ByteBuffer,
     val fileRef: RandomAccessFile? = null,
@@ -41,6 +45,7 @@ abstract class BaseJvmBuffer(
             throw BufferUnderflowException(
                 "Buffer underflow: cannot read 1 byte(s) at position ${position()} " +
                     "(limit=${limit()}, remaining=${remaining()})",
+                e,
             )
         }
 
@@ -50,6 +55,7 @@ abstract class BaseJvmBuffer(
         } catch (e: IndexOutOfBoundsException) {
             throw BufferUnderflowException(
                 "Index out of bounds: cannot read 1 byte(s) at index $index (limit=${limit()})",
+                e,
             )
         }
 
@@ -60,12 +66,14 @@ abstract class BaseJvmBuffer(
             throw BufferUnderflowException(
                 "Buffer underflow: cannot read $size byte(s) at position ${position()} " +
                     "(limit=${limit()}, remaining=${remaining()})",
+                e,
             )
         } catch (e: IndexOutOfBoundsException) {
             // Heap-backed path uses System.arraycopy which throws ArrayIndexOutOfBoundsException
             throw BufferUnderflowException(
                 "Buffer underflow: cannot read $size byte(s) at position ${position()} " +
                     "(limit=${limit()}, remaining=${remaining()})",
+                e,
             )
         }
 
@@ -90,11 +98,13 @@ abstract class BaseJvmBuffer(
             throw BufferUnderflowException(
                 "Buffer underflow: cannot read $length byte(s) at position ${position()} " +
                     "(limit=${limit()}, remaining=${remaining()})",
+                e,
             )
         } catch (e: IndexOutOfBoundsException) {
             throw BufferUnderflowException(
                 "Buffer underflow: cannot read $length byte(s) at position ${position()} " +
                     "(limit=${limit()}, remaining=${remaining()})",
+                e,
             )
         }
     }
@@ -108,6 +118,7 @@ abstract class BaseJvmBuffer(
             throw BufferUnderflowException(
                 "Buffer underflow: cannot read 2 byte(s) at position ${position()} " +
                     "(limit=${limit()}, remaining=${remaining()})",
+                e,
             )
         }
 
@@ -117,6 +128,7 @@ abstract class BaseJvmBuffer(
         } catch (e: IndexOutOfBoundsException) {
             throw BufferUnderflowException(
                 "Index out of bounds: cannot read 2 byte(s) at index $index (limit=${limit()})",
+                e,
             )
         }
 
@@ -127,6 +139,7 @@ abstract class BaseJvmBuffer(
             throw BufferUnderflowException(
                 "Buffer underflow: cannot read 4 byte(s) at position ${position()} " +
                     "(limit=${limit()}, remaining=${remaining()})",
+                e,
             )
         }
 
@@ -136,6 +149,7 @@ abstract class BaseJvmBuffer(
         } catch (e: IndexOutOfBoundsException) {
             throw BufferUnderflowException(
                 "Index out of bounds: cannot read 4 byte(s) at index $index (limit=${limit()})",
+                e,
             )
         }
 
@@ -146,6 +160,7 @@ abstract class BaseJvmBuffer(
             throw BufferUnderflowException(
                 "Buffer underflow: cannot read 8 byte(s) at position ${position()} " +
                     "(limit=${limit()}, remaining=${remaining()})",
+                e,
             )
         }
 
@@ -155,6 +170,7 @@ abstract class BaseJvmBuffer(
         } catch (e: IndexOutOfBoundsException) {
             throw BufferUnderflowException(
                 "Index out of bounds: cannot read 8 byte(s) at index $index (limit=${limit()})",
+                e,
             )
         }
 
@@ -165,6 +181,7 @@ abstract class BaseJvmBuffer(
             throw BufferUnderflowException(
                 "Buffer underflow: cannot read 4 byte(s) at position ${position()} " +
                     "(limit=${limit()}, remaining=${remaining()})",
+                e,
             )
         }
 
@@ -174,6 +191,7 @@ abstract class BaseJvmBuffer(
         } catch (e: IndexOutOfBoundsException) {
             throw BufferUnderflowException(
                 "Index out of bounds: cannot read 4 byte(s) at index $index (limit=${limit()})",
+                e,
             )
         }
 
@@ -184,6 +202,7 @@ abstract class BaseJvmBuffer(
             throw BufferUnderflowException(
                 "Buffer underflow: cannot read 8 byte(s) at position ${position()} " +
                     "(limit=${limit()}, remaining=${remaining()})",
+                e,
             )
         }
 
@@ -193,6 +212,7 @@ abstract class BaseJvmBuffer(
         } catch (e: IndexOutOfBoundsException) {
             throw BufferUnderflowException(
                 "Index out of bounds: cannot read 8 byte(s) at index $index (limit=${limit()})",
+                e,
             )
         }
 
@@ -203,6 +223,7 @@ abstract class BaseJvmBuffer(
             throw BufferOverflowException(
                 "Buffer overflow: cannot write 4 byte(s) at position ${position()} " +
                     "(limit=${limit()}, remaining=${remaining()})",
+                e,
             )
         }
         return this
@@ -217,6 +238,7 @@ abstract class BaseJvmBuffer(
         } catch (e: IndexOutOfBoundsException) {
             throw BufferOverflowException(
                 "Index out of bounds: cannot write 4 byte(s) at index $index (limit=${limit()})",
+                e,
             )
         }
         return this
@@ -229,6 +251,7 @@ abstract class BaseJvmBuffer(
             throw BufferOverflowException(
                 "Buffer overflow: cannot write 8 byte(s) at position ${position()} " +
                     "(limit=${limit()}, remaining=${remaining()})",
+                e,
             )
         }
         return this
@@ -243,6 +266,7 @@ abstract class BaseJvmBuffer(
         } catch (e: IndexOutOfBoundsException) {
             throw BufferOverflowException(
                 "Index out of bounds: cannot write 8 byte(s) at index $index (limit=${limit()})",
+                e,
             )
         }
         return this
@@ -284,6 +308,7 @@ abstract class BaseJvmBuffer(
             throw BufferOverflowException(
                 "Buffer overflow: cannot write 1 byte(s) at position ${position()} " +
                     "(limit=${limit()}, remaining=${remaining()})",
+                e,
             )
         }
         return this
@@ -298,6 +323,7 @@ abstract class BaseJvmBuffer(
         } catch (e: IndexOutOfBoundsException) {
             throw BufferOverflowException(
                 "Index out of bounds: cannot write 1 byte(s) at index $index (limit=${limit()})",
+                e,
             )
         }
         return this
@@ -314,6 +340,7 @@ abstract class BaseJvmBuffer(
             throw BufferOverflowException(
                 "Buffer overflow: cannot write $length byte(s) at position ${position()} " +
                     "(limit=${limit()}, remaining=${remaining()})",
+                e,
             )
         }
         return this
@@ -326,6 +353,7 @@ abstract class BaseJvmBuffer(
             throw BufferOverflowException(
                 "Buffer overflow: cannot write 2 byte(s) at position ${position()} " +
                     "(limit=${limit()}, remaining=${remaining()})",
+                e,
             )
         }
         return this
@@ -340,6 +368,7 @@ abstract class BaseJvmBuffer(
         } catch (e: IndexOutOfBoundsException) {
             throw BufferOverflowException(
                 "Index out of bounds: cannot write 2 byte(s) at index $index (limit=${limit()})",
+                e,
             )
         }
         return this
@@ -352,6 +381,7 @@ abstract class BaseJvmBuffer(
             throw BufferOverflowException(
                 "Buffer overflow: cannot write 4 byte(s) at position ${position()} " +
                     "(limit=${limit()}, remaining=${remaining()})",
+                e,
             )
         }
         return this
@@ -366,6 +396,7 @@ abstract class BaseJvmBuffer(
         } catch (e: IndexOutOfBoundsException) {
             throw BufferOverflowException(
                 "Index out of bounds: cannot write 4 byte(s) at index $index (limit=${limit()})",
+                e,
             )
         }
         return this
@@ -378,6 +409,7 @@ abstract class BaseJvmBuffer(
             throw BufferOverflowException(
                 "Buffer overflow: cannot write 8 byte(s) at position ${position()} " +
                     "(limit=${limit()}, remaining=${remaining()})",
+                e,
             )
         }
         return this
@@ -392,6 +424,7 @@ abstract class BaseJvmBuffer(
         } catch (e: IndexOutOfBoundsException) {
             throw BufferOverflowException(
                 "Index out of bounds: cannot write 8 byte(s) at index $index (limit=${limit()})",
+                e,
             )
         }
         return this
@@ -419,6 +452,7 @@ abstract class BaseJvmBuffer(
             throw BufferOverflowException(
                 "Buffer overflow: cannot write ${buffer.remaining()} byte(s) at position ${position()} " +
                     "(limit=${limit()}, remaining=${remaining()})",
+                e,
             )
         }
     }
@@ -437,12 +471,12 @@ abstract class BaseJvmBuffer(
         if (size == 0) return
 
         // Rotate the mask so that mask byte at (maskOffset % 4) becomes byte 0
-        val shift = (maskOffset and 3) * 8
+        val shift = (maskOffset and 3) * Byte.SIZE_BITS
         val rotatedMask =
-            if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
+            if (shift == 0) mask else (mask shl shift) or (mask ushr (Int.SIZE_BITS - shift))
 
         // Create 8-byte mask (big-endian: rotatedMask repeated twice)
-        val maskLong = (rotatedMask.toLong() shl 32) or (rotatedMask.toLong() and 0xFFFFFFFFL)
+        val maskLong = (rotatedMask.toLong() shl Int.SIZE_BITS) or (rotatedMask.toLong() and LOW_INT_MASK)
 
         // Use a duplicate with BIG_ENDIAN to avoid byte-order interference
         val dup = byteBuffer.duplicate()
@@ -452,16 +486,16 @@ abstract class BaseJvmBuffer(
 
         var offset = pos
         // Process 8 bytes at a time
-        while (offset + 8 <= lim) {
+        while (offset + Long.SIZE_BYTES <= lim) {
             val value = dup.getLong(offset)
             dup.putLong(offset, value xor maskLong)
-            offset += 8
+            offset += Long.SIZE_BYTES
         }
 
         // Handle remaining bytes using the ORIGINAL mask with offset
-        val maskByte0 = (mask ushr 24).toByte()
-        val maskByte1 = (mask ushr 16).toByte()
-        val maskByte2 = (mask ushr 8).toByte()
+        val maskByte0 = (mask ushr MASK_BYTE0_SHIFT).toByte()
+        val maskByte1 = (mask ushr MASK_BYTE1_SHIFT).toByte()
+        val maskByte2 = (mask ushr MASK_BYTE2_SHIFT).toByte()
         val maskByte3 = mask.toByte()
         var i = offset - pos
         while (offset < lim) {
@@ -494,10 +528,10 @@ abstract class BaseJvmBuffer(
         }
 
         // Rotate the mask so that mask byte at (maskOffset % 4) becomes byte 0
-        val shift = (maskOffset and 3) * 8
+        val shift = (maskOffset and 3) * Byte.SIZE_BITS
         val rotatedMask =
-            if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
-        val maskLong = (rotatedMask.toLong() shl 32) or (rotatedMask.toLong() and 0xFFFFFFFFL)
+            if (shift == 0) mask else (mask shl shift) or (mask ushr (Int.SIZE_BITS - shift))
+        val maskLong = (rotatedMask.toLong() shl Int.SIZE_BITS) or (rotatedMask.toLong() and LOW_INT_MASK)
 
         val actualSource = source.unwrapFully()
         val srcBB =
@@ -519,19 +553,19 @@ abstract class BaseJvmBuffer(
 
         if (srcBB != null) {
             // Fast path: both are JVM ByteBuffers, use getLong/putLong
-            while (processed + 8 <= size) {
+            while (processed + Long.SIZE_BYTES <= size) {
                 val value = srcBB.getLong(srcOff)
                 dstDup.putLong(dstOff, value xor maskLong)
-                srcOff += 8
-                dstOff += 8
-                processed += 8
+                srcOff += Long.SIZE_BYTES
+                dstOff += Long.SIZE_BYTES
+                processed += Long.SIZE_BYTES
             }
         }
 
         // Handle remaining bytes (or all bytes if source wasn't a JVM buffer)
-        val maskByte0 = (mask ushr 24).toByte()
-        val maskByte1 = (mask ushr 16).toByte()
-        val maskByte2 = (mask ushr 8).toByte()
+        val maskByte0 = (mask ushr MASK_BYTE0_SHIFT).toByte()
+        val maskByte1 = (mask ushr MASK_BYTE1_SHIFT).toByte()
+        val maskByte2 = (mask ushr MASK_BYTE2_SHIFT).toByte()
         val maskByte3 = mask.toByte()
 
         while (processed < size) {
@@ -657,9 +691,9 @@ abstract class BaseJvmBuffer(
     ): Int {
         val pos = position()
         val remaining = remaining()
-        if (remaining < 4) return -1
+        if (remaining < Int.SIZE_BYTES) return -1
 
-        val step = if (aligned) 4 else 1
+        val step = if (aligned) Int.SIZE_BYTES else 1
         val searchLimit = remaining - 3
         for (i in 0 until searchLimit step step) {
             if (byteBuffer.getInt(pos + i) == value) {
@@ -678,9 +712,9 @@ abstract class BaseJvmBuffer(
     ): Int {
         val pos = position()
         val remaining = remaining()
-        if (remaining < 8) return -1
+        if (remaining < Long.SIZE_BYTES) return -1
 
-        val step = if (aligned) 8 else 1
+        val step = if (aligned) Long.SIZE_BYTES else 1
         val searchLimit = remaining - 7
         for (i in 0 until searchLimit step step) {
             if (byteBuffer.getLong(pos + i) == value) {
@@ -709,6 +743,20 @@ abstract class BaseJvmBuffer(
             }
         }
         return this
+    }
+
+    private companion object {
+        /** Low 32 bits of a Long, used to splice an Int mask into the high+low halves of a Long. */
+        const val LOW_INT_MASK = 0xFFFFFFFFL
+
+        /** Bit shift to extract mask byte 0 (most-significant byte) of a 4-byte mask. */
+        const val MASK_BYTE0_SHIFT = 24
+
+        /** Bit shift to extract mask byte 1 of a 4-byte mask. */
+        const val MASK_BYTE1_SHIFT = 16
+
+        /** Bit shift to extract mask byte 2 of a 4-byte mask. */
+        const val MASK_BYTE2_SHIFT = 8
     }
 }
 

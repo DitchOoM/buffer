@@ -317,7 +317,8 @@ internal actual suspend fun browserCompress(
     input: JsByteArray,
     algorithm: CompressionAlgorithm,
 ): JsByteArray {
-    val result = jsBrowserCompress(input.ref, algorithm.toBrowserFormat().toJsString()).unsafeCast<Promise<JsAny?>>().await() as JsAny
+    val format = algorithm.toBrowserFormat().toJsString()
+    val result = jsBrowserCompress(input.ref, format).unsafeCast<Promise<JsAny?>>().await() as JsAny
     return JsByteArray(result)
 }
 
@@ -339,7 +340,8 @@ internal actual suspend fun browserDecompress(
     input: JsByteArray,
     algorithm: CompressionAlgorithm,
 ): JsByteArray {
-    val result = jsBrowserDecompress(input.ref, algorithm.toBrowserFormat().toJsString()).unsafeCast<Promise<JsAny?>>().await() as JsAny
+    val format = algorithm.toBrowserFormat().toJsString()
+    val result = jsBrowserDecompress(input.ref, format).unsafeCast<Promise<JsAny?>>().await() as JsAny
     return JsByteArray(result)
 }
 
@@ -377,7 +379,10 @@ internal actual fun createCompressStream(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
     windowBits: WindowBits,
-): NodeTransformHandle = NodeTransformHandle(jsCreateCompressStream(algorithm.toOrdinal(), level.value, windowBits.sizeLog2))
+): NodeTransformHandle {
+    val handle = jsCreateCompressStream(algorithm.toOrdinal(), level.value, windowBits.sizeLog2)
+    return NodeTransformHandle(handle)
+}
 
 @JsFun(
     """
@@ -626,7 +631,8 @@ internal actual suspend fun nodeTransformCompressOneShot(
 ): JsByteArray {
     val jsInputs = jsNewArray()
     for (input in inputs) jsArrayPush(jsInputs, input.ref)
-    val result = jsTransformCompressOneShot(jsInputs, algorithm.toOrdinal(), level.value).unsafeCast<Promise<JsAny?>>().await() as JsAny
+    val promise = jsTransformCompressOneShot(jsInputs, algorithm.toOrdinal(), level.value)
+    val result = promise.unsafeCast<Promise<JsAny?>>().await() as JsAny
     return JsByteArray(result)
 }
 
@@ -666,7 +672,8 @@ internal actual suspend fun nodeTransformDecompressOneShot(
 ): JsByteArray {
     val jsInputs = jsNewArray()
     for (input in inputs) jsArrayPush(jsInputs, input.ref)
-    val result = jsTransformDecompressOneShot(jsInputs, algorithm.toOrdinal()).unsafeCast<Promise<JsAny?>>().await() as JsAny
+    val promise = jsTransformDecompressOneShot(jsInputs, algorithm.toOrdinal())
+    val result = promise.unsafeCast<Promise<JsAny?>>().await() as JsAny
     return JsByteArray(result)
 }
 

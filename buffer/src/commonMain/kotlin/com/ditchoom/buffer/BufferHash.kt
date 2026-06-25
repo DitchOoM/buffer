@@ -32,12 +32,12 @@ internal inline fun fnv1aHashRange(
 ): Long {
     var h = seed
     var i = 0
-    while (i + 8 <= length) {
+    while (i + Long.SIZE_BYTES <= length) {
         h = (h xor getLong(offset + i)) * FNV64_PRIME
-        i += 8
+        i += Long.SIZE_BYTES
     }
     while (i < length) {
-        h = (h xor (getByte(offset + i).toLong() and 0xFF)) * FNV64_PRIME
+        h = (h xor (getByte(offset + i).toLong() and BufferConstants.BYTE_MASK.toLong())) * FNV64_PRIME
         i++
     }
     return h

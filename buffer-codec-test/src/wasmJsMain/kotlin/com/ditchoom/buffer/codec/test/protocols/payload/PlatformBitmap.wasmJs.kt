@@ -1,3 +1,5 @@
+@file:Suppress("MatchingDeclarationName") // actual-file MPP naming: PlatformBitmap.wasmJs.kt pairs with expect
+
 package com.ditchoom.buffer.codec.test.protocols.payload
 
 import com.ditchoom.buffer.PlatformBuffer

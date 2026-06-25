@@ -28,6 +28,24 @@ internal const val FRAME_DETECTOR_QNAME = "com.ditchoom.buffer.codec.FrameDetect
 // never emitted; the coalescer keeps them as individual reads.
 internal val BATCH_ALIGNMENTS = setOf(2, 4, 8)
 
+// A coalesced batch reads at most a single `Long` (8 bytes) at once.
+internal const val MAX_BATCH_BYTES = Long.SIZE_BYTES
+
+// Wire widths of the batch accumulator reads, in bytes.
+internal const val SHORT_BATCH_BYTES = Short.SIZE_BYTES
+internal const val INT_BATCH_BYTES = Int.SIZE_BYTES
+internal const val LONG_BATCH_BYTES = Long.SIZE_BYTES
+
+// Corresponding bit widths (`bytes * 8`) used for the shift/or assembly.
+internal const val SHORT_BATCH_BITS = Short.SIZE_BITS
+internal const val INT_BATCH_BITS = Int.SIZE_BITS
+internal const val LONG_BATCH_BITS = Long.SIZE_BITS
+
+// Hex formatting of discriminator/label literals: base-16, zero-padded to two
+// digits so a single byte always renders as `0xNN`.
+internal const val HEX_RADIX = 16
+internal const val HEX_BYTE_PAD = 2
+
 internal val BYTE_ORDER_CN = ClassName("com.ditchoom.buffer", "ByteOrder")
 internal val SWAP_BYTES_MN = MemberName("com.ditchoom.buffer", "swapBytes")
 
@@ -106,3 +124,10 @@ internal val STRING_NULLABLE_TN = ClassName("kotlin", "String").copy(nullable = 
 
 // The shipped unsigned-LEB128 codec a generated enum field rides its ordinal on.
 internal val UNSIGNED_VARINT_CODEC_CN = ClassName("com.ditchoom.buffer.codec", "UnsignedVarIntCodec")
+
+// Upper bound on the initial capacity a `@Count` list decode pre-allocates from
+// the decoded element count. A hostile varint can request up to 2^31-1 elements;
+// pre-sizing to that would let a few header bytes force a huge allocation. The
+// list still grows past this cap when a frame legitimately carries more elements
+// (the underlying buffer reads fail fast long before that on a truncated frame).
+internal const val COUNT_PREFETCH_CAP = 1024

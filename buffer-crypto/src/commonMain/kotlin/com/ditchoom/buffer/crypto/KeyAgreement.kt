@@ -16,7 +16,7 @@ import com.ditchoom.buffer.ReadBuffer
  * **Raw Diffie–Hellman output is never handed back as a key.** A raw X25519/ECDH shared secret
  * is not a uniformly random key (it lives in a structured subset of the field), so every public
  * entry point here runs the raw secret through HKDF-Extract-then-Expand ([Hkdf]) with a
- * caller-supplied `info` (and optional `salt`) for domain separation, and returns the *derived*
+ * caller-supplied [Info] (and optional [Salt]) for domain separation, and returns the *derived*
  * key material. The raw secret is allocated in a wiped [SecureBuffer] and zeroed before return,
  * even on the failure path. The library exposes no API that returns the raw secret.
  *
@@ -38,12 +38,15 @@ import com.ditchoom.buffer.ReadBuffer
  *    coordinate size (32 / 48 / 66 bytes for P-256 / P-384 / P-521).
  *  - **ECDH private key** — big-endian scalar of the curve's coordinate width.
  *
- * # API shape (mirrors `:buffer-compression`)
+ * # API shape (capability witness)
  *
- * A synchronous [deriveSharedSecret] `expect fun` for platforms with a synchronous native KA, a
- * `supportsSync…` capability flag per curve, and a [deriveSharedSecretAsync] suspend wrapper that
- * also covers web (WebCrypto KA is Promise-only). Where a curve is unsupported the sync function
- * throws [UnsupportedOperationException] and its flag is `false`.
+ * Key-agreement operations are reached through a **capability witness**, not throwing top-level
+ * functions: the platform's witness for a curve ([CryptoCapabilities.keyAgreement]) reifies what
+ * that platform supports as a `sealed` value, so an operation a platform lacks (a synchronous path
+ * on the web) is simply not reachable — the variance lives in the type, not in a runtime throw. A
+ * consumer `when`s over the witness exhaustively and the compiler proves every reachable path is
+ * satisfiable. See [KeyAgreementSupport]. Key construction stays as the plain
+ * [KeyAgreementPublicKey.of] / [importPrivateKey] factories (it never "lacks" on a platform).
  */
 sealed interface KeyAgreementCurve {
     /** Human-readable curve name, used only in [InvalidPublicKey.curve] (never carries secrets). */
@@ -91,64 +94,155 @@ sealed interface KeyAgreementCurve {
     }
 }
 
+// =============================================================================
+// Key types (sealed: only library-provided keys; impls are internal)
+// =============================================================================
+
 /**
  * A peer's **public** key for [curve], encoded per the [KeyAgreementCurve] contract.
  *
- * Public keys are not secret, so the backing buffer is an ordinary [ReadBuffer]. Construct one
- * from received bytes with [KeyAgreementCurve] of the expected curve; the length is validated
- * against [KeyAgreementCurve.publicKeyBytes] eagerly so a wrong-curve or truncated key fails fast.
+ * Public keys are not secret, so [encoded] is an ordinary [ReadBuffer]. This is a `sealed
+ * interface` with an internal in-memory impl (like [VerifyKey]) so a hardware-backed public key can
+ * be added later as a non-breaking minor; it carries its [provenance] for symmetry with the private
+ * key. Construct one from received bytes with [of]; the length is validated against
+ * [KeyAgreementCurve.publicKeyBytes] eagerly so a wrong-curve or truncated key fails fast.
  */
-class KeyAgreementPublicKey(
-    val curve: KeyAgreementCurve,
-    encoded: ReadBuffer,
-) {
-    /** The encoded public key bytes, kept read-ready (position 0 .. limit). */
+sealed interface KeyAgreementPublicKey {
+    /** The curve this public key lives on. */
+    val curve: KeyAgreementCurve
+
+    /** Whether the key material is in software memory or hardware-backed. */
+    val provenance: KeyProvenance
+
+    /** The encoded public key bytes, kept read-ready (position 0 .. limit). Not secret. */
     val encoded: ReadBuffer
 
-    init {
-        require(encoded.remaining() == curve.publicKeyBytes) {
-            "${curve.curveName} public key must be ${curve.publicKeyBytes} bytes, was ${encoded.remaining()}"
+    companion object {
+        /**
+         * A public key for [curve] from its [encoded] bytes (the [KeyAgreementCurve] public-key
+         * encoding). The length is validated eagerly; the buffer is sliced so the caller may reuse
+         * theirs. Throws [IllegalArgumentException] on a wrong-length encoding.
+         */
+        fun of(
+            curve: KeyAgreementCurve,
+            encoded: ReadBuffer,
+        ): KeyAgreementPublicKey {
+            require(encoded.remaining() == curve.publicKeyBytes) {
+                "${curve.curveName} public key must be ${curve.publicKeyBytes} bytes, was ${encoded.remaining()}"
+            }
+            return InMemoryKeyAgreementPublicKey(curve, encoded.slice())
         }
-        this.encoded = encoded.slice()
     }
+}
+
+/** In-memory [KeyAgreementPublicKey]: holds the (non-secret) public key bytes. */
+internal class InMemoryKeyAgreementPublicKey(
+    override val curve: KeyAgreementCurve,
+    override val encoded: ReadBuffer,
+) : KeyAgreementPublicKey {
+    override val provenance: KeyProvenance get() = KeyProvenance.Software
 }
 
 /**
- * A **private** key for [curve]. The encoded scalar lives in a [SecureBuffer] that is wiped on
- * [close]; never log or serialize it. Pair with a [KeyAgreementPublicKey] of the same curve.
+ * A **private** key for [curve]. This is a `sealed interface` (like [SigningKey]); the only
+ * implementation downstream can construct is the in-memory one produced by [generateKeyPair] /
+ * [importPrivateKey]. Because downstream cannot name the implementation, it cannot write an
+ * exhaustive `when` over it — which is what lets a hardware-backed variant be added later as a
+ * non-breaking minor. The key carries its [provenance] (software/hardware) so a caller can branch
+ * on whether the material is exportable without inspecting it.
  *
- * A private key normally comes from [generateKeyPair], which produces it via the platform CSPRNG.
- * Importing externally-held key bytes is supported for interop via the secondary constructor.
+ * In-memory key material lives in a wiped [SecureBuffer] and is erased on [close]. Treat instances
+ * as one-shot resources; pair with a [KeyAgreementPublicKey] of the same curve.
  */
-class KeyAgreementPrivateKey internal constructor(
-    val curve: KeyAgreementCurve,
-    /** Secret scalar in a wiped [SecureBuffer]; do not retain references past [close]. */
-    val encoded: PlatformBuffer,
-) : AutoCloseable {
-    override fun close() {
-        encoded.freeNativeMemory()
-    }
+sealed interface KeyAgreementPrivateKey : AutoCloseable {
+    /** The curve this key agrees on. */
+    val curve: KeyAgreementCurve
+
+    /** Whether the key material is in software memory or hardware-backed. */
+    val provenance: KeyProvenance
+
+    /**
+     * Exports the encoded private scalar (the [KeyAgreementCurve] private-key encoding) into a
+     * freshly allocated buffer from [factory], for persistence / interop. Returns a copy for a
+     * [KeyProvenance.Software] key; a hardware-backed key holds no exportable material and throws
+     * [CryptoMisuseException]. Throws if the key has been [close]d.
+     */
+    fun exportEncoded(factory: BufferFactory = BufferFactory.Default): ReadBuffer
 }
 
-/** A freshly generated key pair for one [KeyAgreementCurve]. Close the [privateKey] to wipe it. */
-class KeyAgreementKeyPair internal constructor(
-    val curve: KeyAgreementCurve,
-    val privateKey: KeyAgreementPrivateKey,
-    val publicKey: KeyAgreementPublicKey,
-) : AutoCloseable {
+/**
+ * In-memory [KeyAgreementPrivateKey]: holds the secret scalar in a wiped [SecureBuffer], zeroed on
+ * [close].
+ */
+internal class InMemoryKeyAgreementPrivateKey(
+    override val curve: KeyAgreementCurve,
+    private val material: PlatformBuffer,
+) : KeyAgreementPrivateKey {
+    override val provenance: KeyProvenance get() = KeyProvenance.Software
+    private var closed = false
+
+    /** Zeroes and frees the key material. Idempotent. */
+    override fun close() {
+        if (!closed) {
+            closed = true
+            material.freeNativeMemory()
+        }
+    }
+
+    /** The live key material; throws if the key has been [close]d. */
+    fun requireOpen(): PlatformBuffer {
+        check(!closed) { "KeyAgreementPrivateKey already closed" }
+        return material
+    }
+
+    override fun exportEncoded(factory: BufferFactory): ReadBuffer = copyBuffer(requireOpen(), factory)
+}
+
+/** A key pair for one [KeyAgreementCurve]. Close the pair (or its [privateKey]) to wipe the scalar. */
+sealed interface KeyAgreementKeyPair : AutoCloseable {
+    /** The curve this pair lives on. */
+    val curve: KeyAgreementCurve
+
+    /** The private key; close it (or this pair) to wipe the scalar. */
+    val privateKey: KeyAgreementPrivateKey
+
+    /** The matching public key. */
+    val publicKey: KeyAgreementPublicKey
+
     override fun close() {
         privateKey.close()
     }
 }
 
+/** In-memory [KeyAgreementKeyPair] produced by the platform glue / imports. */
+internal class InMemoryKeyAgreementKeyPair(
+    override val curve: KeyAgreementCurve,
+    override val privateKey: KeyAgreementPrivateKey,
+    override val publicKey: KeyAgreementPublicKey,
+) : KeyAgreementKeyPair
+
 /**
- * Generates a [curve] key pair using the platform's native CSPRNG. The returned private key is
- * held in a wiped [SecureBuffer]; close the pair (or its private key) to zero it.
- *
- * Throws [UnsupportedOperationException] when [curve] has no synchronous native support on this
- * platform (its `supportsSync…` flag is `false`); use [generateKeyPairAsync] there.
+ * The in-memory private scalar, for the platform bridges. A hardware-backed key (added later) holds
+ * no exportable material and would route through a provider path instead, so this seam is only
+ * reached for in-memory keys. Throws if the key was already [KeyAgreementPrivateKey.close]d.
  */
-expect fun generateKeyPair(curve: KeyAgreementCurve): KeyAgreementKeyPair
+internal fun KeyAgreementPrivateKey.requireInMemoryMaterial(): PlatformBuffer =
+    when (this) {
+        is InMemoryKeyAgreementPrivateKey -> requireOpen()
+    }
+
+/** Builds an in-memory private key wrapping [material] (a wiped [SecureBuffer], read-ready). */
+internal fun keyAgreementPrivateKeyOf(
+    curve: KeyAgreementCurve,
+    material: PlatformBuffer,
+): KeyAgreementPrivateKey = InMemoryKeyAgreementPrivateKey(curve, material)
+
+/** Builds an in-memory key pair from a matching [privateKey] / [publicKey]. */
+internal fun keyAgreementKeyPairOf(
+    curve: KeyAgreementCurve,
+    privateKey: KeyAgreementPrivateKey,
+    publicKey: KeyAgreementPublicKey,
+): KeyAgreementKeyPair = InMemoryKeyAgreementKeyPair(curve, privateKey, publicKey)
 
 /**
  * Imports an externally-held private key for [curve] from its encoded scalar (the
@@ -163,72 +257,186 @@ fun importPrivateKey(
     require(encoded.remaining() == curve.privateKeyBytes) {
         "${curve.curveName} private key must be ${curve.privateKeyBytes} bytes, was ${encoded.remaining()}"
     }
-    val secure = secureScratch.allocate(curve.privateKeyBytes)
-    val start = encoded.position()
-    for (i in 0 until curve.privateKeyBytes) secure.writeByte(encoded.get(start + i))
-    secure.resetForRead()
-    return KeyAgreementPrivateKey(curve, secure)
+    return keyAgreementPrivateKeyOf(curve, copyBuffer(encoded, secureScratch))
+}
+
+// =============================================================================
+// Capability witness: operations live ON the witness the platform supplies
+// =============================================================================
+
+/**
+ * Key-agreement operations available through *some* path. Both [generateKeyPair] and
+ * [deriveSharedSecret] are `suspend`; on platforms with a synchronous native KA the witness is a
+ * [KeyAgreementBlockingOps], which adds the non-suspend entry points. Every op is bound to the
+ * [curve] the witness was resolved for.
+ */
+interface KeyAgreementAsyncOps {
+    /** The curve these ops agree on (the curve the witness was resolved for). */
+    val curve: KeyAgreementCurve
+
+    /** Generates a [curve] key pair using the platform CSPRNG. Close the pair to wipe the scalar. */
+    suspend fun generateKeyPair(): KeyAgreementKeyPair
+
+    /**
+     * Computes the raw Diffie–Hellman shared secret of [privateKey] and [peerPublicKey] (which must
+     * be on this [curve]) and immediately derives [length] bytes of key material from it with HKDF —
+     * extract-then-expand keyed by the shared secret, domain-separated by [info] and optional
+     * [salt]. The raw secret is wiped before this returns.
+     *
+     * The result is allocated from [factory]; pass `BufferFactory.deterministic().secure()` if the
+     * derived material must itself be wiped after use.
+     *
+     * @throws InvalidPublicKey if the peer key is low-order / off-curve / identity, or (X25519) the
+     *   raw secret is all-zero (RFC 7748 §6.1).
+     */
+    suspend fun deriveSharedSecret(
+        privateKey: KeyAgreementPrivateKey,
+        peerPublicKey: KeyAgreementPublicKey,
+        info: Info,
+        length: Int,
+        salt: Salt = Salt.None,
+        factory: BufferFactory = BufferFactory.Default,
+    ): ReadBuffer
+}
+
+/** Key agreement with a synchronous (non-`suspend`) path, in addition to the inherited async one. */
+interface KeyAgreementBlockingOps : KeyAgreementAsyncOps {
+    /** Synchronous [KeyAgreementAsyncOps.generateKeyPair]. */
+    fun generateKeyPairBlocking(): KeyAgreementKeyPair
+
+    /** Synchronous [KeyAgreementAsyncOps.deriveSharedSecret]. */
+    fun deriveSharedSecretBlocking(
+        privateKey: KeyAgreementPrivateKey,
+        peerPublicKey: KeyAgreementPublicKey,
+        info: Info,
+        length: Int,
+        salt: Salt = Salt.None,
+        factory: BufferFactory = BufferFactory.Default,
+    ): ReadBuffer
 }
 
 /**
- * Computes the raw Diffie–Hellman shared secret of [privateKey] and [peerPublicKey] (which must
- * be on the same curve) and immediately derives [length] bytes of key material from it with
- * HKDF — extract-then-expand keyed by the shared secret, domain-separated by [info] (required)
- * and [salt] (optional). The raw secret is wiped before this returns.
+ * Capability witness for key agreement over a curve on this platform:
  *
- * The result is allocated from [factory]; pass `BufferFactory.deterministic().secure()` if the
- * derived material must itself be wiped after use.
+ *  - [Blocking] — a synchronous native path exists (JVM/Android/Apple/Linux for the supported
+ *    curves); [ops] also satisfies [KeyAgreementAsyncOps].
+ *  - [AsyncOnly] — only the async path exists (JS/WASM, where WebCrypto is `suspend`-only).
+ *  - [Unavailable] — the curve cannot be reached at all on this platform (e.g. X25519 on a JCA
+ *    provider that lacks `XDH`, such as Android < 34).
  *
- * @throws InvalidPublicKey if the peer key is low-order / off-curve / identity, or (X25519) the
- *   raw secret is all-zero (RFC 7748 §6.1).
- * @throws UnsupportedOperationException if the curve lacks synchronous native support here.
+ * Reached via [CryptoCapabilities.keyAgreement]. Because an unsupported op is not a member of the
+ * resolved witness, it is unrepresentable rather than a runtime throw.
  */
-expect fun deriveSharedSecret(
-    privateKey: KeyAgreementPrivateKey,
-    peerPublicKey: KeyAgreementPublicKey,
-    info: ReadBuffer,
-    length: Int,
-    salt: ReadBuffer? = null,
-    factory: BufferFactory = BufferFactory.Default,
-): ReadBuffer
+sealed interface KeyAgreementSupport {
+    /** The curve is not available on this platform (cannot be reached at all). */
+    data object Unavailable : KeyAgreementSupport
 
-/** Whether this platform can run [generateKeyPair]/[deriveSharedSecret] for X25519 synchronously. */
-expect val supportsSyncX25519: Boolean
+    /** Async-only path available (e.g. WebCrypto). Only [KeyAgreementAsyncOps] is reachable. */
+    data class AsyncOnly(
+        val ops: KeyAgreementAsyncOps,
+    ) : KeyAgreementSupport
 
-/** Whether this platform can run [generateKeyPair]/[deriveSharedSecret] for ECDH P-256 synchronously. */
-expect val supportsSyncEcdhP256: Boolean
+    /** A synchronous native path is available; [ops] also satisfies [KeyAgreementAsyncOps]. */
+    data class Blocking(
+        val ops: KeyAgreementBlockingOps,
+    ) : KeyAgreementSupport
+}
 
-/** Whether this platform can run [generateKeyPair]/[deriveSharedSecret] for ECDH P-384 synchronously. */
-expect val supportsSyncEcdhP384: Boolean
+/**
+ * The key-agreement capability for [curve] on this platform: [KeyAgreementSupport.Blocking] on
+ * JVM/Android/Apple/Linux for supported curves, [KeyAgreementSupport.AsyncOnly] on JS/WASM
+ * (WebCrypto is `suspend`-only), [KeyAgreementSupport.Unavailable] where the curve is absent (e.g.
+ * X25519 on Android < 34). On the web, whether the engine actually supports X25519 is
+ * feature-detected at call time, so the X25519 witness is [KeyAgreementSupport.AsyncOnly] and the
+ * async op throws if the engine lacks it.
+ */
+expect fun CryptoCapabilities.keyAgreement(curve: KeyAgreementCurve): KeyAgreementSupport
 
-/** Whether this platform can run [generateKeyPair]/[deriveSharedSecret] for ECDH P-521 synchronously. */
-expect val supportsSyncEcdhP521: Boolean
-
-/** Whether [curve] has synchronous native support on this platform. */
-fun supportsSync(curve: KeyAgreementCurve): Boolean =
-    when (curve) {
-        KeyAgreementCurve.X25519 -> supportsSyncX25519
-        KeyAgreementCurve.P256 -> supportsSyncEcdhP256
-        KeyAgreementCurve.P384 -> supportsSyncEcdhP384
-        KeyAgreementCurve.P521 -> supportsSyncEcdhP521
+/** Resolves the [curve] witness to its async ops, throwing if the curve is unavailable here. */
+internal fun keyAgreementAsyncOps(curve: KeyAgreementCurve): KeyAgreementAsyncOps =
+    when (val w = CryptoCapabilities.keyAgreement(curve)) {
+        is KeyAgreementSupport.Blocking -> w.ops
+        is KeyAgreementSupport.AsyncOnly -> w.ops
+        KeyAgreementSupport.Unavailable ->
+            throw UnsupportedOperationException("${curve.curveName} key agreement is unavailable on this platform")
     }
 
-/**
- * Async [generateKeyPair]. On JVM/Android/Apple this delegates to the synchronous native call;
- * on js/wasmJs it drives WebCrypto's Promise-based `generateKey`, so it works in the browser
- * where no synchronous KA exists.
- */
-expect suspend fun generateKeyPairAsync(curve: KeyAgreementCurve): KeyAgreementKeyPair
+// =============================================================================
+// Witness op implementations (common — call the per-platform expect primitives)
+// =============================================================================
 
-/**
- * Async [deriveSharedSecret]. Same KDF-on-shared-secret and public-key-validation contract; the
- * only difference is it can await WebCrypto on the web. The raw secret is wiped before returning.
- */
-expect suspend fun deriveSharedSecretAsync(
+/** Key-agreement ops over the synchronous native primitives. Native async == sync. */
+internal class KeyAgreementBlockingOpsImpl(
+    override val curve: KeyAgreementCurve,
+) : KeyAgreementBlockingOps {
+    override fun generateKeyPairBlocking(): KeyAgreementKeyPair = generateKeyPairPlatform(curve)
+
+    override fun deriveSharedSecretBlocking(
+        privateKey: KeyAgreementPrivateKey,
+        peerPublicKey: KeyAgreementPublicKey,
+        info: Info,
+        length: Int,
+        salt: Salt,
+        factory: BufferFactory,
+    ): ReadBuffer = deriveSharedSecretPlatform(privateKey, peerPublicKey, info.bytesOrNull, length, salt.bytesOrNull, factory)
+
+    override suspend fun generateKeyPair(): KeyAgreementKeyPair = generateKeyPairBlocking()
+
+    override suspend fun deriveSharedSecret(
+        privateKey: KeyAgreementPrivateKey,
+        peerPublicKey: KeyAgreementPublicKey,
+        info: Info,
+        length: Int,
+        salt: Salt,
+        factory: BufferFactory,
+    ): ReadBuffer = deriveSharedSecretBlocking(privateKey, peerPublicKey, info, length, salt, factory)
+}
+
+/** Key-agreement ops over the async-only primitives (WebCrypto on JS/WASM). */
+internal class KeyAgreementAsyncOpsImpl(
+    override val curve: KeyAgreementCurve,
+) : KeyAgreementAsyncOps {
+    override suspend fun generateKeyPair(): KeyAgreementKeyPair = generateKeyPairAsyncPlatform(curve)
+
+    override suspend fun deriveSharedSecret(
+        privateKey: KeyAgreementPrivateKey,
+        peerPublicKey: KeyAgreementPublicKey,
+        info: Info,
+        length: Int,
+        salt: Salt,
+        factory: BufferFactory,
+    ): ReadBuffer = deriveSharedSecretAsyncPlatform(privateKey, peerPublicKey, info.bytesOrNull, length, salt.bytesOrNull, factory)
+}
+
+// =============================================================================
+// Per-platform primitives — internal seam driven by the witness ops above
+// =============================================================================
+//
+// On JS/WASM the synchronous primitives throw (the witness there is AsyncOnly, so they are never
+// reached). On native platforms the async primitives fulfil synchronously.
+
+/** Synchronous key-pair generation. Throws on JS/WASM (witness is AsyncOnly there). */
+internal expect fun generateKeyPairPlatform(curve: KeyAgreementCurve): KeyAgreementKeyPair
+
+/** Synchronous derive-shared-secret. Throws on JS/WASM (witness is AsyncOnly there). */
+internal expect fun deriveSharedSecretPlatform(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,
-    info: ReadBuffer,
+    info: ReadBuffer?,
     length: Int,
-    salt: ReadBuffer? = null,
-    factory: BufferFactory = BufferFactory.Default,
+    salt: ReadBuffer?,
+    factory: BufferFactory,
+): ReadBuffer
+
+/** Async key-pair generation — native fulfils synchronously; JS/WASM drives WebCrypto. */
+internal expect suspend fun generateKeyPairAsyncPlatform(curve: KeyAgreementCurve): KeyAgreementKeyPair
+
+/** Async derive-shared-secret — native fulfils synchronously; JS/WASM drives WebCrypto. */
+internal expect suspend fun deriveSharedSecretAsyncPlatform(
+    privateKey: KeyAgreementPrivateKey,
+    peerPublicKey: KeyAgreementPublicKey,
+    info: ReadBuffer?,
+    length: Int,
+    salt: ReadBuffer?,
+    factory: BufferFactory,
 ): ReadBuffer

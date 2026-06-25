@@ -162,5 +162,8 @@ class CharacterDecodingException(
  *
  * @param config Decoder configuration. Default: [StreamingStringDecoderConfig.DEFAULT]
  * @return A new StreamingStringDecoder instance
+ *
+ * ktlint (no .editorconfig) collapses this signature onto one line, so it cannot be wrapped.
  */
+@Suppress("MaxLineLength")
 expect fun StreamingStringDecoder(config: StreamingStringDecoderConfig = StreamingStringDecoderConfig.DEFAULT): StreamingStringDecoder

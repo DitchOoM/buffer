@@ -22,6 +22,13 @@ import com.squareup.kotlinpoet.U_SHORT
  * is byte-identical (verified by the snapshot suite).
  */
 
+/** Inclusive `Int`-domain upper bounds of the unsigned `@PacketType` discriminator ranges. */
+private const val UBYTE_MAX_INT = 0xFF
+private const val USHORT_MAX_INT = 0xFFFF
+
+private const val NON_DISPATCH_VALUE_KIND_ERROR =
+    "Long / ULong / Float / Double are not in DISPATCH_VALUE_RETURN_KINDS — analyze should have rejected this kind"
+
 internal fun scalarTypeName(kind: ScalarKind): TypeName =
     when (kind) {
         ScalarKind.Boolean -> BOOLEAN
@@ -61,13 +68,13 @@ internal fun dispatchValuePacketTypeRange(kind: ScalarKind): IntRange =
     when (kind) {
         ScalarKind.Boolean -> 0..1
         ScalarKind.Byte -> Byte.MIN_VALUE.toInt()..Byte.MAX_VALUE.toInt()
-        ScalarKind.UByte -> 0..0xFF
+        ScalarKind.UByte -> 0..UBYTE_MAX_INT
         ScalarKind.Short -> Short.MIN_VALUE.toInt()..Short.MAX_VALUE.toInt()
-        ScalarKind.UShort -> 0..0xFFFF
+        ScalarKind.UShort -> 0..USHORT_MAX_INT
         ScalarKind.Int -> Int.MIN_VALUE..Int.MAX_VALUE
         ScalarKind.UInt -> 0..Int.MAX_VALUE
         ScalarKind.Long, ScalarKind.ULong, ScalarKind.Float, ScalarKind.Double ->
-            error("Long / ULong / Float / Double are not in DISPATCH_VALUE_RETURN_KINDS — analyze should have rejected this kind")
+            error(NON_DISPATCH_VALUE_KIND_ERROR)
     }
 
 /**
@@ -92,7 +99,7 @@ internal fun dispatchValueIntCoercion(
         ScalarKind.UInt,
         -> "$propertyAccess.toInt()"
         ScalarKind.Long, ScalarKind.ULong, ScalarKind.Float, ScalarKind.Double ->
-            error("Long / ULong / Float / Double are not in DISPATCH_VALUE_RETURN_KINDS — analyze should have rejected this kind")
+            error(NON_DISPATCH_VALUE_KIND_ERROR)
     }
 
 /**
