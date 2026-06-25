@@ -110,6 +110,10 @@ const config: Config = {
               href: 'pathname:///api/buffer-flow/index.html',
               label: 'Buffer Flow',
             },
+            {
+              href: 'pathname:///api/buffer-crypto/index.html',
+              label: 'Buffer Crypto',
+            },
           ],
         },
         {
