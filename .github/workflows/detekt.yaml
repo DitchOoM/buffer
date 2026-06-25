@@ -40,7 +40,7 @@ jobs:
       contents: read
       security-events: write # upload detekt SARIF to the code-scanning dashboard
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
@@ -88,7 +88,7 @@ jobs:
       - name: Upload detekt SARIF to code scanning
         if: always()
         continue-on-error: true # never block on the upload itself
-        uses: github/codeql-action/upload-sarif@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
         with:
           sarif_file: build/reports/detekt-merged.sarif
           category: detekt
