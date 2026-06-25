@@ -70,7 +70,7 @@ interface ByteSink {
     }
 
     /** Gather-writes [buffers] using the injected [writePolicy]. */
-    suspend fun writeGathered(buffers: List<ReadBuffer>): BytesWritten = writeGathered(buffers, writePolicy.toDeadline())
+    suspend fun writeGathered(buffers: List<ReadBuffer>) = writeGathered(buffers, writePolicy.toDeadline())
 
     /**
      * Finish/close the **send** side (a stream-level FIN), so the peer sees end-of-send. Idempotent.
