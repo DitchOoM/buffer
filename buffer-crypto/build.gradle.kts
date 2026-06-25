@@ -365,11 +365,12 @@ kotlin {
             macosX64()
         }
     } else if (HostManager.hostIsLinux) {
-        if (System.getProperty("os.arch") == "aarch64") {
-            linuxArm64()
-        } else {
-            linuxX64()
-        }
+        // Register BOTH linux targets locally (mirrors buffer-flow/buffer-codec) so the linuxArm64
+        // klib publishes to mavenLocal even on an x64 host — socket-quic-quiche's linuxArm64 seam
+        // swap (buffer-crypto.sha256) needs it to resolve. The non-host arch libcrypto.a is prebuilt
+        // under libs/boringssl/linux-arm64 (buildBoringSslArm64 is a no-op when already present).
+        linuxX64()
+        linuxArm64()
     }
 
     // AES-GCM on Apple needs CommonCrypto's streaming GCM entry points, which live in the
