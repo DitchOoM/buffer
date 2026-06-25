@@ -115,6 +115,9 @@ jobs:
     uses: ./.github/workflows/build-linux.yaml
     with:
       gradle-args: ${{ needs.check-release.outputs.gradle-args }}
+      # For an actual release/draft publish-to-Central, force a clean, cache-free rebuild
+      # of the published artifacts. Non-publishing flows (dry-run) reuse the build cache.
+      clean-publish: ${{ needs.check-release.outputs.flow == 'release' || needs.check-release.outputs.flow == 'draft' }}
 
   build-apple:
     needs: check-release
@@ -122,6 +125,9 @@ jobs:
     uses: ./.github/workflows/build-apple.yaml
     with:
       gradle-args: ${{ needs.check-release.outputs.gradle-args }}
+      # For an actual release/draft publish-to-Central, force a clean, cache-free rebuild
+      # of the published artifacts. Non-publishing flows (dry-run) reuse the build cache.
+      clean-publish: ${{ needs.check-release.outputs.flow == 'release' || needs.check-release.outputs.flow == 'draft' }}
 
   validate:
     needs: [check-release, build-linux, build-apple]

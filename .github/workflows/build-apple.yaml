@@ -8,6 +8,11 @@ on:
         required: false
         default: ""
         type: string
+      clean-publish:
+        description: "Publish with --no-build-cache (clean rebuild from source). Set true for the actual release/publish-to-Central path."
+        required: false
+        default: false
+        type: boolean
     outputs:
       version:
         description: "Computed next version"
@@ -47,15 +52,29 @@ jobs:
           key: konan-macos-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: konan-macos-
 
+      # Cache the Gradle module caches + local build cache (~/.gradle/caches/build-cache-1)
+      # so compiled klibs, cinterop klibs, and the per-target native shim archives survive
+      # across runs. Keyed on the build definition (version catalog, build scripts, wrapper);
+      # restore-keys fall back to the most recent partial match when those change.
+      - name: Cache Gradle build outputs
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        with:
+          path: ~/.gradle/caches
+          key: gradle-macos-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-macos-
+
       - name: Get version
         id: version
         run: echo "version=$(./gradlew -q nextVersion ${{ inputs.gradle-args }})" >> $GITHUB_OUTPUT
 
       - name: Run Apple target tests
-        run: ./gradlew macosArm64Test iosSimulatorArm64Test --no-build-cache ${{ inputs.gradle-args }}
+        run: ./gradlew macosArm64Test iosSimulatorArm64Test ${{ inputs.gradle-args }}
 
+      # The release/publish-to-Central path passes clean-publish: true to force a cold,
+      # cache-free rebuild of the published artifacts. PR validation reuses the build cache.
       - name: Publish to Maven Local
-        run: ./gradlew publishToMavenLocal --no-build-cache ${{ inputs.gradle-args }}
+        run: ./gradlew publishToMavenLocal ${{ inputs.clean-publish && '--no-build-cache' || '' }} ${{ inputs.gradle-args }}
 
       - name: Upload Maven local artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
