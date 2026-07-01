@@ -443,6 +443,73 @@ when (val hw = CryptoCapabilities.hardware) {
 
 The per-platform results of these checks are the [capability matrix](#per-platform-capability-matrix) below.
 
+## Biometric / user-authenticated hardware keys
+
+A hardware-backed key can be **bound to user authentication inside the secure element** at
+generation — the OS refuses an unauthenticated operation no matter what the process does. Bound
+keys come from a `UserAuthenticatedKeyProvider`, obtained by handing the platform's prompt host to
+the `userAuthenticated(...)` extension; the policies themselves are pure data:
+
+```kotlin
+sealed interface UserAuthenticationPolicy {
+    data class Session(val validity: Duration,
+                       val method: UserAuthenticationMethod = BiometricOrCredential)
+    data class PerUse(val method: UserAuthenticationMethod = BiometricOnly)
+}
+```
+
+Because the prompt host is captured when the provider is constructed, "a bound key without a
+prompt" is a compile error, not a runtime exception — the base `HardwareKeyProvider` keeps only
+the advisory `HardwareKeySpec.authorization` gate and mints unbound keys, exactly as before.
+
+- **`Session(validity)`** — one successful authentication unlocks the key for the window; ops
+  inside it never re-prompt (the provider prompts *lazily*, only when the OS reports the window
+  stale). Android enforces the window in the keystore; the Apple Enclave has no timed window, so
+  the window is library-tracked there while the authentication itself stays OS-enforced.
+- **`PerUse()`** — every operation requires a fresh authentication bound to that exact operation
+  (Android `BiometricPrompt.CryptoObject` wrapping the exact `Cipher`/`Signature`; Apple a fresh,
+  un-evaluated `LAContext`, so the Enclave prompts during the sign itself).
+- **`method`** — `BiometricOnly` (strong biometric; the OS invalidates the key when enrollment
+  changes → `HardwareKeyException.KeyInvalidated`) or `BiometricOrCredential` (biometric or the
+  device PIN/passcode).
+
+The prompt needs UI context that common code cannot express, so `userAuthenticated(...)` is a
+**platform** extension — its parameter type is the platform's prompt host, which is exactly the
+one line of platform code the app had to write anyway:
+
+```kotlin
+// Android (androidMain) — androidx.biometric prompt host
+val authed = hw.provider.userAuthenticated(
+    BiometricPromptAuthenticator(activity, title = "Unlock signing key"),
+)
+
+// Apple (appleMain) — LocalAuthentication
+val authed = hw.provider.userAuthenticated(
+    LocalAuthAuthenticator(reason = "Sign the audit record"),
+)
+
+// Common code from here on — policies are pure data, keys are ordinary SigningKey / AesGcmKey:
+val key = authed?.generateSigning(
+    SignatureScheme.EcdsaP256,
+    UserAuthenticationPolicy.Session(5.minutes),
+)
+// first op in the window prompts; later ops are silent; expiry re-prompts
+```
+
+`userAuthenticated` returns `null` where OS user authentication cannot be driven (a non-platform
+provider, tvOS, a closed authenticator) — witness-style honesty, like
+`CryptoCapabilities.hardware` itself.
+
+Typed outcomes to branch on: a denied/cancelled prompt is `AuthorizationFailed`; a stale session
+the user must re-authenticate is `HardwareKeyException.UserAuthenticationRequired`; biometric
+re-enrollment invalidating a `BiometricOnly` key is `HardwareKeyException.KeyInvalidated`.
+
+Platform notes: Android requires a secure lock screen to generate auth-bound keys (API 30+ uses
+`setUserAuthenticationParameters`; 28/29 the legacy validity-duration API, where `method` cannot
+be narrowed). On Apple, tvOS has no LocalAuthentication and watchOS has no discrete biometric
+policy (wrist detection / passcode stands in), so `BiometricOnly` degrades accordingly. Platforms
+without a secure element (`HardwareSupport.Unavailable`) never reach these values.
+
 ## Using buffer-crypto with buffer-codec
 
 `buffer-crypto` and `buffer-codec` are deliberately **independent siblings over `:buffer`** — neither module depends on the other, and no `Codec` ever calls a crypto op. You compose them in application code: the codec owns the wire envelope, crypto owns the payload.

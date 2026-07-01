@@ -1,6 +1,8 @@
 package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.crypto.CryptoTestVectors.hexBuffer
+import kotlin.time.TimeMark
+import kotlin.time.TimeSource
 
 /*
  * A test fake for [HardwareKeyProvider]. No platform ships a real secure-element backend in 6.0, so
@@ -23,7 +25,63 @@ import com.ditchoom.buffer.crypto.CryptoTestVectors.hexBuffer
  */
 internal class FakeHardware(
     override val dedicatedSecureElement: Boolean = true,
+    /** Injectable clock so tests can advance a [UserAuthenticationPolicy.Session] window. */
+    private val timeSource: TimeSource = TimeSource.Monotonic,
 ) : HardwareKeyProvider {
+    /**
+     * Models the per-key auth behavior a real provider implements: an advisory gate (`policy` ==
+     * null) and [UserAuthenticationPolicy.PerUse] evaluate the gate before *every* op (advisory /
+     * bound-per-op respectively — observably identical here, where no OS prompt exists);
+     * [UserAuthenticationPolicy.Session] evaluates it only when the validity window is stale, then
+     * remembers the successful authentication.
+     */
+    private inner class FakeAuthPolicy(
+        private val gate: HardwareAuthorization,
+        private val policy: UserAuthenticationPolicy?,
+    ) {
+        private var windowStart: TimeMark? = null
+
+        suspend fun beforeOp() {
+            when (val p = policy) {
+                null,
+                is UserAuthenticationPolicy.PerUse,
+                -> if (!gate.authorize()) throw AuthorizationFailed()
+
+                is UserAuthenticationPolicy.Session -> {
+                    val withinWindow = windowStart?.let { it.elapsedNow() < p.validity } == true
+                    if (!withinWindow) {
+                        if (!gate.authorize()) throw AuthorizationFailed()
+                        windowStart = timeSource.markNow()
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * The fake counterpart of the platform `userAuthenticated(...)` extensions: captures the
+     * prompt [gate] at construction (as the real ones capture their platform authenticator), so
+     * the policy values handed to generate stay pure data — mirroring the production shape where
+     * a bound key without a prompt host is unrepresentable.
+     */
+    fun userAuthenticated(gate: HardwareAuthorization): UserAuthenticatedKeyProvider =
+        object : UserAuthenticatedKeyProvider {
+            override fun eligible(alg: HardwareAlgorithm): Boolean = this@FakeHardware.eligible(alg)
+
+            override suspend fun generateAesGcm(
+                policy: UserAuthenticationPolicy,
+                aesKeySizeBits: Int,
+            ): AesGcmKey = aesGcmPair(HardwareKeySpec(gate, aesKeySizeBits), policy).hardware
+
+            override suspend fun generateSigning(
+                scheme: SignatureScheme,
+                policy: UserAuthenticationPolicy,
+            ): SigningKey {
+                if (!eligible(scheme.toHardwareAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
+                return signingPair(HardwareKeySpec(gate), policy).hardware
+            }
+        }
+
     /** A hardware AES-GCM key plus the software twin (same material) the test opens with to cross-check. */
     class AesGcmPair(
         val hardware: AesGcmKey,
@@ -44,16 +102,19 @@ internal class FakeHardware(
         scheme: SignatureScheme,
         spec: HardwareKeySpec,
     ): SigningKey {
-        require(eligible(scheme.toHardwareAlgorithm())) {
-            "${scheme.schemeName} is not eligible for hardware backing"
-        }
+        if (!eligible(scheme.toHardwareAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
         return signingPair(spec).hardware
     }
 
     /** Richer result for the conformance test: the hardware key and a software twin with the same key. */
-    fun aesGcmPair(spec: HardwareKeySpec): AesGcmPair {
-        require(spec.aesKeySizeBits == AES_128_KEY_BYTES * Byte.SIZE_BITS || spec.aesKeySizeBits == AES_256_KEY_BYTES * Byte.SIZE_BITS) {
-            "AES key size must be 128 or 256 bits, was ${spec.aesKeySizeBits}"
+    fun aesGcmPair(
+        spec: HardwareKeySpec,
+        policy: UserAuthenticationPolicy? = null,
+    ): AesGcmPair {
+        if (spec.aesKeySizeBits != AES_128_KEY_BYTES * Byte.SIZE_BITS &&
+            spec.aesKeySizeBits != AES_256_KEY_BYTES * Byte.SIZE_BITS
+        ) {
+            throw HardwareKeyException.UnsupportedHardwareKey()
         }
         val material = cryptoRandom(spec.aesKeySizeBits / Byte.SIZE_BITS)
         // Two independent in-memory keys over the SAME bytes: one drives the gated closures (the
@@ -62,12 +123,12 @@ internal class FakeHardware(
         // so the test can prove the hardware seal produced standard, openable AES-GCM.
         val inner = AesGcmKey.of(material)
         val twin = AesGcmKey.of(material)
-        val auth = spec.authorization
+        val auth = FakeAuthPolicy(spec.authorization, policy)
         val hardware =
             HardwareAesGcmKey(
                 sizeBits = spec.aesKeySizeBits,
                 gatedSeal = { aad, plaintext, factory ->
-                    if (!auth.authorize()) throw AuthorizationFailed()
+                    auth.beforeOp()
                     // A real secure element generates the nonce itself, so the seam hands the closure
                     // none: the fake mints a fresh CSPRNG nonce and frames nonce ‖ ciphertext ‖ tag,
                     // exactly as the Android keystore path frames its keystore-chosen IV.
@@ -80,7 +141,7 @@ internal class FakeHardware(
                     out
                 },
                 gatedOpen = { nonce, aad, ciphertextAndTag, factory ->
-                    if (!auth.authorize()) throw AuthorizationFailed()
+                    auth.beforeOp()
                     aesGcmOpenWithNonceAsync(inner, nonce, aad, ciphertextAndTag, factory)
                 },
             )
@@ -88,15 +149,18 @@ internal class FakeHardware(
     }
 
     /** Richer result for the conformance test: the hardware signing key and its public verify key. */
-    fun signingPair(spec: HardwareKeySpec): SigningPair {
+    fun signingPair(
+        spec: HardwareKeySpec,
+        policy: UserAuthenticationPolicy? = null,
+    ): SigningPair {
         val verifyKey = VerifyKey.ecdsaP256(hexBuffer(P256_POINT_HEX))
         val inner = SigningKey.ecdsaP256(hexBuffer(P256_SCALAR_HEX), verifyKey)
-        val auth = spec.authorization
+        val auth = FakeAuthPolicy(spec.authorization, policy)
         val hardware =
             HardwareSigningKey(
                 scheme = SignatureScheme.EcdsaP256,
                 gatedSign = { message, factory ->
-                    if (!auth.authorize()) throw AuthorizationFailed()
+                    auth.beforeOp()
                     signAsyncPlatform(inner, message, factory)
                 },
                 verifyKey = verifyKey,

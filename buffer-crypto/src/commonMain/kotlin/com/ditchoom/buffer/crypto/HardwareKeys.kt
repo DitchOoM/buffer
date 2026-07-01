@@ -3,6 +3,8 @@ package com.ditchoom.buffer.crypto
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 /*
  * Hardware-backed key support — the *shape* of the API, frozen in 6.0 so a real secure-element /
@@ -67,10 +69,110 @@ internal fun SignatureScheme.toHardwareAlgorithm(): HardwareAlgorithm =
  * Returning `false` (or throwing) denies the operation, which the witness ops surface as
  * [AuthorizationFailed]. `suspend` because a real gate (a biometric prompt, a TEE round-trip) is
  * inherently asynchronous.
+ *
+ * This gate is **advisory** — library code deciding whether to proceed. Keys the secure element
+ * itself refuses without user authentication come from [UserAuthenticatedKeyProvider] instead,
+ * whose platform `userAuthenticated(...)` constructor captures a real prompt authenticator
+ * (`BiometricPromptAuthenticator` on Android, `LocalAuthAuthenticator` on Apple).
  */
 fun interface HardwareAuthorization {
     /** Returns `true` to authorize the pending hardware key operation, `false` to deny it. */
     suspend fun authorize(): Boolean
+}
+
+/**
+ * Which kinds of user authentication satisfy a [UserAuthenticationPolicy] binding. Fixed at
+ * generation and enforced by the OS, not by library code.
+ */
+enum class UserAuthenticationMethod {
+    /**
+     * A strong biometric only (fingerprint / face). The OS invalidates the key when biometric
+     * enrollment changes (Android `AUTH_BIOMETRIC_STRONG` + invalidate-on-enrollment, Apple
+     * `SecAccessControl.biometryCurrentSet`) — surfacing as [HardwareKeyException.KeyInvalidated].
+     */
+    BiometricOnly,
+
+    /**
+     * A biometric or the device credential (PIN / pattern / passcode). Survives biometric
+     * re-enrollment (Android `AUTH_BIOMETRIC_STRONG or AUTH_DEVICE_CREDENTIAL`, Apple
+     * `SecAccessControl.userPresence`).
+     */
+    BiometricOrCredential,
+}
+
+/**
+ * How an OS-bound key requires user authentication, fixed at generation. Pure data — no platform
+ * handles, identical shape on every target. A policy only ever reaches a provider through
+ * [UserAuthenticatedKeyProvider], whose platform constructor already captured the prompt
+ * authenticator — so "policy without an authenticator" is unrepresentable, not a runtime error.
+ */
+sealed interface UserAuthenticationPolicy {
+    /**
+     * One successful user authentication unlocks the key for [validity]; ops inside the window do
+     * not re-prompt. The provider prompts lazily — it attempts the op and only prompts when the
+     * OS reports the window stale — so an already-authenticated user is never re-prompted.
+     *
+     * Window enforcement is by the OS on Android (keystore auth timeout); on Apple the Enclave has
+     * no timed window, so the provider enforces [validity] by re-prompting when it expires — the
+     * OS still enforces *that a successful authentication happened* via `SecAccessControl`.
+     */
+    data class Session(
+        val validity: Duration,
+        val method: UserAuthenticationMethod = UserAuthenticationMethod.BiometricOrCredential,
+    ) : UserAuthenticationPolicy {
+        init {
+            require(validity >= 1.seconds) { "session validity must be at least 1 second, was $validity" }
+        }
+    }
+
+    /**
+     * Every operation requires a fresh user authentication bound to that exact operation (Android:
+     * auth-per-use key + `BiometricPrompt.CryptoObject` wrapping the exact `Cipher`/`Signature`;
+     * Apple: a fresh, un-evaluated `LAContext` per sign, so the Enclave prompts each time).
+     */
+    data class PerUse(
+        val method: UserAuthenticationMethod = UserAuthenticationMethod.BiometricOnly,
+    ) : UserAuthenticationPolicy
+}
+
+/**
+ * Mints hardware keys that are **bound to user authentication inside the secure element** — an op
+ * on an unauthenticated key fails in hardware no matter what the process does, unlike the advisory
+ * [HardwareKeySpec.authorization] gate on [HardwareKeyProvider]'s unbound keys.
+ *
+ * Obtained from a [HardwareKeyProvider] through a **platform** `userAuthenticated(...)` extension
+ * (androidMain takes a `BiometricAuthorization` prompt host, appleMain a `LocalAuthAuthenticator`),
+ * which returns `null` where OS user authentication cannot be driven (a non-platform provider, or
+ * a platform without the auth framework — e.g. tvOS). Because the prompt authenticator is captured
+ * at construction, the policy values stay pure data and a misconfigured request is a compile
+ * error, not a [CryptoException].
+ *
+ * Keys returned here are ordinary [AesGcmKey]/[SigningKey] values with [KeyProvenance.Hardware]:
+ * they flow through the same async witness ops as every other hardware key. What changes is only
+ * the reachable failure states: a denied/cancelled prompt is [AuthorizationFailed]; a stale
+ * session the user must re-authenticate is [HardwareKeyException.UserAuthenticationRequired]; a
+ * biometric re-enrollment invalidating a [UserAuthenticationMethod.BiometricOnly] key is
+ * [HardwareKeyException.KeyInvalidated].
+ */
+interface UserAuthenticatedKeyProvider {
+    /** Whether the underlying secure element can generate a key for [alg] (same subset as the base provider). */
+    fun eligible(alg: HardwareAlgorithm): Boolean
+
+    /**
+     * Generates a fresh AES-GCM key inside the secure element, OS-bound to [policy].
+     * [aesKeySizeBits] is 128 or 256; an unsupported size throws
+     * [HardwareKeyException.UnsupportedHardwareKey].
+     */
+    suspend fun generateAesGcm(
+        policy: UserAuthenticationPolicy,
+        aesKeySizeBits: Int = AES_256_KEY_BYTES * Byte.SIZE_BITS,
+    ): AesGcmKey
+
+    /** Generates a fresh signing key for [scheme] inside the secure element, OS-bound to [policy]. */
+    suspend fun generateSigning(
+        scheme: SignatureScheme,
+        policy: UserAuthenticationPolicy,
+    ): SigningKey
 }
 
 /**
@@ -79,8 +181,10 @@ fun interface HardwareAuthorization {
  */
 class HardwareKeySpec(
     /**
-     * The gate evaluated before each use of the generated key. The default authorizes
-     * unconditionally; a real caller supplies a biometric / device-credential prompt.
+     * The advisory gate evaluated before each use of the generated key. The default authorizes
+     * unconditionally. Library code deciding whether to proceed — *not* an OS binding; for keys
+     * the secure element itself refuses without user authentication, use the platform's
+     * `userAuthenticated(...)` extension to obtain a [UserAuthenticatedKeyProvider].
      */
     val authorization: HardwareAuthorization = HardwareAuthorization { true },
     /**
@@ -106,7 +210,16 @@ class HardwareKeySpec(
  *     [AuthorizationFailed] when it returns `false` or throws — never proceed with the crypto op;
  *  2. keep secret key material inside the secure element — never expose it through any returned type
  *     (the [KeyProvenance.Hardware] key types carry no exportable material by construction);
- *  3. refuse generation for an [alg] where [eligible] is `false`.
+ *  3. refuse generation for an [alg] where [eligible] is `false` with
+ *     [HardwareKeyException.AlgorithmNotEligible].
+ *
+ * A [UserAuthenticatedKeyProvider] obtained from this provider additionally **MUST** bind its
+ * keys' [UserAuthenticationPolicy] *inside the secure element* (Android
+ * `setUserAuthenticationRequired`, Apple `SecAccessControl`), so the binding is not bypassable by
+ * code that skips any library gate; it drives its captured platform authenticator per policy —
+ * [UserAuthenticationPolicy.Session]: lazily, when the OS reports the window stale, then retry
+ * the op exactly once; [UserAuthenticationPolicy.PerUse]: for every op, bound to the exact crypto
+ * operation where the platform supports binding.
  */
 interface HardwareKeyProvider {
     /**

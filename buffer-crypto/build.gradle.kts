@@ -483,6 +483,11 @@ kotlin {
         }
         androidMain {
             dependsOn(jvmCommonMain)
+            dependencies {
+                // `api`: BiometricPromptAuthenticator's constructor exposes FragmentActivity and
+                // BiometricPrompt types, so consumers must see them on their compile classpath.
+                api(libs.androidx.biometric)
+            }
         }
         jvmTest {
             dependsOn(jvmCommonTest)
