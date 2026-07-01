@@ -29,15 +29,22 @@ const val SHA256_BLOCK_BYTES = 64
  * scratch before returning and finalizes the digest; the instance is one-shot on every
  * platform, so [update] or [digestInto] after finalization throws [IllegalStateException].
  */
-expect class Sha256Digest() {
+expect class Sha256Digest() : AutoCloseable {
     /** Absorbs the remaining bytes of [input] (non-destructive). Returns `this` for chaining. */
     fun update(input: ReadBuffer): Sha256Digest
 
     /**
      * Finalizes and writes [SHA256_DIGEST_BYTES] bytes into [dest] at its current
      * position, advancing it. [dest] must have at least [SHA256_DIGEST_BYTES] remaining.
+     * Releases the digest state; any further [update]/[digestInto] throws [IllegalStateException].
      */
     fun digestInto(dest: WriteBuffer)
+
+    /**
+     * Releases the digest state without producing a result — for a digest abandoned before
+     * [digestInto] (which releases the state itself). Idempotent; a no-op after [digestInto].
+     */
+    override fun close()
 }
 
 /**

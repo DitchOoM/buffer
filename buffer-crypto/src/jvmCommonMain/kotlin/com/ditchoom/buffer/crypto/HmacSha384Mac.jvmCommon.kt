@@ -12,7 +12,7 @@ import javax.crypto.spec.SecretKeySpec
 /** JVM/Android HMAC-SHA384 backed by the JCA [Mac]. */
 actual class HmacSha384Mac actual constructor(
     key: ReadBuffer,
-) {
+) : AutoCloseable {
     private val mac =
         Mac.getInstance("HmacSHA384").apply {
             val managed = key.managedMemoryAccess
@@ -43,5 +43,11 @@ actual class HmacSha384Mac actual constructor(
         check(!finalized) { "mac already finalized" }
         finalized = true
         mac.doFinalInto(dest)
+    }
+
+    actual override fun close() {
+        if (finalized) return
+        finalized = true
+        mac.reset()
     }
 }

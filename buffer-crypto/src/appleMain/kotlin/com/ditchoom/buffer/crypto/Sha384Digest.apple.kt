@@ -22,7 +22,7 @@ import platform.posix.memset
  * Apple SHA-384 backed by CommonCrypto (`CC_SHA384`). SHA-384 shares SHA-512's context type
  * ([CC_SHA512_CTX]) with a distinct init. Reads and writes via buffer pointers — no arrays.
  */
-actual class Sha384Digest actual constructor() {
+actual class Sha384Digest actual constructor() : AutoCloseable {
     private val ctx = nativeHeap.alloc<CC_SHA512_CTX>()
     private var finalized = false
 
@@ -41,7 +41,17 @@ actual class Sha384Digest actual constructor() {
         finalized = true
         // CommonCrypto writes the 48-byte digest straight into the destination buffer's memory.
         dest.withWritablePointer(SHA384_DIGEST_BYTES) { ptr -> CC_SHA384_Final(ptr.reinterpret(), ctx.ptr) }
-        // The context still holds absorbed state; zero it before returning the allocation.
+        releaseCtx()
+    }
+
+    actual override fun close() {
+        if (finalized) return
+        finalized = true
+        releaseCtx()
+    }
+
+    // The context still holds absorbed state; zero it before returning the allocation.
+    private fun releaseCtx() {
         memset(ctx.ptr, 0, sizeOf<CC_SHA512_CTX>().convert())
         nativeHeap.free(ctx.rawPtr)
     }

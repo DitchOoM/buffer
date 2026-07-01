@@ -11,7 +11,7 @@ import com.ditchoom.buffer.managed
 /** js/wasmJs HMAC-SHA256 (RFC 2104) over the pure-Kotlin [Sha256Core]. Holds no primitive arrays. */
 actual class HmacSha256Mac actual constructor(
     key: ReadBuffer,
-) {
+) : AutoCloseable {
     // inner accumulates H(ipad ‖ message); opad (a managed buffer) is held for the outer hash.
     private val inner = Sha256Core()
     private val opad: PlatformBuffer = BufferFactory.managed().allocate(SHA256_BLOCK_BYTES)
@@ -55,5 +55,13 @@ actual class HmacSha256Mac actual constructor(
         outer.finish()
         for (i in 0 until SHA256_DIGEST_BYTES) dest.writeByte(outer.digestByte(i))
         opad.fill(0)
+    }
+
+    actual override fun close() {
+        // GC-managed state; nothing to free beyond wiping opad. The flag still bars further
+        // use, matching the other platforms' post-close behavior.
+        if (finalized) return
+        opad.fill(0)
+        finalized = true
     }
 }

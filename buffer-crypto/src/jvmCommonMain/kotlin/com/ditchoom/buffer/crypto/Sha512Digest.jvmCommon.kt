@@ -7,7 +7,7 @@ import com.ditchoom.buffer.WriteBuffer
 import java.security.MessageDigest
 
 /** JVM/Android SHA-512 backed by the JCA [MessageDigest]. */
-actual class Sha512Digest actual constructor() {
+actual class Sha512Digest actual constructor() : AutoCloseable {
     private val md = MessageDigest.getInstance("SHA-512")
     private var finalized = false
 
@@ -22,5 +22,11 @@ actual class Sha512Digest actual constructor() {
         check(!finalized) { "digest already finalized" }
         finalized = true
         md.digestInto(dest)
+    }
+
+    actual override fun close() {
+        if (finalized) return
+        finalized = true
+        md.reset()
     }
 }

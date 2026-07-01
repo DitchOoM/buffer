@@ -9,11 +9,14 @@ import com.ditchoom.buffer.crypto.cinterop.boringssl.bcl_sha384_final
 import com.ditchoom.buffer.crypto.cinterop.boringssl.bcl_sha384_new
 import com.ditchoom.buffer.crypto.cinterop.boringssl.bcl_sha384_update
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.UByteVar
+import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.convert
+import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.reinterpret
 
 /** Linux SHA-384 backed by BoringSSL (`SHA384_*`). Reads and writes via buffer pointers — no arrays. */
-actual class Sha384Digest actual constructor() {
+actual class Sha384Digest actual constructor() : AutoCloseable {
     private val ctx = bcl_sha384_new() ?: error("SHA384_Init failed")
     private var finalized = false
 
@@ -27,5 +30,16 @@ actual class Sha384Digest actual constructor() {
         check(!finalized) { "digest already finalized" }
         finalized = true
         dest.withWritablePointer(SHA384_DIGEST_BYTES) { ptr -> bcl_sha384_final(ctx, ptr.reinterpret()) }
+    }
+
+    actual override fun close() {
+        if (finalized) return
+        finalized = true
+        // The shim has no free-without-final: finalize into discarded stack scratch, which
+        // cleanses and frees the ctx.
+        memScoped {
+            val scratch = allocArray<UByteVar>(SHA384_DIGEST_BYTES)
+            bcl_sha384_final(ctx, scratch)
+        }
     }
 }

@@ -21,7 +21,7 @@ import platform.posix.memset
 /** Apple HMAC-SHA384 backed by CommonCrypto (`CCHmac`). Reads and writes via buffer pointers — no arrays. */
 actual class HmacSha384Mac actual constructor(
     key: ReadBuffer,
-) {
+) : AutoCloseable {
     private val ctx = nativeHeap.alloc<CCHmacContext>()
     private var finalized = false
 
@@ -44,7 +44,17 @@ actual class HmacSha384Mac actual constructor(
         finalized = true
         // CommonCrypto writes the 48-byte tag straight into the destination buffer's memory.
         dest.withWritablePointer(SHA384_DIGEST_BYTES) { ptr -> CCHmacFinal(ctx.ptr, ptr) }
-        // The context holds key-derived ipad/opad state; zero it before returning the allocation.
+        releaseCtx()
+    }
+
+    actual override fun close() {
+        if (finalized) return
+        finalized = true
+        releaseCtx()
+    }
+
+    // The context holds key-derived ipad/opad state; zero it before returning the allocation.
+    private fun releaseCtx() {
         memset(ctx.ptr, 0, sizeOf<CCHmacContext>().convert())
         nativeHeap.free(ctx.rawPtr)
     }

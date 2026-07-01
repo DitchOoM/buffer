@@ -8,7 +8,7 @@ import com.ditchoom.buffer.WriteBuffer
 /** js/wasmJs HMAC-SHA512 (RFC 2104) over the pure-Kotlin [Sha512Core]. Holds no primitive arrays. */
 actual class HmacSha512Mac actual constructor(
     key: ReadBuffer,
-) {
+) : AutoCloseable {
     private val core = Sha512FamilyHmac(key, mode384 = false, outBytes = SHA512_DIGEST_BYTES)
     private var finalized = false
 
@@ -22,5 +22,12 @@ actual class HmacSha512Mac actual constructor(
         check(!finalized) { "mac already finalized" }
         finalized = true
         core.doFinalInto(dest)
+    }
+
+    actual override fun close() {
+        // GC-managed state; nothing to free. The flag still bars further use, matching the
+        // other platforms' post-close behavior.
+        if (finalized) return
+        finalized = true
     }
 }

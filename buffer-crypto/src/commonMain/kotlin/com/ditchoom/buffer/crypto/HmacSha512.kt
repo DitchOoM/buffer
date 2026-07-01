@@ -25,15 +25,22 @@ const val HMAC_SHA512_BYTES = SHA512_DIGEST_BYTES
  */
 expect class HmacSha512Mac(
     key: ReadBuffer,
-) {
+) : AutoCloseable {
     /** Absorbs the remaining bytes of [input] (non-destructive). Returns `this` for chaining. */
     fun update(input: ReadBuffer): HmacSha512Mac
 
     /**
      * Finalizes and writes [HMAC_SHA512_BYTES] bytes into [dest] at its current
      * position, advancing it. [dest] must have at least [HMAC_SHA512_BYTES] remaining.
+     * Releases the MAC state; any further [update]/[doFinalInto] throws [IllegalStateException].
      */
     fun doFinalInto(dest: WriteBuffer)
+
+    /**
+     * Releases the (key-derived) MAC state without producing a tag — for a MAC abandoned before
+     * [doFinalInto] (which releases the state itself). Idempotent; a no-op after [doFinalInto].
+     */
+    override fun close()
 }
 
 /**
