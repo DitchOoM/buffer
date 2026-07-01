@@ -18,9 +18,12 @@ actual class Sha256Digest actual constructor() : AutoCloseable {
 
     actual fun digestInto(dest: WriteBuffer) {
         check(!finalized) { "digest already finalized" }
-        finalized = true
+        // Validate BEFORE finish(): the core's padding absorb is not re-runnable, so a
+        // short dest must fail while the state is still retryable (C1).
+        require(dest.remaining() >= SHA256_DIGEST_BYTES) { "dest needs $SHA256_DIGEST_BYTES bytes remaining, has ${dest.remaining()}" }
         core.finish()
         for (i in 0 until SHA256_DIGEST_BYTES) dest.writeByte(core.digestByte(i))
+        finalized = true
     }
 
     actual override fun close() {

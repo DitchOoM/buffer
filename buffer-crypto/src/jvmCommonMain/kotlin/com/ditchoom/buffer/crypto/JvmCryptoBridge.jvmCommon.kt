@@ -41,6 +41,11 @@ internal fun Mac.updateRemaining(buffer: ReadBuffer) {
  * buffer via `writeBytes` — the only `ByteArray` here is the one the system API produces.
  */
 internal fun MessageDigest.digestInto(dest: WriteBuffer) {
+    // Validate BEFORE digest(): JCA's digest()/doFinal() consume and auto-reset the engine,
+    // so letting a short dest fail inside writeBytes (direct path) — or silently write past
+    // the buffer's limit into a larger shared backing array (heap path) — would destroy
+    // state the caller could otherwise retry with a correctly-sized buffer.
+    require(dest.remaining() >= digestLength) { "dest needs $digestLength bytes remaining, has ${dest.remaining()}" }
     val managed = dest.managedMemoryAccess
     if (managed != null) {
         val pos = dest.position()
@@ -53,6 +58,8 @@ internal fun MessageDigest.digestInto(dest: WriteBuffer) {
 
 /** As [MessageDigest.digestInto], for an HMAC tag. */
 internal fun Mac.doFinalInto(dest: WriteBuffer) {
+    // See [MessageDigest.digestInto] — same validate-before-doFinal() rationale.
+    require(dest.remaining() >= macLength) { "dest needs $macLength bytes remaining, has ${dest.remaining()}" }
     val managed = dest.managedMemoryAccess
     if (managed != null) {
         val pos = dest.position()

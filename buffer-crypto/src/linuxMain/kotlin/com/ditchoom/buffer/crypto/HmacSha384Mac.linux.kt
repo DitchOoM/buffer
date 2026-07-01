@@ -35,8 +35,11 @@ actual class HmacSha384Mac actual constructor(
 
     actual fun doFinalInto(dest: WriteBuffer) {
         check(!finalized) { "mac already finalized" }
-        finalized = true
+        // withWritablePointer validates capacity BEFORE invoking the block, so a too-small
+        // dest throws with the ctx untouched (not yet freed by the shim) — the finalize
+        // stays retryable (C1). The flag is set only after the shim call succeeds.
         dest.withWritablePointer(HMAC_SHA384_BYTES) { ptr -> bcl_hmac_final(ctx, ptr.reinterpret()) }
+        finalized = true
     }
 
     actual override fun close() {

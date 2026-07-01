@@ -20,8 +20,10 @@ actual class Sha384Digest actual constructor() : AutoCloseable {
     actual fun digestInto(dest: WriteBuffer) {
         // JCA resets the digest for reuse; the cross-platform contract is one-shot, so reject reuse.
         check(!finalized) { "digest already finalized" }
-        finalized = true
+        // digestInto validates capacity BEFORE consuming the JCA state, so a too-small
+        // dest throws with the digest still intact — the finalize stays retryable (C1).
         md.digestInto(dest)
+        finalized = true
     }
 
     actual override fun close() {

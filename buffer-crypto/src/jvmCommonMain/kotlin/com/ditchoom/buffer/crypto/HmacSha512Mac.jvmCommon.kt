@@ -41,8 +41,10 @@ actual class HmacSha512Mac actual constructor(
     actual fun doFinalInto(dest: WriteBuffer) {
         // JCA resets the mac for reuse; the cross-platform contract is one-shot, so reject reuse.
         check(!finalized) { "mac already finalized" }
-        finalized = true
+        // doFinalInto validates capacity BEFORE consuming the JCA state, so a too-small
+        // dest throws with the MAC still intact — the finalize stays retryable (C1).
         mac.doFinalInto(dest)
+        finalized = true
     }
 
     actual override fun close() {

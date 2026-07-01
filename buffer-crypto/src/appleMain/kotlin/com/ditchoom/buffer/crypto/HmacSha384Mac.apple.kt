@@ -41,9 +41,11 @@ actual class HmacSha384Mac actual constructor(
 
     actual fun doFinalInto(dest: WriteBuffer) {
         check(!finalized) { "mac already finalized" }
-        finalized = true
         // CommonCrypto writes the 48-byte tag straight into the destination buffer's memory.
+        // withWritablePointer validates capacity BEFORE invoking the block, so a too-small
+        // dest throws here with the ctx untouched — the finalize stays retryable (C1).
         dest.withWritablePointer(SHA384_DIGEST_BYTES) { ptr -> CCHmacFinal(ctx.ptr, ptr) }
+        finalized = true
         releaseCtx()
     }
 

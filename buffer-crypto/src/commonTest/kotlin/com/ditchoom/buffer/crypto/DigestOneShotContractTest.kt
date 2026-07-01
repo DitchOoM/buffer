@@ -8,6 +8,7 @@ import com.ditchoom.buffer.crypto.CryptoTestVectors.ascii
 import com.ditchoom.buffer.crypto.CryptoTestVectors.repeatedByte
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 /**
  * The `close()` half of the streaming digest/MAC lifecycle: a never-finalized instance releases
@@ -31,6 +32,39 @@ class DigestOneShotContractTest {
         close() // idempotent — must not double-free the native ctx
         assertFailsWith<IllegalStateException> { update(ascii("x")) }
         assertFailsWith<IllegalStateException> { finalize(BufferFactory.Default.allocate(outBytes)) }
+    }
+
+    /** One instance's lifecycle ops, so helpers can create fresh instances themselves. */
+    private class Ops(
+        val update: (ReadBuffer) -> Unit,
+        val finalize: (WriteBuffer) -> Unit,
+        val close: () -> Unit,
+    )
+
+    /**
+     * C1 regression: a too-small dest must fail BEFORE the underlying state is consumed (every
+     * platform validates capacity first and throws [IllegalArgumentException]), leaving the
+     * finalize retryable — and the retry must produce the digest of the ORIGINAL message, not
+     * of a silently-reset engine. close() must still be a working no-op afterwards.
+     */
+    private fun tooSmallDestIsRetryable(
+        make: () -> Ops,
+        outBytes: Int,
+    ) {
+        val ops = make()
+        ops.update(ascii("abc"))
+        assertFailsWith<IllegalArgumentException> { ops.finalize(BufferFactory.Default.allocate(outBytes - 1)) }
+        val out = BufferFactory.Default.allocate(outBytes)
+        ops.finalize(out) // retry with a correctly-sized dest must succeed
+        out.resetForRead()
+        val reference = BufferFactory.Default.allocate(outBytes)
+        val fresh = make()
+        fresh.update(ascii("abc"))
+        fresh.finalize(reference)
+        reference.resetForRead()
+        assertTrue(out.contentEquals(reference), "retried finalize must digest the original message")
+        ops.close() // still a working no-op after the successful finalize
+        fresh.close()
     }
 
     /** After a successful finalize (which released the state itself), close is a no-op. */
@@ -117,4 +151,46 @@ class DigestOneShotContractTest {
         val m = HmacSha512Mac(hmacKey)
         closeAfterFinalizeIsNoOp({ m.update(it) }, { m.doFinalInto(it) }, { m.close() }, HMAC_SHA512_BYTES)
     }
+
+    @Test
+    fun sha256TooSmallDestIsRetryable() =
+        tooSmallDestIsRetryable({
+            val d = Sha256Digest()
+            Ops({ d.update(it) }, { d.digestInto(it) }, { d.close() })
+        }, SHA256_DIGEST_BYTES)
+
+    @Test
+    fun sha384TooSmallDestIsRetryable() =
+        tooSmallDestIsRetryable({
+            val d = Sha384Digest()
+            Ops({ d.update(it) }, { d.digestInto(it) }, { d.close() })
+        }, SHA384_DIGEST_BYTES)
+
+    @Test
+    fun sha512TooSmallDestIsRetryable() =
+        tooSmallDestIsRetryable({
+            val d = Sha512Digest()
+            Ops({ d.update(it) }, { d.digestInto(it) }, { d.close() })
+        }, SHA512_DIGEST_BYTES)
+
+    @Test
+    fun hmacSha256TooSmallDestIsRetryable() =
+        tooSmallDestIsRetryable({
+            val m = HmacSha256Mac(hmacKey)
+            Ops({ m.update(it) }, { m.doFinalInto(it) }, { m.close() })
+        }, HMAC_SHA256_BYTES)
+
+    @Test
+    fun hmacSha384TooSmallDestIsRetryable() =
+        tooSmallDestIsRetryable({
+            val m = HmacSha384Mac(hmacKey)
+            Ops({ m.update(it) }, { m.doFinalInto(it) }, { m.close() })
+        }, HMAC_SHA384_BYTES)
+
+    @Test
+    fun hmacSha512TooSmallDestIsRetryable() =
+        tooSmallDestIsRetryable({
+            val m = HmacSha512Mac(hmacKey)
+            Ops({ m.update(it) }, { m.doFinalInto(it) }, { m.close() })
+        }, HMAC_SHA512_BYTES)
 }

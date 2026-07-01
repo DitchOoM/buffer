@@ -47,7 +47,9 @@ actual class HmacSha256Mac actual constructor(
 
     actual fun doFinalInto(dest: WriteBuffer) {
         check(!finalized) { "mac already finalized" }
-        finalized = true
+        // Validate BEFORE finish(): the core's padding absorb is not re-runnable, so a
+        // short dest must fail while the state is still retryable (C1).
+        require(dest.remaining() >= HMAC_SHA256_BYTES) { "dest needs $HMAC_SHA256_BYTES bytes remaining, has ${dest.remaining()}" }
         inner.finish() // inner = H(ipad ‖ message)
         val outer = Sha256Core()
         for (i in 0 until SHA256_BLOCK_BYTES) outer.absorbByte(opad.get(i))
@@ -55,6 +57,7 @@ actual class HmacSha256Mac actual constructor(
         outer.finish()
         for (i in 0 until SHA256_DIGEST_BYTES) dest.writeByte(outer.digestByte(i))
         opad.fill(0)
+        finalized = true
     }
 
     actual override fun close() {

@@ -35,9 +35,11 @@ actual class Sha256Digest actual constructor() : AutoCloseable {
 
     actual fun digestInto(dest: WriteBuffer) {
         check(!finalized) { "digest already finalized" }
-        finalized = true
         // CommonCrypto writes the 32-byte digest straight into the destination buffer's memory.
+        // withWritablePointer validates capacity BEFORE invoking the block, so a too-small
+        // dest throws here with the ctx untouched — the finalize stays retryable (C1).
         dest.withWritablePointer(SHA256_DIGEST_BYTES) { ptr -> CC_SHA256_Final(ptr.reinterpret(), ctx.ptr) }
+        finalized = true
         releaseCtx()
     }
 

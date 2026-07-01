@@ -28,8 +28,11 @@ actual class Sha512Digest actual constructor() : AutoCloseable {
 
     actual fun digestInto(dest: WriteBuffer) {
         check(!finalized) { "digest already finalized" }
-        finalized = true
+        // withWritablePointer validates capacity BEFORE invoking the block, so a too-small
+        // dest throws with the ctx untouched (not yet freed by the shim) — the finalize
+        // stays retryable (C1). The flag is set only after the shim call succeeds.
         dest.withWritablePointer(SHA512_DIGEST_BYTES) { ptr -> bcl_sha512_final(ctx, ptr.reinterpret()) }
+        finalized = true
     }
 
     actual override fun close() {
