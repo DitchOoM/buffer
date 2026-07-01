@@ -47,25 +47,24 @@ import kotlin.time.TimeSource
  * non-exportable hardware-key contract. (The Enclave *does* contain an AES engine, but Apple exposes
  * no developer API to drive it as an app-controlled non-exportable AEAD key.)
  *
- * **User authentication** is resolved at generation into a [ResolvedApplePolicy] — each variant
- * carries exactly the authenticator its sign path needs, so a policy without its authenticator is
+ * **User authentication** is a [ResolvedApplePolicy], fixed at generation — each variant carries
+ * exactly the authenticator its sign path needs, so a policy without its authenticator is
  * unrepresentable (no nullable state downstream):
- *  - [ResolvedApplePolicy.Advisory] ([UserAuthenticationRequirement.None]) — no `SecAccessControl`;
- *    the [HardwareAuthorization] gate is advisory, evaluated before every sign (the pre-biometrics
- *    behavior and default).
- *  - [ResolvedApplePolicy.Session] — the key is generated with
+ *  - [ResolvedApplePolicy.Advisory] — the base provider's keys: no `SecAccessControl`; the
+ *    [HardwareAuthorization] gate is advisory, evaluated before every sign (the pre-biometrics
+ *    behavior).
+ *  - [ResolvedApplePolicy.Session] — via [userAuthenticated]: the key is generated with
  *    `SecAccessControl(privateKeyUsage + userPresence/biometryCurrentSet)`, so the *Enclave*
  *    refuses an unauthenticated sign. Signs go through the [LocalAuthAuthenticator]'s long-lived
  *    LAContext; the provider prompts (evaluates the context) lazily when the library-tracked
  *    validity window is stale — the Enclave has no timed window of its own, so the *window* is
  *    library-enforced while the *authentication itself* stays OS-enforced.
- *  - [ResolvedApplePolicy.PerUse] — same `SecAccessControl` binding, but every sign uses a fresh,
- *    un-evaluated LAContext, so the OS prompts for that exact operation.
+ *  - [ResolvedApplePolicy.PerUse] — via [userAuthenticated]: same `SecAccessControl` binding, but
+ *    every sign uses a fresh, un-evaluated LAContext, so the OS prompts for that exact operation.
  *
- * Session/PerUse generation requires a [LocalAuthAuthenticator] (it carries the prompt reason and
- * owns the LAContext); any other gate throws [HardwareKeyException.UserAuthenticatorRequired] at
- * generation. On platforms without LocalAuthentication (tvOS) the authenticator reports
- * unavailable and generation fails the same way.
+ * [userAuthenticated] captures the [LocalAuthAuthenticator] (prompt reason + LAContext owner) at
+ * the platform boundary and returns `null` where LocalAuthentication cannot be driven (tvOS), so
+ * no bound-key request ever reaches this provider without a usable prompt host.
  */
 internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
     override val dedicatedSecureElement: Boolean get() = true
@@ -79,14 +78,19 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
     override suspend fun generateSigning(
         scheme: SignatureScheme,
         spec: HardwareKeySpec,
+    ): SigningKey = generateSigningBound(ResolvedApplePolicy.Advisory(spec.authorization), scheme)
+
+    /** Generates an Enclave P-256 key under [policy] — the shared path for unbound and OS-bound keys. */
+    internal suspend fun generateSigningBound(
+        policy: ResolvedApplePolicy,
+        scheme: SignatureScheme,
     ): SigningKey {
         if (!eligible(scheme.toHardwareAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
-        val policy = resolvePolicy(spec)
         val generated =
-            when (val req = spec.userAuthentication) {
-                UserAuthenticationRequirement.None -> enclaveGenerateP256()
-                is UserAuthenticationRequirement.Session -> enclaveGenerateP256AccessControlled(req.method)
-                is UserAuthenticationRequirement.PerUse -> enclaveGenerateP256AccessControlled(req.method)
+            when (policy) {
+                is ResolvedApplePolicy.Advisory -> enclaveGenerateP256()
+                is ResolvedApplePolicy.Session -> enclaveGenerateP256AccessControlled(policy.method)
+                is ResolvedApplePolicy.PerUse -> enclaveGenerateP256AccessControlled(policy.method)
             }
         return HardwareSigningKey(
             scheme = SignatureScheme.EcdsaP256,
@@ -152,11 +156,13 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
 }
 
 /**
- * The key's user-auth policy resolved once at generation. Each variant carries exactly what its
- * sign path needs — [Session]/[PerUse] hold their (non-null, available) [LocalAuthAuthenticator]
- * by construction, so "auth-bound key without an authenticator" is unrepresentable.
+ * The key's auth behavior, fixed at generation. Each variant carries exactly what its sign path
+ * needs — [Session]/[PerUse] hold the (available) [LocalAuthAuthenticator] the
+ * [UserAuthenticatedKeyProvider] captured at construction, so "OS-bound key without an
+ * authenticator" is unrepresentable.
  */
-private sealed interface ResolvedApplePolicy {
+internal sealed interface ResolvedApplePolicy {
+    /** No `SecAccessControl`; [gate] is the advisory [HardwareKeySpec.authorization]. */
     class Advisory(
         val gate: HardwareAuthorization,
     ) : ResolvedApplePolicy
@@ -168,23 +174,54 @@ private sealed interface ResolvedApplePolicy {
     ) : ResolvedApplePolicy
 
     class PerUse(
+        val method: UserAuthenticationMethod,
         val authenticator: LocalAuthAuthenticator,
     ) : ResolvedApplePolicy
 }
 
-private fun resolvePolicy(spec: HardwareKeySpec): ResolvedApplePolicy =
-    when (val req = spec.userAuthentication) {
-        UserAuthenticationRequirement.None -> ResolvedApplePolicy.Advisory(spec.authorization)
-        is UserAuthenticationRequirement.Session ->
-            ResolvedApplePolicy.Session(req.validity, req.method, spec.authorization.requireLocalAuth())
-        is UserAuthenticationRequirement.PerUse ->
-            ResolvedApplePolicy.PerUse(spec.authorization.requireLocalAuth())
-    }
+/**
+ * The Apple [UserAuthenticatedKeyProvider]: pairs the Enclave provider with the
+ * [LocalAuthAuthenticator] captured at construction, and maps each pure-data
+ * [UserAuthenticationPolicy] onto a [ResolvedApplePolicy] that carries it.
+ */
+internal class AppleUserAuthenticatedKeyProvider(
+    private val base: SecureEnclaveHardwareKeyProvider,
+    private val authenticator: LocalAuthAuthenticator,
+) : UserAuthenticatedKeyProvider {
+    override fun eligible(alg: HardwareAlgorithm): Boolean = base.eligible(alg)
 
-/** An OS-auth-bound key needs the library's LocalAuthentication authenticator, usable on this platform. */
-private fun HardwareAuthorization.requireLocalAuth(): LocalAuthAuthenticator =
-    (this as? LocalAuthAuthenticator)?.takeIf { it.available }
-        ?: throw HardwareKeyException.UserAuthenticatorRequired()
+    override suspend fun generateAesGcm(
+        policy: UserAuthenticationPolicy,
+        aesKeySizeBits: Int,
+    ): AesGcmKey = throw HardwareKeyException.AlgorithmNotEligible()
+
+    override suspend fun generateSigning(
+        scheme: SignatureScheme,
+        policy: UserAuthenticationPolicy,
+    ): SigningKey = base.generateSigningBound(policy.resolve(), scheme)
+
+    private fun UserAuthenticationPolicy.resolve(): ResolvedApplePolicy =
+        when (this) {
+            is UserAuthenticationPolicy.Session -> ResolvedApplePolicy.Session(validity, method, authenticator)
+            is UserAuthenticationPolicy.PerUse -> ResolvedApplePolicy.PerUse(method, authenticator)
+        }
+}
+
+/**
+ * Binds this provider to a [LocalAuthAuthenticator], unlocking generation of Enclave keys the
+ * *element itself* refuses without user authentication (`SecAccessControl`;
+ * [UserAuthenticationPolicy.Session] / [UserAuthenticationPolicy.PerUse]). The authenticator is
+ * captured here — at the platform boundary, where its prompt reason already had to be written —
+ * so the policy values stay pure data and a bound key without a prompt host is a compile error,
+ * not a runtime state.
+ *
+ * Returns `null` for a provider this platform did not mint (e.g. a test fake) and on platforms
+ * where LocalAuthentication cannot be driven (tvOS, or a closed authenticator).
+ */
+fun HardwareKeyProvider.userAuthenticated(prompt: LocalAuthAuthenticator): UserAuthenticatedKeyProvider? =
+    (this as? SecureEnclaveHardwareKeyProvider)
+        ?.takeIf { prompt.available }
+        ?.let { AppleUserAuthenticatedKeyProvider(it, prompt) }
 
 /**
  * Library-enforced session validity window (the Enclave has no timed window of its own). Within

@@ -120,12 +120,4 @@ sealed class HardwareKeyException protected constructor(
      * fix is to consult [HardwareKeyProvider.eligible] before generating.
      */
     class AlgorithmNotEligible internal constructor() : HardwareKeyException("algorithm not hardware-eligible")
-
-    /**
-     * The requested `HardwareKeySpec.userAuthentication` needs a platform prompt authenticator the
-     * supplied `HardwareKeySpec.authorization` cannot provide (e.g. Android `PerUse` binding
-     * requires a `CryptoObject`-capable `BiometricPromptAuthenticator`, not a plain closure).
-     * Raised at *generation*, so a misconfigured key can never exist.
-     */
-    class UserAuthenticatorRequired internal constructor() : HardwareKeyException("user authenticator required")
 }

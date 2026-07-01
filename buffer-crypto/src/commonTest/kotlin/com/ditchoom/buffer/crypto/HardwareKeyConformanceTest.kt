@@ -118,11 +118,13 @@ class HardwareKeyConformanceTest {
             }
         }
 
-    // ---- User-authentication policies (Session / PerUse / None) ----
-    // The observable contract every real provider must honor, driven through the fake: when the
-    // gate fires, how the session window behaves, and how denial surfaces. The OS-binding halves
-    // (keystore UserNotAuthenticatedException, Enclave SecAccessControl) are covered by the
-    // device-gated Tier-2 tests.
+    // ---- User-authentication policies (Session / PerUse) ----
+    // The observable contract every UserAuthenticatedKeyProvider must honor, driven through the
+    // fake's userAuthenticated() (which captures the prompt gate at construction, exactly like the
+    // platform extensions capture their authenticator): when the gate fires, how the session
+    // window behaves, and how denial surfaces. The OS-binding halves (keystore
+    // UserNotAuthenticatedException, Enclave SecAccessControl) are covered by the device-gated
+    // Tier-2 tests.
 
     /** A gate that counts invocations and answers from [answers] (last answer repeats). */
     private class CountingGate(
@@ -143,43 +145,30 @@ class HardwareKeyConformanceTest {
         runTest {
             val clock = TestTimeSource()
             val gate = CountingGate(true)
-            val provider = FakeHardware(timeSource = clock)
-            val keys =
-                provider.aesGcmPair(
-                    HardwareKeySpec(
-                        authorization = gate,
-                        userAuthentication = UserAuthenticationRequirement.Session(5.minutes),
-                    ),
-                )
+            val authed = FakeHardware(timeSource = clock).userAuthenticated(gate)
+            val key = authed.generateAesGcm(UserAuthenticationPolicy.Session(5.minutes))
             val ops = aesGcmAsyncOps()
 
-            ops.seal(keys.hardware, ascii("first"))
-            ops.seal(keys.hardware, ascii("second"))
+            ops.seal(key, ascii("first"))
+            ops.seal(key, ascii("second"))
             assertEquals(1, gate.calls, "ops inside the window must not re-prompt")
 
             clock += 6.minutes
-            ops.seal(keys.hardware, ascii("third"))
+            ops.seal(key, ascii("third"))
             assertEquals(2, gate.calls, "a stale window must re-prompt exactly once")
         }
 
     @Test
     fun sessionDenialSurfacesAsAuthorizationFailedAndDoesNotOpenAWindow() =
         runTest {
-            val clock = TestTimeSource()
             val gate = CountingGate(false, true)
-            val provider = FakeHardware(timeSource = clock)
-            val keys =
-                provider.aesGcmPair(
-                    HardwareKeySpec(
-                        authorization = gate,
-                        userAuthentication = UserAuthenticationRequirement.Session(5.minutes),
-                    ),
-                )
+            val authed = FakeHardware(timeSource = TestTimeSource()).userAuthenticated(gate)
+            val key = authed.generateAesGcm(UserAuthenticationPolicy.Session(5.minutes))
             val ops = aesGcmAsyncOps()
 
-            assertFailsWith<AuthorizationFailed> { ops.seal(keys.hardware, ascii("denied")) }
+            assertFailsWith<AuthorizationFailed> { ops.seal(key, ascii("denied")) }
             // The denial must not have started a validity window: the next op prompts again.
-            ops.seal(keys.hardware, ascii("granted"))
+            ops.seal(key, ascii("granted"))
             assertEquals(2, gate.calls, "a denied prompt must not open the session window")
         }
 
@@ -187,26 +176,34 @@ class HardwareKeyConformanceTest {
     fun perUseAuthenticatesEveryOperation() =
         runTest {
             val gate = CountingGate(true)
-            val keys =
-                provider.aesGcmPair(
-                    HardwareKeySpec(
-                        authorization = gate,
-                        userAuthentication = UserAuthenticationRequirement.PerUse(),
-                    ),
-                )
+            val key = provider.userAuthenticated(gate).generateAesGcm(UserAuthenticationPolicy.PerUse())
             val ops = aesGcmAsyncOps()
 
-            val sealed = ops.seal(keys.hardware, ascii("payload"), Aad.Of(ascii("ctx")))
-            ops.open(sealed, keys.hardware, Aad.Of(ascii("ctx")))
+            val sealed = ops.seal(key, ascii("payload"), Aad.Of(ascii("ctx")))
+            ops.open(sealed, key, Aad.Of(ascii("ctx")))
             assertEquals(2, gate.calls, "per-use must authenticate each op, including opens")
         }
 
     @Test
     fun sessionValidityRejectsSubSecondWindows() {
         assertFailsWith<IllegalArgumentException> {
-            UserAuthenticationRequirement.Session(500.milliseconds)
+            UserAuthenticationPolicy.Session(500.milliseconds)
         }
     }
+
+    @Test
+    fun authenticatedSigningVerifiesAndPromptsPerPolicy() =
+        runTest {
+            if (!supportsEcdsaSigningFromScalar) return@runTest
+            val gate = CountingGate(true)
+            val authed = provider.userAuthenticated(gate)
+            val key = authed.generateSigning(SignatureScheme.EcdsaP256, UserAuthenticationPolicy.PerUse())
+            val ops = signatureAsyncOrNull(SignatureScheme.EcdsaP256) ?: return@runTest
+            val message = ascii("authenticated signature")
+            val signature = ops.sign(key, message)
+            assertTrue(ops.verify(key.verifyKey, message, signature), "bound hw-sign verifies under its public key")
+            assertEquals(1, gate.calls, "per-use signing prompts for the op")
+        }
 
     // ---- AES-GCM ----
 

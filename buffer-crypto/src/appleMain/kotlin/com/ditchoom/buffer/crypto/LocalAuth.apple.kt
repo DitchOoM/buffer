@@ -14,17 +14,17 @@ import kotlinx.coroutines.withContext
 /*
  * Apple LocalAuthentication authenticator for hardware-backed keys.
  *
- * [HardwareAuthorization] is the common gate; this is the Apple refinement that puts a real OS
- * prompt on screen (Touch ID / Face ID / device passcode via LocalAuthentication). The UI-facing
- * pieces — the localized reason string, the long-lived LAContext whose successful evaluation
- * authorizes Secure Enclave signs without re-prompting — cannot be expressed in common code, so
- * the app constructs this and injects it as [HardwareKeySpec.authorization], the same
- * inversion-of-control pattern as `BufferFactory`.
+ * The prompt host that puts a real OS prompt on screen (Touch ID / Face ID / device passcode via
+ * LocalAuthentication). The UI-facing pieces — the localized reason string, the long-lived
+ * LAContext whose successful evaluation authorizes Secure Enclave signs without re-prompting —
+ * cannot be expressed in common code, so the app constructs this at the platform boundary and
+ * hands it to [userAuthenticated] to obtain a [UserAuthenticatedKeyProvider]. Also usable as a
+ * plain advisory [HardwareAuthorization] gate.
  *
  * The LAContext lives behind the CryptoKit shim as an opaque handle (LocalAuthentication does not
  * exist on every Apple platform — no tvOS — and routing through the shim keeps this file compiling
- * for every apple target; on an unsupported platform [available] is `false` and generation of an
- * auth-bound key fails with a typed [HardwareKeyException.UserAuthenticatorRequired]).
+ * for every apple target; on an unsupported platform [available] is `false`, so
+ * [userAuthenticated] returns `null` and no bound key can be requested at all).
  *
  * Lifecycle: the authenticator owns one native LAContext; [close] invalidates it. A closed (or
  * never-usable) authenticator denies everything.

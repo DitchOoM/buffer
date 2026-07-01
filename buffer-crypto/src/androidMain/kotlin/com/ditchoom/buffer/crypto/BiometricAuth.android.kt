@@ -1,38 +1,39 @@
 package com.ditchoom.buffer.crypto
 
 import android.os.Build
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
+import kotlin.time.Duration
 
 /*
  * Android biometric authenticator for hardware-backed keys.
  *
- * [HardwareAuthorization] is the common gate; this file is the Android refinement that can put a
- * real prompt on screen. Two layers:
+ * Two layers:
  *
- *  - [BiometricAuthorization] — the *capability* interface the Android keystore provider dispatches
- *    to. It exists because Android's auth-per-use keys ([UserAuthenticationRequirement.PerUse])
- *    require the OS to see the exact `Cipher` / `Signature` being authorized
- *    ([BiometricPrompt.CryptoObject]); a plain `suspend () -> Boolean` closure cannot express that.
- *    Generation of a PerUse key with a non-[BiometricAuthorization] gate throws
- *    [HardwareKeyException.UserAuthenticatorRequired] — at generation, so a misconfigured key never
- *    exists.
+ *  - [BiometricAuthorization] — the prompt-host capability [userAuthenticated] demands at the type
+ *    level to mint OS-bound keys. It exists because Android's auth-per-use keys
+ *    ([UserAuthenticationPolicy.PerUse]) require the OS to see the exact `Cipher` / `Signature`
+ *    being authorized ([BiometricPrompt.CryptoObject]); a plain `suspend () -> Boolean` closure
+ *    cannot express that — so the requirement lives in the signature of [userAuthenticated], not
+ *    in a runtime check.
  *
  *  - [BiometricPromptAuthenticator] — the library-shipped implementation over androidx.biometric.
  *    The UI host (a [FragmentActivity]) and the prompt strings cannot be expressed in common code,
- *    so the app constructs this and injects it as [HardwareKeySpec.authorization] — the same
- *    inversion-of-control pattern as `BufferFactory`.
+ *    so the app constructs this at the platform boundary and hands it to [userAuthenticated].
  */
 
 /**
- * An [HardwareAuthorization] that can bind an authentication to the exact keystore operation via
- * [BiometricPrompt.CryptoObject]. Required for [UserAuthenticationRequirement.PerUse] keys on
- * Android; also used (without a crypto object) to unlock a
- * [UserAuthenticationRequirement.Session] window.
+ * A prompt host that can bind an authentication to the exact keystore operation via
+ * [BiometricPrompt.CryptoObject]. Handed to [userAuthenticated] to obtain a
+ * [UserAuthenticatedKeyProvider]; drives [UserAuthenticationPolicy.PerUse] ops and unlocks stale
+ * [UserAuthenticationPolicy.Session] windows. Also usable as a plain advisory
+ * [HardwareAuthorization] gate.
  */
 interface BiometricAuthorization : HardwareAuthorization {
     /**
@@ -51,11 +52,8 @@ interface BiometricAuthorization : HardwareAuthorization {
  * The library-shipped [BiometricAuthorization] over androidx.biometric's [BiometricPrompt].
  *
  * ```kotlin
- * val spec = HardwareKeySpec(
- *     authorization = BiometricPromptAuthenticator(activity, title = "Unlock signing key"),
- *     userAuthentication = UserAuthenticationRequirement.PerUse(),
- * )
- * val key = provider.generateSigning(SignatureScheme.EcdsaP256, spec)
+ * val authed = provider.userAuthenticated(BiometricPromptAuthenticator(activity, title = "Unlock signing key"))
+ * val key = authed?.generateSigning(SignatureScheme.EcdsaP256, UserAuthenticationPolicy.PerUse())
  * ```
  *
  * The prompt always runs on the main executor; [authenticate] suspends until the user completes
@@ -134,3 +132,112 @@ class BiometricPromptAuthenticator(
             }.build()
     }
 }
+
+/**
+ * The key's auth behavior, fixed at generation. Each variant carries exactly what its op path
+ * needs — [Session]/[PerUse] hold the [BiometricAuthorization] the [UserAuthenticatedKeyProvider]
+ * captured at construction, so "OS-bound key without a prompt host" is unrepresentable (no cast,
+ * no nullable downstream, no runtime validation state).
+ */
+internal sealed interface ResolvedAndroidPolicy {
+    /** No OS binding; [gate] is the advisory [HardwareKeySpec.authorization]. */
+    class Advisory(
+        val gate: HardwareAuthorization,
+    ) : ResolvedAndroidPolicy
+
+    class Session(
+        val validity: Duration,
+        val method: UserAuthenticationMethod,
+        val prompt: BiometricAuthorization,
+    ) : ResolvedAndroidPolicy {
+        suspend fun unlock(): Boolean = prompt.authenticate(method, cryptoObject = null)
+    }
+
+    class PerUse(
+        val method: UserAuthenticationMethod,
+        val prompt: BiometricAuthorization,
+    ) : ResolvedAndroidPolicy
+}
+
+/**
+ * The Android [UserAuthenticatedKeyProvider]: pairs the keystore provider with the
+ * [BiometricAuthorization] prompt host captured at construction, and maps each pure-data
+ * [UserAuthenticationPolicy] onto a [ResolvedAndroidPolicy] that carries it.
+ */
+internal class AndroidUserAuthenticatedKeyProvider(
+    private val base: AndroidKeystoreHardwareKeyProvider,
+    private val prompt: BiometricAuthorization,
+) : UserAuthenticatedKeyProvider {
+    override fun eligible(alg: HardwareAlgorithm): Boolean = base.eligible(alg)
+
+    override suspend fun generateAesGcm(
+        policy: UserAuthenticationPolicy,
+        aesKeySizeBits: Int,
+    ): AesGcmKey = base.generateAesGcmBound(policy.resolve(), aesKeySizeBits)
+
+    override suspend fun generateSigning(
+        scheme: SignatureScheme,
+        policy: UserAuthenticationPolicy,
+    ): SigningKey = base.generateSigningBound(policy.resolve(), scheme)
+
+    private fun UserAuthenticationPolicy.resolve(): ResolvedAndroidPolicy =
+        when (this) {
+            is UserAuthenticationPolicy.Session -> ResolvedAndroidPolicy.Session(validity, method, prompt)
+            is UserAuthenticationPolicy.PerUse -> ResolvedAndroidPolicy.PerUse(method, prompt)
+        }
+}
+
+/**
+ * Binds this provider to a [BiometricAuthorization] prompt host, unlocking generation of keys the
+ * *keystore itself* refuses without user authentication ([UserAuthenticationPolicy.Session] /
+ * [UserAuthenticationPolicy.PerUse]). The prompt host is captured here — at the platform boundary,
+ * where it already had to be constructed — so the policy values stay pure data and a bound key
+ * without a prompt is a compile error, not a runtime state.
+ *
+ * Returns `null` for a provider this platform did not mint (e.g. a test fake): only the Android
+ * Keystore provider can honor OS-level binding.
+ */
+fun HardwareKeyProvider.userAuthenticated(prompt: BiometricAuthorization): UserAuthenticatedKeyProvider? =
+    (this as? AndroidKeystoreHardwareKeyProvider)?.let { AndroidUserAuthenticatedKeyProvider(it, prompt) }
+
+/**
+ * Applies OS-level user-authentication binding to a keystore key at generation. On API 30+ the
+ * typed `setUserAuthenticationParameters` expresses both the window and the allowed authenticator
+ * classes; 28/29 only have the deprecated validity-duration seconds, where `-1` means
+ * auth-per-use (biometric + `CryptoObject` only) and the authenticator classes cannot be narrowed.
+ */
+internal fun KeyGenParameterSpec.Builder.applyUserAuth(policy: ResolvedAndroidPolicy) {
+    when (policy) {
+        is ResolvedAndroidPolicy.Advisory -> return
+        is ResolvedAndroidPolicy.Session -> {
+            setUserAuthenticationRequired(true)
+            val seconds =
+                policy.validity.inWholeSeconds
+                    .coerceIn(1L, Int.MAX_VALUE.toLong())
+                    .toInt()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                setUserAuthenticationParameters(seconds, keystoreAuthTypes(policy.method))
+            } else {
+                @Suppress("DEPRECATION")
+                setUserAuthenticationValidityDurationSeconds(seconds)
+            }
+        }
+        is ResolvedAndroidPolicy.PerUse -> {
+            setUserAuthenticationRequired(true)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                setUserAuthenticationParameters(0, keystoreAuthTypes(policy.method))
+            } else {
+                @Suppress("DEPRECATION")
+                setUserAuthenticationValidityDurationSeconds(-1)
+            }
+        }
+    }
+}
+
+/** [UserAuthenticationMethod] → the API 30+ keystore authenticator-class bitmask. */
+internal fun keystoreAuthTypes(method: UserAuthenticationMethod): Int =
+    when (method) {
+        UserAuthenticationMethod.BiometricOnly -> KeyProperties.AUTH_BIOMETRIC_STRONG
+        UserAuthenticationMethod.BiometricOrCredential ->
+            KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL
+    }

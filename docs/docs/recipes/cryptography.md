@@ -446,17 +446,21 @@ The per-platform results of these checks are the [capability matrix](#per-platfo
 ## Biometric / user-authenticated hardware keys
 
 A hardware-backed key can be **bound to user authentication inside the secure element** at
-generation — the OS refuses an unauthenticated operation no matter what the process does. The
-binding is a value on `HardwareKeySpec`:
+generation — the OS refuses an unauthenticated operation no matter what the process does. Bound
+keys come from a `UserAuthenticatedKeyProvider`, obtained by handing the platform's prompt host to
+the `userAuthenticated(...)` extension; the policies themselves are pure data:
 
 ```kotlin
-sealed interface UserAuthenticationRequirement {
-    data object None                    // default: no OS binding, the gate is advisory
+sealed interface UserAuthenticationPolicy {
     data class Session(val validity: Duration,
                        val method: UserAuthenticationMethod = BiometricOrCredential)
     data class PerUse(val method: UserAuthenticationMethod = BiometricOnly)
 }
 ```
+
+Because the prompt host is captured when the provider is constructed, "a bound key without a
+prompt" is a compile error, not a runtime exception — the base `HardwareKeyProvider` keeps only
+the advisory `HardwareKeySpec.authorization` gate and mints unbound keys, exactly as before.
 
 - **`Session(validity)`** — one successful authentication unlocks the key for the window; ops
   inside it never re-prompt (the provider prompts *lazily*, only when the OS reports the window
@@ -469,36 +473,36 @@ sealed interface UserAuthenticationRequirement {
   changes → `HardwareKeyException.KeyInvalidated`) or `BiometricOrCredential` (biometric or the
   device PIN/passcode).
 
-The prompt needs UI context that common code cannot express, so each platform ships an
-authenticator the app constructs and injects as `HardwareKeySpec.authorization` (the same
-inversion-of-control pattern as `BufferFactory`):
+The prompt needs UI context that common code cannot express, so `userAuthenticated(...)` is a
+**platform** extension — its parameter type is the platform's prompt host, which is exactly the
+one line of platform code the app had to write anyway:
 
 ```kotlin
 // Android (androidMain) — androidx.biometric prompt host
-val spec = HardwareKeySpec(
-    authorization = BiometricPromptAuthenticator(activity, title = "Unlock signing key"),
-    userAuthentication = UserAuthenticationRequirement.Session(5.minutes),
+val authed = hw.provider.userAuthenticated(
+    BiometricPromptAuthenticator(activity, title = "Unlock signing key"),
 )
 
 // Apple (appleMain) — LocalAuthentication
-val spec = HardwareKeySpec(
-    authorization = LocalAuthAuthenticator(reason = "Sign the audit record"),
-    userAuthentication = UserAuthenticationRequirement.Session(5.minutes),
+val authed = hw.provider.userAuthenticated(
+    LocalAuthAuthenticator(reason = "Sign the audit record"),
 )
 
-// Common code from here on — the key is an ordinary SigningKey / AesGcmKey:
-val hw = CryptoCapabilities.hardware
-if (hw is HardwareSupport.Available) {
-    val key = hw.provider.generateSigning(SignatureScheme.EcdsaP256, spec)
-    // first op in the window prompts; later ops are silent; expiry re-prompts
-}
+// Common code from here on — policies are pure data, keys are ordinary SigningKey / AesGcmKey:
+val key = authed?.generateSigning(
+    SignatureScheme.EcdsaP256,
+    UserAuthenticationPolicy.Session(5.minutes),
+)
+// first op in the window prompts; later ops are silent; expiry re-prompts
 ```
+
+`userAuthenticated` returns `null` where OS user authentication cannot be driven (a non-platform
+provider, tvOS, a closed authenticator) — witness-style honesty, like
+`CryptoCapabilities.hardware` itself.
 
 Typed outcomes to branch on: a denied/cancelled prompt is `AuthorizationFailed`; a stale session
 the user must re-authenticate is `HardwareKeyException.UserAuthenticationRequired`; biometric
-re-enrollment invalidating a `BiometricOnly` key is `HardwareKeyException.KeyInvalidated`;
-requesting `PerUse` without a platform authenticator fails **at generation** with
-`HardwareKeyException.UserAuthenticatorRequired` (a misconfigured key can never exist).
+re-enrollment invalidating a `BiometricOnly` key is `HardwareKeyException.KeyInvalidated`.
 
 Platform notes: Android requires a secure lock screen to generate auth-bound keys (API 30+ uses
 `setUserAuthenticationParameters`; 28/29 the legacy validity-duration API, where `method` cannot
