@@ -156,11 +156,6 @@ kotlin {
         commonMain.dependencies {
             api(project(":buffer"))
             api(libs.kotlinx.coroutines.core)
-            // The codec bridge (asCodecConnection) lives in commonMain but is
-            // optional: consumers who only use Connection / StreamMux pay no
-            // codec-module compile cost. Consumers who use the bridge add
-            // :buffer-codec to their own dependencies.
-            compileOnly(project(":buffer-codec"))
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
