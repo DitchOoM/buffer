@@ -297,11 +297,23 @@ sealed interface HpkeMode {
  * [pskId] is not secret and is held in an ordinary buffer.
  */
 class HpkePsk private constructor(
-    internal val psk: PlatformBuffer,
+    private val psk: PlatformBuffer,
     internal val pskId: ReadBuffer,
 ) : AutoCloseable {
+    private var closed = false
+
+    /** Zeroes and frees the PSK bytes. Idempotent. */
     override fun close() {
-        psk.freeNativeMemory()
+        if (!closed) {
+            closed = true
+            psk.freeNativeMemory()
+        }
+    }
+
+    /** The live PSK bytes; throws if the PSK has been [close]d. */
+    internal fun requireOpen(): PlatformBuffer {
+        check(!closed) { "HpkePsk already closed" }
+        return psk
     }
 
     companion object {
@@ -721,7 +733,8 @@ class HpkeSenderSetup internal constructor(
 /**
  * Single-shot HPKE seal (RFC 9180 §6.1, Base mode): encapsulates to [recipientPublicKey],
  * encrypts [plaintext] with [aad], and returns `enc || ciphertext` framing via [HpkeSealed].
- * The returned context-equivalent state is discarded (single message).
+ * The context exists for the single message only and is closed (its derived AEAD key, base
+ * nonce, and exporter secret wiped) before returning; the outputs are independent copies.
  */
 internal suspend fun hpkeSealBase(
     suite: HpkeSuite,
@@ -732,8 +745,12 @@ internal suspend fun hpkeSealBase(
     factory: BufferFactory = BufferFactory.Default,
 ): HpkeSealed {
     val setup = hpkeSetupBaseSender(suite, recipientPublicKey, info)
-    val ct = setup.context.seal(plaintext, aad.toAad(), factory)
-    return HpkeSealed(copyBuffer(setup.enc, factory), ct)
+    return try {
+        val ct = setup.context.seal(plaintext, aad.toAad(), factory)
+        HpkeSealed(copyBuffer(setup.enc, factory), ct)
+    } finally {
+        setup.context.close()
+    }
 }
 
 /** Single-shot HPKE open (RFC 9180 §6.1, Base mode): decapsulates [enc] and decrypts. */
@@ -747,7 +764,11 @@ internal suspend fun hpkeOpenBase(
     factory: BufferFactory = BufferFactory.Default,
 ): PlatformBuffer {
     val ctx = hpkeSetupBaseReceiver(suite, recipientPrivateKey, enc, info)
-    return ctx.open(ciphertext, aad.toAad(), factory)
+    return try {
+        ctx.open(ciphertext, aad.toAad(), factory)
+    } finally {
+        ctx.close()
+    }
 }
 
 /** `enc || ciphertext` output of [hpkeSealBase]. Both buffers are read-ready. */

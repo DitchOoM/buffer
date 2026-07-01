@@ -8,6 +8,7 @@ import com.ditchoom.buffer.crypto.CryptoTestVectors.toHex
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -206,6 +207,28 @@ class HpkeRoundTripTest {
             recipient.close()
             sender.context.close()
             receiver.close()
+        }
+
+    @Test
+    fun closedContextRejectsEveryOp() =
+        runTest {
+            val suite = firstSupported() ?: return@runTest
+            val recipient = hpkeGenerateKeyPair(suite.kem)
+            val info = ascii("closed context")
+            val pt = ascii("payload")
+
+            val sender = hpkeSetupBaseSender(suite, recipient.publicKey, info)
+            val receiver = hpkeSetupBaseReceiver(suite, recipient.privateKey, sender.enc, info)
+            val ct = sender.context.seal(pt, null, BufferFactory.Default)
+
+            sender.context.close()
+            sender.context.close() // second close must not throw
+            receiver.close()
+
+            assertFailsWith<IllegalStateException> { sender.context.seal(pt, null, BufferFactory.Default) }
+            assertFailsWith<IllegalStateException> { receiver.open(ct, null, BufferFactory.Default) }
+            assertFailsWith<IllegalStateException> { sender.context.export(ascii("ctx"), 32, BufferFactory.Default) }
+            recipient.close()
         }
 
     private fun firstSupported(): HpkeSuite? = allSuites.firstOrNull { HpkeTestSupport.suiteSupported(it) }

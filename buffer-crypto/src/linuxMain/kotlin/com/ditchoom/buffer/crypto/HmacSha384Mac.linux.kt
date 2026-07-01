@@ -25,6 +25,7 @@ actual class HmacSha384Mac actual constructor(
     private var finalized = false
 
     actual fun update(input: ReadBuffer): HmacSha384Mac {
+        check(!finalized) { "mac already finalized" }
         input.withRemainingBytes { ptr, len -> bcl_hmac_update(ctx, ptr.reinterpret(), len.convert()) }
         return this
     }

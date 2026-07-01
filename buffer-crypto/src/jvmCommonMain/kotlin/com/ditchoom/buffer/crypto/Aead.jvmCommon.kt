@@ -58,7 +58,7 @@ internal actual fun aesGcmSeal(
     val cipher = Cipher.getInstance("AES/GCM/NoPadding")
     cipher.init(
         Cipher.ENCRYPT_MODE,
-        SecretKeySpec(materialBytes(key.requireInMemoryMaterial()), "AES"),
+        keySpec(key.requireInMemoryMaterial(), "AES"),
         GCMParameterSpec(GCM_TAG_BITS, nonceBytes(nonce)),
     )
     aad?.let { cipher.updateAADRemaining(it) }
@@ -77,7 +77,7 @@ internal actual fun aesGcmOpen(
     val cipher = Cipher.getInstance("AES/GCM/NoPadding")
     cipher.init(
         Cipher.DECRYPT_MODE,
-        SecretKeySpec(materialBytes(key.requireInMemoryMaterial()), "AES"),
+        keySpec(key.requireInMemoryMaterial(), "AES"),
         GCMParameterSpec(GCM_TAG_BITS, nonceBytes(nonce)),
     )
     aad?.let { cipher.updateAADRemaining(it) }
@@ -98,7 +98,7 @@ internal actual fun chaChaPolySeal(
     val cipher = Cipher.getInstance("ChaCha20-Poly1305")
     cipher.init(
         Cipher.ENCRYPT_MODE,
-        SecretKeySpec(materialBytes(key.requireInMemoryMaterial()), "ChaCha20"),
+        keySpec(key.requireInMemoryMaterial(), "ChaCha20"),
         IvParameterSpec(nonceBytes(nonce)),
     )
     aad?.let { cipher.updateAADRemaining(it) }
@@ -120,7 +120,7 @@ internal actual fun chaChaPolyOpen(
     val cipher = Cipher.getInstance("ChaCha20-Poly1305")
     cipher.init(
         Cipher.DECRYPT_MODE,
-        SecretKeySpec(materialBytes(key.requireInMemoryMaterial()), "ChaCha20"),
+        keySpec(key.requireInMemoryMaterial(), "ChaCha20"),
         IvParameterSpec(nonceBytes(nonce)),
     )
     aad?.let { cipher.updateAADRemaining(it) }
@@ -171,8 +171,20 @@ internal fun requireTagged(ciphertextAndTag: ReadBuffer) {
     }
 }
 
-/** Copies a key/nonce buffer's remaining bytes into a JCA-consumable array (non-destructive). */
-private fun materialBytes(buffer: ReadBuffer): ByteArray = remainingBytes(buffer)
+/**
+ * Builds a [SecretKeySpec] from the key buffer's remaining bytes (non-destructive). The staging
+ * array is zeroed as soon as the spec is constructed — [SecretKeySpec] copies the bytes internally,
+ * so the wipe cannot affect the spec and the raw key does not linger on the heap.
+ */
+private fun keySpec(
+    key: ReadBuffer,
+    algorithm: String,
+): SecretKeySpec {
+    val staged = remainingBytes(key)
+    val spec = SecretKeySpec(staged, algorithm)
+    staged.fill(0)
+    return spec
+}
 
 internal fun nonceBytes(nonce: ReadBuffer): ByteArray = remainingBytes(nonce)
 

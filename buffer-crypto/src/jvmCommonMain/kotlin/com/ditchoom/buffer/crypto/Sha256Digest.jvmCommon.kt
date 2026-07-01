@@ -9,13 +9,18 @@ import java.security.MessageDigest
 /** JVM/Android SHA-256 backed by the JCA [MessageDigest]. */
 actual class Sha256Digest actual constructor() {
     private val md = MessageDigest.getInstance("SHA-256")
+    private var finalized = false
 
     actual fun update(input: ReadBuffer): Sha256Digest {
+        check(!finalized) { "digest already finalized" }
         md.updateRemaining(input)
         return this
     }
 
     actual fun digestInto(dest: WriteBuffer) {
+        // JCA resets the digest for reuse; the cross-platform contract is one-shot, so reject reuse.
+        check(!finalized) { "digest already finalized" }
+        finalized = true
         md.digestInto(dest)
     }
 }

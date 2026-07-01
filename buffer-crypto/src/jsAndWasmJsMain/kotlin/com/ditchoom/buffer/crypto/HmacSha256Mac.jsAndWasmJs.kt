@@ -15,6 +15,7 @@ actual class HmacSha256Mac actual constructor(
     // inner accumulates H(ipad ‖ message); opad (a managed buffer) is held for the outer hash.
     private val inner = Sha256Core()
     private val opad: PlatformBuffer = BufferFactory.managed().allocate(SHA256_BLOCK_BYTES)
+    private var finalized = false
 
     init {
         // Normalize the key to a single block (managed buffer, zero-initialized): hash it if
@@ -39,11 +40,14 @@ actual class HmacSha256Mac actual constructor(
     }
 
     actual fun update(input: ReadBuffer): HmacSha256Mac {
+        check(!finalized) { "mac already finalized" }
         inner.update(input)
         return this
     }
 
     actual fun doFinalInto(dest: WriteBuffer) {
+        check(!finalized) { "mac already finalized" }
+        finalized = true
         inner.finish() // inner = H(ipad ‖ message)
         val outer = Sha256Core()
         for (i in 0 until SHA256_BLOCK_BYTES) outer.absorbByte(opad.get(i))

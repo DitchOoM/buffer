@@ -21,6 +21,7 @@ const val HMAC_SHA384_BYTES = SHA384_DIGEST_BYTES
  * 48-byte tag into a caller-owned destination. Reads are non-destructive.
  *
  * Not thread-safe — one instance per MAC. Key-bearing intermediates are wiped after use.
+ * One-shot: [update] or [doFinalInto] after finalization throws [IllegalStateException].
  */
 expect class HmacSha384Mac(
     key: ReadBuffer,

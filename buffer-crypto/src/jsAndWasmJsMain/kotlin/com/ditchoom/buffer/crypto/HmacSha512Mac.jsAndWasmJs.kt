@@ -10,13 +10,17 @@ actual class HmacSha512Mac actual constructor(
     key: ReadBuffer,
 ) {
     private val core = Sha512FamilyHmac(key, mode384 = false, outBytes = SHA512_DIGEST_BYTES)
+    private var finalized = false
 
     actual fun update(input: ReadBuffer): HmacSha512Mac {
+        check(!finalized) { "mac already finalized" }
         core.update(input)
         return this
     }
 
     actual fun doFinalInto(dest: WriteBuffer) {
+        check(!finalized) { "mac already finalized" }
+        finalized = true
         core.doFinalInto(dest)
     }
 }

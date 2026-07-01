@@ -21,6 +21,7 @@ const val HMAC_SHA256_BYTES = SHA256_DIGEST_BYTES
  * Reads are non-destructive (operate on `slice()`s).
  *
  * Not thread-safe — use one instance per MAC. Key-bearing intermediates are wiped after use.
+ * One-shot: [update] or [doFinalInto] after finalization throws [IllegalStateException].
  */
 expect class HmacSha256Mac(
     key: ReadBuffer,

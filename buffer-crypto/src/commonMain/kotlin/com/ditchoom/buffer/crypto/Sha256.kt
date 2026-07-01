@@ -26,7 +26,8 @@ const val SHA256_BLOCK_BYTES = 64
  * of the input, leaving the source buffer's position untouched.
  *
  * Not thread-safe — use one instance per digest. [digestInto] wipes the instance's
- * scratch before returning and finalizes the digest; the instance must not be reused.
+ * scratch before returning and finalizes the digest; the instance is one-shot on every
+ * platform, so [update] or [digestInto] after finalization throws [IllegalStateException].
  */
 expect class Sha256Digest() {
     /** Absorbs the remaining bytes of [input] (non-destructive). Returns `this` for chaining. */

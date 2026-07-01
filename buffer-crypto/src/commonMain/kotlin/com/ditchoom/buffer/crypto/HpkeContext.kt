@@ -5,6 +5,8 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * HPKE encryption contexts (RFC 9180 §5.2) and the setup functions that produce them.
@@ -15,7 +17,13 @@ import com.ditchoom.buffer.WriteBuffer
  * (key, nonce) pair is never reused. The [export] method derives independent secrets from the
  * context's `exporter_secret` (the HPKE secret-export interface, §5.3).
  *
- * The AEAD key, base nonce, and exporter secret live in wiped [SecureBuffer]s; [close] zeroes them.
+ * Concurrency: the per-message `seal`/`open` ops are serialized on an internal [Mutex], so
+ * concurrent callers on one context are safe — each op claims its sequence number exactly once
+ * (and a failed open still leaves the counter unchanged). [close] is not synchronized with
+ * in-flight ops; close a context only after its last op has returned.
+ *
+ * The AEAD key, base nonce, and exporter secret live in wiped [SecureBuffer]s; [close] zeroes them
+ * (idempotent) along with the wrapped [aeadKey]'s material. Ops on a closed context throw.
  */
 sealed class HpkeContext protected constructor(
     internal val suite: HpkeSuite,
@@ -24,6 +32,13 @@ sealed class HpkeContext protected constructor(
     internal val exporterSecret: PlatformBuffer,
 ) : AutoCloseable {
     private var seq: Long = 0L
+    private var closed = false
+
+    /** Serializes the nonce-compute → AEAD op → counter-advance sequence (see class KDoc). */
+    internal val seqLock = Mutex()
+
+    /** The derived AEAD key, wrapped once for the context's lifetime and wiped by [close]. */
+    internal val aeadKey: AeadKey = hpkeAeadKeyOf(suite.aead, key)
 
     /** RFC 9180 §5.3 secret export: `LabeledExpand(exporter_secret, "sec", context, L)`. */
     fun export(
@@ -31,6 +46,7 @@ sealed class HpkeContext protected constructor(
         length: Int,
         factory: BufferFactory = BufferFactory.Default,
     ): ReadBuffer {
+        requireOpen()
         require(length >= 0) { "export length must be non-negative, was $length" }
         val out = factory.allocate(length)
         labeledExpand(suite.kdf, suite.suiteId(), exporterSecret, LABEL_SEC, exporterContext.bytesOrNull, length, out)
@@ -76,7 +92,15 @@ sealed class HpkeContext protected constructor(
         seq = value
     }
 
+    /** Guards every op against use after [close]. */
+    internal fun requireOpen() {
+        check(!closed) { "HpkeContext already closed" }
+    }
+
     override fun close() {
+        if (closed) return
+        closed = true
+        aeadKey.closeMaterial()
         key.freeNativeMemory()
         baseNonce.freeNativeMemory()
         exporterSecret.freeNativeMemory()
@@ -91,20 +115,24 @@ sealed class HpkeContext protected constructor(
     ) : HpkeContext(suite, key, baseNonce, exporterSecret) {
         /**
          * Seals [plaintext] with [aad] under the next per-message nonce, returning `ct || tag`
-         * (read-ready, from [factory]). Advances the sequence number only on success.
+         * (read-ready, from [factory]). Advances the sequence number only on success; serialized
+         * against concurrent seals so a sequence number (and thus a nonce) is never reused.
          */
         suspend fun seal(
             plaintext: ReadBuffer,
             aad: Aad = Aad.None,
             factory: BufferFactory = BufferFactory.Default,
         ): PlatformBuffer {
-            val nonce = computeNonce()
-            return try {
-                val ct = hpkeAeadSeal(suite.aead, key, nonce, aad.bytesOrNull, plaintext, factory)
-                incrementSeq()
-                ct
-            } finally {
-                nonce.freeNativeMemory()
+            requireOpen()
+            return seqLock.withLock {
+                val nonce = computeNonce()
+                try {
+                    val ct = hpkeAeadSeal(aeadKey, nonce, aad.bytesOrNull, plaintext, factory)
+                    incrementSeq()
+                    ct
+                } finally {
+                    nonce.freeNativeMemory()
+                }
             }
         }
     }
@@ -129,13 +157,16 @@ sealed class HpkeContext protected constructor(
             aad: Aad = Aad.None,
             factory: BufferFactory = BufferFactory.Default,
         ): PlatformBuffer {
-            val nonce = computeNonce()
-            return try {
-                val pt = hpkeAeadOpen(suite.aead, key, nonce, aad.bytesOrNull, ciphertext, factory)
-                incrementSeq()
-                pt
-            } finally {
-                nonce.freeNativeMemory()
+            requireOpen()
+            return seqLock.withLock {
+                val nonce = computeNonce()
+                try {
+                    val pt = hpkeAeadOpen(aeadKey, nonce, aad.bytesOrNull, ciphertext, factory)
+                    incrementSeq()
+                    pt
+                } finally {
+                    nonce.freeNativeMemory()
+                }
             }
         }
     }
@@ -463,7 +494,7 @@ private fun keySchedule(
     val suiteId = suite.suiteId()
     val nh = kdf.nh
 
-    val pskValue: ReadBuffer? = psk?.psk
+    val pskValue: ReadBuffer? = psk?.requireOpen()
     val pskIdValue: ReadBuffer = psk?.pskId ?: EMPTY
 
     // psk_id_hash = LabeledExtract("", "psk_id_hash", psk_id)
