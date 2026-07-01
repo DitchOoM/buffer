@@ -66,6 +66,43 @@ jobs:
             echo "FAIL: no Apple-publishing modules detected — Apple artifact download or PSM layout changed"
             exit 1
           fi
+
+          # Regression guard: independently derive the set of modules that SHIP Apple
+          # leaf-target artifacts (buffer-codec-macosarm64, buffer-flow-iosarm64, …) and
+          # require every one of them to also appear in the detected umbrella set above.
+          # A module that publishes Apple leaf klibs but whose umbrella metadata JAR has
+          # no appleMain source set has regressed to the old split-publish hack (umbrella
+          # disabled on macOS + hand-injected .module variants) — exactly the failure that
+          # silently shipped Apple-less PSMs before. Detection alone can't catch it because
+          # such a module never appears in APPLE_MODULES; this cross-check makes it loud.
+          APPLE_TARGET_SUFFIXES="iosarm64 iossimulatorarm64 iosx64 macosarm64 macosx64 tvosarm64 tvossimulatorarm64 tvosx64 watchosarm64 watchossimulatorarm64 watchosx64 watchosdevicearm64"
+          EXPECTED_APPLE_MODULES=""
+          for dir in "$APPLE_BASE"/*/; do
+            [ -d "$dir" ] || continue
+            name=$(basename "$dir")
+            for suf in $APPLE_TARGET_SUFFIXES; do
+              case "$name" in
+                *-"$suf")
+                  EXPECTED_APPLE_MODULES="$EXPECTED_APPLE_MODULES ${name%-"$suf"}"
+                  break ;;
+              esac
+            done
+          done
+          EXPECTED_APPLE_MODULES=$(echo "$EXPECTED_APPLE_MODULES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')
+          echo "Modules shipping Apple leaf targets: ${EXPECTED_APPLE_MODULES}"
+
+          MISSING_APPLE_MODULES=""
+          for m in $EXPECTED_APPLE_MODULES; do
+            case " $APPLE_MODULES " in
+              *" $m "*) ;;
+              *) MISSING_APPLE_MODULES="$MISSING_APPLE_MODULES $m" ;;
+            esac
+          done
+          if [ -n "$(echo "$MISSING_APPLE_MODULES" | tr -d ' ')" ]; then
+            echo "FAIL: these modules ship Apple leaf targets but their umbrella metadata JAR has no appleMain source set (regressed to a split-publish hack — publish the umbrella on macOS too):${MISSING_APPLE_MODULES}"
+            exit 1
+          fi
+
           echo "APPLE_MODULES=${APPLE_MODULES}" >> "$GITHUB_ENV"
 
           for module in $APPLE_MODULES; do
