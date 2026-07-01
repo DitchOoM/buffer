@@ -18,6 +18,7 @@ actual class Sha384Digest actual constructor() {
     private var finalized = false
 
     actual fun update(input: ReadBuffer): Sha384Digest {
+        check(!finalized) { "digest already finalized" }
         input.withRemainingBytes { ptr, len -> bcl_sha384_update(ctx, ptr.reinterpret(), len.convert()) }
         return this
     }

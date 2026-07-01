@@ -30,13 +30,18 @@ actual class HmacSha384Mac actual constructor(
                 }
             init(spec)
         }
+    private var finalized = false
 
     actual fun update(input: ReadBuffer): HmacSha384Mac {
+        check(!finalized) { "mac already finalized" }
         mac.updateRemaining(input)
         return this
     }
 
     actual fun doFinalInto(dest: WriteBuffer) {
+        // JCA resets the mac for reuse; the cross-platform contract is one-shot, so reject reuse.
+        check(!finalized) { "mac already finalized" }
+        finalized = true
         mac.doFinalInto(dest)
     }
 }

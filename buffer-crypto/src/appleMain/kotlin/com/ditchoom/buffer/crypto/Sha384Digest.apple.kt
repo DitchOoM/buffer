@@ -11,10 +11,12 @@ import kotlinx.cinterop.convert
 import kotlinx.cinterop.nativeHeap
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.reinterpret
+import kotlinx.cinterop.sizeOf
 import platform.CoreCrypto.CC_SHA384_Final
 import platform.CoreCrypto.CC_SHA384_Init
 import platform.CoreCrypto.CC_SHA384_Update
 import platform.CoreCrypto.CC_SHA512_CTX
+import platform.posix.memset
 
 /**
  * Apple SHA-384 backed by CommonCrypto (`CC_SHA384`). SHA-384 shares SHA-512's context type
@@ -29,16 +31,18 @@ actual class Sha384Digest actual constructor() {
     }
 
     actual fun update(input: ReadBuffer): Sha384Digest {
+        check(!finalized) { "digest already finalized" }
         input.withRemainingBytes { ptr, len -> CC_SHA384_Update(ctx.ptr, ptr, len.convert()) }
         return this
     }
 
     actual fun digestInto(dest: WriteBuffer) {
+        check(!finalized) { "digest already finalized" }
+        finalized = true
         // CommonCrypto writes the 48-byte digest straight into the destination buffer's memory.
         dest.withWritablePointer(SHA384_DIGEST_BYTES) { ptr -> CC_SHA384_Final(ptr.reinterpret(), ctx.ptr) }
-        if (!finalized) {
-            finalized = true
-            nativeHeap.free(ctx.rawPtr)
-        }
+        // The context still holds absorbed state; zero it before returning the allocation.
+        memset(ctx.ptr, 0, sizeOf<CC_SHA512_CTX>().convert())
+        nativeHeap.free(ctx.rawPtr)
     }
 }

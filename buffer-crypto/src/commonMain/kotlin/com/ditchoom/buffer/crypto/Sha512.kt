@@ -24,8 +24,8 @@ const val SHA512_BLOCK_BYTES = 128
  * then [digestInto] to write the 64-byte result into a caller-owned destination. Reading is
  * non-destructive: [update] consumes a `slice()` of the input, leaving the source untouched.
  *
- * Not thread-safe — use one instance per digest. The instance must not be reused after
- * [digestInto].
+ * Not thread-safe — use one instance per digest. The instance is one-shot on every platform:
+ * [update] or [digestInto] after finalization throws [IllegalStateException].
  */
 expect class Sha512Digest() {
     /** Absorbs the remaining bytes of [input] (non-destructive). Returns `this` for chaining. */

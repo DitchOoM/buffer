@@ -121,7 +121,7 @@ sealed interface SyncCapableAesGcmKey : AesGcmKey
 /** In-memory [AesGcmKey]: holds the raw key bytes, freed (and wiped, on a secure buffer) on [close]. */
 internal class InMemoryAesGcmKey(
     override val sizeBits: Int,
-    val material: PlatformBuffer,
+    private val material: PlatformBuffer,
 ) : SyncCapableAesGcmKey {
     override val provenance: KeyProvenance get() = KeyProvenance.Software
     private var closed = false
@@ -131,6 +131,12 @@ internal class InMemoryAesGcmKey(
             closed = true
             material.freeNativeMemory()
         }
+    }
+
+    /** The live key material; throws if the key has been [close]d. */
+    fun requireOpen(): PlatformBuffer {
+        check(!closed) { "AesGcmKey already closed" }
+        return material
     }
 }
 
@@ -165,7 +171,7 @@ sealed interface ChaChaPolyKey :
 
 /** In-memory [ChaChaPolyKey]: holds the raw key bytes, freed (and wiped) on [close]. */
 internal class InMemoryChaChaPolyKey(
-    val material: PlatformBuffer,
+    private val material: PlatformBuffer,
 ) : ChaChaPolyKey {
     override val provenance: KeyProvenance get() = KeyProvenance.Software
     private var closed = false
@@ -176,16 +182,24 @@ internal class InMemoryChaChaPolyKey(
             material.freeNativeMemory()
         }
     }
+
+    /** The live key material; throws if the key has been [close]d. */
+    fun requireOpen(): PlatformBuffer {
+        check(!closed) { "ChaChaPolyKey already closed" }
+        return material
+    }
 }
 
 /**
- * The in-memory key material, for the blocking native primitives. A hardware-backed key (added
- * later) holds no exportable material and would route through the async provider path instead, so
- * this seam is only reached for in-memory keys.
+ * The in-memory key material, for the blocking native primitives; throws if the key has been
+ * closed (a closed secure backing is zeroed, a closed deterministic backing is freed — sealing
+ * with either would be silently wrong). A hardware-backed key (added later) holds no exportable
+ * material and would route through the async provider path instead, so this seam is only reached
+ * for in-memory keys.
  */
 internal fun AesGcmKey.requireInMemoryMaterial(): PlatformBuffer =
     when (this) {
-        is InMemoryAesGcmKey -> material
+        is InMemoryAesGcmKey -> requireOpen()
         // A hardware key holds no exportable material, so the synchronous/material-reading path is
         // not supported for it — hardware keys operate only through the async witness ops, which
         // dispatch to the gated closures and never reach here. This throw is the safety net if a
@@ -196,7 +210,7 @@ internal fun AesGcmKey.requireInMemoryMaterial(): PlatformBuffer =
 /** See [AesGcmKey.requireInMemoryMaterial]. */
 internal fun ChaChaPolyKey.requireInMemoryMaterial(): PlatformBuffer =
     when (this) {
-        is InMemoryChaChaPolyKey -> material
+        is InMemoryChaChaPolyKey -> requireOpen()
     }
 
 /**

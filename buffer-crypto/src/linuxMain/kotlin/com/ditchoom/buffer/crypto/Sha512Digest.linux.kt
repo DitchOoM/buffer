@@ -18,6 +18,7 @@ actual class Sha512Digest actual constructor() {
     private var finalized = false
 
     actual fun update(input: ReadBuffer): Sha512Digest {
+        check(!finalized) { "digest already finalized" }
         input.withRemainingBytes { ptr, len -> bcl_sha512_update(ctx, ptr.reinterpret(), len.convert()) }
         return this
     }

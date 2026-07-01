@@ -10,11 +10,13 @@ import kotlinx.cinterop.alloc
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.nativeHeap
 import kotlinx.cinterop.ptr
+import kotlinx.cinterop.sizeOf
 import platform.CoreCrypto.CCHmacContext
 import platform.CoreCrypto.CCHmacFinal
 import platform.CoreCrypto.CCHmacInit
 import platform.CoreCrypto.CCHmacUpdate
 import platform.CoreCrypto.kCCHmacAlgSHA384
+import platform.posix.memset
 
 /** Apple HMAC-SHA384 backed by CommonCrypto (`CCHmac`). Reads and writes via buffer pointers — no arrays. */
 actual class HmacSha384Mac actual constructor(
@@ -32,16 +34,18 @@ actual class HmacSha384Mac actual constructor(
     }
 
     actual fun update(input: ReadBuffer): HmacSha384Mac {
+        check(!finalized) { "mac already finalized" }
         input.withRemainingBytes { ptr, len -> CCHmacUpdate(ctx.ptr, ptr, len.convert()) }
         return this
     }
 
     actual fun doFinalInto(dest: WriteBuffer) {
+        check(!finalized) { "mac already finalized" }
+        finalized = true
         // CommonCrypto writes the 48-byte tag straight into the destination buffer's memory.
         dest.withWritablePointer(SHA384_DIGEST_BYTES) { ptr -> CCHmacFinal(ctx.ptr, ptr) }
-        if (!finalized) {
-            finalized = true
-            nativeHeap.free(ctx.rawPtr)
-        }
+        // The context holds key-derived ipad/opad state; zero it before returning the allocation.
+        memset(ctx.ptr, 0, sizeOf<CCHmacContext>().convert())
+        nativeHeap.free(ctx.rawPtr)
     }
 }
