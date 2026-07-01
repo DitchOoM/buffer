@@ -1,11 +1,11 @@
 
 [versions]
-kotlin = "2.3.21"
+kotlin = "2.4.0"
 androidGradlePlugin = "9.2.1"
 ktlint = "14.2.0"
-# detekt 2.0.0-alpha.3 is built against Kotlin 2.3.21 (exact match for `kotlin` above).
+# detekt 2.0.0-alpha.5 is built against Kotlin 2.4.0 (matches `kotlin` above).
 # Plugin id moved to `dev.detekt` in 2.0. Run non-blocking with a committed baseline.
-detekt = "2.0.0-alpha.3"
+detekt = "2.0.0-alpha.5"
 # simdutf - SIMD-accelerated Unicode validation and transcoding (Linux only)
 simdutf = "8.0.0"
 simdutfSha256 = "3d9eef727f088abaeaae4d40962a1ca09871c6bbe6d23de7930488c43ab77643"
@@ -24,8 +24,8 @@ androidxTestCore = "1.7.0"
 androidxTestJunit = "1.3.0"
 kotlinWrappers = "2026.6.0"
 ksp = "2.3.9"
-# kctfork 0.13.0-alpha01 requires Kotlin 2.4.0-Beta1; hold at 0.12.0-alpha01 for Kotlin 2.3.x
-kctfork = "0.12.0-alpha01"
+# kctfork 0.13.0 targets Kotlin 2.4.0 (matches `kotlin` above).
+kctfork = "0.13.0"
 kotlinpoet = "2.3.0"
 binaryCompatibilityValidator = "0.18.1"
 # androidx.collection — multiplatform Swiss-table maps used by the :buffer-1brc showcase only
