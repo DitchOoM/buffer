@@ -22,7 +22,9 @@ actual class HmacSha512Mac actual constructor(
         check(!finalized) { "mac already finalized" }
         // Validate BEFORE the core finalize: the core's padding absorb is not re-runnable, so a
         // short dest must fail while the state is still retryable (C1).
-        require(dest.remaining() >= HMAC_SHA512_BYTES) { "dest needs $HMAC_SHA512_BYTES bytes remaining, has ${dest.remaining()}" }
+        require(dest.remaining() >= HMAC_SHA512_BYTES) {
+            "dest needs $HMAC_SHA512_BYTES bytes remaining, has ${dest.remaining()}"
+        }
         core.doFinalInto(dest)
         finalized = true
     }

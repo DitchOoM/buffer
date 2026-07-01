@@ -20,7 +20,9 @@ actual class Sha512Digest actual constructor() : AutoCloseable {
         check(!finalized) { "digest already finalized" }
         // Validate BEFORE finish(): the core's padding absorb is not re-runnable, so a
         // short dest must fail while the state is still retryable (C1).
-        require(dest.remaining() >= SHA512_DIGEST_BYTES) { "dest needs $SHA512_DIGEST_BYTES bytes remaining, has ${dest.remaining()}" }
+        require(dest.remaining() >= SHA512_DIGEST_BYTES) {
+            "dest needs $SHA512_DIGEST_BYTES bytes remaining, has ${dest.remaining()}"
+        }
         core.finish()
         for (i in 0 until SHA512_DIGEST_BYTES) dest.writeByte(core.digestByte(i))
         finalized = true
