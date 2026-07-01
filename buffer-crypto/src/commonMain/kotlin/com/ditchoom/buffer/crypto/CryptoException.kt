@@ -112,4 +112,20 @@ sealed class HardwareKeyException protected constructor(
 
     /** The secure element does not support the requested algorithm / key size / parameters. */
     class UnsupportedHardwareKey internal constructor() : HardwareKeyException("unsupported hardware key parameters")
+
+    /**
+     * Generation was requested for a [HardwareAlgorithm] where [HardwareKeyProvider.eligible] is
+     * `false` (e.g. AES-GCM on the Apple Secure Enclave). Typed — not an
+     * `IllegalArgumentException` with a message — so a caller can branch on it exhaustively; the
+     * fix is to consult [HardwareKeyProvider.eligible] before generating.
+     */
+    class AlgorithmNotEligible internal constructor() : HardwareKeyException("algorithm not hardware-eligible")
+
+    /**
+     * The requested `HardwareKeySpec.userAuthentication` needs a platform prompt authenticator the
+     * supplied `HardwareKeySpec.authorization` cannot provide (e.g. Android `PerUse` binding
+     * requires a `CryptoObject`-capable `BiometricPromptAuthenticator`, not a plain closure).
+     * Raised at *generation*, so a misconfigured key can never exist.
+     */
+    class UserAuthenticatorRequired internal constructor() : HardwareKeyException("user authenticator required")
 }

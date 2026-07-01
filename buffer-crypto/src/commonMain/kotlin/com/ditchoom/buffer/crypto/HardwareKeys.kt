@@ -3,6 +3,8 @@ package com.ditchoom.buffer.crypto
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 /*
  * Hardware-backed key support — the *shape* of the API, frozen in 6.0 so a real secure-element /
@@ -67,10 +69,86 @@ internal fun SignatureScheme.toHardwareAlgorithm(): HardwareAlgorithm =
  * Returning `false` (or throwing) denies the operation, which the witness ops surface as
  * [AuthorizationFailed]. `suspend` because a real gate (a biometric prompt, a TEE round-trip) is
  * inherently asynchronous.
+ *
+ * The library ships a real prompt-backed implementation per platform that has OS user
+ * authentication — `BiometricPromptAuthenticator` (androidMain, androidx.biometric) and
+ * `LocalAuthAuthenticator` (appleMain, LocalAuthentication) — which is how
+ * [UserAuthenticationRequirement.Session] / [UserAuthenticationRequirement.PerUse] keys actually
+ * put a prompt on screen. The UI host (an Activity, a localized reason) cannot be expressed in
+ * common code, so the app constructs the platform authenticator and injects it here — the same
+ * inversion-of-control pattern as `BufferFactory`.
  */
 fun interface HardwareAuthorization {
     /** Returns `true` to authorize the pending hardware key operation, `false` to deny it. */
     suspend fun authorize(): Boolean
+}
+
+/**
+ * Which kinds of user authentication satisfy a [UserAuthenticationRequirement] binding. Fixed at
+ * generation and enforced by the OS, not by library code.
+ */
+enum class UserAuthenticationMethod {
+    /**
+     * A strong biometric only (fingerprint / face). The OS invalidates the key when biometric
+     * enrollment changes (Android `AUTH_BIOMETRIC_STRONG` + invalidate-on-enrollment, Apple
+     * `SecAccessControl.biometryCurrentSet`) — surfacing as [HardwareKeyException.KeyInvalidated].
+     */
+    BiometricOnly,
+
+    /**
+     * A biometric or the device credential (PIN / pattern / passcode). Survives biometric
+     * re-enrollment (Android `AUTH_BIOMETRIC_STRONG or AUTH_DEVICE_CREDENTIAL`, Apple
+     * `SecAccessControl.userPresence`).
+     */
+    BiometricOrCredential,
+}
+
+/**
+ * OS-level user-authentication binding for a hardware-backed key, fixed at generation. Unlike the
+ * advisory [HardwareAuthorization] gate (library code deciding whether to proceed), this binds the
+ * key *inside the secure element*: an op on an unauthenticated key fails in hardware no matter what
+ * the process does.
+ *
+ * Platform reality: OS binding exists on Android (Keystore `setUserAuthenticationRequired`) and
+ * Apple (Secure Enclave `SecAccessControl`). Platforms without a hardware provider (JVM, JS, WASM,
+ * Linux) never see these values — [CryptoCapabilities.hardware] is already
+ * [HardwareSupport.Unavailable] there.
+ */
+sealed interface UserAuthenticationRequirement {
+    /** No OS binding (the default). The key is usable whenever the process runs. */
+    data object None : UserAuthenticationRequirement
+
+    /**
+     * One successful user authentication unlocks the key for [validity]; ops inside the window do
+     * not re-prompt. The provider prompts lazily — it attempts the op and only invokes the
+     * [HardwareKeySpec.authorization] gate when the OS reports the window stale — so an
+     * already-authenticated user is never re-prompted.
+     *
+     * Window enforcement is by the OS on Android (keystore auth timeout); on Apple the Enclave has
+     * no timed window, so the provider enforces [validity] by re-prompting when it expires — the
+     * OS still enforces *that a successful authentication happened* via `SecAccessControl`.
+     */
+    data class Session(
+        val validity: Duration,
+        val method: UserAuthenticationMethod = UserAuthenticationMethod.BiometricOrCredential,
+    ) : UserAuthenticationRequirement {
+        init {
+            require(validity >= 1.seconds) { "session validity must be at least 1 second, was $validity" }
+        }
+    }
+
+    /**
+     * Every operation requires a fresh user authentication bound to that exact operation (Android:
+     * auth-per-use key + `BiometricPrompt.CryptoObject` wrapping the exact `Cipher`/`Signature`;
+     * Apple: a fresh, un-evaluated `LAContext` per sign, so the Enclave prompts each time).
+     *
+     * On Android this requires a `CryptoObject`-capable authenticator
+     * (`BiometricPromptAuthenticator`); generation with a plain [HardwareAuthorization] closure
+     * throws [HardwareKeyException.UserAuthenticatorRequired].
+     */
+    data class PerUse(
+        val method: UserAuthenticationMethod = UserAuthenticationMethod.BiometricOnly,
+    ) : UserAuthenticationRequirement
 }
 
 /**
@@ -80,7 +158,14 @@ fun interface HardwareAuthorization {
 class HardwareKeySpec(
     /**
      * The gate evaluated before each use of the generated key. The default authorizes
-     * unconditionally; a real caller supplies a biometric / device-credential prompt.
+     * unconditionally; a real caller supplies a biometric / device-credential prompt
+     * (`BiometricPromptAuthenticator` on Android, `LocalAuthAuthenticator` on Apple).
+     *
+     * With [userAuthentication] = [UserAuthenticationRequirement.None] this is a purely advisory
+     * gate evaluated before every op. With [UserAuthenticationRequirement.Session] it is invoked
+     * lazily — only when the OS reports the auth window stale. With
+     * [UserAuthenticationRequirement.PerUse] it is invoked for every op, bound to the exact
+     * crypto operation where the platform supports that (Android `CryptoObject`).
      */
     val authorization: HardwareAuthorization = HardwareAuthorization { true },
     /**
@@ -88,6 +173,12 @@ class HardwareKeySpec(
      * generating a signing key (the curve fixes the size).
      */
     val aesKeySizeBits: Int = AES_256_KEY_BYTES * Byte.SIZE_BITS,
+    /**
+     * OS-level user-authentication binding, fixed at generation. The default
+     * ([UserAuthenticationRequirement.None]) preserves the pre-existing behavior: no OS binding,
+     * [authorization] is advisory-only.
+     */
+    val userAuthentication: UserAuthenticationRequirement = UserAuthenticationRequirement.None,
 )
 
 /**
@@ -102,11 +193,22 @@ class HardwareKeySpec(
  * closures a provider builds into each key, but the *gate itself is the provider's responsibility* —
  * the common code holds no authorization to evaluate. Therefore an implementation **MUST**, for every
  * key it generates:
- *  1. evaluate [HardwareKeySpec.authorization] (`authorize()`) before each use of the key, and throw
- *     [AuthorizationFailed] when it returns `false` or throws — never proceed with the crypto op;
- *  2. keep secret key material inside the secure element — never expose it through any returned type
+ *  1. evaluate [HardwareKeySpec.authorization] (`authorize()`) per the key's
+ *     [HardwareKeySpec.userAuthentication] policy — [UserAuthenticationRequirement.None]: before
+ *     every op; [UserAuthenticationRequirement.Session]: lazily, when the OS reports the auth
+ *     window stale, then retry the op exactly once; [UserAuthenticationRequirement.PerUse]: for
+ *     every op, bound to the exact crypto operation where the platform supports binding — and
+ *     throw [AuthorizationFailed] when the gate returns `false` or throws: never proceed with the
+ *     crypto op;
+ *  2. honor [HardwareKeySpec.userAuthentication] *inside the secure element* where the platform
+ *     supports it (Android `setUserAuthenticationRequired`, Apple `SecAccessControl`), so the
+ *     binding is not bypassable by code that skips the gate;
+ *  3. keep secret key material inside the secure element — never expose it through any returned type
  *     (the [KeyProvenance.Hardware] key types carry no exportable material by construction);
- *  3. refuse generation for an [alg] where [eligible] is `false`.
+ *  4. refuse generation for an [alg] where [eligible] is `false`, and throw
+ *     [HardwareKeyException.UserAuthenticatorRequired] when the requested
+ *     [HardwareKeySpec.userAuthentication] needs a platform prompt the supplied
+ *     [HardwareKeySpec.authorization] cannot provide.
  */
 interface HardwareKeyProvider {
     /**

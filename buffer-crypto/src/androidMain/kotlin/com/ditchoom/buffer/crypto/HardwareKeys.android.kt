@@ -10,6 +10,7 @@ import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.security.keystore.StrongBoxUnavailableException
 import android.security.keystore.UserNotAuthenticatedException
+import androidx.biometric.BiometricPrompt
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
@@ -67,11 +68,21 @@ import javax.crypto.spec.GCMParameterSpec
  *    under a [Mutex] on [Dispatchers.Default]. The auth gate ([HardwareAuthorization.authorize]) is
  *    evaluated *outside* the lock — a biometric prompt must not hold the keystore mutex.
  *
- * The per-use gate is [HardwareKeySpec.authorization], evaluated in Kotlin before every op. OS-level
- * user-authentication binding (`setUserAuthenticationRequired`) is intentionally NOT set: it would
- * make a key unusable without a fresh device unlock / biometric, which the [HardwareAuthorization]
- * gate already models at the SPI level and which would break unattended conformance runs. Binding the
- * keystore to a biometric prompt is a future enhancement layered on top of the gate.
+ * **User authentication** follows [HardwareKeySpec.userAuthentication]:
+ *  - [UserAuthenticationRequirement.None] — no OS binding; the [HardwareAuthorization] gate is
+ *    advisory, evaluated before every op (the pre-biometrics behavior, and the default — this is
+ *    what keeps unattended conformance runs green).
+ *  - [UserAuthenticationRequirement.Session] — the key is generated with
+ *    `setUserAuthenticationRequired(true)` + a validity window (`setUserAuthenticationParameters`
+ *    on API 30+, the deprecated validity-duration seconds on 28/29), so the *keystore* refuses a
+ *    stale op with `UserNotAuthenticatedException`. The provider then prompts via the gate
+ *    (a [BiometricAuthorization] shows a real prompt; a plain closure just decides) and retries
+ *    exactly once — an already-authenticated user is never re-prompted.
+ *  - [UserAuthenticationRequirement.PerUse] — auth-per-use binding (timeout 0 /
+ *    validity -1), which Android only honors through a `BiometricPrompt.CryptoObject`
+ *    wrapping the exact `Cipher`/`Signature`. Generation therefore requires a
+ *    [BiometricAuthorization] (the library ships [BiometricPromptAuthenticator]); anything else
+ *    throws [HardwareKeyException.UserAuthenticatorRequired] at generation.
  */
 internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
     private val keyStore: KeyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
@@ -104,43 +115,58 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
 
     override suspend fun generateAesGcm(spec: HardwareKeySpec): AesGcmKey {
         val keyBits = spec.aesKeySizeBits
-        require(keyBits == AES_128_KEY_BYTES * Byte.SIZE_BITS || keyBits == AES_256_KEY_BYTES * Byte.SIZE_BITS) {
-            "AES key size must be 128 or 256 bits, was $keyBits"
+        if (keyBits != AES_128_KEY_BYTES * Byte.SIZE_BITS && keyBits != AES_256_KEY_BYTES * Byte.SIZE_BITS) {
+            throw HardwareKeyException.UnsupportedHardwareKey()
         }
+        val policy = resolvePolicy(spec)
         val alias = newAlias("aes")
-        val key = keystoreOp { generateAesKey(alias, spec.aesKeySizeBits) }
-        val auth = spec.authorization
+        val key = keystoreOp { generateAesKey(alias, spec.aesKeySizeBits, spec.userAuthentication) }
         return HardwareAesGcmKey(
             sizeBits = spec.aesKeySizeBits,
             gatedSeal = { aad, plaintext, factory ->
-                if (!auth.authorize()) throw AuthorizationFailed()
-                keystoreOp {
-                    val cipher = Cipher.getInstance(AES_GCM_TRANSFORM)
-                    // Randomized-encryption-required (the JCA default) ⇒ the keystore generates a
-                    // fresh 12-byte GCM IV at init; read it back and frame it ahead of the ciphertext.
-                    cipher.init(Cipher.ENCRYPT_MODE, key)
-                    val nonce = cipher.iv
-                    aad?.let { cipher.updateAADRemaining(it) }
-                    val out = factory.allocate(nonce.size + plaintext.remaining() + AEAD_TAG_BYTES)
-                    out.writeBytes(nonce)
-                    finalInto(cipher, plaintext, out)
-                    out.resetForRead()
-                    out
-                }
+                gatedOp(
+                    policy = policy,
+                    create = {
+                        val cipher = Cipher.getInstance(AES_GCM_TRANSFORM)
+                        // Randomized-encryption-required (the JCA default) ⇒ the keystore generates
+                        // a fresh 12-byte GCM IV at init; read it back and frame it ahead of the
+                        // ciphertext.
+                        cipher.init(Cipher.ENCRYPT_MODE, key)
+                        cipher
+                    },
+                    wrap = { BiometricPrompt.CryptoObject(it) },
+                    use = { cipher ->
+                        val nonce = cipher.iv
+                        aad?.let { cipher.updateAADRemaining(it.slice()) }
+                        val plaintextView = plaintext.slice()
+                        val out = factory.allocate(nonce.size + plaintextView.remaining() + AEAD_TAG_BYTES)
+                        out.writeBytes(nonce)
+                        finalInto(cipher, plaintextView, out)
+                        out.resetForRead()
+                        out
+                    },
+                )
             },
             gatedOpen = { nonce, aad, ciphertextAndTag, factory ->
-                if (!auth.authorize()) throw AuthorizationFailed()
                 requireNonce(nonce)
                 requireTagged(ciphertextAndTag)
-                keystoreOp {
-                    val cipher = Cipher.getInstance(AES_GCM_TRANSFORM)
-                    cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(gcmTagBits, nonceBytes(nonce)))
-                    aad?.let { cipher.updateAADRemaining(it) }
-                    val out = factory.allocate(maxOf(0, ciphertextAndTag.remaining() - AEAD_TAG_BYTES))
-                    openInto(cipher, ciphertextAndTag, out)
-                    out.resetForRead()
-                    out
-                }
+                gatedOp(
+                    policy = policy,
+                    create = {
+                        val cipher = Cipher.getInstance(AES_GCM_TRANSFORM)
+                        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(gcmTagBits, nonceBytes(nonce.slice())))
+                        cipher
+                    },
+                    wrap = { BiometricPrompt.CryptoObject(it) },
+                    use = { cipher ->
+                        aad?.let { cipher.updateAADRemaining(it.slice()) }
+                        val ctView = ciphertextAndTag.slice()
+                        val out = factory.allocate(maxOf(0, ctView.remaining() - AEAD_TAG_BYTES))
+                        openInto(cipher, ctView, out)
+                        out.resetForRead()
+                        out
+                    },
+                )
             },
             onClose = { runCatching { keyStore.deleteEntry(alias) } },
         )
@@ -150,33 +176,78 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
         scheme: SignatureScheme,
         spec: HardwareKeySpec,
     ): SigningKey {
-        require(eligible(scheme.toHardwareAlgorithm())) {
-            "${scheme.schemeName} is not eligible for hardware backing"
-        }
+        if (!eligible(scheme.toHardwareAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
+        val policy = resolvePolicy(spec)
         val alias = newAlias("ec")
-        val keyPair = keystoreOp { generateEcKeyPair(alias) }
+        val keyPair = keystoreOp { generateEcKeyPair(alias, spec.userAuthentication) }
         val privateKey = keyPair.private
         val verifyKey = VerifyKey.ecdsaP256(uncompressedPoint(keyPair.public as ECPublicKey))
-        val auth = spec.authorization
         return HardwareSigningKey(
             scheme = SignatureScheme.EcdsaP256,
             gatedSign = { message, factory ->
-                if (!auth.authorize()) throw AuthorizationFailed()
-                keystoreOp {
-                    val signer = Signature.getInstance(ECDSA_SHA256)
-                    signer.initSign(privateKey)
-                    signer.update(message.remainingBytes())
-                    val der = signer.sign()
-                    val out: PlatformBuffer = factory.allocate(der.size)
-                    out.writeBytes(der)
-                    out.resetForRead()
-                    out
-                }
+                gatedOp(
+                    policy = policy,
+                    create = {
+                        Signature.getInstance(ECDSA_SHA256).apply { initSign(privateKey) }
+                    },
+                    wrap = { BiometricPrompt.CryptoObject(it) },
+                    use = { signer ->
+                        signer.update(message.slice().remainingBytes())
+                        val der = signer.sign()
+                        val out: PlatformBuffer = factory.allocate(der.size)
+                        out.writeBytes(der)
+                        out.resetForRead()
+                        out
+                    },
+                )
             },
             verifyKey = verifyKey,
             onClose = { runCatching { keyStore.deleteEntry(alias) } },
         )
     }
+
+    // --- user-authentication policy dispatch -------------------------------------------------------
+
+    /**
+     * Runs one keystore op under the key's resolved user-auth [policy]. [create] initializes the
+     * JCA handle (`Cipher`/`Signature`) and [use] drives it to completion — both inside
+     * [keystoreOp]; the prompt (when any) happens strictly *outside* the keystore lock.
+     *
+     *  - [ResolvedAndroidPolicy.Advisory]: gate first, then one shot.
+     *  - [ResolvedAndroidPolicy.Session]: one shot; when the keystore reports the auth window
+     *    stale ([HardwareKeyException.UserAuthenticationRequired], mapped from
+     *    `UserNotAuthenticatedException`), prompt once and retry once — a fresh handle, because
+     *    the stale one is unusable.
+     *  - [ResolvedAndroidPolicy.PerUse]: initialize the handle, authorize *that exact handle* via
+     *    `CryptoObject`, then drive it. The variant carries its [BiometricAuthorization] by
+     *    construction — resolved at generation, so no cast and no nullable state here.
+     */
+    private suspend fun <C : Any, T> gatedOp(
+        policy: ResolvedAndroidPolicy,
+        create: () -> C,
+        wrap: (C) -> BiometricPrompt.CryptoObject,
+        use: (C) -> T,
+    ): T =
+        when (policy) {
+            is ResolvedAndroidPolicy.Advisory -> {
+                if (!policy.gate.authorize()) throw AuthorizationFailed()
+                keystoreOp { use(create()) }
+            }
+
+            is ResolvedAndroidPolicy.Session ->
+                try {
+                    keystoreOp { use(create()) }
+                } catch (_: HardwareKeyException.UserAuthenticationRequired) {
+                    if (!policy.unlock()) throw AuthorizationFailed()
+                    keystoreOp { use(create()) }
+                }
+
+            is ResolvedAndroidPolicy.PerUse -> {
+                val crypto = keystoreOp { create() }
+                if (!policy.prompt.authenticate(policy.method, wrap(crypto))) throw AuthorizationFailed()
+                keystoreOp { use(crypto) }
+            }
+        }
 
     // --- keystore serialization ------------------------------------------------------------------
 
@@ -198,12 +269,13 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
     private fun generateAesKey(
         alias: String,
         sizeBits: Int,
+        req: UserAuthenticationRequirement,
     ): SecretKey =
         generateWithStrongBoxFallback { strongBox ->
             KeyGenerator
                 .getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEY_STORE)
                 .apply {
-                    init(aesSpec(alias, sizeBits, strongBox))
+                    init(aesSpec(alias, sizeBits, strongBox, req))
                 }.generateKey()
         }
 
@@ -211,6 +283,7 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
         alias: String,
         sizeBits: Int,
         strongBox: Boolean,
+        req: UserAuthenticationRequirement,
     ): KeyGenParameterSpec =
         KeyGenParameterSpec
             .Builder(
@@ -223,26 +296,32 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
             // per seal, which the witness reads back and frames (see HardwareAesGcmKey.gatedSeal). The
             // library never supplies a seal nonce — one reused GCM (key, nonce) pair is catastrophic.
             .setIsStrongBoxBacked(strongBox)
+            .apply { applyUserAuth(req) }
             .build()
 
-    private fun generateEcKeyPair(alias: String): java.security.KeyPair =
+    private fun generateEcKeyPair(
+        alias: String,
+        req: UserAuthenticationRequirement,
+    ): java.security.KeyPair =
         generateWithStrongBoxFallback { strongBox ->
             KeyPairGenerator
                 .getInstance(KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEY_STORE)
                 .apply {
-                    initialize(ecSpec(alias, strongBox))
+                    initialize(ecSpec(alias, strongBox, req))
                 }.generateKeyPair()
         }
 
     private fun ecSpec(
         alias: String,
         strongBox: Boolean,
+        req: UserAuthenticationRequirement,
     ): KeyGenParameterSpec =
         KeyGenParameterSpec
             .Builder(alias, KeyProperties.PURPOSE_SIGN)
             .setAlgorithmParameterSpec(ECGenParameterSpec(SECP256R1))
             .setDigests(KeyProperties.DIGEST_SHA256)
             .setIsStrongBoxBacked(strongBox)
+            .apply { applyUserAuth(req) }
             .build()
 
     /**
@@ -277,7 +356,7 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
                 val keyPair =
                     KeyPairGenerator
                         .getInstance(KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEY_STORE)
-                        .apply { initialize(ecSpec(alias, strongBox = true)) }
+                        .apply { initialize(ecSpec(alias, strongBox = true, req = UserAuthenticationRequirement.None)) }
                         .generateKeyPair()
                 // A device may honor a StrongBox request silently in the TEE, so confirm the level
                 // where the OS exposes it (API 31+); pre-31 keep the best-effort "no throw ⇒ assume".
@@ -294,9 +373,9 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
                 runCatching { keyStore.deleteEntry(alias) }
             }
         }
-
-    private fun newAlias(kind: String): String = "$ALIAS_PREFIX$kind-${UUID.randomUUID()}"
 }
+
+private fun newAlias(kind: String): String = "$ALIAS_PREFIX$kind-${UUID.randomUUID()}"
 
 private const val ANDROID_KEY_STORE = "AndroidKeyStore"
 private const val AES_GCM_TRANSFORM = "AES/GCM/NoPadding"
@@ -306,7 +385,101 @@ private const val ALIAS_PREFIX = "com.ditchoom.buffer.crypto.hw."
 private const val P256_FIELD_BYTES = 32
 private const val SEC1_UNCOMPRESSED = 0x04
 
+/**
+ * The key's user-auth policy resolved once at generation. Each variant carries exactly what its
+ * op path needs — [PerUse] holds its [BiometricAuthorization] by construction, so "per-use key
+ * without a CryptoObject-capable prompt" is unrepresentable (no cast, no nullable downstream).
+ */
+private sealed interface ResolvedAndroidPolicy {
+    class Advisory(
+        val gate: HardwareAuthorization,
+    ) : ResolvedAndroidPolicy
+
+    /**
+     * [gate] may or may not be a real prompt: a [BiometricAuthorization] shows the OS prompt on a
+     * stale window ([unlock]); a plain closure just decides — the keystore still enforces the
+     * binding either way.
+     */
+    class Session(
+        val method: UserAuthenticationMethod,
+        val gate: HardwareAuthorization,
+    ) : ResolvedAndroidPolicy {
+        suspend fun unlock(): Boolean =
+            when (gate) {
+                is BiometricAuthorization -> gate.authenticate(method, cryptoObject = null)
+                else -> gate.authorize()
+            }
+    }
+
+    class PerUse(
+        val method: UserAuthenticationMethod,
+        val prompt: BiometricAuthorization,
+    ) : ResolvedAndroidPolicy
+}
+
+/**
+ * Resolves [HardwareKeySpec.userAuthentication] + [HardwareKeySpec.authorization] into a
+ * [ResolvedAndroidPolicy], failing generation with the typed
+ * [HardwareKeyException.UserAuthenticatorRequired] when per-use binding is requested without a
+ * [BiometricAuthorization] (Android only honors auth-per-use through a
+ * `BiometricPrompt.CryptoObject`; a plain closure cannot put the OS prompt on screen, so the key
+ * would be permanently unusable).
+ */
+private fun resolvePolicy(spec: HardwareKeySpec): ResolvedAndroidPolicy =
+    when (val req = spec.userAuthentication) {
+        UserAuthenticationRequirement.None -> ResolvedAndroidPolicy.Advisory(spec.authorization)
+        is UserAuthenticationRequirement.Session -> ResolvedAndroidPolicy.Session(req.method, spec.authorization)
+        is UserAuthenticationRequirement.PerUse ->
+            ResolvedAndroidPolicy.PerUse(
+                req.method,
+                spec.authorization as? BiometricAuthorization
+                    ?: throw HardwareKeyException.UserAuthenticatorRequired(),
+            )
+    }
+
 // --- stateless keystore helpers (file-level: no provider state, kept off the class) --------------
+
+/**
+ * Applies OS-level user-authentication binding to a keystore key at generation. On API 30+ the
+ * typed `setUserAuthenticationParameters` expresses both the window and the allowed authenticator
+ * classes; 28/29 only have the deprecated validity-duration seconds, where `-1` means
+ * auth-per-use (biometric + `CryptoObject` only) and the authenticator classes cannot be narrowed.
+ */
+private fun KeyGenParameterSpec.Builder.applyUserAuth(req: UserAuthenticationRequirement) {
+    when (req) {
+        UserAuthenticationRequirement.None -> return
+        is UserAuthenticationRequirement.Session -> {
+            setUserAuthenticationRequired(true)
+            val seconds =
+                req.validity.inWholeSeconds
+                    .coerceIn(1L, Int.MAX_VALUE.toLong())
+                    .toInt()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                setUserAuthenticationParameters(seconds, keystoreAuthTypes(req.method))
+            } else {
+                @Suppress("DEPRECATION")
+                setUserAuthenticationValidityDurationSeconds(seconds)
+            }
+        }
+        is UserAuthenticationRequirement.PerUse -> {
+            setUserAuthenticationRequired(true)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                setUserAuthenticationParameters(0, keystoreAuthTypes(req.method))
+            } else {
+                @Suppress("DEPRECATION")
+                setUserAuthenticationValidityDurationSeconds(-1)
+            }
+        }
+    }
+}
+
+/** [UserAuthenticationMethod] → the API 30+ keystore authenticator-class bitmask. */
+private fun keystoreAuthTypes(method: UserAuthenticationMethod): Int =
+    when (method) {
+        UserAuthenticationMethod.BiometricOnly -> KeyProperties.AUTH_BIOMETRIC_STRONG
+        UserAuthenticationMethod.BiometricOrCredential ->
+            KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL
+    }
 
 /**
  * Runs [block], normalizing any keystore-originated failure to a [HardwareKeyException]. A

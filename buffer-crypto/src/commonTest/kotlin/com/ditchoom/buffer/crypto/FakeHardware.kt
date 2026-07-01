@@ -1,6 +1,8 @@
 package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.crypto.CryptoTestVectors.hexBuffer
+import kotlin.time.TimeMark
+import kotlin.time.TimeSource
 
 /*
  * A test fake for [HardwareKeyProvider]. No platform ships a real secure-element backend in 6.0, so
@@ -23,7 +25,41 @@ import com.ditchoom.buffer.crypto.CryptoTestVectors.hexBuffer
  */
 internal class FakeHardware(
     override val dedicatedSecureElement: Boolean = true,
+    /** Injectable clock so tests can advance a [UserAuthenticationRequirement.Session] window. */
+    private val timeSource: TimeSource = TimeSource.Monotonic,
 ) : HardwareKeyProvider {
+    /**
+     * Models the per-key auth behavior a real provider implements for
+     * [HardwareKeySpec.userAuthentication]:
+     * [UserAuthenticationRequirement.None] and [UserAuthenticationRequirement.PerUse] evaluate the
+     * gate before *every* op (advisory / bound-per-op respectively — observably identical here,
+     * where no OS prompt exists); [UserAuthenticationRequirement.Session] evaluates it only when
+     * the validity window is stale, then remembers the successful authentication.
+     */
+    private inner class FakeAuthPolicy(
+        spec: HardwareKeySpec,
+    ) {
+        private val req = spec.userAuthentication
+        private val gate = spec.authorization
+        private var windowStart: TimeMark? = null
+
+        suspend fun beforeOp() {
+            when (val r = req) {
+                UserAuthenticationRequirement.None,
+                is UserAuthenticationRequirement.PerUse,
+                -> if (!gate.authorize()) throw AuthorizationFailed()
+
+                is UserAuthenticationRequirement.Session -> {
+                    val withinWindow = windowStart?.let { it.elapsedNow() < r.validity } == true
+                    if (!withinWindow) {
+                        if (!gate.authorize()) throw AuthorizationFailed()
+                        windowStart = timeSource.markNow()
+                    }
+                }
+            }
+        }
+    }
+
     /** A hardware AES-GCM key plus the software twin (same material) the test opens with to cross-check. */
     class AesGcmPair(
         val hardware: AesGcmKey,
@@ -44,16 +80,16 @@ internal class FakeHardware(
         scheme: SignatureScheme,
         spec: HardwareKeySpec,
     ): SigningKey {
-        require(eligible(scheme.toHardwareAlgorithm())) {
-            "${scheme.schemeName} is not eligible for hardware backing"
-        }
+        if (!eligible(scheme.toHardwareAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
         return signingPair(spec).hardware
     }
 
     /** Richer result for the conformance test: the hardware key and a software twin with the same key. */
     fun aesGcmPair(spec: HardwareKeySpec): AesGcmPair {
-        require(spec.aesKeySizeBits == AES_128_KEY_BYTES * Byte.SIZE_BITS || spec.aesKeySizeBits == AES_256_KEY_BYTES * Byte.SIZE_BITS) {
-            "AES key size must be 128 or 256 bits, was ${spec.aesKeySizeBits}"
+        if (spec.aesKeySizeBits != AES_128_KEY_BYTES * Byte.SIZE_BITS &&
+            spec.aesKeySizeBits != AES_256_KEY_BYTES * Byte.SIZE_BITS
+        ) {
+            throw HardwareKeyException.UnsupportedHardwareKey()
         }
         val material = cryptoRandom(spec.aesKeySizeBits / Byte.SIZE_BITS)
         // Two independent in-memory keys over the SAME bytes: one drives the gated closures (the
@@ -62,12 +98,12 @@ internal class FakeHardware(
         // so the test can prove the hardware seal produced standard, openable AES-GCM.
         val inner = AesGcmKey.of(material)
         val twin = AesGcmKey.of(material)
-        val auth = spec.authorization
+        val policy = FakeAuthPolicy(spec)
         val hardware =
             HardwareAesGcmKey(
                 sizeBits = spec.aesKeySizeBits,
                 gatedSeal = { aad, plaintext, factory ->
-                    if (!auth.authorize()) throw AuthorizationFailed()
+                    policy.beforeOp()
                     // A real secure element generates the nonce itself, so the seam hands the closure
                     // none: the fake mints a fresh CSPRNG nonce and frames nonce ‖ ciphertext ‖ tag,
                     // exactly as the Android keystore path frames its keystore-chosen IV.
@@ -80,7 +116,7 @@ internal class FakeHardware(
                     out
                 },
                 gatedOpen = { nonce, aad, ciphertextAndTag, factory ->
-                    if (!auth.authorize()) throw AuthorizationFailed()
+                    policy.beforeOp()
                     aesGcmOpenWithNonceAsync(inner, nonce, aad, ciphertextAndTag, factory)
                 },
             )
@@ -91,12 +127,12 @@ internal class FakeHardware(
     fun signingPair(spec: HardwareKeySpec): SigningPair {
         val verifyKey = VerifyKey.ecdsaP256(hexBuffer(P256_POINT_HEX))
         val inner = SigningKey.ecdsaP256(hexBuffer(P256_SCALAR_HEX), verifyKey)
-        val auth = spec.authorization
+        val policy = FakeAuthPolicy(spec)
         val hardware =
             HardwareSigningKey(
                 scheme = SignatureScheme.EcdsaP256,
                 gatedSign = { message, factory ->
-                    if (!auth.authorize()) throw AuthorizationFailed()
+                    policy.beforeOp()
                     signAsyncPlatform(inner, message, factory)
                 },
                 verifyKey = verifyKey,

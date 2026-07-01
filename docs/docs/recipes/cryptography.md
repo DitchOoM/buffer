@@ -443,6 +443,69 @@ when (val hw = CryptoCapabilities.hardware) {
 
 The per-platform results of these checks are the [capability matrix](#per-platform-capability-matrix) below.
 
+## Biometric / user-authenticated hardware keys
+
+A hardware-backed key can be **bound to user authentication inside the secure element** at
+generation — the OS refuses an unauthenticated operation no matter what the process does. The
+binding is a value on `HardwareKeySpec`:
+
+```kotlin
+sealed interface UserAuthenticationRequirement {
+    data object None                    // default: no OS binding, the gate is advisory
+    data class Session(val validity: Duration,
+                       val method: UserAuthenticationMethod = BiometricOrCredential)
+    data class PerUse(val method: UserAuthenticationMethod = BiometricOnly)
+}
+```
+
+- **`Session(validity)`** — one successful authentication unlocks the key for the window; ops
+  inside it never re-prompt (the provider prompts *lazily*, only when the OS reports the window
+  stale). Android enforces the window in the keystore; the Apple Enclave has no timed window, so
+  the window is library-tracked there while the authentication itself stays OS-enforced.
+- **`PerUse()`** — every operation requires a fresh authentication bound to that exact operation
+  (Android `BiometricPrompt.CryptoObject` wrapping the exact `Cipher`/`Signature`; Apple a fresh,
+  un-evaluated `LAContext`, so the Enclave prompts during the sign itself).
+- **`method`** — `BiometricOnly` (strong biometric; the OS invalidates the key when enrollment
+  changes → `HardwareKeyException.KeyInvalidated`) or `BiometricOrCredential` (biometric or the
+  device PIN/passcode).
+
+The prompt needs UI context that common code cannot express, so each platform ships an
+authenticator the app constructs and injects as `HardwareKeySpec.authorization` (the same
+inversion-of-control pattern as `BufferFactory`):
+
+```kotlin
+// Android (androidMain) — androidx.biometric prompt host
+val spec = HardwareKeySpec(
+    authorization = BiometricPromptAuthenticator(activity, title = "Unlock signing key"),
+    userAuthentication = UserAuthenticationRequirement.Session(5.minutes),
+)
+
+// Apple (appleMain) — LocalAuthentication
+val spec = HardwareKeySpec(
+    authorization = LocalAuthAuthenticator(reason = "Sign the audit record"),
+    userAuthentication = UserAuthenticationRequirement.Session(5.minutes),
+)
+
+// Common code from here on — the key is an ordinary SigningKey / AesGcmKey:
+val hw = CryptoCapabilities.hardware
+if (hw is HardwareSupport.Available) {
+    val key = hw.provider.generateSigning(SignatureScheme.EcdsaP256, spec)
+    // first op in the window prompts; later ops are silent; expiry re-prompts
+}
+```
+
+Typed outcomes to branch on: a denied/cancelled prompt is `AuthorizationFailed`; a stale session
+the user must re-authenticate is `HardwareKeyException.UserAuthenticationRequired`; biometric
+re-enrollment invalidating a `BiometricOnly` key is `HardwareKeyException.KeyInvalidated`;
+requesting `PerUse` without a platform authenticator fails **at generation** with
+`HardwareKeyException.UserAuthenticatorRequired` (a misconfigured key can never exist).
+
+Platform notes: Android requires a secure lock screen to generate auth-bound keys (API 30+ uses
+`setUserAuthenticationParameters`; 28/29 the legacy validity-duration API, where `method` cannot
+be narrowed). On Apple, tvOS has no LocalAuthentication and watchOS has no discrete biometric
+policy (wrist detection / passcode stands in), so `BiometricOnly` degrades accordingly. Platforms
+without a secure element (`HardwareSupport.Unavailable`) never reach these values.
+
 ## Using buffer-crypto with buffer-codec
 
 `buffer-crypto` and `buffer-codec` are deliberately **independent siblings over `:buffer`** — neither module depends on the other, and no `Codec` ever calls a crypto op. You compose them in application code: the codec owns the wire envelope, crypto owns the payload.
