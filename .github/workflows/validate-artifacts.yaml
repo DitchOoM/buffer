@@ -40,7 +40,35 @@ jobs:
           mkdir -p /tmp/maven-local/com
           cp -r "$LINUX_BASE" /tmp/maven-local/com/
 
-          for module in buffer buffer-compression buffer-flow; do
+          # Single source of truth: the KMP modules that publish Apple targets and
+          # therefore need Linux+Apple metadata reconciliation. A module qualifies when
+          # its Apple-host umbrella metadata JAR declares an `appleMain` source set in
+          # its PSM (kotlin-project-structure-metadata.json). Only the umbrella metadata
+          # JAR carries that file, so leaf/JVM-only modules are naturally excluded. This
+          # list is exported and reused by every loop below (merge + validation guards)
+          # so they can't drift as modules are added or removed.
+          APPLE_MODULES=""
+          for dir in "$APPLE_BASE"/*/; do
+            [ -d "$dir" ] || continue
+            module=$(basename "$dir")
+            jar="$APPLE_BASE/$module/$version/$module-$version.jar"
+            [ -f "$jar" ] || continue
+            psm=$(unzip -p "$jar" META-INF/kotlin-project-structure-metadata.json 2>/dev/null) || continue
+            [ -n "$psm" ] || continue
+            if printf '%s' "$psm" | jq -e '.projectStructure.sourceSets[]? | select(.name == "appleMain")' >/dev/null 2>&1; then
+              APPLE_MODULES="$APPLE_MODULES $module"
+            fi
+          done
+          APPLE_MODULES=$(echo "$APPLE_MODULES" | tr ' ' '\n' | grep -v '^$' | sort | tr '\n' ' ')
+          echo "Detected Apple-publishing modules: ${APPLE_MODULES}"
+
+          if [ -z "$(echo "$APPLE_MODULES" | tr -d ' ')" ]; then
+            echo "FAIL: no Apple-publishing modules detected — Apple artifact download or PSM layout changed"
+            exit 1
+          fi
+          echo "APPLE_MODULES=${APPLE_MODULES}" >> "$GITHUB_ENV"
+
+          for module in $APPLE_MODULES; do
             echo "=== Merging ${module} ==="
 
             # Copy Apple per-target artifact directories
@@ -176,13 +204,12 @@ jobs:
           echo ""
 
           # 1. Root module metadata - all platform variants
-          # buffer has wasmJs; buffer-compression and buffer-flow do not
-          BUFFER_PLATFORMS="jvm js linuxx64 linuxarm64 macosarm64 macosx64 iosarm64 iossimulatorarm64 wasmJs"
-          COMPRESSION_PLATFORMS="jvm js linuxx64 linuxarm64 macosarm64 macosx64 iosarm64 iossimulatorarm64"
-          FLOW_PLATFORMS="jvm js linuxx64 linuxarm64 macosarm64 macosx64 iosarm64 iossimulatorarm64"
-          CODEC_PLATFORMS="jvm js linuxx64 linuxarm64 macosarm64 macosx64 iosarm64 iossimulatorarm64"
+          # Expected platform variants per module — an intentional assertion, not derived.
+          # The apple+linux+jvm+js set is shared; buffer and buffer-crypto additionally
+          # publish a wasmJs variant in their root .module.
+          COMMON_PLATFORMS="jvm js linuxx64 linuxarm64 macosarm64 macosx64 iosarm64 iossimulatorarm64"
 
-          for module in buffer buffer-compression buffer-flow buffer-codec; do
+          for module in $APPLE_MODULES; do
             echo "--- ${module} module metadata ---"
             MODULE_FILE="${BASE}/${module}/${version}/${module}-${version}.module"
             if [ ! -f "$MODULE_FILE" ]; then
@@ -190,15 +217,10 @@ jobs:
               FAILED=true
               continue
             fi
-            if [ "$module" = "buffer" ]; then
-              platforms="$BUFFER_PLATFORMS"
-            elif [ "$module" = "buffer-flow" ]; then
-              platforms="$FLOW_PLATFORMS"
-            elif [ "$module" = "buffer-codec" ]; then
-              platforms="$CODEC_PLATFORMS"
-            else
-              platforms="$COMPRESSION_PLATFORMS"
-            fi
+            case "$module" in
+              buffer|buffer-crypto) platforms="$COMMON_PLATFORMS wasmJs" ;;
+              *)                    platforms="$COMMON_PLATFORMS" ;;
+            esac
             for platform in $platforms; do
               if grep -q "$platform" "$MODULE_FILE"; then
                 echo "  $platform variant present"
@@ -313,7 +335,7 @@ jobs:
 
           # 6. Android AAR and kotlin-tooling-metadata presence
           echo "--- Android & Metadata Artifacts ---"
-          for module in buffer buffer-compression buffer-flow buffer-codec; do
+          for module in $APPLE_MODULES; do
             AAR_DIR="${BASE}/${module}-android/${version}"
             if [ -d "$AAR_DIR" ]; then
               AAR=$(find "$AAR_DIR" -name "*.aar" | head -1)
@@ -335,7 +357,7 @@ jobs:
 
           # 7. Metadata JAR Apple source sets
           echo "--- Metadata JAR Apple Source Sets ---"
-          for module in buffer buffer-compression buffer-flow; do
+          for module in $APPLE_MODULES; do
             METADATA_JAR="${BASE}/${module}/${version}/${module}-${version}.jar"
             if [ ! -f "$METADATA_JAR" ]; then
               echo "  WARN: ${module} metadata JAR not found"
