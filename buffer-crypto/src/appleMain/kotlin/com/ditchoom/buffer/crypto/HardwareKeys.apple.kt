@@ -58,7 +58,9 @@ import kotlin.time.TimeSource
  *    refuses an unauthenticated sign. Signs go through the [LocalAuthAuthenticator]'s long-lived
  *    LAContext; the provider prompts (evaluates the context) lazily when the library-tracked
  *    validity window is stale — the Enclave has no timed window of its own, so the *window* is
- *    library-enforced while the *authentication itself* stays OS-enforced.
+ *    library-enforced while the *authentication itself* stays OS-enforced. If the OS invalidates
+ *    the context mid-window, the sign re-prompts once (see [sessionSign]) rather than failing for
+ *    the rest of the window; a closed authenticator is refused with [AuthorizationFailed].
  *  - [ResolvedApplePolicy.PerUse] — via [userAuthenticated]: same `SecAccessControl` binding, but
  *    every sign uses a fresh, un-evaluated LAContext, so the OS prompts for that exact operation.
  *
@@ -125,14 +127,33 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
         policy: ResolvedApplePolicy.Session,
         blob: PlatformBuffer,
     ): HardwareSign {
-        val window = SessionWindow(policy.validity, policy.method, policy.authenticator)
+        val authenticator = policy.authenticator
+        val window = SessionWindow(policy.validity, policy.method, authenticator)
         return { message, factory ->
+            // A closed authenticator has released its LAContext; refuse before handing the shim a
+            // stale handle (which would otherwise misreport as KeyInvalidated).
+            if (!authenticator.available) throw AuthorizationFailed()
+
             window.ensureAuthenticated()
-            // The evaluated LAContext authorizes the Enclave sign without a prompt; a stale/
-            // invalidated context surfaces as the keystore-style "authenticate and retry" state.
-            withContext(Dispatchers.Default) {
-                enclaveSignP256Into(blob, policy.authenticator.contextHandle, message, factory)
-            } ?: throw HardwareKeyException.UserAuthenticationRequired()
+            val first =
+                withContext(Dispatchers.Default) {
+                    enclaveSignP256Into(blob, authenticator.contextHandle, message, factory)
+                }
+            if (first != null) {
+                first
+            } else {
+                // The OS refused the sign on a window we believed fresh — the LAContext was
+                // invalidated out from under us (backgrounding, device lock, biometry change,
+                // reuse-duration expiry). Reset the window, re-prompt exactly once, and retry;
+                // only a second refusal is the terminal "authenticate and retry" state. Without
+                // this the fresh window would suppress every re-prompt for the whole validity
+                // period — a self-inflicted lockout.
+                window.invalidate()
+                window.ensureAuthenticated()
+                withContext(Dispatchers.Default) {
+                    enclaveSignP256Into(blob, authenticator.contextHandle, message, factory)
+                } ?: throw HardwareKeyException.UserAuthenticationRequired()
+            }
         }
     }
 
@@ -244,6 +265,15 @@ private class SessionWindow(
                 lastAuth = TimeSource.Monotonic.markNow()
             }
         }
+    }
+
+    /**
+     * Drops the current window so the next [ensureAuthenticated] re-prompts. Called after the OS
+     * refuses a sign the window believed authorized — concurrent stale signs coalesce, since the
+     * next [ensureAuthenticated] to win the lock re-authenticates and the rest see the new window.
+     */
+    suspend fun invalidate() {
+        lock.withLock { lastAuth = null }
     }
 }
 

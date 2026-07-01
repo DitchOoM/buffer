@@ -10,6 +10,7 @@ import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_la_evaluate
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.concurrent.Volatile
 
 /*
  * Apple LocalAuthentication authenticator for hardware-backed keys.
@@ -26,8 +27,10 @@ import kotlinx.coroutines.withContext
  * for every apple target; on an unsupported platform [available] is `false`, so
  * [userAuthenticated] returns `null` and no bound key can be requested at all).
  *
- * Lifecycle: the authenticator owns one native LAContext; [close] invalidates it. A closed (or
- * never-usable) authenticator denies everything.
+ * Lifecycle: the authenticator owns one native LAContext; [close] releases it and flips
+ * [available] to `false`. A closed (or never-usable) authenticator denies everything — a session
+ * sign on a closed authenticator fails cleanly ([AuthorizationFailed]) rather than passing a
+ * released handle to the shim.
  */
 class LocalAuthAuthenticator(
     /** User-facing reason shown in the OS authentication prompt. */
@@ -40,8 +43,16 @@ class LocalAuthAuthenticator(
      */
     internal val contextHandle: Long = newContextHandle()
 
-    /** `true` when LocalAuthentication exists on this platform and [close] has not been called. */
-    internal val available: Boolean get() = contextHandle != 0L
+    /** Flipped by [close]; `@Volatile` so a session sign on another thread observes the release. */
+    @Volatile
+    private var closed: Boolean = false
+
+    /**
+     * `true` when LocalAuthentication exists on this platform and [close] has not been called.
+     * Reports `false` once closed, so [userAuthenticated] refuses a closed authenticator and an
+     * in-flight session sign fails cleanly instead of signing through a released handle.
+     */
+    internal val available: Boolean get() = contextHandle != 0L && !closed
 
     /** Plain gate use (advisory / session unlock): biometric or device credential. */
     override suspend fun authorize(): Boolean = evaluate(UserAuthenticationMethod.BiometricOrCredential)
@@ -64,7 +75,10 @@ class LocalAuthAuthenticator(
      */
     internal fun newContextHandle(): Long = bcks_la_context_create(reason)
 
-    override fun close() = releaseContextHandle(contextHandle)
+    override fun close() {
+        closed = true
+        releaseContextHandle(contextHandle)
+    }
 }
 
 /** [UserAuthenticationMethod] → the shim's LAPolicy selector (1 = with credential, 2 = biometric only). */
