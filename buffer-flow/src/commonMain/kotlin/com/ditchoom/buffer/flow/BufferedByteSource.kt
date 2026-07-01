@@ -71,12 +71,27 @@ class BufferedByteSource(
         if (available == 0) return terminal ?: ReadResult.End
         val length = minOf(n, available)
         val head = lookAhead.first()
-        if (head.remaining() >= length) {
+        return if (head.remaining() >= length) {
             // Zero-copy: a view over the head chunk, limited to the requested length.
-            return ReadResult.Data(head.slice().readBytes(length))
+            ReadResult.Data(head.slice().readBytes(length))
+        } else {
+            ReadResult.Data(stageSpanningPeek(length))
         }
-        // Spanning case: assemble a header-sized staging buffer via absolute reads
-        // (positions of the buffered chunks are untouched).
+    }
+
+    /** Peeks up to [n] bytes using the inherited [readPolicy] deadline. */
+    suspend fun peek(n: Int): ReadResult = peek(n, readPolicy.toDeadline())
+
+    override suspend fun read(deadline: Duration): ReadResult {
+        val head = lookAhead.removeFirstOrNull()
+        return if (head != null) ReadResult.Data(head) else terminal ?: upstream.read(deadline)
+    }
+
+    /**
+     * Spanning-peek case: assembles a header-sized staging buffer via absolute reads —
+     * the positions of the buffered chunks are untouched.
+     */
+    private fun stageSpanningPeek(length: Int): ReadBuffer {
         val staging = factory.allocate(length)
         var copied = 0
         for (chunk in lookAhead) {
@@ -89,17 +104,7 @@ class BufferedByteSource(
             if (copied == length) break
         }
         staging.resetForRead()
-        return ReadResult.Data(staging)
-    }
-
-    /** Peeks up to [n] bytes using the inherited [readPolicy] deadline. */
-    suspend fun peek(n: Int): ReadResult = peek(n, readPolicy.toDeadline())
-
-    override suspend fun read(deadline: Duration): ReadResult {
-        val head = lookAhead.removeFirstOrNull()
-        if (head != null) return ReadResult.Data(head)
-        terminal?.let { return it }
-        return upstream.read(deadline)
+        return staging
     }
 
     private suspend fun fillLookAhead(
