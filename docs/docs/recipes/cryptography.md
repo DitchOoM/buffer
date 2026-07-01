@@ -443,6 +443,84 @@ when (val hw = CryptoCapabilities.hardware) {
 
 The per-platform results of these checks are the [capability matrix](#per-platform-capability-matrix) below.
 
+## Using buffer-crypto with buffer-codec
+
+`buffer-crypto` and `buffer-codec` are deliberately **independent siblings over `:buffer`** — neither module depends on the other, and no `Codec` ever calls a crypto op. You compose them in application code: the codec owns the wire envelope, crypto owns the payload.
+
+### The two-phase pattern
+
+Model the ciphertext slot in a `@ProtocolMessage` as a length-prefixed **opaque** field. Decode the envelope first, then open the payload **outside** the codec with the AEAD/HPKE witness ops; if the recovered plaintext is itself structured, run a second codec over it. The AEAD seal ops return a self-framed `nonce ‖ ciphertext ‖ tag` buffer, so the sealed bytes drop into the field as-is — no nonce bookkeeping in the message shape.
+
+The opaque slot is a `Payload`-marked wrapper over `OwnedBytesHandle`, whose codec delegates to the library's `OwnedBytesHandleCodec` (canonical consumer-owned-bytes decode):
+
+```kotlin
+import com.ditchoom.buffer.codec.*
+import com.ditchoom.buffer.codec.annotations.*
+import com.ditchoom.buffer.crypto.*
+
+@JvmInline
+value class SealedBox(val handle: OwnedBytesHandle) : Payload
+
+object SealedBoxCodec : Codec<SealedBox> {
+    override fun decode(buffer: ReadBuffer, context: DecodeContext) =
+        SealedBox(OwnedBytesHandleCodec.decode(buffer, context))
+    override fun encode(buffer: WriteBuffer, value: SealedBox, context: EncodeContext) =
+        OwnedBytesHandleCodec.encode(buffer, value.handle, context)
+    override fun wireSize(value: SealedBox, context: EncodeContext) =
+        OwnedBytesHandleCodec.wireSize(value.handle, context)
+}
+
+@ProtocolMessage
+data class SecureEnvelope(
+    val version: UByte,
+    @LengthPrefixed(LengthPrefix.Int) @UseCodec(SealedBoxCodec::class) val sealed: SealedBox,
+)
+```
+
+Seal → encode on the sender, decode → open on the receiver:
+
+```kotlin
+// Both witness states carry the suspend ops, so resolve once.
+val gcm: AeadAsyncOps<AesGcmKey> = when (val w = CryptoCapabilities.aesGcm) {
+    is Aead.Blocking  -> w.ops
+    is Aead.AsyncOnly -> w.ops
+}
+
+suspend fun sealAndEncode(key: AesGcmKey, plaintext: ReadBuffer): PlatformBuffer {
+    val box = SealedBox(ownedBytesFrom(gcm.seal(key, plaintext))) // nonce ‖ ciphertext ‖ tag
+    val envelope = SecureEnvelope(version = 1u, sealed = box)
+    val out = BufferFactory.Default.allocate(1 + 4 + box.handle.byteSize()) // version ‖ Int prefix ‖ sealed
+    SecureEnvelopeCodec.encode(out, envelope, EncodeContext.Empty)          // generated codec
+    out.resetForRead()
+    return out
+}
+
+suspend fun decodeAndOpen(key: AesGcmKey, wire: ReadBuffer): PlatformBuffer {
+    val envelope = SecureEnvelopeCodec.decode(wire, DecodeContext.Empty)    // phase 1: no crypto
+    return gcm.open(envelope.sealed.handle.asReadBuffer(), key)             // phase 2: verify-then-release
+    // Structured plaintext? Run its own codec over the returned buffer here.
+}
+```
+
+### Why not decrypt inside `decode`?
+
+`Decoder.decode` is **synchronous**. AEAD is async-only on JS/WASM (`Aead.AsyncOnly` — WebCrypto is `suspend`-only) and HPKE is `suspend` on **every** platform. A codec that opens ciphertext inline compiles fine on JVM/Apple/Linux and is unimplementable on the web — the witness types are telling you the decrypt belongs in the `suspend` world, after the envelope decode returns. (A hand-written `SuspendingDecoder` can suspend, but the generated `@ProtocolMessage` codecs are synchronous, and the two-phase split keeps them that way.)
+
+### Fail the frame opaquely
+
+Never catch `VerificationFailed` and re-throw it wrapped in a `DecodeException` — `DecodeException` carries `expected`/`actual` detail by design, and `VerificationFailed` is deliberately opaque **by design**: attaching diagnostics to a tag-verification failure reintroduces the decryption oracle the opacity exists to prevent. Let `VerificationFailed` propagate (or map it to a connection teardown) without inspecting, describing, or distinguishing it.
+
+### Keys and config through `DecodeContext`
+
+Typed context keys flow automatically through sealed dispatch, `@UseCodec` fields, and nested messages, so routing configuration (a key *identifier*, size limits, an allocation factory via `BufferFactoryKey`) to a deep codec is mechanically supported:
+
+```kotlin
+object KeyIdKey : DecodeKey<Int>
+val ctx = DecodeContext.Empty.with(KeyIdKey, activeKeyId)
+```
+
+One caveat: the context's `toString` prints **every value** (`DecodeContext(key=value)`). If you bind a value that holds key material, its own `toString` must redact — otherwise a stray log of the context leaks the key. Prefer binding identifiers and looking the key up outside the codec.
+
 ## Security model
 
 The full threat model lives in [`buffer-crypto/SECURITY.md`](https://github.com/DitchOoM/buffer/blob/main/buffer-crypto/SECURITY.md). In brief:
