@@ -144,7 +144,7 @@ sealed class HpkeContext protected constructor(
     /**
      * Runs one serialized seal/open [op] under [seqLock]: re-checks [closed] once the lock is
      * held (a close that won the lock first has already wiped — fail before touching freed
-     * memory), and performs the wipe a concurrent [close] deferred to us.
+     * memory), and performs the wipe that a concurrent [close] deferred to this op.
      */
     internal suspend fun <R> withOpLock(op: suspend () -> R): R =
         seqLock.withLock {
