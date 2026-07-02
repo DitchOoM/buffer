@@ -73,9 +73,9 @@ sealed interface AeadKey
  * implementations, it cannot write an exhaustive `when` over them — which is what lets a
  * hardware-backed variant be added later as a non-breaking minor.
  *
- * In-memory key material is **not** auto-wiped — callers that need erase-on-free should allocate
- * the backing buffer from a secure factory and pass it through [of]; the copy taken there
- * preserves that secure backing.
+ * In-memory key material is copied into a buffer from the factory passed to [of] — by default a
+ * secure deterministic one (matching [SigningKey] and [KeyAgreementPrivateKey]), so the copy is
+ * zeroed and freed by [close]. Pass a non-secure factory explicitly to opt out.
  */
 sealed interface AesGcmKey :
     AeadKey,
@@ -93,11 +93,12 @@ sealed interface AesGcmKey :
         /**
          * Wraps [key]'s remaining bytes as an in-memory AES-GCM key. The length must be exactly 16
          * (AES-128) or 32 (AES-256) bytes; any other length is rejected. The bytes are copied into
-         * a buffer from [factory] (use a secure factory for erase-on-free).
+         * a buffer from [factory] — secure and deterministic by default, so the copy is wiped and
+         * freed by [close] (align with [SigningKey]; pass a non-secure factory to opt out).
          */
         fun of(
             key: ReadBuffer,
-            factory: BufferFactory = BufferFactory.Default,
+            factory: BufferFactory = BufferFactory.deterministicSecure(),
         ): SyncCapableAesGcmKey {
             val n = key.remaining()
             require(n == AES_128_KEY_BYTES || n == AES_256_KEY_BYTES) {
@@ -154,11 +155,12 @@ sealed interface ChaChaPolyKey :
         /**
          * Wraps [key]'s remaining bytes as an in-memory ChaCha20-Poly1305 key. The length must be
          * exactly 32 bytes; any other length is rejected. The bytes are copied into a buffer from
-         * [factory] (use a secure factory for erase-on-free).
+         * [factory] — secure and deterministic by default, so the copy is wiped and freed by
+         * [close] (align with [SigningKey]; pass a non-secure factory to opt out).
          */
         fun of(
             key: ReadBuffer,
-            factory: BufferFactory = BufferFactory.Default,
+            factory: BufferFactory = BufferFactory.deterministicSecure(),
         ): ChaChaPolyKey {
             val n = key.remaining()
             require(n == CHACHA_KEY_BYTES) {

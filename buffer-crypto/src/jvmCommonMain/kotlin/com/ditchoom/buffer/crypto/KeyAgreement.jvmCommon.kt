@@ -238,8 +238,15 @@ internal actual fun generateKeyPairPlatform(curve: KeyAgreementCurve): KeyAgreem
             val rawPub = rawX25519(kp.public)
             // Private scalar lives in a wiped SecureBuffer. JCA does not expose the raw XDH scalar
             // via a stable API, so we re-import the PKCS#8 octet string we'll need for agreement;
-            // store the PKCS#8-extracted 32-byte scalar.
-            val scalar = extractX25519Scalar(kp.private.encoded)
+            // store the PKCS#8-extracted 32-byte scalar. Both staging copies (the PKCS#8 encoding
+            // and the extracted scalar) are wiped once the scalar reaches the SecureBuffer.
+            val pkcs8 = kp.private.encoded
+            val scalar =
+                try {
+                    extractX25519Scalar(pkcs8)
+                } finally {
+                    pkcs8.fill(0)
+                }
             val priv = secureBufferOf(curve.privateKeyBytes) { it.writeBytes(scalar) }
             scalar.fill(0)
             keyAgreementKeyPairOf(curve, keyAgreementPrivateKeyOf(curve, priv), publicKeyOf(curve, rawPub))
@@ -259,12 +266,62 @@ internal actual fun generateKeyPairPlatform(curve: KeyAgreementCurve): KeyAgreem
     }
 }
 
-/** Extracts the 32-byte X25519 scalar from a PKCS#8 PrivateKeyInfo encoding. */
+// DER tags/length constants for the minimal PKCS#8 walk below.
+private const val DER_SEQUENCE = 0x30
+private const val DER_INTEGER = 0x02
+private const val DER_OCTET_STRING = 0x04
+private const val DER_LONG_FORM = 0x80
+private const val DER_LEN_MASK = 0x7F
+private const val UBYTE_MASK = 0xFF
+
+/**
+ * Extracts the 32-byte X25519 scalar from a PKCS#8 `PrivateKeyInfo` encoding by walking the DER
+ * structure (RFC 5958 / RFC 8410): `SEQUENCE { version INTEGER, privateKeyAlgorithm SEQUENCE,
+ * privateKey OCTET STRING { CurvePrivateKey ::= OCTET STRING (the raw scalar) } }`. Locating the
+ * nested OCTET STRING — rather than assuming the scalar is the trailing 32 bytes — stays correct
+ * for providers that append optional `attributes` or `publicKey` fields to the encoding.
+ */
 private fun extractX25519Scalar(pkcs8: ByteArray): ByteArray {
-    // The scalar is the last 32 bytes of the standard X25519 PKCS#8 encoding (inner OCTET STRING).
-    val out = ByteArray(X25519_RAW_BYTES)
-    System.arraycopy(pkcs8, pkcs8.size - X25519_RAW_BYTES, out, 0, X25519_RAW_BYTES)
-    return out
+    var pos = 0
+
+    fun u8(): Int {
+        check(pos < pkcs8.size) { "truncated PKCS#8 PrivateKeyInfo" }
+        return pkcs8[pos++].toInt() and UBYTE_MASK
+    }
+
+    // DER length: short form, or long form with 1..2 length octets (a PrivateKeyInfo is tiny).
+    fun length(): Int {
+        val first = u8()
+        if (first < DER_LONG_FORM) return first
+        val numBytes = first and DER_LEN_MASK
+        check(numBytes in 1..2) { "unsupported DER length form in PKCS#8 PrivateKeyInfo" }
+        var len = 0
+        repeat(numBytes) { len = (len shl Byte.SIZE_BITS) or u8() }
+        return len
+    }
+
+    // Reads a TLV header, checks the tag and that the value fits, and returns the value length
+    // with [pos] left at the value's first byte.
+    fun expectTag(tag: Int): Int {
+        check(u8() == tag) { "unexpected DER tag in PKCS#8 PrivateKeyInfo" }
+        val len = length()
+        check(len <= pkcs8.size - pos) { "truncated PKCS#8 PrivateKeyInfo" }
+        return len
+    }
+
+    // Skips a whole TLV: reads the header, then jumps over the value.
+    fun skipTag(tag: Int) {
+        val len = expectTag(tag)
+        pos += len
+    }
+
+    expectTag(DER_SEQUENCE) // PrivateKeyInfo — descend
+    skipTag(DER_INTEGER) // version
+    skipTag(DER_SEQUENCE) // privateKeyAlgorithm (id-X25519)
+    expectTag(DER_OCTET_STRING) // privateKey — descend
+    val scalarLen = expectTag(DER_OCTET_STRING) // CurvePrivateKey ::= OCTET STRING (RFC 8410 §7)
+    check(scalarLen == X25519_RAW_BYTES) { "X25519 scalar must be $X25519_RAW_BYTES bytes, was $scalarLen" }
+    return pkcs8.copyOfRange(pos, pos + X25519_RAW_BYTES)
 }
 
 private fun publicKeyOf(

@@ -174,16 +174,19 @@ internal fun requireTagged(ciphertextAndTag: ReadBuffer) {
 /**
  * Builds a [SecretKeySpec] from the key buffer's remaining bytes (non-destructive). The staging
  * array is zeroed as soon as the spec is constructed — [SecretKeySpec] copies the bytes internally,
- * so the wipe cannot affect the spec and the raw key does not linger on the heap.
+ * so the wipe cannot affect the spec and the raw key does not linger on the heap. The wipe runs in
+ * a `finally` so the staged key is erased even when the spec constructor rejects the material.
  */
 private fun keySpec(
     key: ReadBuffer,
     algorithm: String,
 ): SecretKeySpec {
     val staged = remainingBytes(key)
-    val spec = SecretKeySpec(staged, algorithm)
-    staged.fill(0)
-    return spec
+    try {
+        return SecretKeySpec(staged, algorithm)
+    } finally {
+        staged.fill(0)
+    }
 }
 
 internal fun nonceBytes(nonce: ReadBuffer): ByteArray = remainingBytes(nonce)
