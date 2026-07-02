@@ -40,7 +40,9 @@ private func emit(_ data: Data, _ out: UnsafeMutablePointer<UInt8>?, _ outCap: I
     return BCKS_OK
 }
 
-// Build a Data view over a (pointer, length) pair without copying (valid only for the call).
+// Build a Data over a (pointer, length) pair. Data(bytes:count:) COPIES the bytes — this is a
+// staging copy, not a zero-copy view. The copy is released (not zeroed) when the Data goes out of
+// scope; Kotlin-side wiping covers only the caller's buffer, not this transient.
 private func bytes(_ ptr: UnsafePointer<UInt8>?, _ len: Int) -> Data {
     guard let ptr = ptr, len > 0 else { return Data() }
     return Data(bytes: ptr, count: len)

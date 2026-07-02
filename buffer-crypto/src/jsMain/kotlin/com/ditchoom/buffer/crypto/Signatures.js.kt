@@ -6,8 +6,9 @@ import kotlin.coroutines.suspendCoroutine
 import kotlin.js.Promise
 
 /**
- * Awaits a [Promise] from a suspend function using only the stdlib coroutine intrinsics — the
- * crypto module deliberately does not depend on kotlinx-coroutines, so we bridge `then` ourselves.
+ * Awaits a [Promise] from a suspend function by bridging `then` with the stdlib coroutine
+ * intrinsics — equivalent to kotlinx-coroutines' `await`. (Predates the module's
+ * kotlinx-coroutines dependency; kept because it needs nothing beyond the stdlib.)
  */
 private suspend fun <T> Promise<T>.awaitResult(): T =
     suspendCoroutine { cont ->

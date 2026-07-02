@@ -20,6 +20,13 @@ import com.ditchoom.buffer.WriteBuffer
  * Ed25519 is only present on newer engines (Chrome 137+/Firefox 129+/Safari 17+, Node stable). We
  * **feature-detect** it (see [webCryptoEd25519Available]); when absent every Ed25519 op throws
  * [UnsupportedOperationException], matching the capability contract.
+ *
+ * ZEROIZATION LIMITATION (documented, accepted): private key material crosses the
+ * Kotlin↔WebCrypto boundary as immutable hex Strings (the PKCS#8 wrappers below), which cannot
+ * be wiped — the copies live on the GC heap until collected. WebCrypto also copies imported key
+ * bytes into engine-internal state Kotlin cannot reach, so Int8Array marshalling would narrow but
+ * not close the exposure. In-memory secrecy on the web targets is best-effort; SecureBuffer
+ * wiping covers only the Kotlin-side buffers.
  */
 
 actual val ecdsaSignatureEncoding: EcdsaSignatureEncoding get() = EcdsaSignatureEncoding.P1363

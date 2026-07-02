@@ -23,6 +23,13 @@ import com.ditchoom.buffer.ReadBuffer
  * private keys as PKCS#8, so the stored scalar is wrapped via [scalarToPkcs8Hex] just before the
  * derive call. Off-curve / low-order peer points are rejected by `importKey` / `deriveBits`,
  * surfaced as [InvalidPublicKey].
+ *
+ * ZEROIZATION LIMITATION (documented, accepted): private scalars and derived shared secrets cross
+ * the Kotlin↔WebCrypto boundary as immutable hex Strings ([scalarToPkcs8Hex], the `privateHex` /
+ * shared-secret results), which cannot be wiped — the copies live on the GC heap until collected.
+ * WebCrypto also copies imported key bytes into engine-internal state Kotlin cannot reach, so
+ * Int8Array marshalling would narrow but not close the exposure. In-memory secrecy on the web
+ * targets is best-effort; SecureBuffer wiping covers only the Kotlin-side buffers.
  */
 
 private const val HEX_RADIX = 16
