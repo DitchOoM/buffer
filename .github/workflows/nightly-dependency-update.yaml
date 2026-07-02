@@ -47,7 +47,7 @@ jobs:
           restore-keys: konan-${{ runner.os }}-
 
       - name: Claude — coordinated toolchain update
-        uses: anthropics/claude-code-action@a92e7c70a4da9793dc164451d829089dc057a464 # v1
+        uses: anthropics/claude-code-action@6c0083bb7289c31716797a039b6367b3079cc46e # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: "--allowedTools Bash,Edit,Write,Read,Glob,Grep --max-turns 60"
