@@ -21,7 +21,7 @@ import platform.posix.memset
 /** Apple HMAC-SHA512 backed by CommonCrypto (`CCHmac`). Reads and writes via buffer pointers — no arrays. */
 actual class HmacSha512Mac actual constructor(
     key: ReadBuffer,
-) {
+) : AutoCloseable {
     private val ctx = nativeHeap.alloc<CCHmacContext>()
     private var finalized = false
 
@@ -41,10 +41,22 @@ actual class HmacSha512Mac actual constructor(
 
     actual fun doFinalInto(dest: WriteBuffer) {
         check(!finalized) { "mac already finalized" }
-        finalized = true
         // CommonCrypto writes the 64-byte tag straight into the destination buffer's memory.
+        // withWritablePointer validates capacity BEFORE invoking the block, so a too-small
+        // dest throws here with the ctx untouched — the finalize stays retryable (C1).
         dest.withWritablePointer(SHA512_DIGEST_BYTES) { ptr -> CCHmacFinal(ctx.ptr, ptr) }
-        // The context holds key-derived ipad/opad state; zero it before returning the allocation.
+        finalized = true
+        releaseCtx()
+    }
+
+    actual override fun close() {
+        if (finalized) return
+        finalized = true
+        releaseCtx()
+    }
+
+    // The context holds key-derived ipad/opad state; zero it before returning the allocation.
+    private fun releaseCtx() {
         memset(ctx.ptr, 0, sizeOf<CCHmacContext>().convert())
         nativeHeap.free(ctx.rawPtr)
     }

@@ -27,15 +27,22 @@ const val SHA512_BLOCK_BYTES = 128
  * Not thread-safe — use one instance per digest. The instance is one-shot on every platform:
  * [update] or [digestInto] after finalization throws [IllegalStateException].
  */
-expect class Sha512Digest() {
+expect class Sha512Digest() : AutoCloseable {
     /** Absorbs the remaining bytes of [input] (non-destructive). Returns `this` for chaining. */
     fun update(input: ReadBuffer): Sha512Digest
 
     /**
      * Finalizes and writes [SHA512_DIGEST_BYTES] bytes into [dest] at its current
      * position, advancing it. [dest] must have at least [SHA512_DIGEST_BYTES] remaining.
+     * Releases the digest state; any further [update]/[digestInto] throws [IllegalStateException].
      */
     fun digestInto(dest: WriteBuffer)
+
+    /**
+     * Releases the digest state without producing a result — for a digest abandoned before
+     * [digestInto] (which releases the state itself). Idempotent; a no-op after [digestInto].
+     */
+    override fun close()
 }
 
 /**

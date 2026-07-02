@@ -329,8 +329,9 @@ public final class com/ditchoom/buffer/crypto/HmacSha256Kt {
 	public static synthetic fun hmacSha256$default (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 }
 
-public final class com/ditchoom/buffer/crypto/HmacSha256Mac {
+public final class com/ditchoom/buffer/crypto/HmacSha256Mac : java/lang/AutoCloseable {
 	public fun <init> (Lcom/ditchoom/buffer/ReadBuffer;)V
+	public fun close ()V
 	public final fun doFinalInto (Lcom/ditchoom/buffer/WriteBuffer;)V
 	public final fun update (Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/HmacSha256Mac;
 }
@@ -342,8 +343,9 @@ public final class com/ditchoom/buffer/crypto/HmacSha384Kt {
 	public static synthetic fun hmacSha384$default (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 }
 
-public final class com/ditchoom/buffer/crypto/HmacSha384Mac {
+public final class com/ditchoom/buffer/crypto/HmacSha384Mac : java/lang/AutoCloseable {
 	public fun <init> (Lcom/ditchoom/buffer/ReadBuffer;)V
+	public fun close ()V
 	public final fun doFinalInto (Lcom/ditchoom/buffer/WriteBuffer;)V
 	public final fun update (Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/HmacSha384Mac;
 }
@@ -355,8 +357,9 @@ public final class com/ditchoom/buffer/crypto/HmacSha512Kt {
 	public static synthetic fun hmacSha512$default (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 }
 
-public final class com/ditchoom/buffer/crypto/HmacSha512Mac {
+public final class com/ditchoom/buffer/crypto/HmacSha512Mac : java/lang/AutoCloseable {
 	public fun <init> (Lcom/ditchoom/buffer/ReadBuffer;)V
+	public fun close ()V
 	public final fun doFinalInto (Lcom/ditchoom/buffer/WriteBuffer;)V
 	public final fun update (Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/HmacSha512Mac;
 }
@@ -1098,8 +1101,9 @@ public final class com/ditchoom/buffer/crypto/SecurePoolKt {
 	public static synthetic fun withSecureBuffer$default (Lcom/ditchoom/buffer/pool/BufferPool;ILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/lang/Object;
 }
 
-public final class com/ditchoom/buffer/crypto/Sha256Digest {
+public final class com/ditchoom/buffer/crypto/Sha256Digest : java/lang/AutoCloseable {
 	public fun <init> ()V
+	public fun close ()V
 	public final fun digestInto (Lcom/ditchoom/buffer/WriteBuffer;)V
 	public final fun update (Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/Sha256Digest;
 }
@@ -1112,8 +1116,9 @@ public final class com/ditchoom/buffer/crypto/Sha256Kt {
 	public static synthetic fun sha256$default (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 }
 
-public final class com/ditchoom/buffer/crypto/Sha384Digest {
+public final class com/ditchoom/buffer/crypto/Sha384Digest : java/lang/AutoCloseable {
 	public fun <init> ()V
+	public fun close ()V
 	public final fun digestInto (Lcom/ditchoom/buffer/WriteBuffer;)V
 	public final fun update (Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/Sha384Digest;
 }
@@ -1126,8 +1131,9 @@ public final class com/ditchoom/buffer/crypto/Sha384Kt {
 	public static synthetic fun sha384$default (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 }
 
-public final class com/ditchoom/buffer/crypto/Sha512Digest {
+public final class com/ditchoom/buffer/crypto/Sha512Digest : java/lang/AutoCloseable {
 	public fun <init> ()V
+	public fun close ()V
 	public final fun digestInto (Lcom/ditchoom/buffer/WriteBuffer;)V
 	public final fun update (Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/Sha512Digest;
 }
