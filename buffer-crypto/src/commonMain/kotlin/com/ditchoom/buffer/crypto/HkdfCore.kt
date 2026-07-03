@@ -109,8 +109,15 @@ internal class HkdfEngine(
                 mac.doFinalInto(cur)
                 cur.resetForRead()
 
+                // Bulk-copy this block's contribution into dest. `slice()` is a
+                // zero-copy view that does NOT advance `cur`'s position, so `cur`
+                // stays at position 0 and can still be replayed as `prev` (T(i-1))
+                // into the next round's MAC. `setLimit(take)` clamps the final,
+                // possibly-partial block; only the last block is partial and it is
+                // never reused as `prev`, so clamping the limit is safe.
                 val take = minOf(hashLen, length - written)
-                for (j in 0 until take) dest.writeByte(cur.get(j))
+                cur.setLimit(take)
+                dest.write(cur.slice())
                 written += take
 
                 // Swap: this block becomes T(i-1) for the next round.
