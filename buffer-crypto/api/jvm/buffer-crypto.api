@@ -224,6 +224,9 @@ public abstract class com/ditchoom/buffer/crypto/HardwareKeyException : com/ditc
 	public synthetic fun <init> (Ljava/lang/String;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
 }
 
+public final class com/ditchoom/buffer/crypto/HardwareKeyException$AlgorithmNotEligible : com/ditchoom/buffer/crypto/HardwareKeyException {
+}
+
 public final class com/ditchoom/buffer/crypto/HardwareKeyException$KeyInvalidated : com/ditchoom/buffer/crypto/HardwareKeyException {
 }
 
@@ -311,8 +314,9 @@ public final class com/ditchoom/buffer/crypto/HmacSha256Kt {
 	public static synthetic fun hmacSha256$default (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 }
 
-public final class com/ditchoom/buffer/crypto/HmacSha256Mac {
+public final class com/ditchoom/buffer/crypto/HmacSha256Mac : java/lang/AutoCloseable {
 	public fun <init> (Lcom/ditchoom/buffer/ReadBuffer;)V
+	public fun close ()V
 	public final fun doFinalInto (Lcom/ditchoom/buffer/WriteBuffer;)V
 	public final fun update (Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/HmacSha256Mac;
 }
@@ -324,8 +328,9 @@ public final class com/ditchoom/buffer/crypto/HmacSha384Kt {
 	public static synthetic fun hmacSha384$default (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 }
 
-public final class com/ditchoom/buffer/crypto/HmacSha384Mac {
+public final class com/ditchoom/buffer/crypto/HmacSha384Mac : java/lang/AutoCloseable {
 	public fun <init> (Lcom/ditchoom/buffer/ReadBuffer;)V
+	public fun close ()V
 	public final fun doFinalInto (Lcom/ditchoom/buffer/WriteBuffer;)V
 	public final fun update (Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/HmacSha384Mac;
 }
@@ -337,8 +342,9 @@ public final class com/ditchoom/buffer/crypto/HmacSha512Kt {
 	public static synthetic fun hmacSha512$default (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 }
 
-public final class com/ditchoom/buffer/crypto/HmacSha512Mac {
+public final class com/ditchoom/buffer/crypto/HmacSha512Mac : java/lang/AutoCloseable {
 	public fun <init> (Lcom/ditchoom/buffer/ReadBuffer;)V
+	public fun close ()V
 	public final fun doFinalInto (Lcom/ditchoom/buffer/WriteBuffer;)V
 	public final fun update (Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/HmacSha512Mac;
 }
@@ -1078,8 +1084,9 @@ public final class com/ditchoom/buffer/crypto/SecurePoolKt {
 	public static synthetic fun withSecureBuffer$default (Lcom/ditchoom/buffer/pool/BufferPool;ILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/lang/Object;
 }
 
-public final class com/ditchoom/buffer/crypto/Sha256Digest {
+public final class com/ditchoom/buffer/crypto/Sha256Digest : java/lang/AutoCloseable {
 	public fun <init> ()V
+	public fun close ()V
 	public final fun digestInto (Lcom/ditchoom/buffer/WriteBuffer;)V
 	public final fun update (Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/Sha256Digest;
 }
@@ -1092,8 +1099,9 @@ public final class com/ditchoom/buffer/crypto/Sha256Kt {
 	public static synthetic fun sha256$default (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 }
 
-public final class com/ditchoom/buffer/crypto/Sha384Digest {
+public final class com/ditchoom/buffer/crypto/Sha384Digest : java/lang/AutoCloseable {
 	public fun <init> ()V
+	public fun close ()V
 	public final fun digestInto (Lcom/ditchoom/buffer/WriteBuffer;)V
 	public final fun update (Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/Sha384Digest;
 }
@@ -1106,8 +1114,9 @@ public final class com/ditchoom/buffer/crypto/Sha384Kt {
 	public static synthetic fun sha384$default (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 }
 
-public final class com/ditchoom/buffer/crypto/Sha512Digest {
+public final class com/ditchoom/buffer/crypto/Sha512Digest : java/lang/AutoCloseable {
 	public fun <init> ()V
+	public fun close ()V
 	public final fun digestInto (Lcom/ditchoom/buffer/WriteBuffer;)V
 	public final fun update (Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/Sha512Digest;
 }
@@ -1253,6 +1262,55 @@ public final class com/ditchoom/buffer/crypto/SyncCapableAesGcmKey$DefaultImpls 
 }
 
 public abstract interface class com/ditchoom/buffer/crypto/SyncCapableSigningKey : com/ditchoom/buffer/crypto/SigningKey {
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/UserAuthenticatedKeyProvider {
+	public abstract fun eligible (Lcom/ditchoom/buffer/crypto/HardwareAlgorithm;)Z
+	public abstract fun generateAesGcm (Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun generateAesGcm$default (Lcom/ditchoom/buffer/crypto/UserAuthenticatedKeyProvider;Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun generateSigning (Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class com/ditchoom/buffer/crypto/UserAuthenticatedKeyProvider$DefaultImpls {
+	public static synthetic fun generateAesGcm$default (Lcom/ditchoom/buffer/crypto/UserAuthenticatedKeyProvider;Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+}
+
+public final class com/ditchoom/buffer/crypto/UserAuthenticationMethod : java/lang/Enum {
+	public static final field BiometricOnly Lcom/ditchoom/buffer/crypto/UserAuthenticationMethod;
+	public static final field BiometricOrCredential Lcom/ditchoom/buffer/crypto/UserAuthenticationMethod;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/ditchoom/buffer/crypto/UserAuthenticationMethod;
+	public static fun values ()[Lcom/ditchoom/buffer/crypto/UserAuthenticationMethod;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/UserAuthenticationPolicy {
+}
+
+public final class com/ditchoom/buffer/crypto/UserAuthenticationPolicy$PerUse : com/ditchoom/buffer/crypto/UserAuthenticationPolicy {
+	public fun <init> ()V
+	public fun <init> (Lcom/ditchoom/buffer/crypto/UserAuthenticationMethod;)V
+	public synthetic fun <init> (Lcom/ditchoom/buffer/crypto/UserAuthenticationMethod;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lcom/ditchoom/buffer/crypto/UserAuthenticationMethod;
+	public final fun copy (Lcom/ditchoom/buffer/crypto/UserAuthenticationMethod;)Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy$PerUse;
+	public static synthetic fun copy$default (Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy$PerUse;Lcom/ditchoom/buffer/crypto/UserAuthenticationMethod;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy$PerUse;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMethod ()Lcom/ditchoom/buffer/crypto/UserAuthenticationMethod;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/UserAuthenticationPolicy$Session : com/ditchoom/buffer/crypto/UserAuthenticationPolicy {
+	public synthetic fun <init> (JLcom/ditchoom/buffer/crypto/UserAuthenticationMethod;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public synthetic fun <init> (JLcom/ditchoom/buffer/crypto/UserAuthenticationMethod;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1-UwyO8pc ()J
+	public final fun component2 ()Lcom/ditchoom/buffer/crypto/UserAuthenticationMethod;
+	public final fun copy-VtjQ1oo (JLcom/ditchoom/buffer/crypto/UserAuthenticationMethod;)Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy$Session;
+	public static synthetic fun copy-VtjQ1oo$default (Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy$Session;JLcom/ditchoom/buffer/crypto/UserAuthenticationMethod;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy$Session;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMethod ()Lcom/ditchoom/buffer/crypto/UserAuthenticationMethod;
+	public final fun getValidity-UwyO8pc ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class com/ditchoom/buffer/crypto/VerificationFailed : com/ditchoom/buffer/crypto/CryptoException {

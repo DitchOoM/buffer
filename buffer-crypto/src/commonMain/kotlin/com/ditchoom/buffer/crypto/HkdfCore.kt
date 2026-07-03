@@ -8,6 +8,12 @@ import com.ditchoom.buffer.deterministic
 import com.ditchoom.buffer.use
 
 /**
+ * HKDF-Expand's block-counter ceiling (RFC 5869 §2.3): output is at most 255 hash blocks, so the
+ * maximum length is `255 * Nh`. Shared with the pre-allocation length checks (e.g. HPKE export).
+ */
+internal const val HKDF_MAX_BLOCKS = 255
+
+/**
  * The minimal streaming-MAC surface [HkdfEngine] needs. Adapts any of the platform-native
  * `Hmac*Mac` classes without forcing them to share a supertype (keeps the landed expect
  * classes untouched).
@@ -32,7 +38,7 @@ internal class HkdfEngine(
     private val hashLen: Int,
     private val newMac: (key: ReadBuffer) -> HkdfMac,
 ) {
-    private val maxOutput = MAX_BLOCKS * hashLen
+    private val maxOutput = HKDF_MAX_BLOCKS * hashLen
 
     /**
      * Scratch factory for key-derived intermediates: deterministic so it can be `use {}`-freed,
@@ -73,7 +79,7 @@ internal class HkdfEngine(
     ) {
         require(length >= 0) { "length must be non-negative, was $length" }
         val blocks = (length + hashLen - 1) / hashLen
-        require(blocks <= MAX_BLOCKS) { "HKDF cannot expand to $length bytes (max $maxOutput)" }
+        require(blocks <= HKDF_MAX_BLOCKS) { "HKDF cannot expand to $length bytes (max $maxOutput)" }
         require(dest.remaining() >= length) { "dest needs $length bytes remaining, has ${dest.remaining()}" }
 
         // Two ping-pong T blocks plus a one-byte counter, all wiped in `finally`.
@@ -147,9 +153,5 @@ internal class HkdfEngine(
         deriveInto(salt, ikm, info, length, out)
         out.resetForRead()
         return out
-    }
-
-    private companion object {
-        const val MAX_BLOCKS = 255
     }
 }

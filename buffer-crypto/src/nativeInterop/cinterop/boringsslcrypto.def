@@ -44,6 +44,7 @@ static inline void bcl_sha256_update(SHA256_CTX *c, const uint8_t *data, size_t 
 }
 static inline void bcl_sha256_final(SHA256_CTX *c, uint8_t *out32) {
     SHA256_Final(out32, c);
+    OPENSSL_cleanse(c, sizeof(*c));
     OPENSSL_free(c);
 }
 
@@ -57,6 +58,7 @@ static inline void bcl_sha384_update(SHA512_CTX *c, const uint8_t *data, size_t 
 }
 static inline void bcl_sha384_final(SHA512_CTX *c, uint8_t *out48) {
     SHA384_Final(out48, c);
+    OPENSSL_cleanse(c, sizeof(*c));
     OPENSSL_free(c);
 }
 
@@ -70,6 +72,7 @@ static inline void bcl_sha512_update(SHA512_CTX *c, const uint8_t *data, size_t 
 }
 static inline void bcl_sha512_final(SHA512_CTX *c, uint8_t *out64) {
     SHA512_Final(out64, c);
+    OPENSSL_cleanse(c, sizeof(*c));
     OPENSSL_free(c);
 }
 

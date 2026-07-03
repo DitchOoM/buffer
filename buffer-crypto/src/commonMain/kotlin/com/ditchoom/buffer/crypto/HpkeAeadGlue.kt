@@ -6,7 +6,8 @@ import com.ditchoom.buffer.ReadBuffer
 
 /*
  * Bridges the HPKE per-message AEAD ops onto the landed AEAD primitive family, keyed by the
- * already-derived HPKE key (HpkeAead.nk bytes) and the per-message explicit nonce.
+ * already-derived HPKE key (wrapped once per context via [hpkeAeadKeyOf]) and the per-message
+ * explicit nonce.
  *
  * - AES-GCM uses the explicit-nonce async seam (aesGcmSealWithNonceAsync / aesGcmOpenWithNonceAsync),
  *   which works on every platform including the web (WebCrypto).
@@ -17,56 +18,68 @@ import com.ditchoom.buffer.ReadBuffer
  * from the context's base nonce and sequence number.
  */
 
-/** Seals [plaintext] under the HPKE AEAD [aead], [key] (the derived AEAD key), and explicit [nonce]. */
-internal suspend fun hpkeAeadSeal(
+/**
+ * Wraps the derived HPKE AEAD key (`HpkeAead.nk` bytes) as a typed AEAD key. Created once per
+ * context at key-schedule time; the wrapper holds its own secure-scratch copy of the material,
+ * which [closeMaterial] (driven by [HpkeContext.close]) zeroes.
+ */
+internal fun hpkeAeadKeyOf(
     aead: HpkeAead,
     key: ReadBuffer,
+): AeadKey =
+    when (aead) {
+        HpkeAead.Aes128Gcm, HpkeAead.Aes256Gcm -> AesGcmKey.of(viewRemaining(key), secureScratch)
+        HpkeAead.ChaCha20Poly1305 -> ChaChaPolyKey.of(viewRemaining(key), secureScratch)
+    }
+
+/** Zeroes and frees the wrapper's copied key material (each AEAD key family is closeable). */
+internal fun AeadKey.closeMaterial() {
+    when (this) {
+        is AesGcmKey -> close()
+        is ChaChaPolyKey -> close()
+    }
+}
+
+/** Seals [plaintext] under the context's wrapped AEAD [key] and explicit [nonce]. */
+internal suspend fun hpkeAeadSeal(
+    key: AeadKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
     plaintext: ReadBuffer,
     factory: BufferFactory,
 ): PlatformBuffer =
-    when (aead) {
-        HpkeAead.Aes128Gcm, HpkeAead.Aes256Gcm -> {
-            val gcmKey = AesGcmKey.of(viewRemaining(key), secureScratch)
-            aesGcmSealWithNonceAsync(gcmKey, nonce, aad, plaintext, factory)
-        }
-        HpkeAead.ChaCha20Poly1305 -> {
+    when (key) {
+        is AesGcmKey -> aesGcmSealWithNonceAsync(key, nonce, aad, plaintext, factory)
+        is ChaChaPolyKey -> {
             if (!chaChaPolyReachable) {
                 throw UnsupportedOperationException("ChaCha20-Poly1305 is not supported on this platform")
             }
-            val ccKey = ChaChaPolyKey.of(viewRemaining(key), secureScratch)
             val dest = factory.allocate(plaintext.remaining() + AEAD_TAG_BYTES)
-            chaChaPolySeal(ccKey, nonce, aad, plaintext, dest)
+            chaChaPolySeal(key, nonce, aad, plaintext, dest)
             dest.resetForRead()
             dest
         }
     }
 
-/** Opens a `ct || tag` blob under the HPKE AEAD [aead], [key], and explicit [nonce]. */
+/** Opens a `ct || tag` blob under the context's wrapped AEAD [key] and explicit [nonce]. */
 internal suspend fun hpkeAeadOpen(
-    aead: HpkeAead,
-    key: ReadBuffer,
+    key: AeadKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
     ciphertextAndTag: ReadBuffer,
     factory: BufferFactory,
 ): PlatformBuffer =
-    when (aead) {
-        HpkeAead.Aes128Gcm, HpkeAead.Aes256Gcm -> {
-            val gcmKey = AesGcmKey.of(viewRemaining(key), secureScratch)
-            aesGcmOpenWithNonceAsync(gcmKey, nonce, aad, ciphertextAndTag, factory)
-        }
-        HpkeAead.ChaCha20Poly1305 -> {
+    when (key) {
+        is AesGcmKey -> aesGcmOpenWithNonceAsync(key, nonce, aad, ciphertextAndTag, factory)
+        is ChaChaPolyKey -> {
             if (!chaChaPolyReachable) {
                 throw UnsupportedOperationException("ChaCha20-Poly1305 is not supported on this platform")
             }
-            val ccKey = ChaChaPolyKey.of(viewRemaining(key), secureScratch)
             require(ciphertextAndTag.remaining() >= AEAD_TAG_BYTES) {
                 "ciphertext too short: need at least $AEAD_TAG_BYTES bytes"
             }
             val dest = factory.allocate(ciphertextAndTag.remaining() - AEAD_TAG_BYTES)
-            chaChaPolyOpen(ccKey, nonce, aad, ciphertextAndTag, dest)
+            chaChaPolyOpen(key, nonce, aad, ciphertextAndTag, dest)
             dest.resetForRead()
             dest
         }

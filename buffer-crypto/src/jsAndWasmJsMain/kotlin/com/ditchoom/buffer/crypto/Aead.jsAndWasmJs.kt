@@ -22,6 +22,14 @@ import com.ditchoom.buffer.WriteBuffer
  * and the Wasm backend without typed-array interop differences leaking in. No ByteArray crosses
  * the boundary, and the tag stays attached to the ciphertext (WebCrypto appends it), so
  * plaintext is only produced after WebCrypto verifies it.
+ *
+ * ZEROIZATION LIMITATION (documented, accepted): the hex marshalling means key material (and
+ * plaintext) transits the boundary as immutable JS Strings, which cannot be wiped — the copies
+ * live on the GC heap until collected. WebCrypto additionally copies the bytes into
+ * engine-internal key state that Kotlin also cannot wipe, so switching the bridge to Int8Array
+ * would narrow but not close the exposure. In-memory secrecy on the web targets is therefore
+ * best-effort only; the wipe-on-close contract of SecureBuffer applies to the Kotlin-side
+ * buffers, not to these boundary copies.
  */
 
 private const val NO_CHACHA_POLY = "ChaCha20-Poly1305 is not part of WebCrypto and is not polyfilled"

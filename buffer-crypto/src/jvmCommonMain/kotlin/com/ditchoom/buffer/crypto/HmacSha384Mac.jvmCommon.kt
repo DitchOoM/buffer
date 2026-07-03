@@ -12,7 +12,7 @@ import javax.crypto.spec.SecretKeySpec
 /** JVM/Android HMAC-SHA384 backed by the JCA [Mac]. */
 actual class HmacSha384Mac actual constructor(
     key: ReadBuffer,
-) {
+) : AutoCloseable {
     private val mac =
         Mac.getInstance("HmacSHA384").apply {
             val managed = key.managedMemoryAccess
@@ -30,13 +30,26 @@ actual class HmacSha384Mac actual constructor(
                 }
             init(spec)
         }
+    private var finalized = false
 
     actual fun update(input: ReadBuffer): HmacSha384Mac {
+        check(!finalized) { "mac already finalized" }
         mac.updateRemaining(input)
         return this
     }
 
     actual fun doFinalInto(dest: WriteBuffer) {
+        // JCA resets the mac for reuse; the cross-platform contract is one-shot, so reject reuse.
+        check(!finalized) { "mac already finalized" }
+        // doFinalInto validates capacity BEFORE consuming the JCA state, so a too-small
+        // dest throws with the MAC still intact — the finalize stays retryable (C1).
         mac.doFinalInto(dest)
+        finalized = true
+    }
+
+    actual override fun close() {
+        if (finalized) return
+        finalized = true
+        mac.reset()
     }
 }

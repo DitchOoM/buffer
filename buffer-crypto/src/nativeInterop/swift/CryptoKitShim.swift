@@ -17,6 +17,11 @@
 
 import CryptoKit
 import Foundation
+#if canImport(LocalAuthentication) && !os(tvOS)
+// tvOS ships the framework for canImport purposes but marks LAContext itself unavailable,
+// so the os() clause is load-bearing.
+import LocalAuthentication
+#endif
 
 // Status codes — kept in sync with CryptoKitShim.h.
 private let BCKS_OK: Int32 = 0
@@ -35,7 +40,9 @@ private func emit(_ data: Data, _ out: UnsafeMutablePointer<UInt8>?, _ outCap: I
     return BCKS_OK
 }
 
-// Build a Data view over a (pointer, length) pair without copying (valid only for the call).
+// Build a Data over a (pointer, length) pair. Data(bytes:count:) COPIES the bytes — this is a
+// staging copy, not a zero-copy view. The copy is released (not zeroed) when the Data goes out of
+// scope; Kotlin-side wiping covers only the caller's buffer, not this transient.
 private func bytes(_ ptr: UnsafePointer<UInt8>?, _ len: Int) -> Data {
     guard let ptr = ptr, len > 0 else { return Data() }
     return Data(bytes: ptr, count: len)
@@ -361,4 +368,179 @@ public func bcks_secure_enclave_p256_sign(
     }
     guard let sig = try? key.signature(for: bytes(msgPtr, msgLen)) else { return BCKS_ERR_INTERNAL }
     return emit(sig.derRepresentation, sigOut, sigCap, sigLenOut)
+}
+
+// =============================================================================
+// User-authentication binding — LocalAuthentication contexts + Secure Enclave
+// access control. LocalAuthentication does not exist on every Apple platform
+// (no tvOS), so the whole surface is canImport-guarded and degrades to typed
+// "unsupported" statuses instead of failing to compile the Kotlin actuals.
+// =============================================================================
+
+#if canImport(LocalAuthentication) && !os(tvOS)
+// Live LAContexts handed to Kotlin as opaque Int64 handles. Kotlin owns the
+// lifecycle (create/release); the registry just keeps ARC references alive and
+// remembers the localized reason to show in the OS prompt.
+private final class LAContextRegistry {
+    static let shared = LAContextRegistry()
+    private var next: Int64 = 1
+    private var entries: [Int64: (LAContext, String)] = [:]
+    private let lock = NSLock()
+
+    func create(reason: String) -> Int64 {
+        lock.lock(); defer { lock.unlock() }
+        let handle = next
+        next += 1
+        entries[handle] = (LAContext(), reason)
+        return handle
+    }
+
+    func get(_ handle: Int64) -> (LAContext, String)? {
+        lock.lock(); defer { lock.unlock() }
+        return entries[handle]
+    }
+
+    func release(_ handle: Int64) {
+        lock.lock(); defer { lock.unlock() }
+        if let (ctx, _) = entries.removeValue(forKey: handle) { ctx.invalidate() }
+    }
+}
+#endif
+
+// Create a LocalAuthentication context with the user-facing reason string shown in the OS prompt.
+// Returns an opaque handle (> 0), or 0 when LocalAuthentication is unavailable on this platform.
+@_cdecl("bcks_la_context_create")
+public func bcks_la_context_create(_ reasonPtr: UnsafePointer<CChar>?) -> Int64 {
+    #if canImport(LocalAuthentication) && !os(tvOS)
+    let reason = reasonPtr.map { String(cString: $0) } ?? ""
+    return LAContextRegistry.shared.create(reason: reason)
+    #else
+    return 0
+    #endif
+}
+
+// Invalidate and release a context created by bcks_la_context_create. Idempotent.
+@_cdecl("bcks_la_context_release")
+public func bcks_la_context_release(_ handle: Int64) {
+    #if canImport(LocalAuthentication) && !os(tvOS)
+    LAContextRegistry.shared.release(handle)
+    #endif
+}
+
+// Evaluate the context's auth policy, prompting the user. method: 1 = biometric or device
+// credential, 2 = biometric only. interactionAllowed == 0 sets interactionNotAllowed so a
+// headless caller fails (BCKS_ERR_AUTH) instead of hanging on an invisible prompt. BLOCKING —
+// call off the main thread. A successfully evaluated context can then authorize Enclave signs
+// (bcks_secure_enclave_p256_sign_ctx) without re-prompting until released.
+@_cdecl("bcks_la_evaluate")
+public func bcks_la_evaluate(_ handle: Int64, _ method: Int32, _ interactionAllowed: Int32) -> Int32 {
+    #if canImport(LocalAuthentication) && !os(tvOS)
+    guard let (ctx, reason) = LAContextRegistry.shared.get(handle) else { return BCKS_ERR_INPUT }
+    #if os(watchOS)
+    // watchOS exposes no discrete biometric policy (wrist detection stands in for biometrics);
+    // deviceOwnerAuthentication is the strongest policy the platform offers for either method.
+    let policy: LAPolicy = .deviceOwnerAuthentication
+    #else
+    let policy: LAPolicy = method == 2 ? .deviceOwnerAuthenticationWithBiometrics : .deviceOwnerAuthentication
+    #endif
+    ctx.interactionNotAllowed = interactionAllowed == 0
+    let sem = DispatchSemaphore(value: 0)
+    var ok = false
+    ctx.evaluatePolicy(policy, localizedReason: reason.isEmpty ? "authorize hardware key use" : reason) { success, _ in
+        ok = success
+        sem.signal()
+    }
+    sem.wait()
+    return ok ? BCKS_OK : BCKS_ERR_AUTH
+    #else
+    return BCKS_ERR_INTERNAL
+    #endif
+}
+
+// Generate a Secure Enclave P-256 signing key bound to user authentication via SecAccessControl.
+// authReq: 1 = userPresence (biometric or device credential), 2 = biometryCurrentSet (biometric
+// only; the OS invalidates the key when biometric enrollment changes). Same outputs as
+// bcks_secure_enclave_p256_generate.
+@_cdecl("bcks_secure_enclave_p256_generate_ac")
+public func bcks_secure_enclave_p256_generate_ac(
+    _ authReq: Int32,
+    _ blobOut: UnsafeMutablePointer<UInt8>?, _ blobCap: Int,
+    _ blobLenOut: UnsafeMutablePointer<Int>?,
+    _ pointOut: UnsafeMutablePointer<UInt8>?, _ pointCap: Int,
+    _ pointLenOut: UnsafeMutablePointer<Int>?
+) -> Int32 {
+    guard SecureEnclave.isAvailable else { return BCKS_ERR_INTERNAL }
+    var flags: SecAccessControlCreateFlags = [.privateKeyUsage]
+    switch authReq {
+    case 1: flags.insert(.userPresence)
+    case 2: flags.insert(.biometryCurrentSet)
+    default: return BCKS_ERR_INPUT
+    }
+    var acError: Unmanaged<CFError>?
+    guard let ac = SecAccessControlCreateWithFlags(
+        kCFAllocatorDefault, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, flags, &acError
+    ) else { return BCKS_ERR_INTERNAL }
+    guard let key = try? SecureEnclave.P256.Signing.PrivateKey(accessControl: ac) else { return BCKS_ERR_INTERNAL }
+    let s = emit(key.dataRepresentation, blobOut, blobCap, blobLenOut)
+    if s != BCKS_OK { return s }
+    return emit(key.publicKey.x963Representation, pointOut, pointCap, pointLenOut)
+}
+
+// Classify a signing failure on an access-controlled key: user-auth denials (cancel, no match,
+// interaction not allowed, auth failed) map to BCKS_ERR_AUTH; everything else is internal.
+private func classifySignFailure(_ error: Error) -> Int32 {
+    let ns = error as NSError
+    #if canImport(LocalAuthentication) && !os(tvOS)
+    if ns.domain == LAError.errorDomain { return BCKS_ERR_AUTH }
+    #endif
+    if ns.domain == NSOSStatusErrorDomain {
+        switch OSStatus(ns.code) {
+        case errSecAuthFailed, errSecUserCanceled, errSecInteractionNotAllowed: return BCKS_ERR_AUTH
+        default: return BCKS_ERR_INTERNAL
+        }
+    }
+    return BCKS_ERR_INTERNAL
+}
+
+// Sign with the Enclave key reconstructed from its blob, authorizing through the LAContext
+// behind laHandle (0 = no context: the OS drives any required prompt itself, or refuses when it
+// cannot). Emits a DER signature; BCKS_ERR_AUTH when user authentication was denied.
+@_cdecl("bcks_secure_enclave_p256_sign_ctx")
+public func bcks_secure_enclave_p256_sign_ctx(
+    _ blobPtr: UnsafePointer<UInt8>?, _ blobLen: Int,
+    _ laHandle: Int64,
+    _ msgPtr: UnsafePointer<UInt8>?, _ msgLen: Int,
+    _ sigOut: UnsafeMutablePointer<UInt8>?, _ sigCap: Int,
+    _ sigLenOut: UnsafeMutablePointer<Int>?
+) -> Int32 {
+    #if canImport(LocalAuthentication) && !os(tvOS)
+    let ctx: LAContext? = laHandle == 0 ? nil : LAContextRegistry.shared.get(laHandle)?.0
+    if laHandle != 0 && ctx == nil { return BCKS_ERR_INPUT }
+    // The context-carrying init needs watchOS 9; below that (floor: 7) sign without one — the
+    // access control still holds, the OS just drives any prompt itself.
+    guard #available(watchOS 9.0, iOS 13.0, macOS 10.15, *) else {
+        guard let key = try? SecureEnclave.P256.Signing.PrivateKey(
+            dataRepresentation: bytes(blobPtr, blobLen)
+        ) else { return BCKS_ERR_INPUT }
+        do {
+            let sig = try key.signature(for: bytes(msgPtr, msgLen))
+            return emit(sig.derRepresentation, sigOut, sigCap, sigLenOut)
+        } catch {
+            return classifySignFailure(error)
+        }
+    }
+    guard let key = try? SecureEnclave.P256.Signing.PrivateKey(
+        dataRepresentation: bytes(blobPtr, blobLen), authenticationContext: ctx
+    ) else { return BCKS_ERR_INPUT }
+    #else
+    guard let key = try? SecureEnclave.P256.Signing.PrivateKey(
+        dataRepresentation: bytes(blobPtr, blobLen)
+    ) else { return BCKS_ERR_INPUT }
+    #endif
+    do {
+        let sig = try key.signature(for: bytes(msgPtr, msgLen))
+        return emit(sig.derRepresentation, sigOut, sigCap, sigLenOut)
+    } catch {
+        return classifySignFailure(error)
+    }
 }

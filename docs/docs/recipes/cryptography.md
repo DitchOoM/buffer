@@ -443,6 +443,151 @@ when (val hw = CryptoCapabilities.hardware) {
 
 The per-platform results of these checks are the [capability matrix](#per-platform-capability-matrix) below.
 
+## Biometric / user-authenticated hardware keys
+
+A hardware-backed key can be **bound to user authentication inside the secure element** at
+generation — the OS refuses an unauthenticated operation no matter what the process does. Bound
+keys come from a `UserAuthenticatedKeyProvider`, obtained by handing the platform's prompt host to
+the `userAuthenticated(...)` extension; the policies themselves are pure data:
+
+```kotlin
+sealed interface UserAuthenticationPolicy {
+    data class Session(val validity: Duration,
+                       val method: UserAuthenticationMethod = BiometricOrCredential)
+    data class PerUse(val method: UserAuthenticationMethod = BiometricOnly)
+}
+```
+
+Because the prompt host is captured when the provider is constructed, "a bound key without a
+prompt" is a compile error, not a runtime exception — the base `HardwareKeyProvider` keeps only
+the advisory `HardwareKeySpec.authorization` gate and mints unbound keys, exactly as before.
+
+- **`Session(validity)`** — one successful authentication unlocks the key for the window; ops
+  inside it never re-prompt (the provider prompts *lazily*, only when the OS reports the window
+  stale). Android enforces the window in the keystore; the Apple Enclave has no timed window, so
+  the window is library-tracked there while the authentication itself stays OS-enforced.
+- **`PerUse()`** — every operation requires a fresh authentication bound to that exact operation
+  (Android `BiometricPrompt.CryptoObject` wrapping the exact `Cipher`/`Signature`; Apple a fresh,
+  un-evaluated `LAContext`, so the Enclave prompts during the sign itself).
+- **`method`** — `BiometricOnly` (strong biometric; the OS invalidates the key when enrollment
+  changes → `HardwareKeyException.KeyInvalidated`) or `BiometricOrCredential` (biometric or the
+  device PIN/passcode).
+
+The prompt needs UI context that common code cannot express, so `userAuthenticated(...)` is a
+**platform** extension — its parameter type is the platform's prompt host, which is exactly the
+one line of platform code the app had to write anyway:
+
+```kotlin
+// Android (androidMain) — androidx.biometric prompt host
+val authed = hw.provider.userAuthenticated(
+    BiometricPromptAuthenticator(activity, title = "Unlock signing key"),
+)
+
+// Apple (appleMain) — LocalAuthentication
+val authed = hw.provider.userAuthenticated(
+    LocalAuthAuthenticator(reason = "Sign the audit record"),
+)
+
+// Common code from here on — policies are pure data, keys are ordinary SigningKey / AesGcmKey:
+val key = authed?.generateSigning(
+    SignatureScheme.EcdsaP256,
+    UserAuthenticationPolicy.Session(5.minutes),
+)
+// first op in the window prompts; later ops are silent; expiry re-prompts
+```
+
+`userAuthenticated` returns `null` where OS user authentication cannot be driven (a non-platform
+provider, tvOS, a closed authenticator) — witness-style honesty, like
+`CryptoCapabilities.hardware` itself.
+
+Typed outcomes to branch on: a denied/cancelled prompt is `AuthorizationFailed`; a stale session
+the user must re-authenticate is `HardwareKeyException.UserAuthenticationRequired`; biometric
+re-enrollment invalidating a `BiometricOnly` key is `HardwareKeyException.KeyInvalidated`.
+
+Platform notes: Android requires a secure lock screen to generate auth-bound keys (API 30+ uses
+`setUserAuthenticationParameters`; 28/29 the legacy validity-duration API, where `method` cannot
+be narrowed). On Apple, tvOS has no LocalAuthentication and watchOS has no discrete biometric
+policy (wrist detection / passcode stands in), so `BiometricOnly` degrades accordingly. Platforms
+without a secure element (`HardwareSupport.Unavailable`) never reach these values.
+
+## Using buffer-crypto with buffer-codec
+
+`buffer-crypto` and `buffer-codec` are deliberately **independent siblings over `:buffer`** — neither module depends on the other, and no `Codec` ever calls a crypto op. You compose them in application code: the codec owns the wire envelope, crypto owns the payload.
+
+### The two-phase pattern
+
+Model the ciphertext slot in a `@ProtocolMessage` as a length-prefixed **opaque** field. Decode the envelope first, then open the payload **outside** the codec with the AEAD/HPKE witness ops; if the recovered plaintext is itself structured, run a second codec over it. The AEAD seal ops return a self-framed `nonce ‖ ciphertext ‖ tag` buffer, so the sealed bytes drop into the field as-is — no nonce bookkeeping in the message shape.
+
+The opaque slot is a `Payload`-marked wrapper over `OwnedBytesHandle`, whose codec delegates to the library's `OwnedBytesHandleCodec` (canonical consumer-owned-bytes decode):
+
+```kotlin
+import com.ditchoom.buffer.codec.*
+import com.ditchoom.buffer.codec.annotations.*
+import com.ditchoom.buffer.crypto.*
+
+@JvmInline
+value class SealedBox(val handle: OwnedBytesHandle) : Payload
+
+object SealedBoxCodec : Codec<SealedBox> {
+    override fun decode(buffer: ReadBuffer, context: DecodeContext) =
+        SealedBox(OwnedBytesHandleCodec.decode(buffer, context))
+    override fun encode(buffer: WriteBuffer, value: SealedBox, context: EncodeContext) =
+        OwnedBytesHandleCodec.encode(buffer, value.handle, context)
+    override fun wireSize(value: SealedBox, context: EncodeContext) =
+        OwnedBytesHandleCodec.wireSize(value.handle, context)
+}
+
+@ProtocolMessage
+data class SecureEnvelope(
+    val version: UByte,
+    @LengthPrefixed(LengthPrefix.Int) @UseCodec(SealedBoxCodec::class) val sealed: SealedBox,
+)
+```
+
+Seal → encode on the sender, decode → open on the receiver:
+
+```kotlin
+// Both witness states carry the suspend ops, so resolve once.
+val gcm: AeadAsyncOps<AesGcmKey> = when (val w = CryptoCapabilities.aesGcm) {
+    is Aead.Blocking  -> w.ops
+    is Aead.AsyncOnly -> w.ops
+}
+
+suspend fun sealAndEncode(key: AesGcmKey, plaintext: ReadBuffer): PlatformBuffer {
+    val box = SealedBox(ownedBytesFrom(gcm.seal(key, plaintext))) // nonce ‖ ciphertext ‖ tag
+    val envelope = SecureEnvelope(version = 1u, sealed = box)
+    val out = BufferFactory.Default.allocate(1 + 4 + box.handle.byteSize()) // version ‖ Int prefix ‖ sealed
+    SecureEnvelopeCodec.encode(out, envelope, EncodeContext.Empty)          // generated codec
+    out.resetForRead()
+    return out
+}
+
+suspend fun decodeAndOpen(key: AesGcmKey, wire: ReadBuffer): PlatformBuffer {
+    val envelope = SecureEnvelopeCodec.decode(wire, DecodeContext.Empty)    // phase 1: no crypto
+    return gcm.open(envelope.sealed.handle.asReadBuffer(), key)             // phase 2: verify-then-release
+    // Structured plaintext? Run its own codec over the returned buffer here.
+}
+```
+
+### Why not decrypt inside `decode`?
+
+`Decoder.decode` is **synchronous**. AEAD is async-only on JS/WASM (`Aead.AsyncOnly` — WebCrypto is `suspend`-only) and HPKE is `suspend` on **every** platform. A codec that opens ciphertext inline compiles fine on JVM/Apple/Linux and is unimplementable on the web — the witness types are telling you the decrypt belongs in the `suspend` world, after the envelope decode returns. (A hand-written `SuspendingDecoder` can suspend, but the generated `@ProtocolMessage` codecs are synchronous, and the two-phase split keeps them that way.)
+
+### Fail the frame opaquely
+
+Never catch `VerificationFailed` and re-throw it wrapped in a `DecodeException` — `DecodeException` carries `expected`/`actual` detail by design, and `VerificationFailed` is deliberately opaque **by design**: attaching diagnostics to a tag-verification failure reintroduces the decryption oracle the opacity exists to prevent. Let `VerificationFailed` propagate (or map it to a connection teardown) without inspecting, describing, or distinguishing it.
+
+### Keys and config through `DecodeContext`
+
+Typed context keys flow automatically through sealed dispatch, `@UseCodec` fields, and nested messages, so routing configuration (a key *identifier*, size limits, an allocation factory via `BufferFactoryKey`) to a deep codec is mechanically supported:
+
+```kotlin
+object KeyIdKey : DecodeKey<Int>
+val ctx = DecodeContext.Empty.with(KeyIdKey, activeKeyId)
+```
+
+One caveat: the context's `toString` prints **every value** (`DecodeContext(key=value)`). If you bind a value that holds key material, its own `toString` must redact — otherwise a stray log of the context leaks the key. Prefer binding identifiers and looking the key up outside the codec.
+
 ## Security model
 
 The full threat model lives in [`buffer-crypto/SECURITY.md`](https://github.com/DitchOoM/buffer/blob/main/buffer-crypto/SECURITY.md). In brief:

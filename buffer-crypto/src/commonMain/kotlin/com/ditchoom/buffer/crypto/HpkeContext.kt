@@ -5,6 +5,9 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlin.concurrent.Volatile
 
 /**
  * HPKE encryption contexts (RFC 9180 §5.2) and the setup functions that produce them.
@@ -15,7 +18,16 @@ import com.ditchoom.buffer.WriteBuffer
  * (key, nonce) pair is never reused. The [export] method derives independent secrets from the
  * context's `exporter_secret` (the HPKE secret-export interface, §5.3).
  *
- * The AEAD key, base nonce, and exporter secret live in wiped [SecureBuffer]s; [close] zeroes them.
+ * Concurrency: the per-message `seal`/`open` ops are serialized on an internal [Mutex], so
+ * concurrent callers on one context are safe — each op claims its sequence number exactly once
+ * (and a failed open still leaves the counter unchanged). [close] marks the context closed
+ * immediately (later ops throw) and wipes under the same lock: inline when no op is in flight,
+ * otherwise deferred to the in-flight op's completion — so a seal/open never reads wiped or freed
+ * key material. [export] is *not* serialized on the lock (it cannot suspend); do not race it with
+ * [close].
+ *
+ * The AEAD key, base nonce, and exporter secret live in wiped [SecureBuffer]s; [close] zeroes them
+ * (idempotent) along with the wrapped [aeadKey]'s material. Ops on a closed context throw.
  */
 sealed class HpkeContext protected constructor(
     internal val suite: HpkeSuite,
@@ -25,13 +37,33 @@ sealed class HpkeContext protected constructor(
 ) : AutoCloseable {
     private var seq: Long = 0L
 
+    // Volatile: close() may run on a different thread than the op holding seqLock; the op's
+    // completion path must observe the closed flag to perform the deferred wipe.
+    @Volatile
+    private var closed = false
+
+    @Volatile
+    private var wiped = false
+
+    /** Serializes the nonce-compute → AEAD op → counter-advance sequence (see class KDoc). */
+    internal val seqLock = Mutex()
+
+    /** The derived AEAD key, wrapped once for the context's lifetime and wiped by [close]. */
+    internal val aeadKey: AeadKey = hpkeAeadKeyOf(suite.aead, key)
+
     /** RFC 9180 §5.3 secret export: `LabeledExpand(exporter_secret, "sec", context, L)`. */
     fun export(
         exporterContext: Info,
         length: Int,
         factory: BufferFactory = BufferFactory.Default,
     ): ReadBuffer {
+        requireOpen()
         require(length >= 0) { "export length must be non-negative, was $length" }
+        // RFC 9180 §5.3: L must be at most 255*Nh (the HKDF-Expand block limit). Checked here,
+        // before the output allocation, so an oversized request cannot allocate first and only
+        // fail inside the KDF.
+        val maxLength = HKDF_MAX_BLOCKS * suite.kdf.nh
+        require(length <= maxLength) { "export length must be <= $maxLength bytes for this KDF, was $length" }
         val out = factory.allocate(length)
         labeledExpand(suite.kdf, suite.suiteId(), exporterSecret, LABEL_SEC, exporterContext.bytesOrNull, length, out)
         out.resetForRead()
@@ -76,11 +108,53 @@ sealed class HpkeContext protected constructor(
         seq = value
     }
 
+    /** Guards every op against use after [close]. `seal`/`open` re-check under [seqLock]. */
+    internal fun requireOpen() {
+        check(!closed) { "HpkeContext already closed" }
+    }
+
+    /**
+     * Marks the context closed (later ops throw) and wipes the secrets under [seqLock]: inline if
+     * the lock is free, otherwise deferred to the in-flight op's completion path (a [Mutex] cannot
+     * be awaited from a non-suspend close). Either way a seal/open never observes wiped or freed
+     * material. Idempotent. [export] does not hold the lock — do not race it with close.
+     */
     override fun close() {
+        closed = true
+        if (wiped) return
+        if (seqLock.tryLock()) {
+            try {
+                wipeLocked()
+            } finally {
+                seqLock.unlock()
+            }
+        }
+    }
+
+    /** Zeroes/frees the derived secrets. Call only while holding [seqLock]; idempotent. */
+    private fun wipeLocked() {
+        if (wiped) return
+        wiped = true
+        aeadKey.closeMaterial()
         key.freeNativeMemory()
         baseNonce.freeNativeMemory()
         exporterSecret.freeNativeMemory()
     }
+
+    /**
+     * Runs one serialized seal/open [op] under [seqLock]: re-checks [closed] once the lock is
+     * held (a close that won the lock first has already wiped — fail before touching freed
+     * memory), and performs the wipe that a concurrent [close] deferred to this op.
+     */
+    internal suspend fun <R> withOpLock(op: suspend () -> R): R =
+        seqLock.withLock {
+            try {
+                requireOpen()
+                op()
+            } finally {
+                if (closed) wipeLocked()
+            }
+        }
 
     /** A sender context: encrypts successive messages to the recipient. */
     class Sender internal constructor(
@@ -91,22 +165,24 @@ sealed class HpkeContext protected constructor(
     ) : HpkeContext(suite, key, baseNonce, exporterSecret) {
         /**
          * Seals [plaintext] with [aad] under the next per-message nonce, returning `ct || tag`
-         * (read-ready, from [factory]). Advances the sequence number only on success.
+         * (read-ready, from [factory]). Advances the sequence number only on success; serialized
+         * against concurrent seals so a sequence number (and thus a nonce) is never reused.
          */
         suspend fun seal(
             plaintext: ReadBuffer,
             aad: Aad = Aad.None,
             factory: BufferFactory = BufferFactory.Default,
-        ): PlatformBuffer {
-            val nonce = computeNonce()
-            return try {
-                val ct = hpkeAeadSeal(suite.aead, key, nonce, aad.bytesOrNull, plaintext, factory)
-                incrementSeq()
-                ct
-            } finally {
-                nonce.freeNativeMemory()
+        ): PlatformBuffer =
+            withOpLock {
+                val nonce = computeNonce()
+                try {
+                    val ct = hpkeAeadSeal(aeadKey, nonce, aad.bytesOrNull, plaintext, factory)
+                    incrementSeq()
+                    ct
+                } finally {
+                    nonce.freeNativeMemory()
+                }
             }
-        }
     }
 
     /** A receiver context: decrypts successive messages from the sender. */
@@ -128,16 +204,17 @@ sealed class HpkeContext protected constructor(
             ciphertext: ReadBuffer,
             aad: Aad = Aad.None,
             factory: BufferFactory = BufferFactory.Default,
-        ): PlatformBuffer {
-            val nonce = computeNonce()
-            return try {
-                val pt = hpkeAeadOpen(suite.aead, key, nonce, aad.bytesOrNull, ciphertext, factory)
-                incrementSeq()
-                pt
-            } finally {
-                nonce.freeNativeMemory()
+        ): PlatformBuffer =
+            withOpLock {
+                val nonce = computeNonce()
+                try {
+                    val pt = hpkeAeadOpen(aeadKey, nonce, aad.bytesOrNull, ciphertext, factory)
+                    incrementSeq()
+                    pt
+                } finally {
+                    nonce.freeNativeMemory()
+                }
             }
-        }
     }
 }
 
@@ -433,7 +510,7 @@ private suspend fun keyScheduleReceiver(
     return HpkeContext.Receiver(suite, key, baseNonce, exporterSecret)
 }
 
-private class ScheduleOutput(
+internal class ScheduleOutput(
     val key: PlatformBuffer,
     val baseNonce: PlatformBuffer,
     val exporterSecret: PlatformBuffer,
@@ -449,21 +526,24 @@ private class ScheduleOutput(
  * The HPKE key schedule (RFC 9180 §5.1, `KeySchedule`). Computes `key`, `base_nonce`, and
  * `exporter_secret` from the KEM `shared_secret`, the [mode], `info`, and the optional [psk].
  * All intermediates (`psk_id_hash`, `info_hash`, `key_schedule_context`, `secret`) live in wiped
- * scratch and are freed before returning. The three returned buffers are secure (wiped on context
- * close).
+ * scratch and are freed before returning. The three returned buffers come from [outputFactory] —
+ * [secureScratch] in production, so they are wiped on context close. The parameter is a test seam:
+ * a `managed().secure()` factory keeps the wiped bytes readable after close (managed free is a GC
+ * no-op), letting a test byte-assert the zeroization — the [AeadKeyCloseTest] technique.
  */
-private fun keySchedule(
+internal fun keySchedule(
     suite: HpkeSuite,
     mode: HpkeMode,
     sharedSecret: PlatformBuffer,
     info: ReadBuffer,
     psk: HpkePsk?,
+    outputFactory: BufferFactory = secureScratch,
 ): ScheduleOutput {
     val kdf = suite.kdf
     val suiteId = suite.suiteId()
     val nh = kdf.nh
 
-    val pskValue: ReadBuffer? = psk?.psk
+    val pskValue: ReadBuffer? = psk?.requireOpen()
     val pskIdValue: ReadBuffer = psk?.pskId ?: EMPTY
 
     // psk_id_hash = LabeledExtract("", "psk_id_hash", psk_id)
@@ -491,15 +571,15 @@ private fun keySchedule(
 
         // `secret` is read non-destructively by the HMAC (absolute position+remaining), so the same
         // read-ready buffer is reused for all three expands without re-resetting.
-        val key = secureScratch.allocate(suite.aead.nk)
+        val key = outputFactory.allocate(suite.aead.nk)
         labeledExpand(kdf, suiteId, secret, LABEL_KEY, ksc, suite.aead.nk, key)
         key.resetForRead()
 
-        val baseNonce = secureScratch.allocate(suite.aead.nn)
+        val baseNonce = outputFactory.allocate(suite.aead.nn)
         labeledExpand(kdf, suiteId, secret, LABEL_BASE_NONCE, ksc, suite.aead.nn, baseNonce)
         baseNonce.resetForRead()
 
-        val exporterSecret = secureScratch.allocate(nh)
+        val exporterSecret = outputFactory.allocate(nh)
         labeledExpand(kdf, suiteId, secret, LABEL_EXP, ksc, nh, exporterSecret)
         exporterSecret.resetForRead()
 

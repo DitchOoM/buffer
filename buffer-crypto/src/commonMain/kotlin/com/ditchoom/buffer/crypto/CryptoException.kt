@@ -30,6 +30,12 @@ expect open class NativeCryptoException : Exception {
  *    values ([InvalidPublicKey.curve]).
  *  - [VerificationFailed] is **deliberately opaque** — it carries no reason and no [cause], so a
  *    verification path can never become an oracle.
+ *  - **Capability gating is outside this hierarchy**: "this platform/engine does not provide the
+ *    algorithm" throws a plain [UnsupportedOperationException], not a [CryptoException] — it is an
+ *    environment/programming condition, not a crypto-operation failure, and the capability
+ *    witnesses ([CryptoCapabilities]) exist precisely so callers probe support instead of catching
+ *    it. The cost is that it is not part of the exhaustive sealed `when`; branch on the witness,
+ *    not the exception.
  *
  * Invariant for every subtype: **no secret material** (keys, plaintext, shared secrets, derived key
  * material) ever appears in any message, property, or cause.
@@ -112,4 +118,12 @@ sealed class HardwareKeyException protected constructor(
 
     /** The secure element does not support the requested algorithm / key size / parameters. */
     class UnsupportedHardwareKey internal constructor() : HardwareKeyException("unsupported hardware key parameters")
+
+    /**
+     * Generation was requested for a [HardwareAlgorithm] where [HardwareKeyProvider.eligible] is
+     * `false` (e.g. AES-GCM on the Apple Secure Enclave). Typed — not an
+     * `IllegalArgumentException` with a message — so a caller can branch on it exhaustively; the
+     * fix is to consult [HardwareKeyProvider.eligible] before generating.
+     */
+    class AlgorithmNotEligible internal constructor() : HardwareKeyException("algorithm not hardware-eligible")
 }
