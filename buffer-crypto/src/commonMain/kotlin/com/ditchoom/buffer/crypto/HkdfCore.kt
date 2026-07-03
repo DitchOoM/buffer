@@ -82,39 +82,47 @@ internal class HkdfEngine(
         require(blocks <= HKDF_MAX_BLOCKS) { "HKDF cannot expand to $length bytes (max $maxOutput)" }
         require(dest.remaining() >= length) { "dest needs $length bytes remaining, has ${dest.remaining()}" }
 
-        // Two ping-pong T blocks plus a one-byte counter, all wiped on close.
-        scratch.allocate(hashLen).use { tA ->
-            scratch.allocate(hashLen).use { tB ->
-                scratch.allocate(1).use { counter ->
-                    var prev: PlatformBuffer? = null // T(0) is empty
-                    var cur = tA
-                    var spare = tB
-                    var written = 0
-                    for (i in 1..blocks) {
-                        // T(i) = HMAC(prk, T(i-1) ‖ info ‖ i) — streamed, never concatenated.
-                        val mac = newMac(prk)
-                        prev?.let { mac.update(it) }
-                        info?.let { mac.update(it) }
-                        counter.resetForWrite()
-                        counter.writeByte(i.toByte())
-                        counter.resetForRead()
-                        mac.update(counter)
-                        cur.resetForWrite()
-                        mac.doFinalInto(cur)
-                        cur.resetForRead()
+        // Two ping-pong T blocks plus a one-byte counter, all wiped in `finally`.
+        // A single try/finally (rather than three nested `use {}`) keeps the inlined
+        // try/catch/finally nesting shallow: Kotlin/Native's body-lowering pass recurses
+        // per inlined `use {}`, and three nested here overflowed its stack on iOS
+        // (StackOverflowError in body lowering). Same secure-erase guarantee — all three
+        // scratch buffers are freed on every exit path, including exceptions.
+        val tA = scratch.allocate(hashLen)
+        val tB = scratch.allocate(hashLen)
+        val counter = scratch.allocate(1)
+        try {
+            var prev: PlatformBuffer? = null // T(0) is empty
+            var cur = tA
+            var spare = tB
+            var written = 0
+            for (i in 1..blocks) {
+                // T(i) = HMAC(prk, T(i-1) ‖ info ‖ i) — streamed, never concatenated.
+                val mac = newMac(prk)
+                prev?.let { mac.update(it) }
+                info?.let { mac.update(it) }
+                counter.resetForWrite()
+                counter.writeByte(i.toByte())
+                counter.resetForRead()
+                mac.update(counter)
+                cur.resetForWrite()
+                mac.doFinalInto(cur)
+                cur.resetForRead()
 
-                        val take = minOf(hashLen, length - written)
-                        for (j in 0 until take) dest.writeByte(cur.get(j))
-                        written += take
+                val take = minOf(hashLen, length - written)
+                for (j in 0 until take) dest.writeByte(cur.get(j))
+                written += take
 
-                        // Swap: this block becomes T(i-1) for the next round.
-                        prev = cur
-                        val next = spare
-                        spare = cur
-                        cur = next
-                    }
-                }
+                // Swap: this block becomes T(i-1) for the next round.
+                prev = cur
+                val next = spare
+                spare = cur
+                cur = next
             }
+        } finally {
+            counter.freeNativeMemory()
+            tB.freeNativeMemory()
+            tA.freeNativeMemory()
         }
     }
 
