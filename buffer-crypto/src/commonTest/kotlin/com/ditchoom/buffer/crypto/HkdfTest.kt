@@ -53,4 +53,26 @@ class HkdfTest {
         assertEquals(12, Hkdf.derive(Salt.None, repeatedByte(1, 32), Info.None, 12, BufferFactory.Default).remaining())
         assertEquals(80, Hkdf.derive(Salt.None, repeatedByte(1, 32), Info.None, 80, BufferFactory.Default).remaining())
     }
+
+    /**
+     * HKDF-Expand emits a block stream: block T(i) is independent of the requested length, so the
+     * OKM for a shorter length must be a byte-exact prefix of the OKM for any longer length. This
+     * pins the per-block copy and the final-partial-block `setLimit` clamp across the block
+     * boundary (SHA-256 hashLen = 32) — an off-by-one in either would make a shorter derivation
+     * diverge from the prefix of the 80-byte (3-block) output.
+     */
+    @Test
+    fun expandOutputIsPrefixConsistentAcrossLengths() {
+        fun okm(length: Int): String =
+            derive(
+                salt = hexBuffer("000102030405060708090a0b0c"),
+                ikm = repeatedByte(0x0b, 22),
+                info = hexBuffer("f0f1f2f3f4f5f6f7f8f9"),
+                length = length,
+            )
+        val full = okm(80) // 3 blocks: 32 + 32 + 16
+        for (n in intArrayOf(1, 31, 32, 33, 42, 64, 79)) {
+            assertEquals(full.substring(0, n * 2), okm(n), "OKM($n) must be the $n-byte prefix of OKM(80)")
+        }
+    }
 }
