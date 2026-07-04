@@ -409,6 +409,16 @@ kotlin {
                     "lib${shim.archiveName}.a",
                     "-libraryPath",
                     shim.outDir.absolutePath,
+                    // #253: bake the toolchain's per-SDK Swift runtime lib dir into the cinterop
+                    // klib's own link options. The Swift shim archive auto-links the Swift back-compat
+                    // libs (swiftCompatibility56 / swiftCompatibilityConcurrency / swiftCompatibilityPacks);
+                    // on Xcode 26.5 / K/N 2.4.0 the pre-built cinterop *static cache* link doesn't inherit
+                    // the final-binary linkerOpts below, so those symbols go unresolved (`ld: symbol(s)
+                    // not found`). The compat libs live in the same per-SDK dir as swiftCore/swiftFoundation
+                    // (shim.swiftLibDir = .../usr/lib/swift/<sdk>), so a single -L there resolves them for
+                    // the cached-link path too, without disabling the native cache.
+                    "-linkerOpts",
+                    "-L${shim.swiftLibDir}",
                 )
             }
             // The cinterop task is registered by the KMP plugin under a derived name; wire the
