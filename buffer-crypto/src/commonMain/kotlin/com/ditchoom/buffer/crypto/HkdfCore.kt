@@ -1,7 +1,6 @@
 package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.deterministic
@@ -88,18 +87,26 @@ internal class HkdfEngine(
         // per inlined `use {}`, and three nested here overflowed its stack on iOS
         // (StackOverflowError in body lowering). Same secure-erase guarantee — all three
         // scratch buffers are freed on every exit path, including exceptions.
-        val tA = scratch.allocate(hashLen)
-        val tB = scratch.allocate(hashLen)
+        //
+        // The two blocks ping-pong by array index — `t[(i-1) and 1]` is T(i), `t[i and 1]`
+        // is T(i-1). This deliberately avoids a `var prev/cur/spare` swap: reassigning locals
+        // to each other in a loop builds a cyclic variable-alias graph that Kotlin/Native's
+        // `CastsOptimization.buildNullablePredicate` walks WITHOUT a visited-set, so a nullable
+        // `prev` fed from that cycle recurses forever → StackOverflowError in body lowering on
+        // iOS (independent of -Xss). Indexed `val`s have no reassignment and no nullable, so
+        // the predicate builder terminates.
+        val t = arrayOf(scratch.allocate(hashLen), scratch.allocate(hashLen))
         val counter = scratch.allocate(1)
         try {
-            var prev: PlatformBuffer? = null // T(0) is empty
-            var cur = tA
-            var spare = tB
             var written = 0
             for (i in 1..blocks) {
                 // T(i) = HMAC(prk, T(i-1) ‖ info ‖ i) — streamed, never concatenated.
+                val cur = t[(i - 1) and 1]
                 val mac = newMac(prk)
-                prev?.let { mac.update(it) }
+                // T(i-1): the other buffer, still at position 0 with limit == hashLen from
+                // the previous round (a full block — only the final block is limit-clamped,
+                // and it is never replayed). T(0) is empty, so skip it on the first round.
+                if (i > 1) mac.update(t[i and 1])
                 info?.let { mac.update(it) }
                 counter.resetForWrite()
                 counter.writeByte(i.toByte())
@@ -111,25 +118,19 @@ internal class HkdfEngine(
 
                 // Bulk-copy this block's contribution into dest. `slice()` is a
                 // zero-copy view that does NOT advance `cur`'s position, so `cur`
-                // stays at position 0 and can still be replayed as `prev` (T(i-1))
-                // into the next round's MAC. `setLimit(take)` clamps the final,
-                // possibly-partial block; only the last block is partial and it is
-                // never reused as `prev`, so clamping the limit is safe.
+                // stays at position 0 and can still be replayed as T(i-1) into the
+                // next round's MAC. `setLimit(take)` clamps the final, possibly-partial
+                // block; only the last block is partial and it is never reused, so
+                // clamping the limit is safe.
                 val take = minOf(hashLen, length - written)
                 cur.setLimit(take)
                 dest.write(cur.slice())
                 written += take
-
-                // Swap: this block becomes T(i-1) for the next round.
-                prev = cur
-                val next = spare
-                spare = cur
-                cur = next
             }
         } finally {
             counter.freeNativeMemory()
-            tB.freeNativeMemory()
-            tA.freeNativeMemory()
+            t[1].freeNativeMemory()
+            t[0].freeNativeMemory()
         }
     }
 
