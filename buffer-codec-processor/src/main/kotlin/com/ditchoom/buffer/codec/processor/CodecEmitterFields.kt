@@ -1938,23 +1938,19 @@ internal fun appendEncodeLengthPrefixedUseCodecPayload(
  *
  * **Sealed elements** — variants commonly carry BackPatch-wireSize
  * fields (`@LengthPrefixed val: String`, `@When` trailers), so the
- * pre-measure `as WireSize.Exact` cast doesn't apply. Encode each
- * element into a scratch buffer first to capture the actual byte
- * count, then write the VBI prefix and bulk-copy:
+ * pre-measure `as WireSize.Exact` cast doesn't apply. Delegate to the
+ * runtime `LengthPrefixedListEncoder`, which stages the elements into a
+ * growable scratch to measure the exact body size, writes the VBI
+ * prefix, then bulk-copies the body:
  * ```
- * BufferFactory.Default.allocate(64, buffer.byteOrder).use { __<n>Scratch ->
- *     for (__elem in <accessor>) {
- *         ElementCodec.encode(__<n>Scratch, __elem, context)
- *     }
- *     val __<n>BodyBytes = __<n>Scratch.position()
- *     <codecType>.encode(buffer, __<n>BodyBytes.toUInt(), context)
- *     __<n>Scratch.resetForRead()
- *     buffer.write(__<n>Scratch)
- * }
+ * LengthPrefixedListEncoder.encode(
+ *     buffer, BufferFactory.Default, <codecType>, <accessor>, ElementCodec, context,
+ * )
  * ```
- * 64-byte starting allocation is a heuristic — `BufferFactory` grows
- * on demand for buffers that exceed it. Tunable per-field if a
- * measurable hot path emerges.
+ * The scratch grows on demand (via the codec module's
+ * `GrowableWriteBufferPool`), so a list section of any size encodes
+ * correctly. An earlier emit used a fixed 64-byte scratch that silently
+ * truncated sections over 64 bytes.
  *
  * **Data-class elements** — pre-measure body bytes via the element
  * codec's `wireSize as Exact`, write VBI prefix, iterate. BackPatch
@@ -1972,31 +1968,18 @@ internal fun appendEncodeLengthPrefixedListBody(
     namespacePrefix: String,
 ) {
     if (spec.elementIsBackPatch) {
-        val scratchVar = "__${namespacePrefix}Scratch"
-        val bodyBytesVar = "__${namespacePrefix}BodyBytes"
-        body.beginControlFlow(
-            "%T.%M.allocate(64, buffer.byteOrder).%M { %L ->",
+        // Elements are BackPatch-sized, so the body byte count isn't known until they're
+        // encoded. Stage into a growable scratch (via LengthPrefixedListEncoder) that grows
+        // to any size, measures the exact body, writes the length prefix, then bulk-copies.
+        body.addStatement(
+            "%T.encode(buffer, %T.%M, %T, %L, %T, context)",
+            LENGTH_PREFIXED_LIST_ENCODER_CN,
             BUFFER_FACTORY_CN,
             BUFFER_FACTORY_DEFAULT_MN,
-            BUFFER_USE_MN,
-            scratchVar,
-        )
-        body.beginControlFlow("for (__elem in %L)", accessor)
-        body.addStatement(
-            "%T.encode(%L, __elem, context)",
-            spec.elementCodecClassName,
-            scratchVar,
-        )
-        body.endControlFlow()
-        body.addStatement("val %L = %L.position()", bodyBytesVar, scratchVar)
-        body.addStatement(
-            "%T.encode(buffer, %L.toUInt(), context)",
             spec.codecType,
-            bodyBytesVar,
+            accessor,
+            spec.elementCodecClassName,
         )
-        body.addStatement("%L.resetForRead()", scratchVar)
-        body.addStatement("buffer.write(%L)", scratchVar)
-        body.endControlFlow()
     } else {
         val bodyBytesVar = "__${namespacePrefix}BodyBytes"
         body.addStatement(

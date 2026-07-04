@@ -88,8 +88,6 @@ internal val PLATFORM_BUFFER_CN = ClassName("com.ditchoom.buffer", "PlatformBuff
 internal val BUFFER_FACTORY_CN = ClassName("com.ditchoom.buffer", "BufferFactory")
 internal val BUFFER_FACTORY_DEFAULT_MN =
     MemberName("com.ditchoom.buffer", "Default")
-internal val BUFFER_USE_MN =
-    MemberName("com.ditchoom.buffer", "use")
 internal val CODEC_CN = ClassName("com.ditchoom.buffer.codec", "Codec")
 internal val DECODER_CN = ClassName("com.ditchoom.buffer.codec", "Decoder")
 internal val DECODE_CONTEXT_CN = ClassName("com.ditchoom.buffer.codec", "DecodeContext")
@@ -100,6 +98,8 @@ internal val STREAM_PROCESSOR_CN = ClassName("com.ditchoom.buffer.stream", "Stre
 internal val DECODE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "DecodeException")
 internal val ENCODE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "EncodeException")
 internal val FRAMED_ENCODER_CN = ClassName("com.ditchoom.buffer.codec", "FramedEncoder")
+internal val LENGTH_PREFIXED_LIST_ENCODER_CN =
+    ClassName("com.ditchoom.buffer.codec", "LengthPrefixedListEncoder")
 internal val FORWARD_COMPATIBLE_FACTORY_KEY_CN =
     ClassName("com.ditchoom.buffer.codec", "ForwardCompatibleFactoryKey")
 internal val BUFFER_FACTORY_MANAGED_MN =
