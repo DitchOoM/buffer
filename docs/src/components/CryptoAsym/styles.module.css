@@ -1,0 +1,175 @@
+/* Asymmetric-scene visuals. Scaffold (panel/inner/hero/wire geometry/faces/buttons/byte grid) is
+   reused from ../CryptoFlow/styles.module.css via the `base` import; this file adds only what those
+   scenes need on top: the two-way exchange, the shared-secret bloom, the wax stamp, and the
+   outcome/verify cards. */
+
+.pubChip {
+  color: #9cc0ff;
+  background: rgba(90, 130, 255, 0.16);
+  border-color: rgba(122, 162, 255, 0.35);
+  font-family: var(--ifm-font-family-monospace);
+}
+.secretChip {
+  color: #0a0e24;
+  background: #7af0c0;
+  border-color: rgba(122, 240, 192, 0.6);
+  font-family: var(--ifm-font-family-monospace);
+  box-shadow: 0 0 14px -2px rgba(122, 240, 192, 0.7);
+}
+
+/* EXCHANGE (scene 5) — two public keys cross in opposite directions along the same wire. */
+.exGlyph {
+  position: absolute;
+  top: 52px;
+  font-size: 1.45rem;
+  z-index: 4;
+  transform: translate(-50%, -50%);
+}
+.exA {
+  filter: drop-shadow(0 0 10px rgba(120, 170, 255, 0.75));
+  animation: exAtoB 2s cubic-bezier(0.5, 0, 0.5, 1) forwards;
+}
+.exB {
+  filter: drop-shadow(0 0 10px rgba(122, 240, 192, 0.75));
+  animation: exBtoA 2s cubic-bezier(0.5, 0, 0.5, 1) forwards;
+}
+@keyframes exAtoB {
+  0% { left: 34px; }
+  100% { left: calc(100% - 34px); }
+}
+@keyframes exBtoA {
+  0% { left: calc(100% - 34px); }
+  100% { left: 34px; }
+}
+/* each crossing key also drops a copy down to Eve at the midpoint */
+.exCopy {
+  position: absolute;
+  top: 52px;
+  left: 50%;
+  font-size: 1.15rem;
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+}
+.exCopyA { animation: exDrop 0.8s ease 1s forwards; filter: drop-shadow(0 0 8px rgba(120, 170, 255, 0.7)); }
+.exCopyB { animation: exDrop 0.8s ease 1.15s forwards; filter: drop-shadow(0 0 8px rgba(122, 240, 192, 0.7)); }
+@keyframes exDrop {
+  0% { top: 52px; opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+  25% { opacity: 1; }
+  100% { top: 112px; opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+/* the shared secret materialises identically at each end once the keys have crossed */
+.bloom {
+  position: absolute;
+  top: 78px;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.68rem;
+  color: #0a0e24;
+  background: #7af0c0;
+  border-radius: 6px;
+  padding: 2px 6px;
+  opacity: 0;
+  z-index: 3;
+  white-space: nowrap;
+  animation: bloomIn 0.6s ease 1.9s forwards;
+  box-shadow: 0 0 16px rgba(122, 240, 192, 0.75);
+}
+.bloomA { left: 2px; }
+.bloomB { right: 2px; }
+@keyframes bloomIn {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: none; }
+}
+
+.secretRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  font-size: clamp(0.82rem, 3.3vw, 0.98rem);
+}
+.eqMark { color: #7af0c0; font-weight: 800; font-size: 1.2rem; }
+.sameNote { font-size: clamp(0.82rem, 3.3vw, 0.95rem); color: #7af0c0; min-height: 1.2em; }
+
+/* SIGNATURES — a wax stamp riding the transparent envelope */
+.stamp {
+  position: absolute;
+  right: -6px;
+  bottom: -4px;
+  font-size: 0.85rem;
+  filter: drop-shadow(0 0 4px rgba(255, 120, 90, 0.7));
+}
+
+/* HPKE — two outcomes side by side (Bob opens, wrong key rejected) */
+.outRow {
+  display: flex;
+  gap: 0.6rem;
+  width: 100%;
+  max-width: 30rem;
+  justify-content: center;
+}
+.outCard {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 12px;
+  padding: 0.6rem 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.outGood { background: rgba(122, 240, 192, 0.08); border-color: rgba(122, 240, 192, 0.35); }
+.outBad { background: rgba(255, 90, 90, 0.08); border-color: rgba(255, 90, 90, 0.35); }
+.outHead { font-size: clamp(0.72rem, 2.9vw, 0.86rem); font-weight: 600; color: #cdd6ff; }
+.recovered {
+  font-size: clamp(0.9rem, 3.8vw, 1.12rem);
+  font-weight: 800;
+  color: #fff;
+  text-align: center;
+  animation: reveal 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@keyframes reveal {
+  0% { opacity: 0; filter: blur(8px); transform: scale(0.94); }
+  100% { opacity: 1; filter: blur(0); transform: none; }
+}
+.okTag { font-size: clamp(0.85rem, 3.4vw, 1.02rem); font-weight: 700; color: #7af0c0; }
+.badTag { font-size: clamp(0.85rem, 3.4vw, 1.02rem); font-weight: 700; color: #ff6b6b; }
+
+.keyline {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  font-size: clamp(0.76rem, 3vw, 0.9rem);
+  color: #93a0c8;
+}
+
+/* SIGNATURES — the verify verdict on what actually arrived at Bob */
+.verifyBox {
+  width: 100%;
+  max-width: 30rem;
+  border-radius: 12px;
+  padding: 0.6rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.vOk { background: rgba(122, 240, 192, 0.08); border-color: rgba(122, 240, 192, 0.4); }
+.vBad { background: rgba(255, 90, 90, 0.1); border-color: rgba(255, 90, 90, 0.45); }
+.arriveMsg { font-size: clamp(0.78rem, 3.1vw, 0.95rem); color: #cdd6ff; text-align: center; word-break: break-word; }
+.flipCh { color: #fff; background: #e23b3b; border-radius: 3px; padding: 0 1px; font-weight: 700; }
+
+.epiSep { color: #4a5578; margin: 0 0.5rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .exA { animation: none; left: calc(100% - 34px); }
+  .exB { animation: none; left: 34px; }
+  .exCopyA, .exCopyB { animation: none; opacity: 1; top: 112px; }
+  .bloom { animation: none; opacity: 1; }
+  .recovered { animation: none; }
+}

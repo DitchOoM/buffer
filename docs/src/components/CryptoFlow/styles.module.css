@@ -1,0 +1,560 @@
+/* full-bleed break-out of the centered docs container.
+   The steps live in the PAGE's own scroll — no nested scroll container — so there's
+   a single scroll context and none of the scroll-chaining/snap-fighting jank. */
+.fullbleed {
+  position: relative;
+  left: 50%;
+  right: 50%;
+  margin-left: -50vw;
+  margin-right: -50vw;
+  width: 100vw;
+  color: #e7ecff;
+  background:
+    radial-gradient(1px 1px at 18% 22%, rgba(255, 255, 255, 0.6), transparent),
+    radial-gradient(1px 1px at 72% 64%, rgba(255, 255, 255, 0.45), transparent),
+    radial-gradient(1.5px 1.5px at 42% 82%, rgba(255, 255, 255, 0.5), transparent),
+    radial-gradient(1px 1px at 88% 30%, rgba(255, 255, 255, 0.4), transparent),
+    linear-gradient(160deg, #05060f 0%, #0a0e24 50%, #0d0820 100%);
+}
+
+.panel {
+  min-height: 100vh;
+  min-height: 100dvh;
+  scroll-margin-top: calc(var(--ifm-navbar-height, 60px) + 44px); /* clears navbar + sticky step rail on tab jumps */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3.25rem 1rem 2.5rem;
+  box-sizing: border-box;
+  position: relative;
+}
+
+.inner {
+  width: 100%;
+  max-width: 34rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.7rem;
+  text-align: center;
+  opacity: 0;
+  transform: translateY(22px);
+  transition: opacity 0.5s ease, transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.live .inner {
+  opacity: 1;
+  transform: none;
+}
+
+/* Spotlight/dim: on the live screen the focal element pops, everything else recedes. */
+.live .sub { opacity: 0.72; }
+.hero {
+  position: relative;
+  border-radius: 16px;
+  transition: box-shadow 0.6s ease, transform 0.6s ease;
+}
+.live .hero {
+  box-shadow: 0 0 0 1px rgba(122, 162, 255, 0.25), 0 0 60px -12px rgba(122, 162, 255, 0.55);
+}
+
+/* faces */
+.wFace {
+  font-size: clamp(2rem, 9vw, 2.7rem);
+  line-height: 1;
+  display: inline-block;
+  transition: transform 0.4s ease;
+}
+.gazeR { transform: rotate(8deg); }
+.gazeL { transform: rotate(-8deg) scaleX(-1); }
+.gazeUp { transform: translateY(-2px) scale(1.05); }
+
+.h {
+  font-size: clamp(1.25rem, 5.4vw, 1.8rem);
+  font-weight: 800;
+  line-height: 1.2;
+}
+.hot {
+  color: #ffe1a0;
+  text-shadow: 0 0 22px rgba(255, 200, 90, 0.55);
+}
+.lede {
+  font-size: clamp(0.95rem, 4vw, 1.15rem);
+  color: #cdd6ff;
+  font-weight: 600;
+  margin-top: -0.15rem;
+}
+.sub {
+  font-size: clamp(0.88rem, 3.5vw, 1.02rem);
+  color: #93a0c8;
+  line-height: 1.5;
+  max-width: 30rem;
+}
+.mono { font-family: var(--ifm-font-family-monospace); font-size: 0.9em; }
+.chip {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 0.85em;
+}
+
+/* inputs / buttons */
+.msgInput {
+  width: 100%;
+  max-width: 28rem;
+  font-size: clamp(1.05rem, 4.4vw, 1.35rem);
+  text-align: center;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 12px;
+  padding: 0.65rem 0.9rem;
+  outline: none;
+  box-sizing: border-box;
+}
+.msgInput:focus {
+  border-color: #7aa2ff;
+  box-shadow: 0 0 0 3px rgba(122, 162, 255, 0.25);
+}
+.btn {
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  padding: 0.6rem 1.2rem;
+  border-radius: 999px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn:hover { background: rgba(255, 255, 255, 0.2); }
+/* the single glowing verb-button per screen */
+.btnGlow {
+  border-color: rgba(122, 162, 255, 0.6);
+  background: linear-gradient(180deg, rgba(122, 162, 255, 0.28), rgba(122, 162, 255, 0.14));
+  box-shadow: 0 0 24px -4px rgba(122, 162, 255, 0.7);
+  animation: btnPulse 2.6s ease-in-out infinite;
+}
+@keyframes btnPulse {
+  0%, 100% { box-shadow: 0 0 20px -6px rgba(122, 162, 255, 0.55); }
+  50% { box-shadow: 0 0 30px -2px rgba(122, 162, 255, 0.9); }
+}
+.miniBtn {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  color: #cdd6ff;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: clamp(0.9rem, 3.7vw, 1.05rem);
+  cursor: pointer;
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+}
+.toggleHot {
+  border-color: rgba(255, 90, 90, 0.55);
+  background: linear-gradient(180deg, rgba(255, 90, 90, 0.24), rgba(255, 90, 90, 0.1));
+}
+
+/* byte grid — the hero packet */
+.grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  max-width: 30rem;
+  padding: 10px;
+}
+.gridCompact { gap: 3px; padding: 5px; }
+.gridCompact .cell { font-size: clamp(0.5rem, 2.1vw, 0.66rem); padding: 2px 3px; }
+.cell {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: clamp(0.6rem, 2.5vw, 0.76rem);
+  padding: 3px 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.cellIn { opacity: 0; animation: cellIn 0.4s ease forwards; }
+@keyframes cellIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.8); }
+  to { opacity: 1; transform: none; }
+}
+.nonce { color: #9cc0ff; background: rgba(90, 130, 255, 0.18); }
+.ct { color: #d9c2ff; background: rgba(150, 90, 255, 0.16); }
+.tag { color: #ffe1a0; background: rgba(255, 190, 60, 0.18); }
+.flipped { color: #fff; background: #e23b3b; animation: pulse 0.6s ease; }
+@keyframes pulse { 0% { transform: scale(1.7); } 100% { transform: scale(1); } }
+.changed { animation: flash 0.7s ease; }
+@keyframes flash {
+  0% { background: #fff; color: #0a0e24; transform: scale(1.5); }
+  100% { transform: scale(1); }
+}
+
+/* SEAL — the funnel that visibly connects the caret to the bytes (cause → effect) */
+.funnel {
+  position: relative;
+  width: 100%;
+  max-width: 20rem;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  clip-path: polygon(0 0, 100% 0, 74% 100%, 26% 100%);
+  background: linear-gradient(180deg, rgba(122, 162, 255, 0.16), rgba(150, 90, 255, 0.14));
+  border-top: 1px solid rgba(122, 162, 255, 0.35);
+}
+.funnelLabel {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: clamp(0.62rem, 2.6vw, 0.78rem);
+  color: #b9c6ff;
+  z-index: 1;
+}
+.funnelBeam {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 40%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), transparent);
+  animation: beam 0.6s ease forwards;
+}
+@keyframes beam {
+  0% { transform: translateY(-110%); opacity: 0; }
+  30% { opacity: 1; }
+  100% { transform: translateY(230%); opacity: 0; }
+}
+
+/* seal-step controls */
+.controls { display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; }
+.ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: clamp(0.82rem, 3.3vw, 0.98rem);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+.anatomy { display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 30rem; text-align: left; }
+.seg { border-left: 4px solid; border-radius: 6px; padding: 4px 9px; background: rgba(255, 255, 255, 0.04); display: flex; flex-direction: column; }
+.seg b { font-size: 0.82rem; }
+.seg span { font-size: 0.7rem; color: #93a0c8; line-height: 1.3; }
+.nonceSeg { border-color: #5a82ff; }
+.nonceSeg b { color: #9cc0ff; }
+.ctSeg { border-color: #965aff; }
+.ctSeg b { color: #d9c2ff; }
+.tagSeg { border-color: #ffbe3c; }
+.tagSeg b { color: #ffe1a0; }
+
+/* INTRO — a readable note that flips shut into sealed bytes */
+.introCard {
+  position: relative;
+  width: min(92%, 22rem);
+  height: 172px;
+  perspective: 1200px;
+  margin: 0.3rem auto 0;
+}
+.introFlip {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 0.85s cubic-bezier(0.4, 0.1, 0.2, 1);
+}
+.introFolded .introFlip { transform: rotateY(180deg); }
+.introFace {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.8rem;
+  box-sizing: border-box;
+}
+.introFace small { font-size: 0.72rem; color: #93a0c8; }
+.introNote {
+  background: linear-gradient(180deg, #fdf6e3, #f2e8c9);
+  color: #3a3320;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+.introNote small { color: #7a6f4a; }
+.introQuote { font-size: clamp(1.1rem, 5vw, 1.5rem); font-weight: 700; }
+.introBack {
+  transform: rotateY(180deg);
+  background: rgba(150, 90, 255, 0.1);
+  border: 1px solid rgba(150, 90, 255, 0.35);
+}
+.introLock {
+  position: absolute;
+  right: -10px;
+  top: -10px;
+  font-size: 1.6rem;
+  filter: drop-shadow(0 0 8px rgba(255, 200, 90, 0.6));
+  z-index: 5;
+  transition: transform 0.3s ease;
+}
+.introFolded .introLock { transform: scale(1.15) rotate(-8deg); }
+
+/* MEET — the shared secret is born off the wire */
+.meetStage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  max-width: 26rem;
+  padding: 1rem 0.75rem;
+}
+.meetPair { display: flex; align-items: center; gap: 0.4rem; }
+.handshake { font-size: clamp(1.5rem, 7vw, 2.1rem); }
+.sharedKeyRow { display: flex; align-items: center; gap: 0.5rem; }
+.eq { color: #7af0c0; font-weight: 800; font-size: 1.2rem; }
+.sameNote { font-size: clamp(0.8rem, 3.2vw, 0.95rem); color: #7af0c0; }
+.eveOut {
+  font-size: clamp(0.82rem, 3.3vw, 0.98rem);
+  color: #ff9b9b;
+  background: rgba(255, 90, 90, 0.1);
+  border: 1px dashed rgba(255, 90, 90, 0.35);
+  border-radius: 8px;
+  padding: 5px 10px;
+}
+/* one slow, punchy flash on Alice's & Bob's chips when the shared secret updates */
+.keyFlash { animation: keyblink 1.8s cubic-bezier(0.2, 0.7, 0.2, 1); }
+@keyframes keyblink {
+  0% { background: #ffd479; color: #0a0e24; transform: scale(1.55); box-shadow: 0 0 30px rgba(255, 212, 121, 1); }
+  100% { background: rgba(255, 255, 255, 0.1); color: #e7ecff; transform: scale(1); box-shadow: none; }
+}
+
+/* SEND — the T-topology wire: Alice —— Bob, tap down to Eve at the midpoint */
+.stage {
+  position: relative;
+  width: 100%;
+  max-width: 30rem;
+  height: 220px;
+  margin: 0.2rem auto 0;
+}
+.wAlice, .wBob, .wEve {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 2;
+}
+.wAlice { top: 0; left: 0; }
+.wBob { top: 0; right: 0; }
+.wEve { top: 118px; left: 50%; transform: translateX(-50%); }
+.wAlice small, .wBob small, .wEve small { font-size: 0.68rem; color: #93a0c8; }
+.eveJob { color: #ff9b9b !important; font-size: 0.6rem !important; }
+/* horizontal wire between Alice and Bob (their faces sit ~34px in from each edge) */
+.wireH {
+  position: absolute;
+  top: 52px;
+  left: 34px;
+  right: 34px;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(122, 162, 255, 0.15), rgba(122, 162, 255, 0.6), rgba(122, 162, 255, 0.15));
+}
+/* vertical tap from the midpoint down to Eve */
+.wireV {
+  position: absolute;
+  top: 52px;
+  left: 50%;
+  width: 2px;
+  height: 66px;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, rgba(255, 120, 120, 0.65), rgba(255, 120, 120, 0.2));
+}
+.tapFlash {
+  position: absolute;
+  top: 52px;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  z-index: 3;
+  animation: tap 0.55s ease 0.92s;
+}
+@keyframes tap {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+  40% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(2.6); }
+}
+/* the envelope travels Alice → Bob along the wire */
+.envelope {
+  position: absolute;
+  top: 52px;
+  left: 34px;
+  transform: translate(-50%, -50%);
+  font-size: 1.5rem;
+  z-index: 4;
+  filter: drop-shadow(0 0 10px rgba(120, 170, 255, 0.7));
+  animation: travelH 2s cubic-bezier(0.5, 0, 0.5, 1) forwards;
+}
+@keyframes travelH {
+  0% { left: 34px; }
+  100% { left: calc(100% - 34px); }
+}
+/* the duplicate that drops to Eve, spawned at the midpoint */
+.envelopeCopy {
+  position: absolute;
+  top: 52px;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 1.35rem;
+  opacity: 0;
+  z-index: 4;
+  filter: drop-shadow(0 0 10px rgba(255, 120, 120, 0.75));
+  animation: dropV 0.8s ease 1s forwards;
+}
+@keyframes dropV {
+  0% { top: 52px; opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+  25% { opacity: 1; }
+  100% { top: 116px; opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+.eveCapture {
+  position: absolute;
+  top: 176px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(92%, 24rem);
+  box-sizing: border-box;
+  font-size: clamp(0.72rem, 3vw, 0.9rem);
+  line-height: 1.35;
+  border-radius: 8px;
+  padding: 6px 10px;
+  opacity: 0;
+  animation: capIn 0.5s ease 1.7s forwards;
+}
+@keyframes capIn { from { opacity: 0; transform: translate(-50%, 6px); } to { opacity: 1; transform: translateX(-50%); } }
+.eveGood { color: #b9c6ff; background: rgba(122, 162, 255, 0.12); border: 1px solid rgba(122, 162, 255, 0.3); }
+.eveGood .mono { color: #d9c2ff; word-break: break-all; }
+.eveBad { color: #ffd0d0; background: rgba(255, 90, 90, 0.16); border: 1px solid rgba(255, 90, 90, 0.5); }
+
+/* OPEN — same bytes, two outcomes side by side */
+.compareWrap {
+  display: flex;
+  gap: 0.6rem;
+  width: 100%;
+  max-width: 32rem;
+  padding: 0.6rem;
+}
+.outcome {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 12px;
+  padding: 0.7rem 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.outGood { background: rgba(122, 240, 192, 0.08); border-color: rgba(122, 240, 192, 0.35); }
+.outBad, .outEve { background: rgba(255, 90, 90, 0.08); border-color: rgba(255, 90, 90, 0.35); }
+.outHead { font-size: clamp(0.75rem, 3vw, 0.9rem); font-weight: 600; }
+.recovered {
+  font-size: clamp(0.95rem, 4vw, 1.25rem);
+  font-weight: 800;
+  color: #fff;
+  animation: reveal 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@keyframes reveal {
+  0% { opacity: 0; filter: blur(8px); transform: scale(0.94); }
+  100% { opacity: 1; filter: blur(0); transform: none; }
+}
+.ok { font-size: clamp(0.9rem, 3.6vw, 1.1rem); font-weight: 700; color: #7af0c0; }
+.bad { font-size: clamp(0.9rem, 3.6vw, 1.1rem); font-weight: 700; color: #ff6b6b; }
+
+/* OPEN — fade-in epilogue on the had-to-meet catch + asymmetric escape */
+.epilogue {
+  width: 100%;
+  max-width: 30rem;
+  text-align: left;
+  border-radius: 12px;
+  padding: 0.9rem 1.1rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  opacity: 0;
+  transform: translateY(10px);
+}
+.live .epilogue { animation: epiIn 0.7s ease 0.9s forwards; }
+@keyframes epiIn { to { opacity: 1; transform: none; } }
+.epiTitle { font-weight: 800; color: #ffe1a0; margin-bottom: 0.4rem; }
+.epilogue p { font-size: clamp(0.85rem, 3.4vw, 0.98rem); color: #b9c2e0; line-height: 1.5; margin: 0 0 0.5rem; }
+.epiLink { font-weight: 600; }
+
+.hint {
+  position: absolute;
+  bottom: 5.5vh;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: rgba(205, 214, 255, 0.7);
+  font-size: 0.95rem;
+  letter-spacing: 0.06em;
+  animation: bobm 1.8s ease-in-out infinite;
+}
+@keyframes bobm {
+  0%, 100% { transform: translateY(0); opacity: 0.55; }
+  50% { transform: translateY(-8px); opacity: 1; }
+}
+
+/* step rail — sticks to the top of the viewport while you're inside the journey */
+.rail {
+  position: sticky;
+  top: var(--ifm-navbar-height, 60px);
+  z-index: 10;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 6px;
+  background: rgba(5, 6, 15, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.tab {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+  color: #aab4e0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.tabOn { background: #fff; color: #0a0e24; font-weight: 700; }
+
+.err {
+  margin: 1.5rem 0;
+  padding: 1rem 1.25rem;
+  border-radius: 8px;
+  background: var(--ifm-color-warning-contrast-background);
+  color: var(--ifm-color-warning-dark);
+}
+
+/* respect reduced-motion — kill looping/auto animations, jump to final states */
+@media (prefers-reduced-motion: reduce) {
+  .btnGlow, .hint, .funnelBeam, .tapFlash { animation: none; }
+  .introFlip, .introLock { transition: none; }
+  .envelope { animation: none; left: calc(100% - 34px); }
+  .envelopeCopy { animation: none; opacity: 1; top: 116px; }
+  .eveCapture { animation: none; opacity: 1; }
+  .epilogue { animation: none; opacity: 1; transform: none; }
+}
