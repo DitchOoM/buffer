@@ -460,7 +460,10 @@ class NativeBuffer private constructor(
         val str = text.toString()
         val len = str.length
         if (len == 0) return this
-        checkWriteBounds(len) // minimum bytes (ASCII); actual UTF-8 may need more
+        // simdutf writes the full multi-byte UTF-8 output with no destination-capacity cap, so the
+        // bound must be checked against the actual encoded byte count, not the char count. Checking
+        // only `len` (the ASCII minimum) would let a multi-byte string overrun the native buffer.
+        checkWriteBounds(str.utf8Length())
         // SIMD-accelerated UTF-16->UTF-8 conversion via simdutf.
         // toCharArray() copies the String's chars, then simdutf converts directly into native memory.
         // ~28x faster than the per-character loop for large strings (518ms -> 18ms at 16MB).
@@ -1061,7 +1064,10 @@ private class NativeBufferSlice(
         val str = text.toString()
         val len = str.length
         if (len == 0) return this
-        checkWriteBounds(len) // minimum bytes (ASCII); actual UTF-8 may need more
+        // simdutf writes the full multi-byte UTF-8 output with no destination-capacity cap, so the
+        // bound must be checked against the actual encoded byte count, not the char count. Checking
+        // only `len` (the ASCII minimum) would let a multi-byte string overrun the native buffer.
+        checkWriteBounds(str.utf8Length())
         val chars = str.toCharArray()
         val dstAddr = baseAddress + positionValue
         val written =
