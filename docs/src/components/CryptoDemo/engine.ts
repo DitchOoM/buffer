@@ -16,6 +16,19 @@ export interface CryptoFacade {
   sealWithNonce(keyHex: string, nonceHex: string, plaintext: string, aad: string): Promise<string>;
   open(keyHex: string, sealedHex: string, aad: string): Promise<string>;
   capabilities(): string;
+
+  // --- Asymmetric ops (real WebCrypto bytes; ':'-delimited hex results, split by the callers). ---
+
+  /** X25519 exchange → `pkAlice:pkBob:sharedFromAlice:sharedFromBob` (the two shared values match). */
+  x25519Exchange(): Promise<string>;
+  /** HPKE seal to a fresh recipient → `pkBob:enc:ciphertext:recoveredHex:wrongKeyRejected(0|1)`. */
+  hpkeSealToRecipient(plaintext: string): Promise<string>;
+  /** Ed25519 keypair → `seedHex:publicKeyHex` (both round-trip through sign/verify). */
+  ed25519GenerateKeypair(): Promise<string>;
+  /** Ed25519 signature of UTF-8 `message` under `seedHex`(+`publicKeyHex`) → signature hex. */
+  ed25519Sign(seedHex: string, publicKeyHex: string, message: string): Promise<string>;
+  /** Ed25519 verify → true only if `signatureHex` matches `message` under `publicKeyHex`. */
+  ed25519Verify(publicKeyHex: string, message: string, signatureHex: string): Promise<boolean>;
 }
 
 /** First 12 bytes of the sealed buffer are the nonce; trailing 16 are the GCM tag. */
