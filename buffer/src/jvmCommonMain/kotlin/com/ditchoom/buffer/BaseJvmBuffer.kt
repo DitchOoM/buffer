@@ -436,7 +436,18 @@ abstract class BaseJvmBuffer(
     ): WriteBuffer {
         val encoder = charset.toEncoder()
         encoder.reset()
-        encoder.encode(CharBuffer.wrap(text), byteBuffer, true)
+        val result = encoder.encode(CharBuffer.wrap(text), byteBuffer, true)
+        if (result.isOverflow) {
+            throw BufferOverflowException(
+                "Buffer overflow: cannot encode $charset string of ${text.length} char(s) at position " +
+                    "${position()} (limit=${limit()}, remaining=${remaining()})",
+            )
+        }
+        if (result.isError) {
+            // Malformed input or unmappable character: surface the JDK's typed CharacterCodingException
+            // rather than silently emitting a partial/substituted encoding.
+            result.throwException()
+        }
         return this
     }
 

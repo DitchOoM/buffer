@@ -51,6 +51,19 @@ internal class GrowableWriteBuffer : WriteBuffer {
         factory = null
     }
 
+    /**
+     * Frees the inner buffer (if attached) and clears state. Used by callers that
+     * own the scratch for its whole lifetime — e.g. [LengthPrefixedListEncoder],
+     * which copies the measured body into the target buffer and then discards the
+     * scratch, rather than transferring ownership to a returned slice the way
+     * [FramedEncoder] does.
+     */
+    fun freeAndDetach() {
+        inner?.freeNativeMemory()
+        inner = null
+        factory = null
+    }
+
     override val byteOrder: ByteOrder get() = requireInner().byteOrder
 
     override fun limit(): Int = requireInner().limit()

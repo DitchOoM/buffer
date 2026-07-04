@@ -217,9 +217,19 @@ class JsBuffer(
             Charset.UTF8 -> {
                 val str = text.toString()
                 if (str.isEmpty()) return this
-                // Zero-alloc: TextEncoder.encodeInto() writes UTF-8 directly into the buffer
-                val target = Uint8Array(buffer.buffer, buffer.byteOffset + positionValue, capacity - positionValue)
+                // Zero-alloc: TextEncoder.encodeInto() writes UTF-8 directly into the buffer.
+                // Bound the target to the write window (limit), not capacity, so we never write
+                // past the limit; encodeInto() silently truncates when the target is too small,
+                // so compare code units read against the input length and throw on a short write.
+                val available = limitValue - positionValue
+                val target = Uint8Array(buffer.buffer, buffer.byteOffset + positionValue, available)
                 val result = textEncoder.asDynamic().encodeInto(str, target)
+                if ((result.read as Int) < str.length) {
+                    throw BufferOverflowException(
+                        "Buffer overflow: cannot encode UTF-8 string of ${str.length} char(s) at position " +
+                            "$positionValue (limit=$limitValue, remaining=$available)",
+                    )
+                }
                 positionValue += (result.written as Int)
             }
             else -> throw UnsupportedOperationException("Unable to encode in $charset. Must use Charset.UTF8")
