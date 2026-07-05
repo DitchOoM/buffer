@@ -496,6 +496,13 @@ benchmark {
             iterationTimeUnit = "ms"
             include("largeBufferOperations")
         }
+        register("pool") {
+            warmups = 3
+            iterations = 5
+            iterationTime = 500
+            iterationTimeUnit = "ms"
+            include("PoolChurn")
+        }
         register("subset") {
             warmups = 2
             iterations = 3

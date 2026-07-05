@@ -513,6 +513,7 @@ class ProtocolConnection(
 ## Platform Notes
 
 - **JVM/Android:** Direct ByteBuffers (`DirectJvmBuffer`) used by default; `HeapJvmBuffer` for `wrap()` and `BufferFactory.managed()`
+- **Android ART allocator behavior** (LOS vs non-moving space routing, fragmentation OOMs, emulator repro recipe): see `ANDROID_ART_ALLOCATOR.md`
 - **Android SharedMemory:** Use `BufferFactory.shared()` for zero-copy IPC via Parcelable (API 27+)
 - **Apple:** `MutableDataBuffer` wraps NSMutableData (native memory); `wrap(ByteArray)` returns `ByteArrayBuffer`
 - **Apple NSData interop:** Use `BufferFactory.Default.wrap(nsData)` or `BufferFactory.Default.wrap(nsMutableData)` for zero-copy Apple API interop

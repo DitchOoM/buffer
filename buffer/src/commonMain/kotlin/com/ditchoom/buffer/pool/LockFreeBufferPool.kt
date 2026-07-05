@@ -15,6 +15,13 @@ import kotlin.concurrent.atomics.ExperimentalAtomicApi
  * Uses Compare-And-Swap (CAS) operations for thread-safe access without locks.
  * Suitable for concurrent access from multiple threads/coroutines.
  *
+ * Allocations are rounded up to size classes (power-of-two up to 1 MiB, 1 MiB
+ * multiples above) and cached buffers are
+ * bucketed by class — one Treiber stack per class ([BufferSizeClass]) — so mixed-size
+ * churn neither allocates unique odd sizes (which fragment freelist allocators,
+ * catastrophically on Android/ART — see ANDROID_ART_ALLOCATOR.md) nor
+ * frees-and-reallocates on wrong-sized pops.
+ *
  * For single-threaded use, prefer [SingleThreadedBufferPool] for better performance.
  *
  * Uses `kotlin.concurrent.atomics` (stdlib) rather than the atomicfu plugin so the
@@ -22,7 +29,12 @@ import kotlin.concurrent.atomics.ExperimentalAtomicApi
  * transform didn't run for the `-android` variant, leaving `kotlinx.atomicfu.AtomicFU`
  * referenced at runtime with no declared dependency (NoClassDefFoundError). Mirrors
  * [com.ditchoom.buffer.codec.GrowableWriteBufferPool].
+ *
+ * `@Suppress("TooManyFunctions")`: the function count exceeds detekt's default cap because
+ * size-class bucketing splits the Treiber-stack helpers (push/pop/popAtLeast/popAny) out
+ * from the BufferPool interface methods; each is a small, single-purpose lock-free primitive.
  */
+@Suppress("TooManyFunctions")
 @OptIn(ExperimentalAtomicApi::class)
 internal class LockFreeBufferPool(
     private val maxPoolSize: Int,
@@ -35,10 +47,11 @@ internal class LockFreeBufferPool(
         val next: Node?,
     )
 
-    // Lock-free stack head
-    private val head = AtomicReference<Node?>(null)
+    // One lock-free stack per size class; a buffer lives in the bucket of its
+    // capacity's floor log2, so every buffer in bucket k has capacity >= 1 shl k.
+    private val heads = Array(BufferSizeClass.BUCKET_COUNT) { AtomicReference<Node?>(null) }
 
-    // Atomic size counter to avoid traversing the list
+    // Atomic size counter across all buckets, to avoid traversing the lists
     private val poolSize = AtomicInt(0)
 
     // Atomic statistics
@@ -54,7 +67,7 @@ internal class LockFreeBufferPool(
         val buffer = acquire(size)
         if (buffer is PlatformBuffer && buffer.byteOrder == byteOrder) return buffer
         release(buffer)
-        return factory.allocate(size, byteOrder)
+        return factory.allocate(BufferSizeClass.roundUp(maxOf(size, defaultBufferSize)), byteOrder)
     }
 
     override fun wrap(
@@ -66,8 +79,8 @@ internal class LockFreeBufferPool(
         totalAllocations.update { it + 1 }
         val size = maxOf(minSize, defaultBufferSize)
 
-        // Try to pop from stack (lock-free)
-        val buffer = pop()
+        // Try to pop a fitting buffer from the size-class stacks (lock-free)
+        val buffer = popAtLeast(size)
 
         val raw =
             if (buffer != null && buffer.capacity >= size) {
@@ -76,11 +89,11 @@ internal class LockFreeBufferPool(
                 buffer
             } else {
                 poolMisses.update { it + 1 }
-                // A too-small popped buffer was removed from the pool; free its native
-                // memory before allocating fresh, otherwise it leaks (Arena.ofShared
-                // never closes, FfmAutoBuffer waits on GC).
+                // Only reachable via bucket 0's zero-capacity edge case; free the popped
+                // buffer's native memory before allocating fresh, otherwise it leaks
+                // (Arena.ofShared never closes, FfmAutoBuffer waits on GC).
                 buffer?.freeNativeMemory()
-                factory.allocate(size)
+                factory.allocate(BufferSizeClass.roundUp(size))
             }
         return PooledBuffer(raw, this)
     }
@@ -123,31 +136,43 @@ internal class LockFreeBufferPool(
         )
 
     override fun clear() {
-        // Pop all elements and free their native memory
+        // Pop all elements and free their native memory, restarting the bucket scan
+        // every iteration: freeNativeMemory() could re-enter release() and push onto
+        // any bucket, including one that was already drained.
         while (true) {
-            val buffer = pop() ?: break
+            val buffer = popAny() ?: break
             buffer.freeNativeMemory()
         }
     }
 
     /**
-     * Lock-free push onto Treiber stack.
+     * Lock-free push onto the Treiber stack for the buffer's size class.
      * Returns true if pushed, false if pool is full.
      */
     private fun push(buffer: PlatformBuffer): Boolean {
+        // Reserve a slot with a bounded CAS-increment BEFORE touching the bucket head.
+        // With one head per size class, pushes to different buckets never contend on
+        // the head CAS, so a plain check-then-push would never re-run its stale size
+        // check and could admit up to (concurrent releasers - 1) buffers past
+        // maxPoolSize. Reserving on the shared counter makes the cap exact; the
+        // counter may transiently exceed the number of linked nodes while a push is
+        // in flight, which only makes concurrent pops/pushes conservatively strict.
         while (true) {
-            // Check size limit before attempting push
             val currentSize = poolSize.load()
             if (currentSize >= maxPoolSize) {
                 return false
             }
+            if (poolSize.compareAndSet(currentSize, currentSize + 1)) break
+        }
 
+        // Slot reserved — the Treiber push always succeeds eventually.
+        val head = heads[BufferSizeClass.bucketForCapacity(buffer.capacity)]
+        while (true) {
             val oldHead = head.load()
             val newNode = Node(buffer, oldHead)
 
             // CAS: if head hasn't changed, update it
             if (head.compareAndSet(oldHead, newNode)) {
-                poolSize.update { it + 1 }
                 return true
             }
             // CAS failed, retry
@@ -155,10 +180,31 @@ internal class LockFreeBufferPool(
     }
 
     /**
-     * Lock-free pop from Treiber stack.
-     * Returns the buffer or null if stack is empty.
+     * Pops a cached buffer guaranteed to hold [size] bytes, searching the request's own
+     * size class first and falling back to larger classes. Returns null on miss.
      */
-    private fun pop(): PlatformBuffer? {
+    private fun popAtLeast(size: Int): PlatformBuffer? {
+        for (bucket in BufferSizeClass.bucketForRequest(size) until BufferSizeClass.BUCKET_COUNT) {
+            val buffer = pop(heads[bucket])
+            if (buffer != null) return buffer
+        }
+        return null
+    }
+
+    /** Pops from any non-empty bucket, smallest class first. Used by [clear]. */
+    private fun popAny(): PlatformBuffer? {
+        for (head in heads) {
+            val buffer = pop(head)
+            if (buffer != null) return buffer
+        }
+        return null
+    }
+
+    /**
+     * Lock-free pop from one size class's Treiber stack.
+     * Returns the buffer or null if that stack is empty.
+     */
+    private fun pop(head: AtomicReference<Node?>): PlatformBuffer? {
         while (true) {
             val oldHead = head.load() ?: return null
             val newHead = oldHead.next
