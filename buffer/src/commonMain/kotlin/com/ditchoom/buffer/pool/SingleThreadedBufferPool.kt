@@ -10,13 +10,22 @@ import com.ditchoom.buffer.ReadWriteBuffer
  *
  * NOT thread-safe. Use when pool is confined to a single coroutine/thread.
  * For multi-threaded access, use [LockFreeBufferPool] instead.
+ *
+ * Allocations are rounded up to size classes (power-of-two up to 1 MiB, 1 MiB
+ * multiples above) and cached buffers are
+ * bucketed by class ([BufferSizeClass]), so mixed-size churn neither allocates unique
+ * odd sizes (which fragment freelist allocators, catastrophically on Android/ART — see
+ * ANDROID_ART_ALLOCATOR.md) nor frees-and-reallocates on wrong-sized pops.
  */
 internal class SingleThreadedBufferPool(
     private val maxPoolSize: Int,
     private val defaultBufferSize: Int,
     private val factory: BufferFactory,
 ) : BufferPool {
-    private val pool = ArrayDeque<PlatformBuffer>(maxPoolSize)
+    // One deque per size class; a buffer lives in the bucket of its capacity's floor
+    // log2, so every buffer in bucket k has capacity >= 1 shl k.
+    private val buckets = Array(BufferSizeClass.BUCKET_COUNT) { ArrayDeque<PlatformBuffer>() }
+    private var pooledCount = 0
 
     private var totalAllocations = 0L
     private var poolHits = 0L
@@ -30,7 +39,7 @@ internal class SingleThreadedBufferPool(
         val buffer = acquire(size)
         if (buffer is PlatformBuffer && buffer.byteOrder == byteOrder) return buffer
         release(buffer)
-        return factory.allocate(size, byteOrder)
+        return factory.allocate(BufferSizeClass.roundUp(maxOf(size, defaultBufferSize)), byteOrder)
     }
 
     override fun wrap(
@@ -42,7 +51,7 @@ internal class SingleThreadedBufferPool(
         totalAllocations++
         val size = maxOf(minSize, defaultBufferSize)
 
-        val buffer = pool.removeLastOrNull()
+        val buffer = popAtLeast(size)
 
         val raw =
             if (buffer != null && buffer.capacity >= size) {
@@ -51,11 +60,11 @@ internal class SingleThreadedBufferPool(
                 buffer
             } else {
                 poolMisses++
-                // A too-small popped buffer was removed from the pool; free its native
-                // memory before allocating fresh, otherwise it leaks (Arena.ofShared
-                // never closes, FfmAutoBuffer waits on GC).
+                // Only reachable via bucket 0's zero-capacity edge case; free the popped
+                // buffer's native memory before allocating fresh, otherwise it leaks
+                // (Arena.ofShared never closes, FfmAutoBuffer waits on GC).
                 buffer?.freeNativeMemory()
-                factory.allocate(size)
+                factory.allocate(BufferSizeClass.roundUp(size))
             }
         return PooledBuffer(raw, this)
     }
@@ -73,10 +82,11 @@ internal class SingleThreadedBufferPool(
                 else -> return
             }
 
-        if (pool.size < maxPoolSize) {
-            pool.addLast(raw)
-            if (pool.size > peakPoolSize) {
-                peakPoolSize = pool.size
+        if (pooledCount < maxPoolSize) {
+            buckets[BufferSizeClass.bucketForCapacity(raw.capacity)].addLast(raw)
+            pooledCount++
+            if (pooledCount > peakPoolSize) {
+                peakPoolSize = pooledCount
             }
         } else {
             raw.freeNativeMemory()
@@ -88,18 +98,34 @@ internal class SingleThreadedBufferPool(
             totalAllocations = totalAllocations,
             poolHits = poolHits,
             poolMisses = poolMisses,
-            currentPoolSize = pool.size,
+            currentPoolSize = pooledCount,
             peakPoolSize = peakPoolSize,
         )
 
     override fun clear() {
-        // Drain-and-free: remove each buffer before freeing it.
-        // Using an iterator (for-in) is unsafe because freeNativeMemory() could
-        // re-enter release() (via PooledBuffer.releaseRef) and modify the ArrayDeque
-        // during iteration, corrupting its internal head/tail indices (size becomes -1).
-        // This pattern matches LockFreeBufferPool.clear().
-        while (pool.isNotEmpty()) {
-            pool.removeFirst().freeNativeMemory()
+        // Drain-and-free: remove each buffer before freeing it, restarting the bucket
+        // scan every iteration. freeNativeMemory() could re-enter release() (via
+        // PooledBuffer.releaseRef) and modify any deque, so neither an iterator (for-in)
+        // nor a cached per-bucket loop is safe. This pattern matches LockFreeBufferPool.
+        while (true) {
+            val deque = buckets.firstOrNull { it.isNotEmpty() } ?: break
+            pooledCount--
+            deque.removeFirst().freeNativeMemory()
         }
+    }
+
+    /**
+     * Removes and returns a cached buffer guaranteed to hold [size] bytes, searching the
+     * request's own size class first and falling back to larger classes, or null.
+     */
+    private fun popAtLeast(size: Int): PlatformBuffer? {
+        for (bucket in BufferSizeClass.bucketForRequest(size) until BufferSizeClass.BUCKET_COUNT) {
+            val buffer = buckets[bucket].removeLastOrNull()
+            if (buffer != null) {
+                pooledCount--
+                return buffer
+            }
+        }
+        return null
     }
 }

@@ -909,10 +909,16 @@ interface ReadBuffer : PositionBuffer {
 
         // Encode the string to bytes
         val needle = BufferFactory.Default.allocate(text.length * 4) // Max 4 bytes per char in UTF-8
-        needle.writeString(text, charset)
-        needle.resetForRead()
-
-        return indexOf(needle)
+        return try {
+            needle.writeString(text, charset)
+            needle.resetForRead()
+            indexOf(needle)
+        } finally {
+            // The needle may be an owning native buffer (large Android / Linux Default
+            // allocations); a no-op on GC-managed buffers. writeString can throw
+            // (unsupported charsets on some platforms), so it must be inside the try.
+            needle.freeNativeMemory()
+        }
     }
 
     // ===== Bulk Primitive Read Operations =====

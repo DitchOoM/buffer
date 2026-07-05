@@ -16,9 +16,19 @@ private const val UTF8_FOUR_BYTES = 4
 
 fun CharSequence.maxBufferSize(charset: Charset): Int = (charset.maxBytesPerChar * this.length).roundToInt()
 
+/**
+ * Encodes this string into a fresh [ReadBuffer].
+ *
+ * Defaults to [BufferFactory.managed] because the backing buffer is dropped without an
+ * explicit free (only its slice is returned): on platforms whose default factory hands
+ * out owning native buffers (Linux `NativeBuffer`, large Android allocations), a
+ * native-memory default would leak the staging allocation. Pass a [factory] explicitly
+ * to control the allocation — with an owning factory the caller is responsible for the
+ * backing memory's lifetime.
+ */
 fun String.toReadBuffer(
     charset: Charset = Charset.UTF8,
-    factory: BufferFactory = BufferFactory.Default,
+    factory: BufferFactory = BufferFactory.managed(),
 ): ReadBuffer {
     if (this == "") {
         return ReadBuffer.EMPTY_BUFFER
