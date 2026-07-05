@@ -90,6 +90,11 @@ const config: Config = {
           position: 'left',
         },
         {
+          to: '/asymmetric',
+          label: 'Asymmetric',
+          position: 'left',
+        },
+        {
           to: '/performance',
           label: 'Performance',
           position: 'left',
