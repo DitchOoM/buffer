@@ -181,13 +181,28 @@ export default function CryptoFlow(): JSX.Element {
   }, [facade, keyHex, nonceHex, msg]);
 
   // Track the active step against the viewport (single page scroll context).
+  // Picks whichever panel currently has the largest visible share, rather than requiring
+  // a fixed 0.55 ratio — a panel taller than ~1.8x the viewport (e.g. the on-screen
+  // keyboard shrinking a short mobile viewport) could never reach 0.55 and would be stuck
+  // permanently un-lit (its `.inner` content stays at opacity:0 forever).
   useEffect(() => {
+    const ratios = new Map<number, number>();
     const obs = new IntersectionObserver(
-      (entries) =>
+      (entries) => {
         entries.forEach((e) => {
-          if (e.isIntersecting) setActive(Number((e.target as HTMLElement).dataset.idx));
-        }),
-      { threshold: 0.55 },
+          ratios.set(Number((e.target as HTMLElement).dataset.idx), e.intersectionRatio);
+        });
+        let bestIdx = -1;
+        let bestRatio = 0;
+        ratios.forEach((ratio, idx) => {
+          if (ratio > bestRatio) {
+            bestRatio = ratio;
+            bestIdx = idx;
+          }
+        });
+        if (bestIdx >= 0) setActive(bestIdx);
+      },
+      { threshold: [0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.55, 0.6, 0.7, 0.8, 0.9, 1] },
     );
     panelRefs.current.forEach((pn) => pn && obs.observe(pn));
     return () => obs.disconnect();

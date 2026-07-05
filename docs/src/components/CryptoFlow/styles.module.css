@@ -339,12 +339,19 @@
   100% { background: rgba(255, 255, 255, 0.1); color: #e7ecff; transform: scale(1); box-shadow: none; }
 }
 
-/* SEND — the T-topology wire: Alice —— Bob, tap down to Eve at the midpoint */
+/* SEND — the T-topology wire: Alice —— Bob, tap down to Eve at the midpoint.
+   Geometry below is derived from measured layout (getBoundingClientRect), not eyeballed:
+   the Alice/Bob face+label stack renders ~61px tall at its widest (wFace clamps to 2.7rem,
+   plus the inherited 1.6 line-height on the <small> label), and .envelope/.envelopeCopy are
+   centered on their `top` via translate(-50%,-50%) — so their *rendered* top edge is
+   `top - height/2`, not `top`. Every offset here accounts for that, so the flying envelope's
+   resting position never lands on top of the name labels, and Eve's capture box never
+   overlaps her "taps the wire" caption. */
 .stage {
   position: relative;
   width: 100%;
   max-width: 30rem;
-  height: 220px;
+  height: 328px;
   margin: 0.2rem auto 0;
 }
 .wAlice, .wBob, .wEve {
@@ -356,13 +363,15 @@
 }
 .wAlice { top: 0; left: 0; }
 .wBob { top: 0; right: 0; }
-.wEve { top: 118px; left: 50%; transform: translateX(-50%); }
+.wEve { top: 154px; left: 50%; transform: translateX(-50%); }
 .wAlice small, .wBob small, .wEve small { font-size: 0.68rem; color: #93a0c8; }
 .eveJob { color: #ff9b9b !important; font-size: 0.6rem !important; }
-/* horizontal wire between Alice and Bob (their faces sit ~34px in from each edge) */
+/* horizontal wire between Alice and Bob (their face+label stack is ~61px tall; .envelope is
+   ~40px tall and centered on `top`, so top:88 puts its rendered top edge at ~68px — past the
+   label). */
 .wireH {
   position: absolute;
-  top: 52px;
+  top: 88px;
   left: 34px;
   right: 34px;
   height: 2px;
@@ -371,7 +380,7 @@
 /* vertical tap from the midpoint down to Eve */
 .wireV {
   position: absolute;
-  top: 52px;
+  top: 88px;
   left: 50%;
   width: 2px;
   height: 66px;
@@ -380,7 +389,7 @@
 }
 .tapFlash {
   position: absolute;
-  top: 52px;
+  top: 88px;
   left: 50%;
   width: 14px;
   height: 14px;
@@ -399,7 +408,7 @@
 /* the envelope travels Alice → Bob along the wire */
 .envelope {
   position: absolute;
-  top: 52px;
+  top: 88px;
   left: 34px;
   transform: translate(-50%, -50%);
   font-size: 1.5rem;
@@ -414,7 +423,7 @@
 /* the duplicate that drops to Eve, spawned at the midpoint */
 .envelopeCopy {
   position: absolute;
-  top: 52px;
+  top: 88px;
   left: 50%;
   transform: translate(-50%, -50%);
   font-size: 1.35rem;
@@ -424,13 +433,15 @@
   animation: dropV 0.8s ease 1s forwards;
 }
 @keyframes dropV {
-  0% { top: 52px; opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+  0% { top: 88px; opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
   25% { opacity: 1; }
-  100% { top: 116px; opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { top: 152px; opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
+/* Eve's face+labels render ~77px tall (face + "Eve" + "taps the wire" lines); the capture
+   box starts well past that (wEve top 154 + 77 + margin) so it never overlaps her caption. */
 .eveCapture {
   position: absolute;
-  top: 176px;
+  top: 242px;
   left: 50%;
   transform: translateX(-50%);
   width: min(92%, 24rem);
@@ -554,7 +565,7 @@
   .btnGlow, .hint, .funnelBeam, .tapFlash { animation: none; }
   .introFlip, .introLock { transition: none; }
   .envelope { animation: none; left: calc(100% - 34px); }
-  .envelopeCopy { animation: none; opacity: 1; top: 116px; }
+  .envelopeCopy { animation: none; opacity: 1; top: 152px; }
   .eveCapture { animation: none; opacity: 1; }
   .epilogue { animation: none; opacity: 1; transform: none; }
 }
