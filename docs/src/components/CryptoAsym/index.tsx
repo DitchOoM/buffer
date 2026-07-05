@@ -239,14 +239,28 @@ export default function CryptoAsym(): JSX.Element {
     };
   }, [facade, sigKeys, sigHex, sigMsg, tamper]);
 
-  // Track the active step against the viewport.
+  // Track the active step against the viewport. Picks whichever panel currently has the
+  // largest visible share, rather than requiring a fixed 0.55 ratio — a panel taller than
+  // ~1.8x the viewport (e.g. the on-screen keyboard shrinking a short mobile viewport)
+  // could never reach 0.55 and would be stuck permanently un-lit (opacity:0 forever).
   useEffect(() => {
+    const ratios = new Map<number, number>();
     const obs = new IntersectionObserver(
-      (entries) =>
+      (entries) => {
         entries.forEach((e) => {
-          if (e.isIntersecting) setActive(Number((e.target as HTMLElement).dataset.idx));
-        }),
-      { threshold: 0.55 },
+          ratios.set(Number((e.target as HTMLElement).dataset.idx), e.intersectionRatio);
+        });
+        let bestIdx = -1;
+        let bestRatio = 0;
+        ratios.forEach((ratio, idx) => {
+          if (ratio > bestRatio) {
+            bestRatio = ratio;
+            bestIdx = idx;
+          }
+        });
+        if (bestIdx >= 0) setActive(bestIdx);
+      },
+      { threshold: [0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.55, 0.6, 0.7, 0.8, 0.9, 1] },
     );
     panelRefs.current.forEach((pn) => pn && obs.observe(pn));
     return () => obs.disconnect();
@@ -281,9 +295,7 @@ export default function CryptoAsym(): JSX.Element {
         Agree on a secret <span className={base.hot}>over Eve’s own wire</span>
       </div>
       <div className={base.lede}>No meeting. They’ve never even met — and Eve is watching every byte.</div>
-      <div className={base.hero}>
-        <ExchangeStage pkA={ka?.pkA ?? ''} pkB={ka?.pkB ?? ''} shared={ka?.shared ?? ''} flightKey={`ka${kaFlight}`} />
-      </div>
+      <ExchangeStage pkA={ka?.pkA ?? ''} pkB={ka?.pkB ?? ''} shared={ka?.shared ?? ''} flightKey={`ka${kaFlight}`} />
       <div className={ax.secretRow}>
         <span>
           👩 derives <HexChip hex={ka?.shared ?? ''} tone="secret" />
@@ -320,18 +332,16 @@ export default function CryptoAsym(): JSX.Element {
         aria-label="message to Bob"
         placeholder="a message for Bob…"
       />
-      <div className={base.hero}>
-        <SendStage
-          glyph="🔒"
-          eveText={
-            <>
-              🔒 Eve’s copy: <span className={base.mono}>{group((hpke?.ct ?? '').slice(0, 28))} …</span> — no private key,
-              no message
-            </>
-          }
-          flightKey={`hpke${hpkeFlight}`}
-        />
-      </div>
+      <SendStage
+        glyph="🔒"
+        eveText={
+          <>
+            🔒 Eve’s copy: <span className={base.mono}>{group((hpke?.ct ?? '').slice(0, 28))} …</span> — no private key,
+            no message
+          </>
+        }
+        flightKey={`hpke${hpkeFlight}`}
+      />
       <div className={ax.outRow}>
         <div className={`${ax.outCard} ${ax.outGood}`}>
           <div className={ax.outHead}>🧔 Bob’s private key</div>
@@ -378,20 +388,18 @@ export default function CryptoAsym(): JSX.Element {
             aria-label="message to sign"
             placeholder="a public statement…"
           />
-          <div className={base.hero}>
-            <SendStage
-              glyph="✉️"
-              stamp="🔏"
-              transparent
-              eveText={
-                <>
-                  😈 reads it fine — but the stamp is Alice’s. Changing a byte <b>breaks the signature</b>, and Eve
-                  can’t make a new valid one without Alice’s private key.
-                </>
-              }
-              flightKey={`sig${sigFlight}-${tamper}`}
-            />
-          </div>
+          <SendStage
+            glyph="✉️"
+            stamp="🔏"
+            transparent
+            eveText={
+              <>
+                😈 reads it fine — but the stamp is Alice’s. Changing a byte <b>breaks the signature</b>, and Eve
+                can’t make a new valid one without Alice’s private key.
+              </>
+            }
+            flightKey={`sig${sigFlight}-${tamper}`}
+          />
           <div className={`${ax.verifyBox} ${verified ? ax.vOk : ax.vBad}`}>
             <div className={ax.arriveMsg}>
               🧔 Bob receives:{' '}

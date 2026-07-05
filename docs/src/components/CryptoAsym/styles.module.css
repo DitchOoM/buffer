@@ -20,7 +20,7 @@
 /* EXCHANGE (scene 5) — two public keys cross in opposite directions along the same wire. */
 .exGlyph {
   position: absolute;
-  top: 52px;
+  top: 88px;
   font-size: 1.45rem;
   z-index: 4;
   transform: translate(-50%, -50%);
@@ -44,7 +44,7 @@
 /* each crossing key also drops a copy down to Eve at the midpoint */
 .exCopy {
   position: absolute;
-  top: 52px;
+  top: 88px;
   left: 50%;
   font-size: 1.15rem;
   opacity: 0;
@@ -54,9 +54,9 @@
 .exCopyA { animation: exDrop 0.8s ease 1s forwards; filter: drop-shadow(0 0 8px rgba(120, 170, 255, 0.7)); }
 .exCopyB { animation: exDrop 0.8s ease 1.15s forwards; filter: drop-shadow(0 0 8px rgba(122, 240, 192, 0.7)); }
 @keyframes exDrop {
-  0% { top: 52px; opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+  0% { top: 88px; opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
   25% { opacity: 1; }
-  100% { top: 112px; opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { top: 152px; opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
 /* the shared secret materialises identically at each end once the keys have crossed */
 .bloom {
@@ -169,7 +169,7 @@
 @media (prefers-reduced-motion: reduce) {
   .exA { animation: none; left: calc(100% - 34px); }
   .exB { animation: none; left: 34px; }
-  .exCopyA, .exCopyB { animation: none; opacity: 1; top: 112px; }
+  .exCopyA, .exCopyB { animation: none; opacity: 1; top: 152px; }
   .bloom { animation: none; opacity: 1; }
   .recovered { animation: none; }
 }
