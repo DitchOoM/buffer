@@ -1,0 +1,17 @@
+public final class com/ditchoom/buffer/kotlinxio/ConversionsKt {
+	public static final fun copyToKotlinxIoBuffer (Lcom/ditchoom/buffer/ReadBuffer;)Lkotlinx/io/Buffer;
+	public static final fun copyToPlatformBuffer (Lkotlinx/io/Buffer;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/ByteOrder;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public static synthetic fun copyToPlatformBuffer$default (Lkotlinx/io/Buffer;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/ByteOrder;ILjava/lang/Object;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public static final fun readInto (Lkotlinx/io/RawSource;Lcom/ditchoom/buffer/WriteBuffer;J)J
+	public static synthetic fun readInto$default (Lkotlinx/io/RawSource;Lcom/ditchoom/buffer/WriteBuffer;JILjava/lang/Object;)J
+	public static final fun transferTo (Lkotlinx/io/RawSource;Lcom/ditchoom/buffer/WriteBuffer;)J
+}
+
+public final class com/ditchoom/buffer/kotlinxio/PlatformBufferRawSinkKt {
+	public static final fun asRawSink (Lcom/ditchoom/buffer/WriteBuffer;)Lkotlinx/io/RawSink;
+}
+
+public final class com/ditchoom/buffer/kotlinxio/PlatformBufferRawSourceKt {
+	public static final fun asRawSource (Lcom/ditchoom/buffer/ReadBuffer;)Lkotlinx/io/RawSource;
+}
+
