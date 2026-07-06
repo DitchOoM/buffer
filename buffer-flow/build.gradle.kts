@@ -166,14 +166,16 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":buffer"))
+            // The typed frame pipe (ByteSource/ByteSink/ByteStream.typed) bridges a Codec across a
+            // byte stream, so buffer-codec is part of buffer-flow's public API surface here.
+            api(project(":buffer-codec"))
             api(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
-            // The bridge tests need the actual codec module + the MQTT fixtures
-            // generated into :buffer-codec-test's commonMain by KSP.
-            implementation(project(":buffer-codec"))
+            // The bridge tests need the MQTT fixtures generated into :buffer-codec-test's
+            // commonMain by KSP (buffer-codec itself is now a main dependency, above).
             implementation(project(":buffer-codec-test"))
         }
 
