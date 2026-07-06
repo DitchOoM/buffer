@@ -29,6 +29,7 @@ const sidebars: SidebarsConfig = {
         'core-concepts/allocation-zones',
         'core-concepts/buffer-basics',
         'core-concepts/byte-order',
+        'core-concepts/android-art-memory',
       ],
     },
     {

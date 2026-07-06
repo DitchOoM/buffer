@@ -56,6 +56,10 @@ public abstract interface class com/ditchoom/buffer/flow/ByteStreamMux {
 	public abstract fun openUnidirectional (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
+public final class com/ditchoom/buffer/flow/ByteStreamResetException : java/lang/IllegalStateException {
+	public fun <init> ()V
+}
+
 public final class com/ditchoom/buffer/flow/BytesWritten {
 	public static final synthetic fun box-impl (I)Lcom/ditchoom/buffer/flow/BytesWritten;
 	public static fun constructor-impl (I)I
@@ -180,6 +184,15 @@ public abstract interface class com/ditchoom/buffer/flow/StreamMux {
 	public abstract fun acceptUnidirectional (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public abstract fun openBidirectional (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public abstract fun openUnidirectional (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class com/ditchoom/buffer/flow/TypedKt {
+	public static final fun typed (Lcom/ditchoom/buffer/flow/ByteSink;Lcom/ditchoom/buffer/codec/Codec;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/EncodeContext;)Lcom/ditchoom/buffer/flow/Sender;
+	public static final fun typed (Lcom/ditchoom/buffer/flow/ByteSource;Lcom/ditchoom/buffer/codec/Codec;Lcom/ditchoom/buffer/codec/DecodeContext;Lcom/ditchoom/buffer/ByteOrder;)Lcom/ditchoom/buffer/flow/Receiver;
+	public static final fun typed (Lcom/ditchoom/buffer/flow/ByteStream;Lcom/ditchoom/buffer/codec/Codec;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/DecodeContext;Lcom/ditchoom/buffer/codec/EncodeContext;Lcom/ditchoom/buffer/ByteOrder;)Lcom/ditchoom/buffer/flow/Connection;
+	public static synthetic fun typed$default (Lcom/ditchoom/buffer/flow/ByteSink;Lcom/ditchoom/buffer/codec/Codec;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/EncodeContext;ILjava/lang/Object;)Lcom/ditchoom/buffer/flow/Sender;
+	public static synthetic fun typed$default (Lcom/ditchoom/buffer/flow/ByteSource;Lcom/ditchoom/buffer/codec/Codec;Lcom/ditchoom/buffer/codec/DecodeContext;Lcom/ditchoom/buffer/ByteOrder;ILjava/lang/Object;)Lcom/ditchoom/buffer/flow/Receiver;
+	public static synthetic fun typed$default (Lcom/ditchoom/buffer/flow/ByteStream;Lcom/ditchoom/buffer/codec/Codec;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/DecodeContext;Lcom/ditchoom/buffer/codec/EncodeContext;Lcom/ditchoom/buffer/ByteOrder;ILjava/lang/Object;)Lcom/ditchoom/buffer/flow/Connection;
 }
 
 public abstract interface class com/ditchoom/buffer/flow/WritePolicy {

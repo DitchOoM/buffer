@@ -1,0 +1,15 @@
+public final class com/ditchoom/buffer/sqldelight/PlatformBufferColumnAdapter : app/cash/sqldelight/ColumnAdapter {
+	public static final field Companion Lcom/ditchoom/buffer/sqldelight/PlatformBufferColumnAdapter$Companion;
+	public fun <init> ()V
+	public fun <init> (Lcom/ditchoom/buffer/BufferFactory;)V
+	public synthetic fun <init> (Lcom/ditchoom/buffer/BufferFactory;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public synthetic fun decode (Ljava/lang/Object;)Ljava/lang/Object;
+	public fun decode ([B)Lcom/ditchoom/buffer/PlatformBuffer;
+	public fun encode (Lcom/ditchoom/buffer/PlatformBuffer;)[B
+	public synthetic fun encode (Ljava/lang/Object;)Ljava/lang/Object;
+}
+
+public final class com/ditchoom/buffer/sqldelight/PlatformBufferColumnAdapter$Companion {
+	public final fun getDefault ()Lcom/ditchoom/buffer/sqldelight/PlatformBufferColumnAdapter;
+}
+

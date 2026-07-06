@@ -4,6 +4,7 @@ import com.ditchoom.buffer.BaseJvmBuffer
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
+import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.unwrapFully
 import java.nio.Buffer
 import java.nio.ByteBuffer
@@ -298,6 +299,25 @@ private inline fun emitPartialBuffer(
 }
 
 /**
+ * Emits [output] if it holds data, otherwise frees it. Use at every point where a retained
+ * `currentOutput` is being finalized or discarded (finish/flush/reset/close): a
+ * [StreamingCompressor]/[StreamingDecompressor] allocates an output buffer *before* it knows
+ * whether the codec will produce bytes, so the sync-flush and end-of-stream steps routinely
+ * leave an allocated-but-empty buffer behind (notably the permessage-deflate `00 00 FF FF`
+ * marker inflate, which yields zero bytes when the message ended on a buffer boundary).
+ * [emitPartialBuffer] alone skips that empty buffer; nulling the field then leaked one
+ * output-sized allocation per operation under explicit-free factories (deterministic
+ * FfmBuffer, native NativeBuffer, direct ByteBuffer) — ~1 GiB of direct memory across an
+ * Autobahn category-12 no-context-takeover run. GC-managed factories (Arena.ofAuto) masked it.
+ */
+private inline fun emitOrFreePartialBuffer(
+    output: ReadWriteBuffer?,
+    onOutput: (ReadBuffer) -> Unit,
+) {
+    if (!emitPartialBuffer(output, onOutput)) output?.freeIfNeeded()
+}
+
+/**
  * Drains the deflater with SYNC_FLUSH mode, producing complete deflate blocks.
  * Returns the final output buffer (which may be null or partially filled).
  */
@@ -326,7 +346,7 @@ private inline fun drainDeflaterSyncFlush(
             break
         }
     }
-    emitPartialBuffer(output, onOutput)
+    emitOrFreePartialBuffer(output, onOutput)
     return null
 }
 
@@ -369,7 +389,7 @@ private class JvmDeflateStreamingCompressor(
         check(!closed) { "Compressor is closed" }
         deflater.finish()
         drainDeflaterFinishing(onOutput)
-        emitPartialBuffer(currentOutput, onOutput)
+        emitOrFreePartialBuffer(currentOutput, onOutput)
         currentOutput = null
     }
 
@@ -378,12 +398,14 @@ private class JvmDeflateStreamingCompressor(
         // deflateReset does not retain a previously set dictionary; reapply immediately,
         // before any subsequent deflate() call.
         dictionaryBuffer?.let { deflater.setDictionaryFrom(it) }
+        currentOutput?.freeIfNeeded()
         currentOutput = null
     }
 
     override fun close() {
         if (!closed) {
             deflater.end()
+            currentOutput?.freeIfNeeded()
             currentOutput = null
             closed = true
         }
@@ -476,7 +498,7 @@ private class JvmGzipStreamingCompressor(
 
         deflater.finish()
         drainDeflaterFinishing(onOutput)
-        emitPartialBuffer(currentOutput, onOutput)
+        emitOrFreePartialBuffer(currentOutput, onOutput)
 
         // Write trailer (8 bytes)
         val trailerBuffer = bufferFactory.allocate(8)
@@ -492,12 +514,14 @@ private class JvmGzipStreamingCompressor(
         crc.reset()
         totalInputBytes = 0L
         headerWritten = false
+        currentOutput?.freeIfNeeded()
         currentOutput = null
     }
 
     override fun close() {
         if (!closed) {
             deflater.end()
+            currentOutput?.freeIfNeeded()
             currentOutput = null
             closed = true
         }
@@ -586,7 +610,7 @@ private class JvmInflateStreamingDecompressor(
     override fun finish(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Decompressor is closed" }
         drainInflater(onOutput)
-        emitPartialBuffer(currentOutput, onOutput)
+        emitOrFreePartialBuffer(currentOutput, onOutput)
         currentOutput = null
 
         if (!inflater.finished() && !inflater.needsInput()) {
@@ -611,12 +635,14 @@ private class JvmInflateStreamingDecompressor(
         if (nowrap) {
             dictionaryBuffer?.let { inflater.setDictionaryFrom(it) }
         }
+        currentOutput?.freeIfNeeded()
         currentOutput = null
     }
 
     override fun close() {
         if (!closed) {
             inflater.end()
+            currentOutput?.freeIfNeeded()
             currentOutput = null
             closed = true
         }
@@ -709,7 +735,7 @@ private class JvmGzipStreamingDecompressor(
     override fun finish(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Decompressor is closed" }
         drainInflater(onOutput)
-        emitPartialBuffer(currentOutput, onOutput)
+        emitOrFreePartialBuffer(currentOutput, onOutput)
         currentOutput = null
     }
 
@@ -718,12 +744,14 @@ private class JvmGzipStreamingDecompressor(
         headerParsed = false
         headerPos = 0
         headerFlags = -1
+        currentOutput?.freeIfNeeded()
         currentOutput = null
     }
 
     override fun close() {
         if (!closed) {
             inflater.end()
+            currentOutput?.freeIfNeeded()
             currentOutput = null
             closed = true
         }

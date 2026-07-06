@@ -39,7 +39,9 @@ internal class SingleThreadedBufferPool(
         val buffer = acquire(size)
         if (buffer is PlatformBuffer && buffer.byteOrder == byteOrder) return buffer
         release(buffer)
-        return factory.allocate(BufferSizeClass.roundUp(maxOf(size, defaultBufferSize)), byteOrder)
+        return allocateOrReclaim {
+            factory.allocate(BufferSizeClass.roundUp(maxOf(size, defaultBufferSize)), byteOrder)
+        }
     }
 
     override fun wrap(
@@ -64,7 +66,7 @@ internal class SingleThreadedBufferPool(
                 // buffer's native memory before allocating fresh, otherwise it leaks
                 // (Arena.ofShared never closes, FfmAutoBuffer waits on GC).
                 buffer?.freeNativeMemory()
-                factory.allocate(BufferSizeClass.roundUp(size))
+                allocateOrReclaim { factory.allocate(BufferSizeClass.roundUp(size)) }
             }
         return PooledBuffer(raw, this)
     }

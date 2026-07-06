@@ -76,8 +76,9 @@ array in the ART heap. Repeatedly allocating and dropping large, oddly-sized buf
 (e.g. one per camera frame) can fragment ART's Large Object Space and non-moving
 space until a same-size allocation fails with an `OutOfMemoryError`, even though the
 heap has plenty of nominally free bytes. This mostly affects stock (non-Mainline) ART
-images under sustained mixed-size churn — see `ANDROID_ART_ALLOCATOR.md` for the full
-repro and root cause.
+images under sustained mixed-size churn. See [Android ART Memory & OOM
+Recovery](../core-concepts/android-art-memory.md) for the platform comparison and the pool's
+built-in recovery net, and `ANDROID_ART_ALLOCATOR.md` for the full repro and root cause.
 
 Prefer a shared, pooled `BufferPool` (below) over one-off
 `BufferFactory.Default.allocate()` calls for repeated large camera/video buffers —

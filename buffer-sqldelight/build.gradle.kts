@@ -8,29 +8,20 @@ import org.jetbrains.kotlin.konan.target.HostManager
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
-    alias(libs.plugins.kotlin.allopen)
     alias(libs.plugins.android.library)
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
     alias(libs.plugins.dokka)
-    alias(libs.plugins.kotlinx.benchmark)
     alias(libs.plugins.binary.compatibility.validator)
     signing
 }
 
-// Binary-compatibility validation locks the published public ABI so additive minors (e.g. the raw
-// ByteStreamMux primitive) are proven non-breaking by `apiCheck`. Like :buffer-crypto we validate
-// the JVM ABI only: it is host-independent and the common public surface is wholly contained in
-// the JVM dump; klib validation would diverge between partial-target dev hosts and CI runners.
+// Validate the JVM ABI only (host-independent, fully contains the common public surface);
+// klib validation diverges between partial-target dev hosts and CI. Mirrors :buffer-okio.
 apiValidation {
     klib {
         enabled = false
     }
-}
-
-// Required for JMH @State classes
-allOpen {
-    annotation("org.openjdk.jmh.annotations.State")
 }
 
 group = "com.ditchoom"
@@ -40,8 +31,6 @@ apply(from = "../gradle/setup.gradle.kts")
 
 @Suppress("UNCHECKED_CAST")
 val getNextVersion = project.extra["getNextVersion"] as (Boolean) -> Any
-// Honor -Pversion so local publishes can pin a version (e.g. -Pversion=4.3.0-SNAPSHOT)
-// without being clobbered by Maven Central's getNextVersion auto-increment.
 if (!project.hasProperty("version") || project.version == "unspecified") {
     project.version = getNextVersion(!isRunningOnGithub).toString()
 }
@@ -52,28 +41,20 @@ repositories {
 }
 
 kotlin {
-    // Ensure consistent JDK version across all developer machines and CI
     jvmToolchain(21)
 
     androidTarget {
         publishLibraryVariants("release")
-        // Use JVM 1.8 for Android to maintain maximum compatibility
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
-        // Include commonTest in Android instrumented tests so the full
-        // suite runs on a real emulator (ART), not just the host JVM.
         instrumentedTestVariant {
             sourceSetTree.set(KotlinSourceSetTree.test)
         }
     }
     jvm {
-        // Keep Java 8 bytecode for maximum compatibility
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
-        compilations.create("benchmark") {
-            associateWith(this@jvm.compilations.getByName("main"))
-        }
     }
     js {
-        outputModuleName.set("buffer-flow-kt")
+        outputModuleName.set("buffer-sqldelight-kt")
         browser()
         nodejs()
     }
@@ -82,7 +63,6 @@ kotlin {
         nodejs()
     }
     if (isRunningOnGithub) {
-        // CI: register targets based on host OS (must match :buffer module)
         if (HostManager.hostIsMac) {
             macosX64()
             macosArm64()
@@ -97,11 +77,7 @@ kotlin {
             tvosX64()
         }
         if (HostManager.hostIsLinux) {
-            linuxX64 {
-                compilations.create("benchmark") {
-                    associateWith(this@linuxX64.compilations.getByName("main"))
-                }
-            }
+            linuxX64()
             linuxArm64()
         }
     } else {
@@ -113,18 +89,12 @@ kotlin {
                 macosX64()
             }
         } else if (HostManager.hostIsLinux) {
-            linuxX64 {
-                compilations.create("benchmark") {
-                    associateWith(this@linuxX64.compilations.getByName("main"))
-                }
-            }
-            // Register linuxArm64 on local Linux dev too (was previously CI-only). K/N
-            // ships an aarch64 cross-compiler; required for downstream consumers
-            // (socket, mqtt) that target linuxArm64 to resolve buffer's umbrella metadata.
+            linuxX64()
             linuxArm64()
         }
     }
-    // Link against simdutf (transitive dependency via :buffer module)
+    // The :buffer klib references simdutf symbols; the final Kotlin/Native test binary must relink
+    // against them (transitive klib deps don't carry linker flags). Mirrors :buffer-okio.
     if (HostManager.hostIsLinux || isRunningOnGithub) {
         targets.matching { it.name == "linuxX64" }.configureEach {
             val target = this as KotlinNativeTarget
@@ -166,45 +136,18 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":buffer"))
-            // The typed frame pipe (ByteSource/ByteSink/ByteStream.typed) bridges a Codec across a
-            // byte stream, so buffer-codec is part of buffer-flow's public API surface here.
-            api(project(":buffer-codec"))
-            api(libs.kotlinx.coroutines.core)
+            api(libs.sqldelight.runtime)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
-            implementation(libs.kotlinx.coroutines.test)
-            // The bridge tests need the MQTT fixtures generated into :buffer-codec-test's
-            // commonMain by KSP (buffer-codec itself is now a main dependency, above).
-            implementation(project(":buffer-codec-test"))
         }
 
-        // AGP 9 no longer auto-provides the default instrumentation runner;
-        // declare androidx.test.runner (AndroidJUnitRunner) explicitly so it is
-        // packaged into the androidTest APK (otherwise connectedDebugAndroidTest
-        // crashes with ClassNotFoundException: androidx.test.runner.AndroidJUnitRunner).
         val androidInstrumentedTest by getting {
             dependencies {
                 implementation(libs.androidx.test.runner)
                 implementation(libs.androidx.test.rules)
                 implementation(libs.androidx.test.core.ktx)
                 implementation(libs.androidx.test.ext.junit)
-            }
-        }
-
-        // Benchmark source sets - all share the same source directory
-        val jvmBenchmark by getting {
-            kotlin.srcDir("src/commonBenchmark/kotlin")
-            dependencies {
-                implementation(libs.kotlinx.benchmark.runtime)
-            }
-        }
-        if (HostManager.hostIsLinux) {
-            val linuxX64Benchmark by getting {
-                kotlin.srcDir("src/commonBenchmark/kotlin")
-                dependencies {
-                    implementation(libs.kotlinx.benchmark.runtime)
-                }
             }
         }
     }
@@ -215,9 +158,8 @@ android {
     defaultConfig {
         minSdk = 21
     }
-    namespace = "$group.buffer.flow"
+    namespace = "$group.buffer.sqldelight"
 
-    // Use Java 1.8 for Android to maintain maximum compatibility
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
@@ -269,11 +211,11 @@ mavenPublishing {
         signAllPublications()
     }
 
-    coordinates(publishedGroupId, "buffer-flow", project.version.toString())
+    coordinates(publishedGroupId, "buffer-sqldelight", project.version.toString())
 
     pom {
-        name.set("Buffer Flow")
-        description.set("Kotlin Multiplatform Flow extensions for the buffer library")
+        name.set("Buffer SQLDelight")
+        description.set("Kotlin Multiplatform SQLDelight ColumnAdapter bridging PlatformBuffer BLOB columns (copy-at-boundary)")
         url.set(siteUrl)
 
         licenses {
@@ -309,43 +251,11 @@ ktlint {
     }
 }
 
-// kotlinx-benchmark configuration
-benchmark {
-    targets {
-        register("jvmBenchmark")
-        if (HostManager.hostIsLinux) {
-            register("linuxX64Benchmark")
-        }
-    }
-    configurations {
-        named("main") {
-            warmups = 3
-            iterations = 5
-            iterationTime = 1000
-            iterationTimeUnit = "ms"
-        }
-        register("quick") {
-            warmups = 1
-            iterations = 2
-            iterationTime = 500
-            iterationTimeUnit = "ms"
-        }
-    }
-}
-
-tasks.matching { it.name == "testBenchmarkUnitTest" }.configureEach {
-    enabled = false
-}
-
 dokka {
     dokkaSourceSets.configureEach {
         externalDocumentationLinks.register("kotlin-stdlib") {
             url("https://kotlinlang.org/api/latest/jvm/stdlib/")
             packageListUrl("https://kotlinlang.org/api/latest/jvm/stdlib/package-list")
-        }
-        externalDocumentationLinks.register("kotlinx-coroutines") {
-            url("https://kotlinlang.org/api/kotlinx.coroutines/")
-            packageListUrl("https://kotlinlang.org/api/kotlinx.coroutines/package-list")
         }
         reportUndocumented.set(false)
     }
