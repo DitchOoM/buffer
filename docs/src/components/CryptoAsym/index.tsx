@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import Link from '@docusaurus/Link';
-import { loadCryptoFacade, CryptoFacade } from '../CryptoDemo/engine';
+import { loadCryptoAsymFacade, CryptoAsymFacade } from '../CryptoDemo/engine';
 import base from '../CryptoFlow/styles.module.css';
 import ax from './styles.module.css';
 
@@ -143,7 +143,7 @@ export default function CryptoAsym(): JSX.Element {
   const panelRefs = useRef<(HTMLElement | null)[]>([]);
   const autoplayed = useRef<Set<number>>(new Set());
 
-  const [facade, setFacade] = useState<CryptoFacade | null>(null);
+  const [facade, setFacade] = useState<CryptoAsymFacade | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [active, setActive] = useState(0);
 
@@ -170,7 +170,7 @@ export default function CryptoAsym(): JSX.Element {
       setErr('These demos use WebCrypto, which needs a secure context — open this page over HTTPS (or localhost).');
       return;
     }
-    loadCryptoFacade(bundleUrl)
+    loadCryptoAsymFacade(bundleUrl)
       .then(setFacade)
       .catch((e) => setErr(String(e?.message ?? e)));
   }, [bundleUrl]);

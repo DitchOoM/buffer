@@ -1,13 +1,15 @@
 /**
- * Loader for the real compiled `buffer-crypto` AES-GCM facade.
+ * Loader for the real compiled `buffer-crypto` facades.
  *
  * `static/crypto/buffer-crypto-kt.js` is the webpack bundle of the module's JS target (see that
- * folder's README to regenerate). It exposes the `@JsExport` `CryptoDemo` object — the same witness
- * ops the library ships — as a `bufferCryptoKt` global. So the widget drives the actual Kotlin
- * code path (`CryptoDemo.kt`), not a JS re-implementation.
+ * folder's README to regenerate). It exposes two `@JsExport` objects on the `bufferCryptoKt`
+ * global: `CryptoDemo` (AES-GCM) and `CryptoAsymDemo` (key agreement, HPKE, signatures) — the same
+ * witness ops the library ships, split into two facades purely so each stays under the Kotlin side's
+ * complexity gate. So the widgets drive the actual Kotlin code paths (`CryptoDemo.kt` /
+ * `CryptoAsymDemo.kt`), not a JS re-implementation.
  */
 
-/** Mirrors the `@JsExport` surface of `com.ditchoom.buffer.crypto.CryptoDemo`. */
+/** Mirrors the `@JsExport` surface of `com.ditchoom.buffer.crypto.CryptoDemo` (AES-GCM). */
 export interface CryptoFacade {
   generateKeyHex(): string;
   generateNonceHex(): string;
@@ -16,9 +18,13 @@ export interface CryptoFacade {
   sealWithNonce(keyHex: string, nonceHex: string, plaintext: string, aad: string): Promise<string>;
   open(keyHex: string, sealedHex: string, aad: string): Promise<string>;
   capabilities(): string;
+}
 
-  // --- Asymmetric ops (real WebCrypto bytes; ':'-delimited hex results, split by the callers). ---
-
+/**
+ * Mirrors the `@JsExport` surface of `com.ditchoom.buffer.crypto.CryptoAsymDemo` (key agreement,
+ * HPKE, signatures; real WebCrypto bytes, ':'-delimited hex results split by the callers).
+ */
+export interface CryptoAsymFacade {
   /** X25519 exchange → `pkAlice:pkBob:sharedFromAlice:sharedFromBob` (the two shared values match). */
   x25519Exchange(): Promise<string>;
   /** HPKE seal to a fresh recipient → `pkBob:enc:ciphertext:recoveredHex:wrongKeyRejected(0|1)`. */
@@ -35,37 +41,49 @@ export interface CryptoFacade {
 export const NONCE_HEX = 12 * 2;
 export const TAG_HEX = 16 * 2;
 
-let cached: Promise<CryptoFacade> | null = null;
-
-function pick(): CryptoFacade {
-  const g = globalThis as unknown as {
-    bufferCryptoKt?: { com: { ditchoom: { buffer: { crypto: { CryptoDemo: CryptoFacade } } } } };
-  };
-  const demo = g.bufferCryptoKt?.com?.ditchoom?.buffer?.crypto?.CryptoDemo;
-  if (!demo) throw new Error('buffer-crypto bundle loaded but CryptoDemo was not found');
-  return demo;
+interface BufferCryptoBundle {
+  com: { ditchoom: { buffer: { crypto: { CryptoDemo: CryptoFacade; CryptoAsymDemo: CryptoAsymFacade } } } };
 }
 
-/** Lazily injects the bundle (once) and resolves the compiled `CryptoDemo` facade. */
-export function loadCryptoFacade(scriptUrl: string): Promise<CryptoFacade> {
-  if (cached) return cached;
-  cached = new Promise<CryptoFacade>((resolve, reject) => {
-    if ((globalThis as { bufferCryptoKt?: unknown }).bufferCryptoKt) {
-      resolve(pick());
+let bundleLoad: Promise<BufferCryptoBundle> | null = null;
+
+/** Lazily injects the webpack bundle (once, shared by both facades) and resolves the global. */
+function loadBundle(scriptUrl: string): Promise<BufferCryptoBundle> {
+  if (bundleLoad) return bundleLoad;
+  bundleLoad = new Promise<BufferCryptoBundle>((resolve, reject) => {
+    const existing = (globalThis as { bufferCryptoKt?: BufferCryptoBundle }).bufferCryptoKt;
+    if (existing) {
+      resolve(existing);
       return;
     }
     const script = document.createElement('script');
     script.src = scriptUrl;
     script.async = true;
     script.onload = () => {
-      try {
-        resolve(pick());
-      } catch (e) {
-        reject(e);
-      }
+      const loaded = (globalThis as { bufferCryptoKt?: BufferCryptoBundle }).bufferCryptoKt;
+      if (loaded) resolve(loaded);
+      else reject(new Error('buffer-crypto bundle loaded but bufferCryptoKt was not found'));
     };
     script.onerror = () => reject(new Error(`failed to load ${scriptUrl}`));
     document.head.appendChild(script);
   });
-  return cached;
+  return bundleLoad;
+}
+
+/** Lazily injects the bundle and resolves the compiled `CryptoDemo` (AES-GCM) facade. */
+export function loadCryptoFacade(scriptUrl: string): Promise<CryptoFacade> {
+  return loadBundle(scriptUrl).then((bundle) => {
+    const demo = bundle.com?.ditchoom?.buffer?.crypto?.CryptoDemo;
+    if (!demo) throw new Error('buffer-crypto bundle loaded but CryptoDemo was not found');
+    return demo;
+  });
+}
+
+/** Lazily injects the bundle and resolves the compiled `CryptoAsymDemo` (asymmetric ops) facade. */
+export function loadCryptoAsymFacade(scriptUrl: string): Promise<CryptoAsymFacade> {
+  return loadBundle(scriptUrl).then((bundle) => {
+    const demo = bundle.com?.ditchoom?.buffer?.crypto?.CryptoAsymDemo;
+    if (!demo) throw new Error('buffer-crypto bundle loaded but CryptoAsymDemo was not found');
+    return demo;
+  });
 }
