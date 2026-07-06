@@ -107,11 +107,16 @@ buffer.writeBytes(data, offset = 1, length = 3)  // writes [2, 3, 4]
 ### Reading Byte Arrays
 
 ```kotlin
-// Read into new array
+// Read into new array — platform-dependent: most backends copy into a fresh
+// ByteArray, but JS aliases via Int8Array. Fine for internal staging; don't
+// rely on it for an independent, retainable copy.
 val data = buffer.readByteArray(5)
 
 // Read as buffer slice (zero-copy)
 val slice = buffer.readBytes(5)
+
+// Guaranteed independent copy, safe to retain past the buffer's scope
+val owned = buffer.copyToByteArray(5)
 ```
 
 ## Buffer-to-Buffer Copy
@@ -254,14 +259,18 @@ buffer.writeBytes(payloadBytes)
 buffer.writeString(payload)  // No intermediate allocation
 ```
 
-The same applies when reading:
+The same applies when reading. `readByteArray`'s copy behavior is platform-dependent (it aliases the source on JS, but copies elsewhere), so it's only appropriate for internal staging — not for a value you intend to retain past the buffer's scope:
 ```kotlin
-// ❌ Anti-pattern: copies to ByteArray first
+// ❌ Anti-pattern: copies to ByteArray first for internal staging
 val bytes = buffer.readByteArray(length)
 processBytes(bytes)
 
-// ✅ Better: use slice or read directly
+// ✅ Better: use slice or read directly for internal staging
 val slice = buffer.readBytes(length)  // Zero-copy slice
+
+// ✅ At a consumer boundary (value outlives the buffer), use copyToByteArray
+// instead — it's a guaranteed, independent copy on every platform
+val owned = buffer.copyToByteArray(length)
 ```
 
 If you find yourself frequently converting to/from `ByteArray`, consider whether you can work with the buffer directly instead.

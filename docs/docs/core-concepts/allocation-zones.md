@@ -42,12 +42,13 @@ val buffer = BufferFactory.Default.allocate(1024)
 **Platform behavior:**
 | Platform | Implementation |
 |----------|---------------|
-| JVM | [`DirectByteBuffer`](https://docs.oracle.com/javase/8/docs/api/java/nio/ByteBuffer.html#allocateDirect-int-) |
+| JVM 9-20 | [`DirectByteBuffer`](https://docs.oracle.com/javase/8/docs/api/java/nio/ByteBuffer.html#allocateDirect-int-) |
+| JVM 21+ | `FfmAutoBuffer` (`Arena.ofAuto()`, GC-managed) |
 | Android | [`DirectByteBuffer`](https://developer.android.com/reference/java/nio/ByteBuffer#allocateDirect(int)) |
 | iOS/macOS | [`NSMutableData`](https://developer.apple.com/documentation/foundation/nsmutabledata) |
 | JavaScript | [`Int8Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int8Array) |
 | WASM | `LinearBuffer` (native WASM memory) |
-| Linux | `NativeBuffer` (malloc) |
+| Linux | `ByteArrayBuffer` (GC-managed; same as `managed()`) |
 
 ![Heap vs Direct Memory](/img/heap-vs-direct.svg)
 
@@ -70,7 +71,8 @@ val buffer = BufferFactory.managed().allocate(1024)
 | JVM | [`HeapByteBuffer`](https://docs.oracle.com/javase/8/docs/api/java/nio/ByteBuffer.html) |
 | Android | [`HeapByteBuffer`](https://developer.android.com/reference/java/nio/ByteBuffer) |
 | WASM | `ByteArrayBuffer` |
-| Others | `ByteArrayBuffer` |
+| JavaScript | `JsBuffer` (same as `Default`) |
+| Others (Apple, Linux) | `ByteArrayBuffer` |
 
 ### BufferFactory.shared()
 

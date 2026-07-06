@@ -55,7 +55,7 @@ Benchmark results (WASM Node.js):
 
 LinearBuffer uses a bump allocator with pre-allocated memory:
 
-- **16MB** allocated by default at first allocation
+- **256MB** allocated by default at first allocation
 - Configurable via `LinearMemoryAllocator.configure()`
 - Memory is not freed (bump allocator)
 - Best for buffers with longer lifetimes (interop scenarios)
@@ -69,6 +69,12 @@ LinearMemoryAllocator.configure(initialSizeMB = 32)  // Set to 32MB
 
 // Or use a smaller size for lightweight apps:
 LinearMemoryAllocator.configure(initialSizeMB = 4)   // Set to 4MB
+```
+
+`PlatformBuffer.configureWasmMemory(initialSizeMB = N)` is the public, expect/actual-friendly alias for `LinearMemoryAllocator.configure(initialSizeMB = N)` — use whichever reads better in your call site; they configure the same value:
+
+```kotlin
+PlatformBuffer.configureWasmMemory(initialSizeMB = 32)  // equivalent to the call above
 ```
 
 ### Usage Patterns
@@ -93,7 +99,7 @@ buffer.writeInt(42)
 buffer.writeString("Hello from WASM")
 
 // Pass this offset to JavaScript
-val jsOffset = buffer.linearMemoryOffset  // or buffer.baseOffset for start of buffer
+val jsOffset = buffer.linearMemoryOffset  // current read/write position offset
 ```
 
 ```javascript
@@ -119,16 +125,16 @@ linearBuffer.readToJsArray(jsInt8Array, dstOffset = 0, length = 100)
 
 Due to a Kotlin/WASM production optimizer bug, LinearBuffer pre-allocates memory at initialization rather than growing dynamically. This means:
 
-1. **Configurable limit** - Default 16MB, adjustable via `configureWasmMemory()`
+1. **Configurable limit** - Default 256MB, adjustable via `configureWasmMemory()`
 2. **No memory reclamation** - Bump allocator doesn't free memory
 3. **Use managed() for benchmarks** - High-frequency allocation benchmarks should use `BufferFactory.managed()`
 
 If you exceed the configured limit, you'll get an `OutOfMemoryError` with guidance:
 
 ```
-LinearBuffer allocation exceeded 16MB pre-allocated memory.
-Call LinearMemoryAllocator.configure(initialSizeMB = N) at startup with a larger value,
-or use BufferFactory.managed() for high-frequency allocation.
+LinearBuffer allocation exceeded 256MB pre-allocated memory. Use BufferFactory.managed() for
+high-frequency allocations, or call LinearMemoryAllocator.configure(initialSizeMB = N) at
+startup with a larger value.
 ```
 
 ### ByteArray Conversion
@@ -178,7 +184,7 @@ val nativeData = buffer.toNativeData()
 val linearBuffer: LinearBuffer = nativeData.linearBuffer
 
 // Access memory offset for JS interop
-val offset = linearBuffer.baseOffset
+val offset = linearBuffer.nativeAddress
 ```
 
 ### Zero-Copy Behavior
@@ -203,7 +209,7 @@ buffer.writeString("Hello from WASM")
 buffer.resetForRead()
 
 val nativeData = buffer.toNativeData()
-val offset = nativeData.linearBuffer.baseOffset
+val offset = nativeData.linearBuffer.nativeAddress
 ```
 
 ```javascript

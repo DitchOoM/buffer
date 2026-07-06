@@ -160,7 +160,7 @@ Compose streaming transforms with Kotlin Flow:
 import com.ditchoom.buffer.flow.*
 
 bufferFlow
-    .mapBuffer { decompress(it, Gzip).getOrThrow() }
+    .mapBuffer { decompress(it, CompressionAlgorithm.Gzip).getOrThrow() }
     .asStringFlow()
     .lines()
     .collect { line -> process(line) }

@@ -23,7 +23,7 @@ Buffer on JVM wraps `java.nio.ByteBuffer` for optimal performance.
 val buffer = BufferFactory.Default.allocate(1024)
 ```
 
-- Allocated outside JVM heap via `ByteBuffer.allocateDirect()`
+- On JVM 21+, allocated outside JVM heap via the FFM API (`Arena.ofAuto()`); on pre-21 JVMs, falls back to `ByteBuffer.allocateDirect()`
 - Zero-copy I/O with NIO channels
 - Minimal / No GC overhead
 - Best for network and file I/O
@@ -58,17 +58,19 @@ When passing buffers to JNI:
 ```kotlin
 // Direct buffers: zero-copy
 val direct = BufferFactory.Default.allocate(1024)
-nativeFunction(direct.asByteBuffer())  // No copy
+nativeFunction(direct.toNativeData().byteBuffer)  // No copy
 
 // Heap buffers: may copy
 val heap = BufferFactory.managed().allocate(1024)
-nativeFunction(heap.asByteBuffer())  // JVM may copy to temp direct buffer
+nativeFunction(heap.toMutableNativeData().byteBuffer)  // JVM may copy to temp direct buffer
 ```
 
 ## Accessing Underlying ByteBuffer
 
+`BufferFactory.Default` does not always return `JvmBuffer` — it returns `FfmAutoBuffer` on JVM 21+ and `DirectJvmBuffer` on older JVMs, both of which extend `BaseJvmBuffer`. Casting straight to `JvmBuffer` will throw a `ClassCastException`. Cast to `BaseJvmBuffer` instead, or prefer `toNativeData()`/`toMutableNativeData()` (shown below), which work regardless of the concrete implementation:
+
 ```kotlin
-val buffer = BufferFactory.Default.allocate(1024) as JvmBuffer
+val buffer = BufferFactory.Default.allocate(1024) as BaseJvmBuffer
 val nioBuffer: ByteBuffer = buffer.byteBuffer
 
 // Use with NIO channels

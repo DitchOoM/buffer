@@ -5,15 +5,20 @@ title: Linux
 
 # Linux Platform
 
-Buffer on Kotlin/Native Linux uses native memory allocation (malloc/free) for zero-copy I/O operations, particularly optimized for io_uring.
+Buffer on Kotlin/Native Linux is GC-managed by default (`ByteArrayBuffer`), with an opt-in `NativeBuffer` (malloc/free) path for zero-copy I/O, particularly optimized for io_uring.
 
 ## Implementation
 
 | Factory | Linux Type | Use Case |
 |---------|------------|----------|
 | `managed()` | `ByteArrayBuffer` | Managed memory, GC-friendly |
-| `Default` | `NativeBuffer` | Zero-copy I/O, io_uring, FFI |
-| `shared()` | `NativeBuffer` | Same as Default |
+| `Default` | `ByteArrayBuffer` | Same as `managed()` |
+| `shared()` | `ByteArrayBuffer` | Same as `managed()` (no Linux shared-memory backend) |
+| `deterministic()` | `NativeBuffer` | Zero-copy I/O, io_uring, FFI — explicit cleanup via `.use {}` |
+
+:::tip Need native memory?
+For io_uring, epoll, or other FFI use cases that require a raw pointer, use `BufferFactory.deterministic().allocate(n)` (or `PlatformBuffer.allocateNative(n)`) rather than `Default` — `Default` is GC-managed and has no `nativeAddress`.
+:::
 
 ## NativeBuffer: Native Memory
 
@@ -61,10 +66,10 @@ buffer.close()
 
 ## Deterministic Cleanup
 
-For automatic memory management, use the `.use {}` extension:
+For automatic memory management, use `BufferFactory.deterministic()` with the `.use {}` extension:
 
 ```kotlin
-BufferFactory.Default.allocate(65536).use { buffer ->
+BufferFactory.deterministic().allocate(65536).use { buffer ->
     val ptr = buffer.nativeAddress.toCPointer<ByteVar>()!!
 
     // Use with io_uring...

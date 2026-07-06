@@ -240,25 +240,37 @@ io_uring_prep_send(sqe, sockfd, ptr, buffer.remaining().toULong(), 0)
 
 ## Wrapping Native Data
 
-You can also create buffers from native platform types:
+You can also create buffers from native platform types. `BufferFactory.wrap()` only accepts a Kotlin `ByteArray` — for native types, use the `PlatformBuffer.Companion.wrap(...)` platform extensions instead:
 
 ```kotlin
-// JVM: Wrap ByteBuffer
-val nioBuffer = ByteBuffer.allocate(1024)
-val buffer = BufferFactory.Default.wrap(nioBuffer)
+// JVM: no wrap-from-java.nio.ByteBuffer API exists today.
+// Copy through a ByteArray, or allocate a buffer and write() into it instead.
 
-// Apple: Wrap NSData
+// Apple: Wrap NSData (copies into a new NSMutableData; use wrapReadOnly for true zero-copy reads)
 val nsData: NSData = // ... from API ...
-val buffer = BufferFactory.Default.wrap(nsData)
+val buffer = PlatformBuffer.wrap(nsData)
 
-// Apple: Wrap NSMutableData (zero-copy mutable)
+// Apple: Wrap NSMutableData (zero-copy, shares memory with the original)
 val nsMutableData: NSMutableData = // ... from API ...
-val buffer = BufferFactory.Default.wrap(nsMutableData)
+val buffer = PlatformBuffer.wrap(nsMutableData)
 
-// JS: Wrap ArrayBuffer
+// JS: Wrap ArrayBuffer (zero-copy view over the entire buffer)
 val arrayBuffer: ArrayBuffer = // ... from API ...
-val buffer = BufferFactory.Default.wrap(arrayBuffer)
+val buffer = PlatformBuffer.wrap(arrayBuffer)
 ```
+
+### wrapNativeAddress() — Externally-Owned Memory
+
+For memory you don't allocate yourself — a locked Android `HardwareBuffer`, an `mmap` region, a Skia surface, or an io_uring buffer — use `wrapNativeAddress()` to get a zero-copy, non-owning `PlatformBuffer` view directly over that address:
+
+```kotlin
+val gpuAddr = lockHardwareBuffer(hwBuffer)
+val dst = PlatformBuffer.wrapNativeAddress(gpuAddr, pixelSize)
+decompressor.decompress(compressedSlice).forEach { dst.write(it) }
+unlockHardwareBuffer(hwBuffer)
+```
+
+The returned buffer does not own the memory — the caller must ensure it remains valid for the buffer's lifetime, and no cleanup happens on GC or close. Not supported on JS (no raw pointer concept); on WASM, `address` is a linear memory offset rather than a native pointer.
 
 ## Best Practices
 
