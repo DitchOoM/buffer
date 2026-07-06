@@ -18,6 +18,7 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.buffer.pool.PooledBuffer
 
 /**
  * Represents a stream of buffer chunks for protocol parsing.
@@ -649,9 +650,19 @@ internal class DefaultStreamProcessor(
             // before the current position. Slice to ensure position 0 = start of payload,
             // so resetForRead() can't expose those bytes to the caller.
             if (chunk.position() == 0) {
-                return chunk // already clean — zero-copy transfer
+                return chunk // already clean — zero-copy transfer, caller frees it
             }
-            return chunk.slice()
+            val slice = chunk.slice()
+            // The chunk was just removed from the deque, so its original reference must be
+            // released. For a PooledBuffer, slice() bumped the refcount, so the returned slice
+            // keeps the backing alive until the caller frees it; without this release the
+            // pooled buffer's refcount is stuck above zero and it never returns to the pool —
+            // a per-frame direct-memory leak (the Autobahn cat-12 OOM). A non-pooled slice
+            // aliases the parent's storage and is freed through the slice itself, so releasing
+            // the parent there would free memory the slice still points at — only pooled
+            // parents are released here.
+            if (chunk is PooledBuffer) freeConsumedChunk(chunk)
+            return slice
         }
         if (chunk.remaining() > size) {
             // Data is contiguous, return a slice
