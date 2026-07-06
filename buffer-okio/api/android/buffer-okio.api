@@ -1,0 +1,20 @@
+public final class com/ditchoom/buffer/okio/ConversionsKt {
+	public static final fun copyToByteString (Lcom/ditchoom/buffer/ReadBuffer;)Lokio/ByteString;
+	public static final fun copyToOkioBuffer (Lcom/ditchoom/buffer/ReadBuffer;)Lokio/Buffer;
+	public static final fun copyToPlatformBuffer (Lokio/Buffer;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/ByteOrder;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public static final fun copyToPlatformBuffer (Lokio/ByteString;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/ByteOrder;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public static synthetic fun copyToPlatformBuffer$default (Lokio/Buffer;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/ByteOrder;ILjava/lang/Object;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public static synthetic fun copyToPlatformBuffer$default (Lokio/ByteString;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/ByteOrder;ILjava/lang/Object;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public static final fun readInto (Lokio/Source;Lcom/ditchoom/buffer/WriteBuffer;J)J
+	public static synthetic fun readInto$default (Lokio/Source;Lcom/ditchoom/buffer/WriteBuffer;JILjava/lang/Object;)J
+	public static final fun transferTo (Lokio/Source;Lcom/ditchoom/buffer/WriteBuffer;)J
+}
+
+public final class com/ditchoom/buffer/okio/PlatformBufferOkioSinkKt {
+	public static final fun asOkioSink (Lcom/ditchoom/buffer/WriteBuffer;)Lokio/Sink;
+}
+
+public final class com/ditchoom/buffer/okio/PlatformBufferOkioSourceKt {
+	public static final fun asOkioSource (Lcom/ditchoom/buffer/ReadBuffer;)Lokio/Source;
+}
+
