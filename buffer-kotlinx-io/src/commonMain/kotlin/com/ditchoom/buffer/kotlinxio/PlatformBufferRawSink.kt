@@ -51,26 +51,38 @@ internal class PlatformBufferRawSink(
 
         var remaining = byteCount
         while (remaining > 0L) {
-            val pos = sink.position()
-            // Re-resolve the access path each iteration so a freed pooled buffer throws its
-            // use-after-free IllegalStateException instead of writing into reclaimed memory.
-            val mma = sink.managedMemoryAccess
-            if (mma != null) {
-                val cap = sink.limit() - pos
-                val n = minOf(remaining, cap.toLong()).toInt()
-                val start = mma.arrayOffset + pos
-                val read = source.readAtMostTo(mma.backingArray, start, start + n)
-                if (read <= 0) break
-                sink.position(pos + read)
-                remaining -= read.toLong()
-            } else {
-                val buf = scratch ?: ByteArray(SCRATCH_CHUNK).also { scratch = it }
-                val n = minOf(remaining, buf.size.toLong()).toInt()
-                val read = source.readAtMostTo(buf, 0, n)
-                if (read <= 0) break
-                sink.writeBytes(buf, 0, read)
-                remaining -= read.toLong()
-            }
+            val read = transferChunk(source, remaining)
+            if (read <= 0) break
+            remaining -= read.toLong()
+        }
+    }
+
+    /**
+     * Drains at most [remaining] bytes from [source] into [sink], returning the number of
+     * bytes actually transferred (`<= 0` signals the source is exhausted). Split out of
+     * [write] so the loop body has a single jump statement instead of one `break` per branch.
+     */
+    private fun transferChunk(
+        source: Buffer,
+        remaining: Long,
+    ): Int {
+        val pos = sink.position()
+        // Re-resolve the access path each iteration so a freed pooled buffer throws its
+        // use-after-free IllegalStateException instead of writing into reclaimed memory.
+        val mma = sink.managedMemoryAccess
+        return if (mma != null) {
+            val cap = sink.limit() - pos
+            val n = minOf(remaining, cap.toLong()).toInt()
+            val start = mma.arrayOffset + pos
+            val read = source.readAtMostTo(mma.backingArray, start, start + n)
+            if (read > 0) sink.position(pos + read)
+            read
+        } else {
+            val buf = scratch ?: ByteArray(SCRATCH_CHUNK).also { scratch = it }
+            val n = minOf(remaining, buf.size.toLong()).toInt()
+            val read = source.readAtMostTo(buf, 0, n)
+            if (read > 0) sink.writeBytes(buf, 0, read)
+            read
         }
     }
 

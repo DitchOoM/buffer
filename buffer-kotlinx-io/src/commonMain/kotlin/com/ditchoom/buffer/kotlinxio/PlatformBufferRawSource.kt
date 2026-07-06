@@ -50,11 +50,25 @@ internal class PlatformBufferRawSource(
     ): Long {
         check(!closed) { "asRawSource() view has been closed" }
         require(byteCount >= 0L) { "byteCount ($byteCount) < 0" }
-        if (byteCount == 0L) return 0L
         val available = source.remaining()
-        if (available <= 0) return -1L
+        return if (byteCount == 0L) {
+            0L
+        } else if (available <= 0) {
+            -1L
+        } else {
+            copyAtMostTo(sink, minOf(byteCount, available.toLong()).toInt())
+        }
+    }
 
-        val n = minOf(byteCount, available.toLong()).toInt()
+    /**
+     * Copies exactly [n] bytes from [source] into [sink], returning `n` as a [Long].
+     * Split out of [readAtMostTo] so that function keeps a single, easy-to-follow exit
+     * path for its three distinct outcomes (empty request / EOF / bytes copied).
+     */
+    private fun copyAtMostTo(
+        sink: Buffer,
+        n: Int,
+    ): Long {
         val pos = source.position()
 
         // Re-resolve the access path on every read: for a freed pooled buffer this throws the

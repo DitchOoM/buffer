@@ -16,7 +16,10 @@ import kotlin.test.assertContentEquals
  * TrackedSlice (the two wrapper types), not just concrete PlatformBuffers.
  */
 class WrapperTransparencyBridgeTest {
-    private fun pool(factory: BufferFactory = BufferFactory.Default) = BufferPool(defaultBufferSize = 256, factory = factory)
+    private fun pool(factory: BufferFactory = BufferFactory.Default): BufferPool {
+        val poolBufferSize = 256
+        return BufferPool(defaultBufferSize = poolBufferSize, factory = factory)
+    }
 
     @Test
     fun asRawSource_throughPooledBuffer() {

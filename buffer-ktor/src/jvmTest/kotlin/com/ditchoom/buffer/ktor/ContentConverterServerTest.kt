@@ -32,7 +32,10 @@ class ContentConverterServerTest {
         return buffer.copyToByteArray(buffer.remaining())
     }
 
-    private fun ByteArray.decodedCommand(): Command = CommandCodec.decode(BufferFactory.Default.wrap(this), DecodeContext.Empty)
+    private fun ByteArray.decodedCommand(): Command {
+        val buffer = BufferFactory.Default.wrap(this)
+        return CommandCodec.decode(buffer, DecodeContext.Empty)
+    }
 
     private fun roundTrip(message: Command) =
         testApplication {
