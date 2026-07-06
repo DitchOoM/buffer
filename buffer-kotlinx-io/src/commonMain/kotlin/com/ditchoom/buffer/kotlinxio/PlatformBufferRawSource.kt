@@ -1,9 +1,10 @@
 package com.ditchoom.buffer.kotlinxio
 
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.managedMemoryAccess
 import kotlinx.io.Buffer
 import kotlinx.io.RawSource
+import kotlinx.io.UnsafeIoApi
+import kotlinx.io.unsafe.UnsafeBufferOperations
 
 /**
  * Adapts a [ReadBuffer] to a kotlinx-io [RawSource].
@@ -18,9 +19,10 @@ import kotlinx.io.RawSource
  * sides are independent afterwards. Mutating [source] (or its backing) after
  * a read does not change bytes already handed to the sink.
  *
- * When [source] exposes [com.ditchoom.buffer.ManagedMemoryAccess] the copy is
- * a single `Buffer.write(backingArray, …)`; otherwise the bytes are staged
- * through a bounded scratch array. Both paths preserve the copy contract.
+ * The copy lands **directly** in the sink's tail segment via
+ * [UnsafeBufferOperations.writeToTail]: [ReadBuffer.readInto] pulls a managed
+ * backing array or native memory straight into the segment. This is a single
+ * copy for **both** backings — there is no intermediate scratch array.
  *
  * ## Lifetime
  *
@@ -28,7 +30,7 @@ import kotlinx.io.RawSource
  * buffer that is released (or a scoped buffer whose scope closes) while this
  * source is still held, the next read **fails fast** with the underlying
  * buffer's use-after-free `IllegalStateException` rather than reading
- * reclaimed memory. The access path is re-resolved on every read so a freed
+ * reclaimed memory. [ReadBuffer.readInto] is invoked on every read so a freed
  * wrapper is detected immediately — the source never caches a backing array.
  *
  * [close] marks this source closed; further reads throw [IllegalStateException].
@@ -36,13 +38,10 @@ import kotlinx.io.RawSource
  */
 public fun ReadBuffer.asRawSource(): RawSource = PlatformBufferRawSource(this)
 
-private const val SCRATCH_CHUNK = 8192
-
 internal class PlatformBufferRawSource(
     private val source: ReadBuffer,
 ) : RawSource {
     private var closed = false
-    private var scratch: ByteArray? = null
 
     override fun readAtMostTo(
         sink: Buffer,
@@ -65,35 +64,29 @@ internal class PlatformBufferRawSource(
      * Split out of [readAtMostTo] so that function keeps a single, easy-to-follow exit
      * path for its three distinct outcomes (empty request / EOF / bytes copied).
      */
+    @OptIn(UnsafeIoApi::class)
     private fun copyAtMostTo(
         sink: Buffer,
         n: Int,
     ): Long {
-        val pos = source.position()
-
-        // Re-resolve the access path on every read: for a freed pooled buffer this throws the
-        // underlying use-after-free IllegalStateException (fail-fast) instead of aliasing a cached
-        // backing array that may have been reclaimed.
-        val mma = source.managedMemoryAccess
-        if (mma != null) {
-            val start = mma.arrayOffset + pos
-            sink.write(mma.backingArray, start, start + n)
-            source.position(pos + n)
-        } else {
-            val buf = scratch ?: ByteArray(minOf(n, SCRATCH_CHUNK)).also { scratch = it }
-            var remaining = n
-            while (remaining > 0) {
-                val chunk = minOf(remaining, buf.size)
-                source.readInto(buf, 0, chunk)
-                sink.write(buf, 0, chunk)
-                remaining -= chunk
-            }
+        var remaining = n
+        while (remaining > 0) {
+            val request = minOf(remaining, UnsafeBufferOperations.maxSafeWriteCapacity)
+            val written =
+                UnsafeBufferOperations.writeToTail(sink, request) { bytes, startIndex, endIndexExclusive ->
+                    val toCopy = minOf(remaining, endIndexExclusive - startIndex)
+                    // Single copy for BOTH backings: readInto pulls a managed backing array or native
+                    // memory straight into the segment and advances position. For a freed pooled buffer
+                    // this throws the use-after-free IllegalStateException (fail-fast).
+                    source.readInto(bytes, startIndex, toCopy)
+                    toCopy
+                }
+            remaining -= written
         }
         return n.toLong()
     }
 
     override fun close() {
         closed = true
-        scratch = null
     }
 }
