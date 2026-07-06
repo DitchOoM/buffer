@@ -48,20 +48,20 @@ class PoolOomResilienceTests {
     fun retryAfterSingleOomSucceedsAndDrainsPool() {
         for (mode in ThreadingMode.entries) {
             val factory = FlakyFactory(failuresRemaining = 0)
-            val pool = createBufferPool(mode, maxPoolSize = 8, defaultBufferSize = 1024, factory = factory)
+            val pool = createBufferPool(mode, maxPoolSize = 8, defaultBufferSize = POOL_BUFFER_SIZE, factory = factory)
 
             // Seed one pooled buffer so the reclaim path has something to drain.
-            pool.release(pool.acquire(1024))
+            pool.release(pool.acquire(POOL_BUFFER_SIZE))
             assertEquals(1, pool.stats().currentPoolSize, "$mode: seed")
 
             // A larger request misses the pooled buffer and hits the factory; make that
             // allocation OOM once so the retry path runs.
             factory.failuresRemaining = 1
-            val buffer = pool.acquire(4096)
+            val buffer = pool.acquire(LARGER_REQUEST_SIZE)
 
             assertNotNull(buffer, "$mode: acquire recovered from OOM")
-            assertTrue(buffer.capacity >= 4096, "$mode: capacity")
-            assertEquals(3, factory.allocateCalls, "$mode: seed + failed attempt + retry")
+            assertTrue(buffer.capacity >= LARGER_REQUEST_SIZE, "$mode: capacity")
+            assertEquals(EXPECTED_ALLOCATE_CALLS, factory.allocateCalls, "$mode: seed + failed attempt + retry")
             assertEquals(0, pool.stats().currentPoolSize, "$mode: clear() drained the pool during reclaim")
         }
     }
@@ -70,12 +70,20 @@ class PoolOomResilienceTests {
     fun secondConsecutiveOomPropagates() {
         for (mode in ThreadingMode.entries) {
             val factory = FlakyFactory(failuresRemaining = 2)
-            val pool = createBufferPool(mode, defaultBufferSize = 1024, factory = factory)
+            val pool = createBufferPool(mode, defaultBufferSize = POOL_BUFFER_SIZE, factory = factory)
 
             assertFailsWith<OutOfMemoryError>("$mode: second failure propagates") {
-                pool.acquire(1024)
+                pool.acquire(POOL_BUFFER_SIZE)
             }
             assertEquals(2, factory.allocateCalls, "$mode: original attempt + one retry, then give up")
         }
+    }
+
+    private companion object {
+        const val POOL_BUFFER_SIZE = 1024
+        const val LARGER_REQUEST_SIZE = 4096
+
+        // Seed miss + the failed first attempt + the successful retry.
+        const val EXPECTED_ALLOCATE_CALLS = 3
     }
 }
