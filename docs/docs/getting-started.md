@@ -24,6 +24,11 @@ dependencies {
 
     // Optional: Flow operators + transport abstractions (Connection, ByteStream)
     implementation("com.ditchoom:buffer-flow:<latest-version>")
+
+    // Optional: I/O library interop bridges
+    implementation("com.ditchoom:buffer-kotlinx-io:<latest-version>")  // kotlinx-io RawSource/RawSink
+    implementation("com.ditchoom:buffer-okio:<latest-version>")        // Okio Source/Sink/ByteString
+    implementation("com.ditchoom:buffer-ktor:<latest-version>")        // Ktor channels + codec ContentConverter
 }
 ```
 
@@ -272,3 +277,4 @@ See [Byte Order](./core-concepts/byte-order) for protocol-specific guidance.
 - [Stream Processing](./recipes/stream-processing) - Handle chunked network data
 - [Protocol Codecs](./recipes/protocol-codecs) - Type-safe encode/decode
 - [Buffer Basics](./core-concepts/buffer-basics) - Position, limit, capacity internals
+- [kotlinx-io](./recipes/kotlinx-io-interop) / [Okio](./recipes/okio-interop) / [Ktor](./recipes/ktor-interop) Interop - Bridge buffers into I/O libraries
