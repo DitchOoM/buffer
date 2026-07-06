@@ -38,6 +38,26 @@ fun handleRequest(data: ByteArray) {
 }
 ```
 
+## Deterministic Allocation for Hot Paths
+
+For FFI/JNI interop or zero-copy I/O where you want native memory freed immediately (instead of
+waiting on GC), use `BufferFactory.deterministic()` with `.use { }`:
+
+```kotlin
+BufferFactory.deterministic().allocate(8192).use { buffer ->
+    buffer.writeInt(42)
+    buffer.resetForRead()
+    val value = buffer.readInt()
+
+    // Native address for FFI/JNI
+    val address = buffer.nativeMemoryAccess?.nativeAddress
+} // Native memory freed here, deterministically
+```
+
+This avoids GC pressure on platforms where Kotlin/Native or Kotlin/JVM would otherwise leave
+cleanup to the garbage collector. See [Allocation Zones](./core-concepts/allocation-zones.md) for
+which buffer types `deterministic()` produces on each platform.
+
 ## Zero-Copy Operations
 
 ### Slicing
@@ -148,7 +168,7 @@ fun processBuffer(buffer: ReadBuffer) {
 The buffer library provides a SIMD-optimized `xorMask()` method that eliminates all the overhead above:
 
 ```kotlin
-// Best: built-in SIMD-optimized XOR mask (36x faster on Native)
+// Best: built-in SIMD-optimized XOR mask (up to 146x faster on Native)
 fun maskPayload(payload: PlatformBuffer, maskKey: Int) {
     payload.xorMask(maskKey)  // SIMD-accelerated on Native, uses Long ops on JVM
 }
@@ -190,9 +210,6 @@ Comparison uses the same Direct buffer type — "Baseline" is the old Kotlin-onl
 ### Running Benchmarks
 
 ```bash
-# All platforms
-./gradlew bulkBenchmark
-
 # Platform-specific
 ./gradlew macosArm64BenchmarkBulkBenchmark
 ./gradlew jvmBenchmarkBulkBenchmark
@@ -238,10 +255,10 @@ destBuffer.write(sourceBuffer)
 
 ### Native (Linux/Apple)
 
-- **Use Direct buffers** for SIMD-accelerated bulk operations (up to 40x faster)
+- **Use Direct buffers** for SIMD-accelerated bulk operations (11-146x faster, see table above)
 - Buffer pooling is critical (avoid GC pressure from Kotlin/Native)
 - `xorMask()`, `contentEquals()`, `mismatch()`, `indexOf()` all use C SIMD functions
-- Use `aligned=true` on `indexOf()` when data alignment is known (up to 24x faster)
+- Use `aligned=true` on `indexOf()` when data alignment is known (~2.3x-2.7x faster)
 
 ### WASM
 
@@ -345,7 +362,7 @@ repeat(1000) {
 
 ```kotlin
 // Anti-pattern: reading beyond limit
-while (buffer.position() < buffer.capacity()) {
+while (buffer.position() < buffer.capacity) {
     buffer.readByte()  // May read garbage!
 }
 

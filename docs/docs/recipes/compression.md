@@ -265,7 +265,8 @@ The examples above use the async API which works everywhere. On platforms with s
 | Linux Native | ✅ | ✅ | zlib |
 | JS (Node.js) | ✅ | ✅ | zlib module |
 | JS (Browser) | ❌ | ✅ | CompressionStream |
-| WasmJS | ❌ | ❌ | — |
+| WasmJS (Node.js) | ✅ | ✅ | zlib module |
+| WasmJS (Browser) | ❌ | ✅ | CompressionStream |
 
 ### Check Platform Support at Runtime
 
@@ -501,11 +502,12 @@ representable (`WindowBits.Min` is 9, `WindowBits.Max` is 15). zlib rejects a wi
 size of 8, so it is unrepresentable by construction.
 
 :::warning Platform support
-Only **Linux native** currently honors a custom `windowBits`. `java.util.zip.Deflater`
-(JVM/Android) has no window-size knob, and Apple/JS/Wasm don't yet wire it through — on
-those platforms the argument is **silently ignored** and the algorithm default is used.
-Round-trips still succeed everywhere because the decompressor also falls back to the
-default. Check `supportsCustomWindowBits` before relying on a specific window size:
+**Linux native**, **Apple** (system zlib), and **JS/WasmJS under Node.js** honor a custom
+`windowBits`. `java.util.zip.Deflater` (JVM/Android) has no window-size knob, and browser
+JS/WasmJS (`CompressionStream`) don't expose one either — on those platforms the argument
+is **silently ignored** and the algorithm default is used. Round-trips still succeed
+everywhere because the decompressor also falls back to the default. Check
+`supportsCustomWindowBits` before relying on a specific window size:
 
 ```kotlin
 if (supportsCustomWindowBits) {
@@ -528,10 +530,3 @@ if (supportsCustomWindowBits) {
 5. **Process in chunks** - For large files, stream data through
 6. **Use StreamProcessor for protocols** - Combines decompression with parsing
 
----
-
-## Unsupported Platforms
-
-**WasmJS** doesn't currently support compression because it would require bundling a WASM-compiled zlib library.
-
-Contributions to add support are welcome!

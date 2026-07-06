@@ -97,6 +97,19 @@ val messageLength = processor.peekInt(offset = 1) // bytes 1-4: length
 val timestamp = processor.peekLong(offset = 5)    // bytes 5-12: timestamp
 ```
 
+`peekBuffer(offset, maxBytes)` returns a non-consuming zero-copy view for variable-length framing — useful when you need to hand a length-prefixed region to a decoder without committing to consuming it yet:
+
+```kotlin
+// Non-consuming view of up to 16 bytes starting 4 bytes in (e.g. after a length header)
+val header = processor.peekBuffer(offset = 4, maxBytes = 16)
+if (header == null) {
+    // Fewer bytes than `offset` are available — wait for more data
+} else {
+    // header has between 1 and 16 bytes, whatever is currently available
+    parseHeader(header)
+}
+```
+
 ### Pattern Matching
 
 ```kotlin
@@ -217,23 +230,25 @@ See [Compression](/recipes/compression#streamprocessor-integration) for full det
 For network protocols, you typically need a loop that reads from the socket and appends to the stream processor until enough data is available. `AutoFillingSuspendingStreamProcessor` eliminates this boilerplate by automatically calling a refill callback when peek/read operations need more data:
 
 ```kotlin
-val processor = StreamProcessor.builder(pool)
-    .buildSuspendingWithAutoFill { stream ->
-        val buffer = pool.acquire(bufferSize)
-        val bytesRead = socket.read(buffer, timeout)
-        if (bytesRead <= 0) {
-            buffer.freeIfNeeded()
-            throw EndOfStreamException()
+suspend fun readMessage(pool: BufferPool, socket: Socket, bufferSize: Int, timeout: Duration): ReadBuffer {
+    val processor = StreamProcessor.builder(pool)
+        .buildSuspendingWithAutoFill { stream ->
+            val buffer = pool.acquire(bufferSize)
+            val bytesRead = socket.read(buffer, timeout)
+            if (bytesRead <= 0) {
+                buffer.freeIfNeeded()
+                throw EndOfStreamException()
+            }
+            buffer.setLimit(buffer.position())
+            buffer.position(0)
+            stream.append(buffer)
         }
-        buffer.setLimit(buffer.position())
-        buffer.position(0)
-        stream.append(buffer)
-    }
 
-// Now peek/read operations automatically trigger socket reads!
-val messageType = processor.peekByte()       // triggers refill if empty
-val length = processor.peekInt(offset = 1)   // triggers refill if < 5 bytes
-val payload = processor.readBuffer(length)   // triggers refill if needed
+    // Now peek/read operations automatically trigger socket reads!
+    val messageType = processor.peekByte()       // triggers refill if empty
+    val length = processor.peekInt(offset = 1)   // triggers refill if < 5 bytes
+    return processor.readBuffer(length)          // triggers refill if needed
+}
 ```
 
 ### Before vs After
@@ -253,8 +268,10 @@ val data = stream.readBuffer(neededBytes)
 
 **After** (auto-filling):
 ```kotlin
-// Just read — refill happens automatically
-val data = processor.readBuffer(neededBytes)
+suspend fun readNext(neededBytes: Int): ReadBuffer {
+    // Just read — refill happens automatically
+    return processor.readBuffer(neededBytes)
+}
 ```
 
 ### EndOfStreamException
@@ -262,13 +279,15 @@ val data = processor.readBuffer(neededBytes)
 When the data source is exhausted (socket closed, file ended), the refill callback should throw `EndOfStreamException`. Callers can catch this to handle clean disconnection:
 
 ```kotlin
-try {
-    while (true) {
-        val message = parseNextMessage(processor)
-        handleMessage(message)
+suspend fun processMessages(processor: SuspendingStreamProcessor) {
+    try {
+        while (true) {
+            val message = parseNextMessage(processor)
+            handleMessage(message)
+        }
+    } catch (e: EndOfStreamException) {
+        // Clean shutdown — peer closed connection
     }
-} catch (e: EndOfStreamException) {
-    // Clean shutdown — peer closed connection
 }
 ```
 

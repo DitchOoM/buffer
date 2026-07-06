@@ -37,7 +37,7 @@ Consider the integer `0x12345678` stored in a 4-byte buffer:
 
 ## Specifying Byte Order
 
-The default byte order is `ByteOrder.NATIVE` (matches the CPU's native endianness). Specify a different byte order when needed:
+The default byte order is `ByteOrder.BIG_ENDIAN`. Note that `ByteOrder.NATIVE` is not detected at runtime — it's a fixed alias for `LITTLE_ENDIAN` (chosen because most CPUs, including x86/x64 and ARM in its common configuration, are little-endian, so `NATIVE` avoids byte-swap overhead there). Specify a different byte order when needed:
 
 ```kotlin
 import com.ditchoom.buffer.BufferFactory
@@ -60,7 +60,7 @@ val littleEndian = BufferFactory.Default.allocate(
 
 ```kotlin
 val buffer = BufferFactory.Default.allocate(1024)
-println(buffer.byteOrder)  // NATIVE (matches CPU endianness)
+println(buffer.byteOrder)  // BIG_ENDIAN (the default)
 ```
 
 ## When to Use Each
@@ -115,7 +115,9 @@ buffer.writeString(payload)
 
 ## Mixing Byte Orders
 
-If you need to read/write different byte orders in the same buffer, read the largest primitive and swap bytes:
+If you're defining a protocol message with [`@ProtocolMessage`](../recipes/protocol-codecs.md), the idiomatic way to mix byte orders within a single message is the `@WireOrder(Endianness.Big)` / `@WireOrder(Endianness.Little)` field annotation — it overrides the message-level byte order per field and is handled for you by the generated codec.
+
+For raw-buffer code without a codec, read the largest primitive and swap bytes manually:
 
 ```kotlin
 // Read a little-endian int from a big-endian buffer
@@ -146,6 +148,6 @@ fun ReadBuffer.readLittleEndianLong(): Long {
 
 1. **Use big-endian for network code** - it's the standard
 2. **Match the protocol spec** - always check documentation
-3. **Be explicit** - specify byte order when it matters (default is `ByteOrder.NATIVE`)
+3. **Be explicit** - specify byte order when it matters (default is `ByteOrder.BIG_ENDIAN`)
 4. **Document byte order** - especially at API boundaries
 5. **Read largest primitive** - swap bytes after rather than reading byte-by-byte

@@ -40,8 +40,11 @@ val pool = BufferPool(
     threadingMode = ThreadingMode.SingleThreaded,  // or MultiThreaded
     maxPoolSize = 64,
     defaultBufferSize = 8 * 1024,  // 8KB
-    byteOrder = ByteOrder.BIG_ENDIAN,
+    factory = BufferFactory.Default,
 )
+
+// Byte order is chosen per allocation, not on the pool itself:
+val buffer = pool.allocate(1024, ByteOrder.BIG_ENDIAN)
 ```
 
 ## Threading Modes
@@ -116,7 +119,7 @@ try {
     buffer.writeInt(42)
     // ... use buffer ...
 } finally {
-    buffer.release()  // Always release!
+    buffer.freeNativeMemory()  // Always release! (or pool.release(buffer))
 }
 ```
 
