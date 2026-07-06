@@ -1,0 +1,202 @@
+.overview {
+  margin: 1rem 0 2rem;
+}
+.h2 {
+  margin-bottom: 0.25rem;
+}
+.lede {
+  color: var(--ifm-color-emphasis-700);
+  margin-bottom: 1.25rem;
+}
+
+/* decision branches */
+.decision {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+.branch {
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  background: var(--ifm-background-surface-color);
+}
+.sym {
+  border-top: 3px solid var(--ifm-color-primary);
+}
+.asym {
+  border-top: 3px solid var(--ifm-color-success);
+}
+.branchQ {
+  font-size: 0.95rem;
+  color: var(--ifm-color-emphasis-800);
+  margin-bottom: 0.5rem;
+}
+.branchA {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin-bottom: 0.4rem;
+}
+.branchSub {
+  font-size: 0.875rem;
+  color: var(--ifm-color-emphasis-700);
+  margin: 0;
+}
+.branchList {
+  font-size: 0.875rem;
+  color: var(--ifm-color-emphasis-700);
+  margin: 0;
+  padding-left: 1.1rem;
+}
+.branchList li {
+  margin-bottom: 0.25rem;
+}
+
+.both {
+  margin: 1.1rem 0 1.25rem;
+  padding: 0.7rem 0.9rem;
+  background: var(--ifm-color-info-contrast-background);
+  color: var(--ifm-color-info-dark);
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+/* comparison table */
+.compare {
+  width: 100%;
+  margin-bottom: 1.5rem;
+  font-size: 0.875rem;
+}
+.compare th,
+.compare td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--ifm-color-emphasis-200);
+}
+.compare thead th {
+  background: var(--ifm-color-emphasis-100);
+  font-weight: 700;
+}
+.compare tbody th {
+  background: var(--ifm-color-emphasis-100);
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--ifm-color-emphasis-700);
+}
+
+/* good vs bad usage */
+.usage {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.good,
+.bad {
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+}
+.good {
+  background: var(--ifm-color-success-contrast-background);
+}
+.bad {
+  background: var(--ifm-color-danger-contrast-background);
+}
+.usageHead {
+  font-weight: 700;
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+}
+.good .usageHead {
+  color: var(--ifm-color-success-dark);
+}
+.bad .usageHead {
+  color: var(--ifm-color-danger-dark);
+}
+.usage ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+.usage li {
+  margin-bottom: 0.4rem;
+}
+.usage li:last-child {
+  margin-bottom: 0;
+}
+
+/* primitive status cards */
+.prims {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+.prim {
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem;
+  background: var(--ifm-background-surface-color);
+}
+.primLink {
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s ease, transform 0.1s ease;
+}
+.primLink:hover {
+  border-color: var(--ifm-color-primary);
+  transform: translateY(-2px);
+  text-decoration: none;
+  color: inherit;
+}
+.primTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin-bottom: 0.2rem;
+}
+.primName {
+  font-weight: 700;
+}
+.primKind {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ifm-color-emphasis-500);
+  margin-bottom: 0.4rem;
+}
+.primBlurb {
+  font-size: 0.8rem;
+  color: var(--ifm-color-emphasis-700);
+  line-height: 1.4;
+}
+.badgeBuilt,
+.badgeSoon {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 1px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.badgeBuilt {
+  background: var(--ifm-color-success);
+  color: #fff;
+}
+.badgeSoon {
+  background: var(--ifm-color-emphasis-200);
+  color: var(--ifm-color-emphasis-600);
+}
+
+@media (max-width: 700px) {
+  .decision,
+  .usage {
+    grid-template-columns: 1fr;
+  }
+  .prims {
+    grid-template-columns: 1fr 1fr;
+  }
+}

@@ -1095,7 +1095,14 @@ fun ReadBuffer.unwrapFully(): ReadBuffer {
         val unwrapped = unwrap()
         return if (unwrapped !== this) unwrapped.unwrapFully() else this
     }
-    if (this is com.ditchoom.buffer.pool.TrackedSlice) return inner.unwrapFully()
+    if (this is com.ditchoom.buffer.pool.TrackedSlice) {
+        // Fail fast: resolving a released slice to its raw inner buffer would hand out
+        // a reference to storage that may already be back in the pool's freelist. This
+        // also gates the nativeMemoryAccess / managedMemoryAccess extensions and the
+        // toNativeData/toByteArray interop bridges, which all resolve through here.
+        checkNotReleased()
+        return inner.unwrapFully()
+    }
     return this
 }
 

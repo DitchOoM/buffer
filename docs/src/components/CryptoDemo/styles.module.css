@@ -1,0 +1,520 @@
+.container {
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 10px;
+  padding: 1.5rem;
+  margin: 1.5rem 0;
+  background: var(--ifm-background-surface-color);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.intro {
+  font-size: 0.9375rem;
+  color: var(--ifm-color-emphasis-700);
+  margin-bottom: 1.25rem;
+}
+
+/* ---- vertical data-flow pipeline ---- */
+.pipeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/* shared-secret box that sits above the flow — held by both parties, never on the wire */
+.sharedKey {
+  border: 1px solid var(--ifm-color-warning);
+  background: var(--ifm-color-warning-contrast-background);
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+.sharedKeyHead {
+  font-size: 0.8125rem;
+  color: var(--ifm-color-emphasis-800);
+  margin-bottom: 0.625rem;
+}
+.sharedKey .field {
+  margin-bottom: 0;
+}
+
+/* divider inside Alice's node: inputs above, the seal transformation below — one step */
+.sealDivider {
+  margin: 0.875rem 0 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--ifm-color-emphasis-300);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ifm-color-primary);
+}
+
+/* ---- Alice / channel(Eve) / Bob lanes ---- */
+.lane {
+  margin-bottom: 0.25rem;
+}
+.laneHead {
+  font-size: 0.8125rem;
+  color: var(--ifm-color-emphasis-700);
+  margin: 0.5rem 0 0.6rem;
+}
+.tagAlice,
+.tagBob,
+.tagEve {
+  display: inline-block;
+  font-weight: 800;
+  padding: 1px 9px;
+  border-radius: 999px;
+  margin-right: 0.4rem;
+  font-size: 0.75rem;
+}
+.tagAlice {
+  background: var(--ifm-color-primary-contrast-background);
+  color: var(--ifm-color-primary);
+}
+.tagBob {
+  background: var(--ifm-color-success-contrast-background);
+  color: var(--ifm-color-success-dark);
+}
+.tagEve {
+  background: var(--ifm-color-danger-contrast-background);
+  color: var(--ifm-color-danger-dark);
+}
+/* the untrusted channel: dashed "danger zone" framing so it's clearly the transmitted, exposed data */
+.channelNode {
+  border: 1.5px dashed var(--ifm-color-danger);
+  background: var(--ifm-color-danger-contrast-background);
+}
+
+.node {
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 10px;
+  padding: 0.875rem 1rem;
+  background: var(--ifm-background-color);
+}
+
+.nodeTitle {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ifm-color-emphasis-500);
+  margin-bottom: 0.625rem;
+}
+
+/* ---- inputs node ---- */
+.inputsNode .field:last-child {
+  margin-bottom: 0;
+}
+.field {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr 1.9rem;
+  align-items: center;
+  gap: 0.3rem 0.6rem;
+  margin-bottom: 0.75rem;
+}
+.fieldLabel {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ifm-color-emphasis-700);
+  text-align: right;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.3rem;
+}
+.fieldIcon {
+  font-size: 0.875rem;
+  opacity: 0.85;
+}
+.fieldCaption {
+  grid-column: 2 / -1;
+  font-size: 0.75rem;
+  color: var(--ifm-color-emphasis-600);
+  line-height: 1.35;
+}
+.whyCare {
+  grid-column: 2 / -1;
+  font-size: 0.75rem;
+  margin-top: 0.15rem;
+}
+.whyCare summary {
+  cursor: pointer;
+  color: var(--ifm-color-primary);
+  font-weight: 600;
+}
+.whyCareBody {
+  margin-top: 0.35rem;
+  padding: 0.5rem 0.625rem;
+  background: var(--ifm-color-emphasis-100);
+  border-radius: 6px;
+  color: var(--ifm-color-emphasis-800);
+  line-height: 1.5;
+}
+
+/* nonce is color-linked to the nonce segment of the wire bytes */
+.fieldAccent .fieldLabel {
+  color: var(--ifm-color-info-dark);
+}
+.fieldAccent .fieldInput {
+  border-color: var(--ifm-color-info);
+}
+.fieldAccent .fieldCaption {
+  color: var(--ifm-color-info-dark);
+}
+.fieldInput {
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 6px;
+  background: var(--ifm-background-surface-color);
+  color: var(--ifm-font-color-base);
+  font-size: 0.875rem;
+}
+.mono {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.78rem;
+}
+.inputBad {
+  border-color: var(--ifm-color-danger);
+  box-shadow: 0 0 0 2px var(--ifm-color-danger-contrast-background);
+}
+.fieldErrFull {
+  grid-column: 1 / -1;
+  font-size: 0.8125rem;
+  color: var(--ifm-color-danger-dark);
+}
+.iconBtn {
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 6px;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  background: var(--ifm-background-surface-color);
+  color: var(--ifm-color-emphasis-700);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+}
+.iconBtn:hover:not(:disabled) {
+  border-color: var(--ifm-color-primary);
+  color: var(--ifm-color-primary);
+}
+.iconBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---- connectors with flowing particles ---- */
+.connector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 0.3rem 0;
+}
+.connTrack {
+  position: relative;
+  width: 2px;
+  height: 26px;
+  background: var(--ifm-color-emphasis-300);
+  border-radius: 2px;
+}
+.dot {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ifm-color-primary);
+  transform: translateX(-50%);
+  animation: flow 1.5s linear infinite;
+}
+@keyframes flow {
+  0% {
+    top: -3px;
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    top: 26px;
+    opacity: 0;
+  }
+}
+.connLabel {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ifm-color-primary);
+  background: var(--ifm-color-primary-contrast-background);
+  padding: 1px 9px;
+  border-radius: 999px;
+}
+
+.fadeIn {
+  animation: fadeIn 0.3s ease;
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---- clickable sealed byte grid ---- */
+.segLabels {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.5rem;
+}
+
+.byteGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.byte {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.8125rem;
+  min-width: 1.9rem;
+  text-align: center;
+  padding: 0.3rem 0.25rem;
+  border-radius: 4px;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  cursor: pointer;
+  /* Animate the fill (inset shadow — can't overflow the border) and text color, so a change pulses
+     attention while the digits stay legible the whole time. No scaling, no clipping. */
+  transition: box-shadow 0.25s ease, color 0.25s ease, border-color 0.15s ease;
+}
+.byte:hover {
+  border-color: var(--ifm-color-emphasis-500);
+}
+
+.seg_nonce {
+  color: var(--ifm-color-info-dark);
+}
+.byte.seg_nonce {
+  background: var(--ifm-color-info-contrast-background);
+}
+.seg_ct {
+  color: var(--ifm-color-emphasis-700);
+}
+.byte.seg_ct {
+  background: var(--ifm-color-emphasis-100);
+}
+.seg_tag {
+  color: var(--ifm-color-warning-dark);
+}
+.byte.seg_tag {
+  background: var(--ifm-color-warning-contrast-background);
+}
+
+.byte.tampered {
+  box-shadow: inset 0 0 0 2rem var(--ifm-color-danger);
+  color: #fff;
+  border-color: var(--ifm-color-danger-dark);
+}
+.byte.flash {
+  box-shadow: inset 0 0 0 2rem var(--ifm-color-warning);
+  color: #1c1e21;
+  border-color: var(--ifm-color-warning-dark);
+}
+
+/* GHASH beat: a danger ripple swept across the tag bytes when verification fails (per-cell
+   animation-delay set inline for the left-to-right wave). */
+.byte.tagBeat {
+  animation: tagBeat 0.55s ease;
+}
+@keyframes tagBeat {
+  0% {
+    box-shadow: inset 0 0 0 2rem transparent;
+  }
+  40% {
+    box-shadow: inset 0 0 0 2rem var(--ifm-color-danger);
+    color: #fff;
+    border-color: var(--ifm-color-danger-dark);
+  }
+  100% {
+    box-shadow: inset 0 0 0 2rem transparent;
+  }
+}
+.segTagBeat {
+  color: var(--ifm-color-danger-dark);
+  font-weight: 800;
+}
+
+.hint {
+  font-size: 0.75rem;
+  color: var(--ifm-color-emphasis-500);
+  margin-top: 0.5rem;
+  font-style: italic;
+}
+
+/* ---- "not in these bytes" note + keystream-XOR view ---- */
+.wireNote {
+  font-size: 0.78rem;
+  color: var(--ifm-color-emphasis-700);
+  margin-top: 0.625rem;
+  line-height: 1.4;
+}
+.wireNote .seg_nonce,
+.wireNote .seg_ct,
+.wireNote .seg_tag {
+  font-weight: 700;
+}
+.miniHead {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ifm-color-emphasis-500);
+  margin-bottom: 0.5rem;
+}
+.ksBlock {
+  margin-top: 0.875rem;
+  border-top: 1px dashed var(--ifm-color-emphasis-300);
+  padding-top: 0.875rem;
+}
+.ksScroll {
+  overflow-x: auto;
+}
+.ksGrid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(3, auto);
+  gap: 3px;
+  align-items: center;
+  width: max-content;
+}
+.ksLabel {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ifm-color-emphasis-600);
+  text-align: right;
+  padding-right: 0.6rem;
+  white-space: nowrap;
+}
+.ksOp {
+  display: inline-block;
+  width: 1em;
+  font-weight: 700;
+  color: var(--ifm-color-primary);
+}
+.ksCell {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.78rem;
+  min-width: 1.9rem;
+  text-align: center;
+  padding: 0.28rem 0.25rem;
+  border-radius: 4px;
+  border: 1px solid var(--ifm-color-emphasis-200);
+}
+.ksPt {
+  background: var(--ifm-color-emphasis-100);
+  color: var(--ifm-color-emphasis-800);
+}
+.ksKs {
+  background: var(--ifm-color-info-contrast-background);
+  color: var(--ifm-color-info-dark);
+}
+.ksCt {
+  background: var(--ifm-background-color);
+  color: var(--ifm-color-emphasis-800);
+}
+.ksChanged {
+  animation: ksPulse 0.8s ease;
+}
+@keyframes ksPulse {
+  0% {
+    box-shadow: inset 0 0 0 2rem var(--ifm-color-warning);
+    color: #1c1e21;
+  }
+  100% {
+    box-shadow: inset 0 0 0 2rem transparent;
+  }
+}
+
+/* ---- live verification verdict ---- */
+.verdictOk,
+.verdictFail,
+.verdictPending {
+  padding: 0.75rem 0.875rem;
+  border-radius: 8px;
+  font-size: 0.9375rem;
+  border: 1px solid transparent;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.verdictOk {
+  background: var(--ifm-color-success-contrast-background);
+  color: var(--ifm-color-success-dark);
+  border-color: var(--ifm-color-success);
+}
+.verdictFail {
+  background: var(--ifm-color-danger-contrast-background);
+  color: var(--ifm-color-danger-dark);
+  border-color: var(--ifm-color-danger);
+}
+.verdictPending {
+  background: var(--ifm-color-emphasis-100);
+  color: var(--ifm-color-emphasis-600);
+  font-style: italic;
+}
+
+/* ---- note ---- */
+.note {
+  font-size: 0.8125rem;
+  color: var(--ifm-color-emphasis-700);
+  background: var(--ifm-color-emphasis-100);
+  border-radius: 6px;
+  padding: 0.625rem 0.75rem;
+  margin: 1rem 0 0;
+}
+.note summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+/* ---- status ---- */
+.statusErr {
+  padding: 0.625rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  background: var(--ifm-color-danger-contrast-background);
+  color: var(--ifm-color-danger-dark);
+  margin-top: 0.5rem;
+}
+
+@media (max-width: 600px) {
+  .field {
+    grid-template-columns: 4rem 1fr 1.9rem;
+  }
+}
+
+/* Respect users who ask for less motion: keep the highlights, drop the looping/scaling animation. */
+@media (prefers-reduced-motion: reduce) {
+  .dot {
+    animation: none;
+    display: none;
+  }
+  .ksChanged,
+  .fadeIn,
+  .byte.tagBeat {
+    animation: none;
+  }
+}
