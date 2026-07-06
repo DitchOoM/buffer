@@ -55,7 +55,7 @@ withPool(defaultBufferSize = 8192) { pool ->
 
 ```kotlin
 bufferFlow
-    .mapBuffer { decompress(it, Gzip).getOrThrow() }
+    .mapBuffer { decompress(it, CompressionAlgorithm.Gzip).getOrThrow() }
     .asStringFlow()
     .lines()
     .collect { line -> process(line) }

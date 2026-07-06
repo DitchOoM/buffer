@@ -25,7 +25,7 @@ buffer.writeString("Hello from Kotlin!")
 buffer.resetForRead()
 
 // Access underlying NSData (platform-specific)
-// val nsData: NSData = buffer.asNSData()
+// val nsData: NSData = buffer.toNativeData().nsData
 ```
 
 ## Swift Interop
@@ -102,13 +102,16 @@ For `toMutableNativeData()`, zero-copy is only possible when position is 0 and t
 You can also create buffers from existing NSData:
 
 ```kotlin
-// Wrap NSData (read-only, zero-copy)
+// Wrap NSData as a read-only buffer (zero-copy - shares memory with the NSData)
 val nsData: NSData = // ... from API ...
-val buffer = BufferFactory.Default.wrap(nsData)
+val readOnlyBuffer = PlatformBuffer.wrapReadOnly(nsData)
 
-// Wrap NSMutableData (mutable, zero-copy)
+// Wrap NSData as a mutable buffer (copies into a new NSMutableData)
+val mutableBuffer = PlatformBuffer.wrap(nsData)
+
+// Wrap NSMutableData (mutable, zero-copy - shares memory with the NSMutableData)
 val nsMutableData: NSMutableData = // ... from API ...
-val buffer = BufferFactory.Default.wrap(nsMutableData)
+val buffer = PlatformBuffer.wrap(nsMutableData)
 ```
 
 See [Platform Interop](../recipes/platform-interop) for more details.

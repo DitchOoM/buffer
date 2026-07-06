@@ -5,8 +5,159 @@ title: Migration Guide
 
 # Migration Guide
 
-This guide covers breaking changes between major releases. The [v4 → v5](#v4-v5)
-section is newest; the v3 → v4 guide follows below.
+This guide covers breaking changes between major releases. The [v5 → v6](#v5-v6)
+section is newest; the v4 → v5 and v3 → v4 guides follow below.
+
+## v5 → v6 {#v5-v6}
+
+v6 reshapes the `buffer-flow` byte layer. The single `ByteStream` interface — with
+its `read(timeout: Duration = 15.seconds)` / `write(buffer, timeout = 15.seconds)`
+defaulted-parameter shape — splits into a `ByteSource` / `ByteSink` / `ByteStream`
+trichotomy, mirroring the existing typed `Receiver` / `Sender` / `Connection` layer.
+Deadlines move off defaulted parameters onto an injected `readPolicy` / `writePolicy`
+**val**, which (unlike a default parameter value) can be overridden per implementation
+— this is what makes it possible for a persistent stream to opt out of an inherited
+timeout instead of silently hanging or truncating. The typed-message layer
+(`Connection`, `Sender`, `Receiver`) is unchanged. The `buffer` and `buffer-codec`
+modules have no breaking changes in v6.
+
+If you don't implement or consume `ByteStream` directly (e.g. you only use
+`buffer`/`buffer-codec`), there is nothing to migrate.
+
+### `ByteStream` splits into `ByteSource` / `ByteSink` / `ByteStream`
+
+**Before (v5)**
+
+```kotlin
+interface ByteStream {
+    val isOpen: Boolean
+
+    suspend fun read(timeout: Duration = 15.seconds): ReadResult
+
+    suspend fun write(
+        buffer: ReadBuffer,
+        timeout: Duration = 15.seconds,
+    ): BytesWritten
+
+    suspend fun writeGathered(
+        buffers: List<ReadBuffer>,
+        timeout: Duration = 15.seconds,
+    ): BytesWritten
+
+    suspend fun close()
+}
+```
+
+**After (v6)**
+
+```kotlin
+interface ByteSource {
+    val isOpen: Boolean
+    val readPolicy: ReadPolicy
+    suspend fun read(deadline: Duration): ReadResult
+    suspend fun read(): ReadResult = read(readPolicy.toDeadline())
+}
+
+interface ByteSink {
+    val isOpen: Boolean
+    val writePolicy: WritePolicy
+    suspend fun write(buffer: ReadBuffer, deadline: Duration): BytesWritten
+    suspend fun write(buffer: ReadBuffer): BytesWritten = write(buffer, writePolicy.toDeadline())
+    suspend fun writeGathered(buffers: List<ReadBuffer>, deadline: Duration): BytesWritten
+    suspend fun writeGathered(buffers: List<ReadBuffer>): BytesWritten =
+        writeGathered(buffers, writePolicy.toDeadline())
+    suspend fun close() {} // send-side FIN; defaults to a no-op
+}
+
+interface ByteStream : ByteSource, ByteSink {
+    override suspend fun close() // re-abstracted: closes the whole stream
+}
+```
+
+A type that only reads implements `ByteSource`; a type that only writes implements
+`ByteSink`; a full-duplex transport implements `ByteStream` (which is both). If your
+implementation was a full-duplex `ByteStream`, implement `ByteStream` and supply
+`readPolicy` / `writePolicy` — the shape of your `read`/`write` bodies is otherwise
+unchanged, just renamed from `timeout` to `deadline` and no longer defaulted.
+
+### Deadlines move to `readPolicy` / `writePolicy`
+
+The `timeout: Duration = 15.seconds` default parameter is gone. Every `ByteSource` now
+carries a `readPolicy: ReadPolicy` val, and every `ByteSink` a `writePolicy: WritePolicy`
+val; the no-argument `read()` / `write()` overloads consult the policy instead of a
+hardcoded default.
+
+```kotlin
+sealed interface ReadPolicy {
+    data class Bounded(val deadline: Duration) : ReadPolicy
+    data object UntilClosed : ReadPolicy // no timeout; liveness via transport idle-timeout
+}
+
+sealed interface WritePolicy {
+    data class Bounded(val deadline: Duration) : WritePolicy
+    data object UntilClosed : WritePolicy
+}
+```
+
+**Before (v5)** — a persistent stream had no way to opt out of the inherited 15s
+default without every call site remembering to pass a longer timeout:
+
+```kotlin
+class MyPersistentStream : ByteStream {
+    override suspend fun read(timeout: Duration): ReadResult = ...
+}
+```
+
+**After (v6)** — override the policy once, on the type:
+
+```kotlin
+class MyPersistentStream : ByteStream {
+    override val readPolicy = ReadPolicy.UntilClosed
+    override val writePolicy = WritePolicy.Bounded(15.seconds)
+    override suspend fun read(deadline: Duration): ReadResult = ...
+    override suspend fun write(buffer: ReadBuffer, deadline: Duration): BytesWritten = ...
+}
+```
+
+**Why**: a default parameter value can't be overridden per subtype, so a caller that
+forgot to pass a longer timeout would silently inherit 15 seconds even on a stream that
+should never time out. Moving the deadline onto an overridable `val` makes that
+footgun structurally impossible.
+
+### `HalfCloseable` and `Resettable` — new mixins
+
+Two capability interfaces are new in v6, factored out of what used to be ad hoc,
+transport-specific methods:
+
+- `HalfCloseable : ByteStream` adds `suspend fun shutdownSend()` — finishes the send
+  side (e.g. a QUIC FIN) while leaving the read side open, for the half-close that
+  HTTP/3 request/response needs.
+- `Resettable` adds `suspend fun reset(errorCode: Long)` — an abrupt abort with an
+  application error code (QUIC `RESET_STREAM`/`STOP_SENDING`), as opposed to the
+  graceful FIN of `close()`. It's deliberately **not** a `ByteStream` — mix it onto
+  whichever direction actually exists (`ByteSink, Resettable` for a send-only stream,
+  `ByteSource, Resettable` for receive-only).
+
+If you previously hand-rolled half-close or reset support on a custom `ByteStream`
+implementation, implement these interfaces instead so protocol layers above you can
+detect the capability via `is HalfCloseable` / `is Resettable`.
+
+### `Sender.close()` / `Sender.id`
+
+`Sender` gained a default-bodied `suspend fun close()` (mirroring `ByteSink.close()`)
+so a send-only typed sender can announce end-of-send, and a `Sender.id` mirroring
+`Connection.id`. No action needed unless you want to opt into signaling FIN from a
+unidirectional `Sender`.
+
+### v6 checklist
+
+- [ ] Replace custom `ByteStream` implementations that are receive-only with `ByteSource`, send-only with `ByteSink`
+- [ ] Add `readPolicy` / `writePolicy` vals to any type implementing `ByteSource` / `ByteSink` / `ByteStream`
+- [ ] Rename `timeout` parameters to `deadline`; drop the `15.seconds` default (call `read()`/`write()` with no args to use the policy instead)
+- [ ] Adopt `HalfCloseable` / `Resettable` instead of any hand-rolled half-close or reset logic
+- [ ] No changes needed in `buffer` or `buffer-codec` consumers
+
+---
 
 ## v4 → v5 {#v4-v5}
 
@@ -254,12 +405,12 @@ buf.use {
     it.readInt()
 } // Memory freed here, guaranteed
 
-// Or with a scope for multiple buffers
-withScope { scope ->
-    val a = scope.allocate(4096)
-    val b = scope.allocate(8192)
-    // ... use buffers ...
-} // Both freed here
+// Multiple buffers each get their own deterministic lifetime
+BufferFactory.deterministic().allocate(4096).use { a ->
+    BufferFactory.deterministic().allocate(8192).use { b ->
+        // ... use buffers ...
+    } // b freed here
+} // a freed here
 ```
 
 **Why**: High-throughput I/O code (network servers, file processing) can't afford to wait for GC finalization of direct ByteBuffers. `CloseableBuffer` gives you C++-style RAII with Kotlin's `.use {}`.
@@ -333,7 +484,8 @@ No built-in pooling — you had to roll your own or use a third-party pool.
 
 ```kotlin
 // Built-in high-performance pool
-val pool = BufferPool.SingleThreaded(defaultSize = 8192)
+val pool = BufferPool(threadingMode = ThreadingMode.SingleThreaded, defaultBufferSize = 8192)
+// Or: val pool = createBufferPool(defaultBufferSize = 8192)
 
 pool.withBuffer(1024) { buffer ->
     buffer.writeInt(42)

@@ -729,7 +729,8 @@ data class Acknowledgement(
 
 A `List<T>` field where `T` is a `@ProtocolMessage` data class is decoded as a
 repeated sequence. The list's extent must be bounded — by `@RemainingBytes`, by
-`@LengthFrom`, or by a `@LengthPrefixed` prefix driven by a `BoundingLengthCodec`:
+`@LengthFrom`, by a `@LengthPrefixed` prefix driven by a `BoundingLengthCodec`,
+or by `@Count`:
 
 ```kotlin
 // Bounded by the rest of the buffer
@@ -754,7 +755,24 @@ data class Http2SettingsFrame(
 data class PropertyBagFrame(
     @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class) val properties: List<PropertyEntry>,
 )
+
+// Bounded by an element count, not a byte span
+@ProtocolMessage
+data class Point(val x: Short, val y: Short)
+
+@ProtocolMessage
+data class Path(
+    val id: UInt,
+    @Count val points: List<Point>,   // varint(points.size) then each Point
+)
 ```
+
+`@Count` is the element-count complement to the three byte-span framings
+above: it writes a LEB128 varint of `points.size` before the elements, so the
+field is self-delimiting and doesn't need to be the last constructor
+parameter. It's **mutually exclusive** with `@LengthPrefixed`, `@LengthFrom`,
+and `@RemainingBytes` on the same parameter — combining `@Count` with any of
+them is a compile error.
 
 ### Typed Payloads and the `Payload` Marker
 
@@ -821,6 +839,44 @@ For consumers who genuinely need raw bytes (IPC forwarding, persistence, debug
 capture), step outside the `Payload` abstraction: decode into a non-`Payload`
 type with a hand-written `Codec` that copies bytes out at the boundary — see
 [Manual Codecs](#manual-codecs).
+
+### `ViewCodec` — Codec-Managed Borrowed Views
+
+The strict transitive shape rule above forbids raw buffer types (`ReadBuffer`,
+`PlatformBuffer`, `ByteArray`, …) in `@ProtocolMessage` fields by default,
+because they leak ownership ambiguity — who frees the memory, and when. A
+`Codec` that implements `ViewCodec<T>` is the explicit opt-in that lifts this
+restriction for one field: it's the sanctioned escape hatch for zero-copy
+streaming protocols (HTTP-style DATA frames, QPACK field sections) where the
+payload is a borrowed view over the source buffer, consumed before the frame
+buffer is recycled.
+
+```kotlin
+object RawBytesCodec : ViewCodec<ReadBuffer> {
+    override fun decode(buffer: ReadBuffer, context: DecodeContext): ReadBuffer =
+        buffer.readBytes(buffer.remaining())   // zero-copy view, tied to buffer's lifetime
+
+    override fun encode(buffer: WriteBuffer, value: ReadBuffer, context: EncodeContext) {
+        val savedPosition = value.position()
+        buffer.write(value)
+        value.position(savedPosition)          // non-destructive: restore for re-encode
+    }
+}
+
+@ProtocolMessage
+data class DataFrame(
+    val streamId: UInt,
+    @RemainingBytes @UseCodec(RawBytesCodec::class) val payload: ReadBuffer,
+)
+```
+
+The contract is on the implementor, not the framework: `decode` must return a
+view whose lifetime is tied to the source buffer (nothing is allocated, and
+nothing beyond the source buffer's own lifecycle needs freeing), and `encode`
+must be non-consuming so a value can be size-checked and re-encoded. When the
+decoded value must outlive the source buffer, `ViewCodec` is the wrong tool —
+use a `Payload`-marked type with a consumer-owned copy instead (see
+[Typed Payloads](#typed-payloads-and-the-payload-marker) above).
 
 ### Supported Types
 
@@ -1350,6 +1406,9 @@ type — not a raw byte blob. For binary payloads:
   reusable across protocols (see [`@UseCodec`](#usecodeccodec--delegate-to-a-hand-written-codec))
 - **A `Payload`-marked type**: for payloads that carry their own structure — see
   [Typed Payloads](#typed-payloads-and-the-payload-marker)
+- **A `ViewCodec`**: for a codec-managed zero-copy *borrowed* view (rather than
+  a manual `readBytes()` outside the codec, or a `Payload` that must own its
+  data) — see [`ViewCodec`](#viewcodec--codec-managed-borrowed-views)
 :::
 
 ### Decode with Zero-Copy Pixel Extraction

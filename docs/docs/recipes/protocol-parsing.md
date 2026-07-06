@@ -165,7 +165,7 @@ Maximize performance by avoiding copies:
 
 ```kotlin
 // DON'T: Copy to ByteArray for parsing
-val bytes = processor.readByteArray(length)
+val bytes = processor.readBuffer(length).readByteArray(length)
 val text = bytes.decodeToString()
 
 // DO: Read directly as string
@@ -173,10 +173,12 @@ val text = processor.readBuffer(length).let { buf ->
     buf.readString(length)
 }
 
-// DON'T: Create intermediate buffers
-val header = ByteArray(4)
-processor.readBytes(header)
-val length = (header[0].toInt() shl 24) or ...
+// DON'T: Assemble multi-byte values one byte at a time
+val b0 = processor.readByte()
+val b1 = processor.readByte()
+val b2 = processor.readByte()
+val b3 = processor.readByte()
+val length = (b0.toInt() shl 24) or ...
 
 // DO: Read directly
 val length = processor.readInt()
