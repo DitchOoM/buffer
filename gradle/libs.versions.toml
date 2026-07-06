@@ -18,9 +18,9 @@ kotlinxCoroutines = "1.11.0"
 kotlinxSerialization = "1.11.0"
 # kotlinx-io — segment-based multiplatform IO; buffer-kotlinx-io bridges PlatformBuffer to its
 # RawSource/RawSink. Ktor 3 also builds its ByteReadChannel/ByteWriteChannel on kotlinx-io.
-kotlinxIo = "0.8.0"
+kotlinxIo = "0.9.1"
 # Ktor 3.x — buffer-ktor ContentConverter, channel bridges, and WebSocket masking helpers.
-ktor = "3.2.0"
+ktor = "3.5.1"
 kotlinxBenchmark = "0.4.17"
 androidxBenchmark = "1.4.1"
 androidxTestRunner = "1.7.0"
