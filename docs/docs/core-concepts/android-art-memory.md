@@ -66,17 +66,27 @@ connection, is close to the worst case for this failure mode. See
 for the full reproduction and the ART-version/image matrix (the behavior varies by ART Mainline
 version, not just API level).
 
-## Why the Library Is Safe by Default
+## Choosing an ART-Safe Factory
 
-The library's own default allocation strategy for pools is `BufferFactory.deterministic()`, not
-`BufferFactory.Default`. On Android, `deterministic()` allocates via `Unsafe.allocateMemory` (raw
-native malloc) and wraps it in a non-owning `DirectByteBuffer` view — it never calls
-`ByteBuffer.allocateDirect`, so it never touches ART's non-moving space or LOS at all. That has been
-verified to hold up under a deliberately fragmentation-wrecked heap.
+A pool seeds every miss with a `BufferFactory`, and that seed defaults to `BufferFactory.Default` —
+`BufferPool()`, `createBufferPool()`, and `withPool()` all default their `factory` parameter to it.
+So on Android a pool that misses falls back to the fragmentation-prone `allocateDirect` path
+described above; a `Default`-seeded pool is **not** automatically safe from it. Two things keep it in
+check:
 
-The fragmentation path is only reachable when application code explicitly overrides a pool's factory
-to `BufferFactory.Default` (or a decorator built on it) and then churns large, direct buffers on
-Android under sustained load.
+1. **Seed hot, high-churn Android pools with `BufferFactory.deterministic()`.** On Android
+   `deterministic()` allocates via `Unsafe.allocateMemory` (raw native malloc) and wraps it in a
+   non-owning `DirectByteBuffer` view — it never calls `ByteBuffer.allocateDirect`, so it never
+   touches ART's non-moving space or LOS at all. Pass it explicitly
+   (`BufferPool(factory = BufferFactory.deterministic())`) and the fragmentation path becomes
+   structurally unreachable; this has been verified to hold up under a deliberately
+   fragmentation-wrecked heap.
+2. **Lean on the pool's OOM-recovery net** (below) for the case where a `Default`-seeded pool hits an
+   ART fragmentation `OutOfMemoryError` anyway.
+
+The fragmentation path is reachable whenever a pool falls back to `BufferFactory.Default` (its
+default seed) — or a decorator built on it — and churns large, direct buffers on Android under
+sustained load.
 
 ## Comparing `BufferFactory.Default` Across Platforms
 
