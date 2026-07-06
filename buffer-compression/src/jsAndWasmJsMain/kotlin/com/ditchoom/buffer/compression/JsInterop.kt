@@ -58,6 +58,7 @@ internal expect fun nodeZlibSync(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
     windowBits: WindowBits = WindowBits.Default,
+    dictionary: JsByteArray? = null,
 ): JsByteArray
 
 /** Synchronous Node.js zlib compression with Z_SYNC_FLUSH. */
@@ -72,6 +73,7 @@ internal expect fun nodeZlibSyncFlush(
 internal expect fun nodeZlibDecompressSync(
     input: JsByteArray,
     algorithm: CompressionAlgorithm,
+    dictionary: JsByteArray? = null,
 ): JsByteArray
 
 // ============================================================================
@@ -102,12 +104,14 @@ internal expect fun createCompressStream(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
     windowBits: WindowBits = WindowBits.Default,
+    dictionary: JsByteArray? = null,
 ): NodeTransformHandle
 
 /** Create a decompression Transform stream. */
 internal expect fun createDecompressStream(
     algorithm: CompressionAlgorithm,
     windowBits: WindowBits = WindowBits.Default,
+    dictionary: JsByteArray? = null,
 ): NodeTransformHandle
 
 /** Write chunks and flush with Z_SYNC_FLUSH. Returns output chunks. */
@@ -164,10 +168,12 @@ internal expect suspend fun nodeTransformCompressOneShot(
     inputs: List<JsByteArray>,
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
+    dictionary: JsByteArray? = null,
 ): JsByteArray
 
 /** Decompress through a one-shot Transform stream. */
 internal expect suspend fun nodeTransformDecompressOneShot(
     inputs: List<JsByteArray>,
     algorithm: CompressionAlgorithm,
+    dictionary: JsByteArray? = null,
 ): JsByteArray

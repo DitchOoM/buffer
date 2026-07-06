@@ -106,6 +106,7 @@ internal actual fun nodeZlibSync(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
     windowBits: WindowBits,
+    dictionary: JsByteArray?,
 ): JsByteArray {
     val zlib = getNodeZlib()
     val options = js("{}")
@@ -115,6 +116,9 @@ internal actual fun nodeZlibSync(
         // name (gzipSync / deflateSync / deflateRawSync) selects the format; Node
         // applies the raw negation / gzip +16 internally.
         options["windowBits"] = windowBits.sizeLog2
+    }
+    if (dictionary != null) {
+        options["dictionary"] = dictionary.array
     }
     val inputArray = input.array
     val result: Uint8Array =
@@ -152,16 +156,22 @@ internal actual fun nodeZlibSyncFlush(
 internal actual fun nodeZlibDecompressSync(
     input: JsByteArray,
     algorithm: CompressionAlgorithm,
+    dictionary: JsByteArray?,
 ): JsByteArray {
     val zlib = getNodeZlib()
     val inputArray = input.array
     val result: Uint8Array =
         when (algorithm) {
             CompressionAlgorithm.Gzip -> zlib.gunzipSync(inputArray).unsafeCast<Uint8Array>()
-            CompressionAlgorithm.Deflate -> zlib.inflateSync(inputArray).unsafeCast<Uint8Array>()
+            CompressionAlgorithm.Deflate -> {
+                val options = js("{}")
+                if (dictionary != null) options["dictionary"] = dictionary.array
+                zlib.inflateSync(inputArray, options).unsafeCast<Uint8Array>()
+            }
             CompressionAlgorithm.Raw -> {
                 val options = js("{}")
                 options["finishFlush"] = zlib.constants.Z_SYNC_FLUSH
+                if (dictionary != null) options["dictionary"] = dictionary.array
                 zlib.inflateRawSync(inputArray, options).unsafeCast<Uint8Array>()
             }
         }
@@ -240,12 +250,16 @@ internal actual fun createCompressStream(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
     windowBits: WindowBits,
+    dictionary: JsByteArray?,
 ): NodeTransformHandle {
     val zlib = getNodeZlib()
     val options = js("{}")
     options["level"] = level.value
     if (windowBits != WindowBits.Default) {
         options["windowBits"] = windowBits.sizeLog2
+    }
+    if (dictionary != null) {
+        options["dictionary"] = dictionary.array
     }
     val stream: dynamic =
         when (algorithm) {
@@ -259,6 +273,7 @@ internal actual fun createCompressStream(
 internal actual fun createDecompressStream(
     algorithm: CompressionAlgorithm,
     windowBits: WindowBits,
+    dictionary: JsByteArray?,
 ): NodeTransformHandle {
     val zlib = getNodeZlib()
     val options = js("{}")
@@ -267,6 +282,9 @@ internal actual fun createDecompressStream(
     }
     if (windowBits != WindowBits.Default) {
         options["windowBits"] = windowBits.sizeLog2
+    }
+    if (dictionary != null) {
+        options["dictionary"] = dictionary.array
     }
     val stream: dynamic =
         when (algorithm) {
@@ -427,10 +445,14 @@ internal actual suspend fun nodeTransformCompressOneShot(
     inputs: List<JsByteArray>,
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
+    dictionary: JsByteArray?,
 ): JsByteArray {
     val zlib = getNodeZlib()
     val options = js("{}")
     options["level"] = level.value
+    if (dictionary != null) {
+        options["dictionary"] = dictionary.array
+    }
     val algStr = algorithm.toNodeString()
 
     val result =
@@ -459,12 +481,16 @@ internal actual suspend fun nodeTransformCompressOneShot(
 internal actual suspend fun nodeTransformDecompressOneShot(
     inputs: List<JsByteArray>,
     algorithm: CompressionAlgorithm,
+    dictionary: JsByteArray?,
 ): JsByteArray {
     val zlib = getNodeZlib()
     val options: dynamic = js("{}")
     val algStr = algorithm.toNodeString()
     if (algStr == "raw") {
         options["finishFlush"] = zlib.constants.Z_SYNC_FLUSH
+    }
+    if (dictionary != null) {
+        options["dictionary"] = dictionary.array
     }
 
     val result =
