@@ -17,6 +17,9 @@ const sidebars: SidebarsConfig = {
         'recipes/basic-operations',
         'recipes/platform-interop',
         'recipes/cryptography',
+        'recipes/kotlinx-io-interop',
+        'recipes/okio-interop',
+        'recipes/ktor-interop',
       ],
     },
     {
