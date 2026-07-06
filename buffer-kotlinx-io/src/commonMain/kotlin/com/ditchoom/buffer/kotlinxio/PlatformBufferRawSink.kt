@@ -16,9 +16,11 @@ import kotlinx.io.unsafe.UnsafeBufferOperations
  * [sink]'s write position. Bytes cross the boundary exactly once.
  *
  * The copy reads **directly** from the source's head segment via
- * [UnsafeBufferOperations.readFromHead]: [WriteBuffer.writeBytes] pushes the
- * segment slice into a managed backing array or native memory. This is a
- * single copy for **both** backings — there is no intermediate scratch array.
+ * [UnsafeBufferOperations.readFromHead]: the segment transfer pushes the
+ * segment slice into a managed backing array or native memory (on JVM/Android
+ * an array-backed ByteBuffer additionally takes a `System.arraycopy` shortcut
+ * — see `writeSegmentBytes`). This is a single copy for **both** backings —
+ * there is no intermediate scratch array.
  *
  * Writing more than [sink]'s remaining capacity fails fast with the underlying
  * buffer's overflow exception — this sink never grows [sink].
@@ -70,10 +72,10 @@ internal class PlatformBufferRawSink(
         UnsafeBufferOperations.readFromHead(source) { bytes, startIndex, endIndexExclusive ->
             val avail = endIndexExclusive - startIndex
             val n = minOf(remaining, avail.toLong()).toInt()
-            // Single copy for BOTH backings: writeBytes pushes the segment slice into the managed
-            // backing or native memory and advances position. A freed pooled buffer throws its
+            // Single copy for BOTH backings: writeSegmentBytes pushes the segment slice into the
+            // managed backing or native memory and advances position. A freed pooled buffer throws its
             // use-after-free IllegalStateException; an over-capacity write throws overflow (fail-fast).
-            sink.writeBytes(bytes, startIndex, n)
+            sink.writeSegmentBytes(bytes, startIndex, n)
             n
         }
 

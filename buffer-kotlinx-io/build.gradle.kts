@@ -162,6 +162,30 @@ kotlin {
             implementation(kotlin("test"))
         }
 
+        // jvmCommonMain: shared JVM/Android segment-transfer fast path (ByteBuffer.hasArray
+        // dispatch). nonJvmMain: passthrough actuals for js/wasmJs/native. Mirrors :buffer.
+        val jvmCommonMain by creating {
+            dependsOn(commonMain.get())
+        }
+        jvmMain {
+            dependsOn(jvmCommonMain)
+        }
+        androidMain {
+            dependsOn(jvmCommonMain)
+        }
+        val nonJvmMain by creating {
+            dependsOn(commonMain.get())
+        }
+        jsMain {
+            dependsOn(nonJvmMain)
+        }
+        wasmJsMain {
+            dependsOn(nonJvmMain)
+        }
+        nativeMain {
+            dependsOn(nonJvmMain)
+        }
+
         // Benchmark source sets share one source directory across platforms.
         val jvmBenchmark by getting {
             kotlin.srcDir("src/commonBenchmark/kotlin")

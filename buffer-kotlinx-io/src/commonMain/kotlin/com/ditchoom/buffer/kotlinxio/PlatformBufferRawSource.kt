@@ -20,9 +20,11 @@ import kotlinx.io.unsafe.UnsafeBufferOperations
  * a read does not change bytes already handed to the sink.
  *
  * The copy lands **directly** in the sink's tail segment via
- * [UnsafeBufferOperations.writeToTail]: [ReadBuffer.readInto] pulls a managed
- * backing array or native memory straight into the segment. This is a single
- * copy for **both** backings — there is no intermediate scratch array.
+ * [UnsafeBufferOperations.writeToTail]: the segment transfer pulls a managed
+ * backing array or native memory straight into the segment (on JVM/Android an
+ * array-backed ByteBuffer additionally takes a `System.arraycopy` shortcut —
+ * see `readIntoSegment`). This is a single copy for **both** backings — there
+ * is no intermediate scratch array.
  *
  * ## Lifetime
  *
@@ -30,7 +32,7 @@ import kotlinx.io.unsafe.UnsafeBufferOperations
  * buffer that is released (or a scoped buffer whose scope closes) while this
  * source is still held, the next read **fails fast** with the underlying
  * buffer's use-after-free `IllegalStateException` rather than reading
- * reclaimed memory. [ReadBuffer.readInto] is invoked on every read so a freed
+ * reclaimed memory. The access path is re-resolved on every read so a freed
  * wrapper is detected immediately — the source never caches a backing array.
  *
  * [close] marks this source closed; further reads throw [IllegalStateException].
@@ -75,10 +77,10 @@ internal class PlatformBufferRawSource(
             val written =
                 UnsafeBufferOperations.writeToTail(sink, request) { bytes, startIndex, endIndexExclusive ->
                     val toCopy = minOf(remaining, endIndexExclusive - startIndex)
-                    // Single copy for BOTH backings: readInto pulls a managed backing array or native
-                    // memory straight into the segment and advances position. For a freed pooled buffer
-                    // this throws the use-after-free IllegalStateException (fail-fast).
-                    source.readInto(bytes, startIndex, toCopy)
+                    // Single copy for BOTH backings: readIntoSegment pulls a managed backing array or
+                    // native memory straight into the segment and advances position. For a freed pooled
+                    // buffer this throws the use-after-free IllegalStateException (fail-fast).
+                    source.readIntoSegment(bytes, startIndex, toCopy)
                     toCopy
                 }
             remaining -= written
