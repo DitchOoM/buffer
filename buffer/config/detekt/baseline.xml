@@ -10,6 +10,7 @@
     <ID>LargeClass:BufferPoolTests.kt:BufferPoolTests</ID>
     <ID>LargeClass:BufferStreamTests.kt:BufferStreamTests</ID>
     <ID>LargeClass:BufferTests.kt:BufferTests</ID>
+    <ID>LargeClass:TrackedSlice.kt:TrackedSlice : PlatformBufferPoolReleasable</ID>
     <ID>LargeClass:WrapperTransparencyTests.kt:WrapperTransparencyTests</ID>
     <ID>LongMethod:BaseJvmBuffer.kt:BaseJvmBuffer$override fun xorMaskCopy</ID>
     <ID>LongMethod:FastDirectByteBufferTest.kt:FastDirectByteBufferTest$@Test fun `byte order conversion performance`</ID>
@@ -90,6 +91,7 @@
     <ID>TooManyFunctions:StreamingStringDecoder.linux.kt:LinuxStreamingStringDecoder : StreamingStringDecoder</ID>
     <ID>TooManyFunctions:SuspendingStreamProcessor.kt:SuspendingStreamProcessor</ID>
     <ID>TooManyFunctions:SuspendingStreamProcessor.kt:SyncToSuspendingProcessor : SuspendingStreamProcessor</ID>
+    <ID>TooManyFunctions:TrackedSlice.kt:TrackedSlice : PlatformBufferPoolReleasable</ID>
     <ID>TooManyFunctions:UnsafeMemory.apple.kt:UnsafeMemory</ID>
     <ID>TooManyFunctions:UnsafeMemory.js.kt:UnsafeMemory</ID>
     <ID>TooManyFunctions:UnsafeMemory.jvmCommon.kt:UnsafeMemory</ID>
