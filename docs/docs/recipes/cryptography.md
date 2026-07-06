@@ -80,6 +80,10 @@ val sealed = gcm.ops.sealBlocking(key, plaintext)       // Aad defaults to Aad.N
 
 The synchronous `sealBlocking`/`openBlocking` accept a `SyncCapableAesGcmKey` (the in-memory key `AesGcmKey.of` returns). A hardware-backed key is an `AesGcmKey` but **not** sync-capable, so it cannot reach the blocking ops — that misuse is a compile error, not a runtime throw. See [Sync-capable keys](#sync-capable-keys-the-hardware-seam).
 
+:::tip Try it live
+Want to *see* this run? The **[Crypto Playground](/playground)** seals/opens AES-GCM in your browser using the compiled `buffer-crypto` bundle — flip any byte of the output and watch decryption refuse with the opaque `VerificationFailed`. It's the shipping Kotlin code path ([`CryptoDemo.kt`](https://github.com/DitchOoM/buffer/blob/main/buffer-crypto/src/jsMain/kotlin/com/ditchoom/buffer/crypto/CryptoDemo.kt)), not a re-implementation.
+:::
+
 ### ChaCha20-Poly1305
 
 The API mirrors AES-GCM. The key is always 256-bit and is a distinct type (`ChaChaPolyKey`) so the two AEAD families cannot be cross-used. Because ChaCha20-Poly1305 is **absent on the web**, its witness is `OptionalAead` — with an extra `Unavailable` state:
