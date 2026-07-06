@@ -239,7 +239,10 @@ internal actual fun nodeZlibSync(
     level: CompressionLevel,
     windowBits: WindowBits,
     dictionary: JsByteArray?,
-): JsByteArray = JsByteArray(jsZlibSync(input.ref, algorithm.toOrdinal(), level.value, windowBits.sizeLog2, dictionary?.ref))
+): JsByteArray {
+    val result = jsZlibSync(input.ref, algorithm.toOrdinal(), level.value, windowBits.sizeLog2, dictionary?.ref)
+    return JsByteArray(result)
+}
 
 @JsFun(
     """
@@ -425,7 +428,10 @@ internal actual fun createDecompressStream(
     algorithm: CompressionAlgorithm,
     windowBits: WindowBits,
     dictionary: JsByteArray?,
-): NodeTransformHandle = NodeTransformHandle(jsCreateDecompressStream(algorithm.toOrdinal(), windowBits.sizeLog2, dictionary?.ref))
+): NodeTransformHandle {
+    val handle = jsCreateDecompressStream(algorithm.toOrdinal(), windowBits.sizeLog2, dictionary?.ref)
+    return NodeTransformHandle(handle)
+}
 
 @JsFun(
     """
