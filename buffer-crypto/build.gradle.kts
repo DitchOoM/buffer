@@ -323,8 +323,18 @@ kotlin {
     }
     js {
         outputModuleName.set("buffer-crypto-kt")
-        browser()
+        browser {
+            // Bundle the whole module graph (stdlib + coroutines + buffer + buffer-crypto) into one
+            // self-contained webpack file that exposes the @JsExport surface as a `bufferCryptoKt`
+            // global, so the docs site can load the real CryptoDemo facade with a single <script>.
+            // Only adds a JS distribution artifact; the Maven publication remains the klib.
+            webpackTask {
+                output.library = "bufferCryptoKt"
+                output.libraryTarget = "umd"
+            }
+        }
         nodejs()
+        binaries.executable()
     }
     wasmJs {
         browser()
