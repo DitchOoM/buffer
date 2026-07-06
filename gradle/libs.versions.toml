@@ -16,6 +16,11 @@ kover = "0.9.8"
 kotlinxCoroutines = "1.11.0"
 # kotlinx-serialization — buffer-crypto test-only: parsing vendored Wycheproof KAT vectors
 kotlinxSerialization = "1.11.0"
+# kotlinx-io — segment-based multiplatform IO; buffer-kotlinx-io bridges PlatformBuffer to its
+# RawSource/RawSink. Ktor 3 also builds its ByteReadChannel/ByteWriteChannel on kotlinx-io.
+kotlinxIo = "0.8.0"
+# Ktor 3.x — buffer-ktor ContentConverter, channel bridges, and WebSocket masking helpers.
+ktor = "3.2.0"
 kotlinxBenchmark = "0.4.17"
 androidxBenchmark = "1.4.1"
 androidxTestRunner = "1.7.0"
@@ -32,8 +37,13 @@ kotlinpoet = "2.3.0"
 binaryCompatibilityValidator = "0.18.1"
 # androidx.collection — multiplatform Swiss-table maps used by the :buffer-1brc showcase only
 androidxCollection = "1.6.0"
+# okio — segment-based multiplatform IO; buffer-okio bridges PlatformBuffer to its Source/Sink.
+okio = "3.17.0"
+sqldelight = "2.2.1"
 
 [libraries]
+okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
+sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref = "sqldelight" }
 ksp-api = { module = "com.google.devtools.ksp:symbol-processing-api", version.ref = "ksp" }
 kctfork-ksp = { module = "dev.zacsweers.kctfork:ksp", version.ref = "kctfork" }
 kotlinpoet = { module = "com.squareup:kotlinpoet", version.ref = "kotlinpoet" }
@@ -41,6 +51,15 @@ kotlinpoet-ksp = { module = "com.squareup:kotlinpoet-ksp", version.ref = "kotlin
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+kotlinx-io-core = { module = "org.jetbrains.kotlinx:kotlinx-io-core", version.ref = "kotlinxIo" }
+ktor-io = { module = "io.ktor:ktor-io", version.ref = "ktor" }
+ktor-http = { module = "io.ktor:ktor-http", version.ref = "ktor" }
+ktor-utils = { module = "io.ktor:ktor-utils", version.ref = "ktor" }
+ktor-serialization = { module = "io.ktor:ktor-serialization", version.ref = "ktor" }
+ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
+ktor-server-test-host = { module = "io.ktor:ktor-server-test-host", version.ref = "ktor" }
+ktor-server-content-negotiation = { module = "io.ktor:ktor-server-content-negotiation", version.ref = "ktor" }
+ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
 kotlinx-benchmark-runtime = { module = "org.jetbrains.kotlinx:kotlinx-benchmark-runtime", version.ref = "kotlinxBenchmark" }
 androidx-collection = { module = "androidx.collection:collection", version.ref = "androidxCollection" }
 androidx-benchmark-junit4 = { module = "androidx.benchmark:benchmark-junit4", version.ref = "androidxBenchmark" }

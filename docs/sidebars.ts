@@ -17,6 +17,9 @@ const sidebars: SidebarsConfig = {
         'recipes/basic-operations',
         'recipes/platform-interop',
         'recipes/cryptography',
+        'recipes/kotlinx-io-interop',
+        'recipes/okio-interop',
+        'recipes/ktor-interop',
       ],
     },
     {
@@ -26,6 +29,7 @@ const sidebars: SidebarsConfig = {
         'core-concepts/allocation-zones',
         'core-concepts/buffer-basics',
         'core-concepts/byte-order',
+        'core-concepts/android-art-memory',
       ],
     },
     {

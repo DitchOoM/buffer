@@ -1,0 +1,50 @@
+name: "Build and Test (docs-only no-op)"
+
+# review.yaml runs build-linux / build-apple on every PR EXCEPT ones that touch only
+# `**/*.md` (paths-ignore). Those two jobs' contexts
+# ("build-linux / Linux / JVM / JS / WASM / Android" and "build-apple / Apple Targets")
+# are required status checks on `main`. A skipped job reports no status at all, so a
+# docs-only PR sits at "Expected — waiting for status to be reported" forever and can
+# never merge.
+#
+# Fix (the standard GitHub-documented pattern for required checks + path filters):
+# mirror review.yaml with the exact inverse path filter and two jobs sharing the same
+# job id + display name, whose only step is a no-op `echo`.
+# NOTE: the display names must be the FULL context strings including the caller-job
+# prefix ('build-apple / ...') — the real contexts get that prefix because review.yaml's
+# jobs are reusable-workflow calls (caller-job / callee-job); a plain job only reports
+# its own name, so the prefix must be written literally here to match. GitHub records that as a
+# real success for the same context string, satisfying the required check without
+# running the expensive build.
+#
+# Path filters MUST stay the exact complement of review.yaml's `paths-ignore`:
+#   review.yaml            : paths-ignore: ['**/*.md']  (skips only if ALL files are .md)
+#   review-docs-only.yaml   : paths:        ['**/*.md']  (runs if ANY file is .md)
+# For a PR that mixes .md and non-.md files, both workflows fire: review.yaml's real
+# build-linux/build-apple run for real, and this no-op mirror also runs alongside them.
+# That's harmless (two check runs for the same context, both able to succeed
+# independently) and is the same tradeoff GitHub's own docs call out for this pattern.
+# If either file's trigger conditions change, update the other to match.
+on:
+  pull_request:
+    paths:
+      - "**/*.md"
+    types:
+      - synchronize
+      - opened
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux:
+    name: "build-linux / Linux / JVM / JS / WASM / Android"
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "docs-only change - build not required"
+
+  build-apple:
+    name: "build-apple / Apple Targets"
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "docs-only change - build not required"

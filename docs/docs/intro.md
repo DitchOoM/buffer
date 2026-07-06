@@ -55,7 +55,7 @@ withPool(defaultBufferSize = 8192) { pool ->
 
 ```kotlin
 bufferFlow
-    .mapBuffer { decompress(it, Gzip).getOrThrow() }
+    .mapBuffer { decompress(it, CompressionAlgorithm.Gzip).getOrThrow() }
     .asStringFlow()
     .lines()
     .collect { line -> process(line) }
@@ -88,6 +88,9 @@ Buffer is the foundation for the [Socket](https://github.com/DitchOoM/socket) li
 ├─────────────────────────────┤
 │  buffer-flow                │  ← com.ditchoom:buffer-flow
 ├─────────────────────────────┤
+│  buffer-kotlinx-io / -okio  │  ← I/O library interop bridges
+│  buffer-ktor                │  ← com.ditchoom:buffer-ktor
+├─────────────────────────────┤
 │  buffer                     │  ← com.ditchoom:buffer
 └─────────────────────────────┘
 ```
@@ -109,6 +112,11 @@ dependencies {
 
     // Optional: Flow operators + transport abstractions (Connection, ByteStream)
     implementation("com.ditchoom:buffer-flow:<latest-version>")
+
+    // Optional: I/O library interop (kotlinx-io, Okio, Ktor)
+    implementation("com.ditchoom:buffer-kotlinx-io:<latest-version>")
+    implementation("com.ditchoom:buffer-okio:<latest-version>")
+    implementation("com.ditchoom:buffer-ktor:<latest-version>")
 }
 ```
 

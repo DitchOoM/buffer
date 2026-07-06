@@ -85,6 +85,16 @@ const config: Config = {
           position: 'left',
         },
         {
+          to: '/playground',
+          label: 'Playground',
+          position: 'left',
+        },
+        {
+          to: '/asymmetric',
+          label: 'Asymmetric',
+          position: 'left',
+        },
+        {
           to: '/performance',
           label: 'Performance',
           position: 'left',
@@ -109,6 +119,10 @@ const config: Config = {
             {
               href: 'pathname:///api/buffer-flow/index.html',
               label: 'Buffer Flow',
+            },
+            {
+              href: 'pathname:///api/buffer-crypto/index.html',
+              label: 'Buffer Crypto',
             },
           ],
         },

@@ -70,6 +70,22 @@ val buffer = BufferFactory.shared().allocate(1024)
 val videoFrame = BufferFactory.Default.allocate(1920 * 1080 * 4)  // 8MB RGBA
 ```
 
+:::warning Avoid repeated ad hoc large allocations
+On Android, `ByteBuffer.allocateDirect()` backs the buffer with a pinned, non-movable
+array in the ART heap. Repeatedly allocating and dropping large, oddly-sized buffers
+(e.g. one per camera frame) can fragment ART's Large Object Space and non-moving
+space until a same-size allocation fails with an `OutOfMemoryError`, even though the
+heap has plenty of nominally free bytes. This mostly affects stock (non-Mainline) ART
+images under sustained mixed-size churn. See [Android ART Memory & OOM
+Recovery](../core-concepts/android-art-memory.md) for the platform comparison and the pool's
+built-in recovery net, and `ANDROID_ART_ALLOCATOR.md` for the full repro and root cause.
+
+Prefer a shared, pooled `BufferPool` (below) over one-off
+`BufferFactory.Default.allocate()` calls for repeated large camera/video buffers —
+the pool rounds requests into size-class buckets and reuses buffers instead of
+churning the allocator with new odd-sized ones.
+:::
+
 ### Buffer Pooling for Camera/Video
 
 ```kotlin

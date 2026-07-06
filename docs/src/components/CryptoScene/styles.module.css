@@ -1,0 +1,863 @@
+/* ============================================================
+   Shared
+   ============================================================ */
+.statusErr {
+  padding: 0.625rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  background: var(--ifm-color-danger-contrast-background);
+  color: var(--ifm-color-danger-dark);
+  margin: 0.75rem 0;
+}
+
+/* ============================================================
+   1. Cinematic scene player
+   ============================================================ */
+.scene {
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 10px;
+  padding: 1.25rem 1.5rem 1.5rem;
+  margin: 1.5rem 0;
+  background: var(--ifm-background-surface-color);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+/* ---- breadcrumb stepper ---- */
+.crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+  margin-bottom: 0.875rem;
+}
+.crumb {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ifm-color-emphasis-500);
+  cursor: default;
+}
+.crumb:not(:disabled) {
+  cursor: pointer;
+  color: var(--ifm-color-primary);
+}
+.crumb:not(:disabled):hover {
+  background: var(--ifm-color-primary-contrast-background);
+}
+.crumbDone {
+  color: var(--ifm-color-emphasis-700);
+}
+.crumbOn {
+  background: var(--ifm-color-primary);
+  color: #fff !important;
+}
+.crumbSep {
+  color: var(--ifm-color-emphasis-400);
+  font-size: 0.8rem;
+}
+
+/* ---- setup: shared key + message input + run buttons ---- */
+.setup {
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 10px;
+  padding: 0.875rem 1rem;
+  background: var(--ifm-background-color);
+  margin-bottom: 1.25rem;
+}
+.keyLine {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+.keyTag {
+  font-weight: 700;
+  color: var(--ifm-color-warning-dark);
+}
+.keyVal {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.78rem;
+  background: var(--ifm-color-emphasis-100);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.keyBits {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--ifm-color-emphasis-600);
+}
+.msgLine {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+}
+.msgLabel {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--ifm-color-primary);
+  white-space: nowrap;
+}
+.msgInput {
+  flex: 1;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 6px;
+  background: var(--ifm-background-surface-color);
+  color: var(--ifm-font-color-base);
+  font-size: 0.95rem;
+}
+.msgInput:focus {
+  outline: none;
+  border-color: var(--ifm-color-primary);
+  box-shadow: 0 0 0 2px var(--ifm-color-primary-contrast-background);
+}
+
+/* compact echo of the message at later steps, with an inline "change" link */
+.msgEcho {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.875rem;
+}
+.msgEchoLabel {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ifm-color-emphasis-500);
+}
+.msgEchoText {
+  font-family: var(--ifm-font-family-monospace);
+  color: var(--ifm-color-emphasis-900);
+}
+.linkBtn {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--ifm-color-primary);
+  cursor: pointer;
+}
+.linkBtn:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.linkBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* per-step action row */
+.stepActions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+.primaryBtn,
+.dangerBtn,
+.ghostBtn {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  padding: 0.45rem 0.9rem;
+  border-radius: 6px;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  cursor: pointer;
+}
+.primaryBtn {
+  background: var(--ifm-color-primary);
+  color: #fff;
+  border-color: var(--ifm-color-primary);
+}
+.primaryBtn:hover:not(:disabled) {
+  background: var(--ifm-color-primary-dark);
+}
+.dangerBtn {
+  background: var(--ifm-color-danger-contrast-background);
+  color: var(--ifm-color-danger-dark);
+  border-color: var(--ifm-color-danger);
+}
+.dangerBtn:hover:not(:disabled) {
+  background: var(--ifm-color-danger);
+  color: #fff;
+}
+.ghostBtn {
+  background: var(--ifm-background-surface-color);
+  color: var(--ifm-color-emphasis-700);
+}
+.ghostBtn:hover:not(:disabled) {
+  border-color: var(--ifm-color-primary);
+  color: var(--ifm-color-primary);
+}
+.primaryBtn:disabled,
+.dangerBtn:disabled,
+.ghostBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---- actors ---- */
+.actors {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+.actor {
+  text-align: center;
+  padding: 0.75rem 0.5rem;
+  border-radius: 10px;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  background: var(--ifm-background-color);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
+}
+.actorActive {
+  transform: translateY(-2px);
+}
+.actor_alice.actorActive {
+  border-color: var(--ifm-color-primary);
+  box-shadow: 0 0 0 2px var(--ifm-color-primary-contrast-background);
+}
+.actor_eve.actorActive {
+  border-color: var(--ifm-color-danger);
+  box-shadow: 0 0 0 2px var(--ifm-color-danger-contrast-background);
+}
+.actor_bob.actorActive {
+  border-color: var(--ifm-color-success);
+  box-shadow: 0 0 0 2px var(--ifm-color-success-contrast-background);
+}
+.actorEmoji {
+  font-size: 1.6rem;
+  line-height: 1;
+}
+.actorName {
+  font-weight: 800;
+  font-size: 0.9rem;
+  margin-top: 0.2rem;
+}
+.actor_alice .actorName {
+  color: var(--ifm-color-primary);
+}
+.actor_eve .actorName {
+  color: var(--ifm-color-danger-dark);
+}
+.actor_bob .actorName {
+  color: var(--ifm-color-success-dark);
+}
+.actorRole {
+  font-size: 0.7rem;
+  color: var(--ifm-color-emphasis-600);
+}
+.actorKey {
+  font-size: 0.72rem;
+  margin-top: 0.3rem;
+  color: var(--ifm-color-emphasis-700);
+}
+
+/* ---- packet rail + flying packet ---- */
+.rail {
+  position: relative;
+  height: 1.9rem;
+  margin: 0.4rem 0;
+}
+.flyer {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--ifm-color-warning-contrast-background);
+  color: var(--ifm-color-warning-dark);
+  border: 1px solid var(--ifm-color-warning);
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  transition: left 1.5s cubic-bezier(0.45, 0, 0.2, 1);
+}
+.flyerBad {
+  background: var(--ifm-color-danger-contrast-background);
+  color: var(--ifm-color-danger-dark);
+  border-color: var(--ifm-color-danger);
+}
+
+/* ---- the phase panel ---- */
+.panel {
+  min-height: 3rem;
+  margin-top: 0.25rem;
+}
+.idleHint,
+.travelCap {
+  font-size: 0.875rem;
+  color: var(--ifm-color-emphasis-700);
+  line-height: 1.55;
+  padding: 0.75rem 0.875rem;
+  background: var(--ifm-color-emphasis-100);
+  border-radius: 8px;
+}
+.travelCap {
+  text-align: center;
+  font-weight: 600;
+  font-style: italic;
+}
+.panelCap {
+  font-size: 0.83rem;
+  color: var(--ifm-color-emphasis-700);
+  margin-bottom: 0.5rem;
+}
+.fade {
+  animation: fade 0.35s ease;
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.hint {
+  font-size: 0.75rem;
+  color: var(--ifm-color-emphasis-600);
+  margin-top: 0.5rem;
+  font-style: italic;
+}
+
+/* content that appears as the packet finishes its glide across the wire */
+.afterTravel {
+  animation: fade 0.45s ease 0.55s both;
+}
+
+/* seal arrow between plaintext and packet */
+.sealArrow {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ifm-color-primary);
+  margin: 0.7rem 0;
+}
+.sealArrow code {
+  font-size: 0.78rem;
+}
+
+/* nonce explainer under the sealed packet */
+.nonceCallout {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--ifm-color-emphasis-800);
+  background: var(--ifm-color-info-contrast-background);
+  border: 1px solid var(--ifm-color-info);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  margin-top: 0.625rem;
+}
+.nonceCallout .seg_nonce {
+  font-weight: 800;
+}
+.nonceCallout .linkBtn {
+  display: inline-block;
+  margin-left: 0.4rem;
+  color: var(--ifm-color-info-dark);
+}
+
+/* ---- plaintext char cells ---- */
+.charRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.charCell {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.95rem;
+  min-width: 1.6rem;
+  text-align: center;
+  padding: 0.35rem 0.2rem;
+  border-radius: 4px;
+  border: 1px solid var(--ifm-color-primary);
+  background: var(--ifm-color-primary-contrast-background);
+  color: var(--ifm-color-primary);
+}
+
+/* ---- packet bytes ---- */
+.packet {
+  margin: 0.25rem 0 0.5rem;
+}
+.segLabels {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.4rem;
+}
+.byteWrap {
+  position: relative;
+  transition: transform 0.8s ease, opacity 0.8s ease;
+  transform-origin: left center;
+}
+.shrinking {
+  transform: scale(0.32);
+  opacity: 0.15;
+}
+.byteGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  transition: filter 0.3s ease;
+}
+.byteGridLocked {
+  filter: blur(2.5px) grayscale(0.4);
+}
+.byte {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.8125rem;
+  min-width: 1.9rem;
+  text-align: center;
+  padding: 0.3rem 0.25rem;
+  border-radius: 4px;
+  border: 1px solid var(--ifm-color-emphasis-200);
+}
+.byteIn {
+  animation: byteIn 0.5s ease both;
+}
+@keyframes byteIn {
+  from {
+    opacity: 0;
+    transform: translateY(-7px) scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.seg_nonce {
+  color: var(--ifm-color-info-dark);
+}
+.byte.seg_nonce {
+  background: var(--ifm-color-info-contrast-background);
+}
+.seg_ct {
+  color: var(--ifm-color-emphasis-700);
+}
+.byte.seg_ct {
+  background: var(--ifm-color-emphasis-100);
+}
+.seg_tag {
+  color: var(--ifm-color-warning-dark);
+}
+.byte.seg_tag {
+  background: var(--ifm-color-warning-contrast-background);
+}
+.byte.tampered {
+  box-shadow: inset 0 0 0 2rem var(--ifm-color-danger);
+  color: #fff;
+  border-color: var(--ifm-color-danger-dark);
+}
+.lockOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--ifm-color-danger-dark);
+  background: rgba(255, 255, 255, 0.35);
+  border-radius: 6px;
+}
+[data-theme='dark'] .lockOverlay {
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
+}
+.lockIcon {
+  font-size: 1.1rem;
+}
+
+/* ---- Eve brute-force panel ---- */
+.brute {
+  margin: 0.875rem 0;
+  border: 1px solid var(--ifm-color-danger);
+  border-radius: 10px;
+  padding: 0.875rem 1rem;
+  background: var(--ifm-color-danger-contrast-background);
+}
+.bruteHead {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--ifm-color-emphasis-900);
+  margin-bottom: 0.75rem;
+}
+.bruteCounter {
+  margin-bottom: 0.875rem;
+}
+.bruteBarTrack {
+  height: 0.55rem;
+  border-radius: 999px;
+  background: var(--ifm-color-emphasis-200);
+  overflow: hidden;
+}
+.bruteBarFill {
+  height: 100%;
+  background: var(--ifm-color-danger);
+  border-radius: 999px;
+  transition: width 0.2s linear;
+}
+.bruteCounterText {
+  font-size: 0.78rem;
+  font-family: var(--ifm-font-family-monospace);
+  color: var(--ifm-color-emphasis-800);
+  margin-top: 0.35rem;
+}
+.bruteSpeeds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  margin-bottom: 0.875rem;
+}
+.bruteSpeedsLabel {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--ifm-color-emphasis-700);
+  margin-right: 0.2rem;
+}
+.bruteSpeedBtn {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--ifm-color-emphasis-400);
+  background: var(--ifm-background-surface-color);
+  color: var(--ifm-color-emphasis-800);
+  cursor: pointer;
+}
+.bruteSpeedBtn:hover {
+  border-color: var(--ifm-color-danger);
+}
+.bruteSpeedOn {
+  background: var(--ifm-color-danger);
+  color: #fff;
+  border-color: var(--ifm-color-danger);
+}
+.bruteVerdict {
+  text-align: center;
+  font-size: 0.83rem;
+  color: var(--ifm-color-emphasis-800);
+}
+.bruteYears {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--ifm-color-danger-dark);
+  margin: 0.25rem 0 0.1rem;
+  line-height: 1.1;
+}
+.bruteUniverses {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--ifm-color-emphasis-700);
+}
+.bruteNote {
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--ifm-color-emphasis-700);
+  margin-top: 0.75rem;
+  padding-top: 0.625rem;
+  border-top: 1px dashed var(--ifm-color-danger);
+}
+
+.tamperBeat {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  margin-top: 0.75rem;
+  padding: 0.7rem 0.875rem;
+  border-radius: 8px;
+  background: var(--ifm-color-danger-contrast-background);
+  color: var(--ifm-color-danger-dark);
+  border: 1px solid var(--ifm-color-danger);
+}
+
+/* ---- verdicts + Eve-vs-Bob contrast ---- */
+.verdictOk,
+.verdictFail,
+.verdictPending {
+  padding: 0.7rem 0.875rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  border: 1px solid transparent;
+}
+.verdictOk {
+  background: var(--ifm-color-success-contrast-background);
+  color: var(--ifm-color-success-dark);
+  border-color: var(--ifm-color-success);
+}
+.verdictFail {
+  background: var(--ifm-color-danger-contrast-background);
+  color: var(--ifm-color-danger-dark);
+  border-color: var(--ifm-color-danger);
+}
+.verdictPending {
+  background: var(--ifm-color-emphasis-100);
+  color: var(--ifm-color-emphasis-600);
+  font-style: italic;
+}
+.contrast {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-top: 0.875rem;
+}
+.contrastEve,
+.contrastBob {
+  text-align: center;
+  padding: 0.875rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+.contrastEve {
+  background: var(--ifm-color-danger-contrast-background);
+  border-color: var(--ifm-color-danger);
+}
+.contrastBob {
+  background: var(--ifm-color-success-contrast-background);
+  border-color: var(--ifm-color-success);
+}
+.contrastWho {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--ifm-color-emphasis-700);
+}
+.contrastBig {
+  font-size: 1.35rem;
+  font-weight: 800;
+  line-height: 1.15;
+  margin: 0.3rem 0 0.15rem;
+}
+.contrastEve .contrastBig {
+  color: var(--ifm-color-danger-dark);
+}
+.contrastBob .contrastBig {
+  color: var(--ifm-color-success-dark);
+}
+.contrastSub {
+  font-size: 0.72rem;
+  color: var(--ifm-color-emphasis-600);
+}
+
+/* ============================================================
+   2. Eve's attacks strip
+   ============================================================ */
+.attacks {
+  margin: 1.25rem 0;
+}
+.attacksIntro {
+  font-size: 0.9rem;
+  color: var(--ifm-color-emphasis-700);
+  margin-bottom: 0.875rem;
+}
+.attackGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(195px, 1fr));
+  gap: 0.75rem;
+}
+.attackCard {
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 10px;
+  padding: 0.75rem 0.875rem;
+  background: var(--ifm-background-surface-color);
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.attackCard:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+.attackRejected {
+  border-left: 4px solid var(--ifm-color-success);
+}
+.attackAccepted {
+  border-left: 4px solid var(--ifm-color-warning);
+}
+.attackOpen {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+.attackTop {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.attackIcon {
+  font-size: 1rem;
+}
+.attackName {
+  font-weight: 800;
+  font-size: 0.875rem;
+}
+.attackPill {
+  margin-left: auto;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: 999px;
+}
+.attackRejected .attackPill {
+  background: var(--ifm-color-success-contrast-background);
+  color: var(--ifm-color-success-dark);
+}
+.attackAccepted .attackPill {
+  background: var(--ifm-color-warning-contrast-background);
+  color: var(--ifm-color-warning-dark);
+}
+.attackDoes {
+  font-size: 0.8rem;
+  color: var(--ifm-color-emphasis-700);
+  margin-top: 0.4rem;
+  line-height: 1.4;
+}
+.attackWhy {
+  font-size: 0.8rem;
+  color: var(--ifm-color-emphasis-800);
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--ifm-color-emphasis-300);
+  line-height: 1.5;
+}
+.attackRecovered {
+  margin-top: 0.4rem;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.78rem;
+  color: var(--ifm-color-warning-dark);
+}
+.attacksFoot {
+  font-size: 0.8125rem;
+  color: var(--ifm-color-emphasis-700);
+  margin-top: 0.875rem;
+  line-height: 1.5;
+}
+
+/* ============================================================
+   3. Limits → fixes board
+   ============================================================ */
+.board {
+  margin: 1.25rem 0;
+}
+.boardIntro {
+  font-size: 0.9rem;
+  color: var(--ifm-color-emphasis-700);
+  margin-bottom: 0.875rem;
+}
+.boardGrid {
+  display: grid;
+  grid-template-columns: 1fr auto 1.1fr;
+  gap: 0.5rem 0.75rem;
+  align-items: stretch;
+}
+.boardHead {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-bottom: 0.15rem;
+}
+.boardHeadLimit {
+  color: var(--ifm-color-danger-dark);
+}
+.boardHeadArrow {
+  /* spacer above the arrow column */
+}
+.boardHeadFix {
+  color: var(--ifm-color-success-dark);
+}
+.boardLimit {
+  font-size: 0.83rem;
+  line-height: 1.4;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  background: var(--ifm-color-danger-contrast-background);
+  color: var(--ifm-color-emphasis-900);
+  border: 1px solid var(--ifm-color-danger);
+}
+.boardArrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  color: var(--ifm-color-emphasis-500);
+}
+.boardFix {
+  font-size: 0.83rem;
+  line-height: 1.4;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  background: var(--ifm-color-success-contrast-background);
+  color: var(--ifm-color-emphasis-900);
+  border: 1px solid var(--ifm-color-success);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  justify-content: space-between;
+}
+.boardTag {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--ifm-color-success);
+  color: #fff;
+}
+.boardTagSoon {
+  background: var(--ifm-color-primary);
+}
+.soonBadge {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+@media (max-width: 700px) {
+  .boardGrid {
+    grid-template-columns: 1fr;
+  }
+  .boardArrow {
+    transform: rotate(90deg);
+    padding: 0.1rem 0;
+  }
+  .boardHeadArrow {
+    display: none;
+  }
+  .contrast {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Respect reduced-motion: keep highlights, drop glides/scale/cascade. */
+@media (prefers-reduced-motion: reduce) {
+  .flyer {
+    transition: opacity 0.2s ease;
+  }
+  .actorActive {
+    transform: none;
+  }
+  .byteWrap,
+  .shrinking,
+  .byteIn,
+  .fade {
+    transition: none;
+    animation: none;
+    transform: none;
+  }
+}
