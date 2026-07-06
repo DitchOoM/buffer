@@ -116,6 +116,30 @@ class RoundTripTest {
     }
 
     @Test
+    fun readInto_exactFit_sourceExhaustedAndDestinationFullSimultaneously_returnsFullAmount() {
+        // Pins the boundary case where the last chunk both fills dst to capacity and
+        // exhausts src at the same time: the loop must exit on the byteCount check
+        // (dst-full) without issuing a further readAtMostTo probe that would observe EOF.
+        val expected = patternBytes(256)
+        val src = readableBufferOf(expected).asRawSource()
+        val dst = BufferFactory.Default.allocate(256)
+        val moved = src.readInto(dst, 256L)
+        assertEquals(256L, moved, "readInto returns the full byteCount, not a truncated amount")
+        dst.resetForRead()
+        assertContentEquals(expected, ByteArray(256) { dst.readByte() })
+    }
+
+    @Test
+    fun readInto_onAlreadyExhaustedSource_returnsZeroNotNegativeOne() {
+        // RawSource.readAtMostTo() uses the -1 EOF convention, but readInto() folds that
+        // into a plain 0 total — it never propagates -1 to its own caller.
+        val src = readableBufferOf(ByteArray(0)).asRawSource()
+        val dst = BufferFactory.Default.allocate(16)
+        val moved = src.readInto(dst)
+        assertEquals(0L, moved, "readInto returns 0, never -1, when the source starts at EOF")
+    }
+
+    @Test
     fun transferTo_movesEntireSource() {
         val expected = patternBytes(5000)
         val src = readableBufferOf(expected).asRawSource()
