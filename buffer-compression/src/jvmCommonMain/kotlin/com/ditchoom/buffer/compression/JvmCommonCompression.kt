@@ -19,6 +19,11 @@ actual val supportsStatefulFlush: Boolean = true
 // sign: +15 zlib-format, -15 raw-deflate). No public JDK API reaches it.
 actual val supportsCustomWindowBits: Boolean = false
 
+// java.util.zip.{Deflater,Inflater} both expose setDictionary on every supported JDK/Android
+// API level (the byte[] overload predates Java 1.2); the ByteBuffer overload used internally
+// requires JDK 11 / Android API 35+, with an array-based fallback below that.
+actual val supportsPresetDictionary: Boolean = true
+
 /**
  * JVM/Android implementation delegating to streaming compression.
  */
@@ -26,9 +31,11 @@ actual fun compress(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
+    dictionary: ReadBuffer?,
 ): CompressionResult =
     try {
-        val compressor = StreamingCompressor.create(algorithm, level)
+        requireDictionarySupport(algorithm, dictionary)
+        val compressor = StreamingCompressor.create(algorithm, level, dictionary = dictionary)
         val outputChunks = mutableListOf<ReadBuffer>()
         var totalSize = 0
 
@@ -64,9 +71,11 @@ actual fun compress(
 actual fun decompress(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm,
+    dictionary: ReadBuffer?,
 ): CompressionResult =
     try {
-        val decompressor = StreamingDecompressor.create(algorithm)
+        requireDictionarySupport(algorithm, dictionary)
+        val decompressor = StreamingDecompressor.create(algorithm, dictionary = dictionary)
         val outputChunks = mutableListOf<ReadBuffer>()
         var totalSize = 0
 

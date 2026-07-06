@@ -26,28 +26,34 @@ actual fun StreamingCompressor.Companion.create(
     bufferFactory: BufferFactory,
     outputBufferSize: Int,
     windowBits: WindowBits,
-): StreamingCompressor =
-    when (algorithm) {
+    dictionary: ReadBuffer?,
+): StreamingCompressor {
+    requireDictionarySupport(algorithm, dictionary)
+    return when (algorithm) {
         CompressionAlgorithm.Gzip -> JvmGzipStreamingCompressor(level, bufferFactory, outputBufferSize)
         CompressionAlgorithm.Deflate ->
-            JvmDeflateStreamingCompressor(level, nowrap = false, bufferFactory, outputBufferSize)
+            JvmDeflateStreamingCompressor(level, nowrap = false, bufferFactory, outputBufferSize, dictionary)
         CompressionAlgorithm.Raw ->
-            JvmDeflateStreamingCompressor(level, nowrap = true, bufferFactory, outputBufferSize)
+            JvmDeflateStreamingCompressor(level, nowrap = true, bufferFactory, outputBufferSize, dictionary)
     }
+}
 
 actual fun StreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     bufferFactory: BufferFactory,
     outputBufferSize: Int,
     expectedSize: Int,
-): StreamingDecompressor =
-    when (algorithm) {
+    dictionary: ReadBuffer?,
+): StreamingDecompressor {
+    requireDictionarySupport(algorithm, dictionary)
+    return when (algorithm) {
         CompressionAlgorithm.Gzip -> JvmGzipStreamingDecompressor(bufferFactory, outputBufferSize, expectedSize)
         CompressionAlgorithm.Deflate ->
-            JvmInflateStreamingDecompressor(nowrap = false, bufferFactory, outputBufferSize, expectedSize)
+            JvmInflateStreamingDecompressor(nowrap = false, bufferFactory, outputBufferSize, expectedSize, dictionary)
         CompressionAlgorithm.Raw ->
-            JvmInflateStreamingDecompressor(nowrap = true, bufferFactory, outputBufferSize, expectedSize)
+            JvmInflateStreamingDecompressor(nowrap = true, bufferFactory, outputBufferSize, expectedSize, dictionary)
     }
+}
 
 // =============================================================================
 // Shared Helpers - ByteBuffer overloads require JDK 11+ / Android API 35+
@@ -218,6 +224,63 @@ private fun CRC32.updateFrom(buffer: ReadBuffer): Int {
 }
 
 /**
+ * Materializes an optional dictionary [ReadBuffer] into an owned JVM [ByteBuffer], consuming
+ * the source buffer fully (the "consume once, retain internally" contract on
+ * [StreamingCompressor.Companion.create] / [StreamingDecompressor.Companion.create]). The
+ * returned buffer is re-applied across multiple reset() cycles by rewinding it before each
+ * use — see [setDictionaryFrom].
+ */
+private fun BufferFactory.materializeDictionary(dictionary: ReadBuffer?): ByteBuffer? {
+    if (dictionary == null) return null
+    val owned = allocate(dictionary.remaining())
+    owned.write(dictionary)
+    owned.resetForRead()
+    return (owned as ReadBuffer).jvmByteBufferOrNull()
+        ?: error("BufferFactory allocation did not produce a JVM-backed buffer")
+}
+
+/**
+ * Sets [dictionary] as the preset dictionary, using the ByteBuffer overload (JDK 11+ /
+ * Android API 35+) when available, with the same array/copy fallback chain as [setInputFrom].
+ * Rewinds [dictionary] first so it can be reapplied across multiple calls (e.g. after
+ * [Deflater.reset] / [Inflater.reset], which do not retain a previously set dictionary).
+ */
+private fun Deflater.setDictionaryFrom(dictionary: ByteBuffer) {
+    dictionary.rewind()
+    try {
+        setDictionary(dictionary)
+        return
+    } catch (_: NoSuchMethodError) {
+        // ByteBuffer overload not available (JDK < 11), use fallback
+    }
+    if (dictionary.hasArray()) {
+        setDictionary(dictionary.array(), dictionary.arrayOffset(), dictionary.remaining())
+        return
+    }
+    val data = ByteArray(dictionary.remaining())
+    dictionary.get(data)
+    setDictionary(data)
+}
+
+/** See [Deflater.setDictionaryFrom]. */
+private fun Inflater.setDictionaryFrom(dictionary: ByteBuffer) {
+    dictionary.rewind()
+    try {
+        setDictionary(dictionary)
+        return
+    } catch (_: NoSuchMethodError) {
+        // ByteBuffer overload not available (JDK < 11), use fallback
+    }
+    if (dictionary.hasArray()) {
+        setDictionary(dictionary.array(), dictionary.arrayOffset(), dictionary.remaining())
+        return
+    }
+    val data = ByteArray(dictionary.remaining())
+    dictionary.get(data)
+    setDictionary(data)
+}
+
+/**
  * Emits a partial buffer if it has data.
  */
 private inline fun emitPartialBuffer(
@@ -276,10 +339,17 @@ private class JvmDeflateStreamingCompressor(
     nowrap: Boolean,
     override val bufferFactory: BufferFactory,
     private val outputBufferSize: Int,
+    dictionary: ReadBuffer? = null,
 ) : StreamingCompressor {
     private val deflater = Deflater(level.value, nowrap)
+    private val dictionaryBuffer: ByteBuffer? = bufferFactory.materializeDictionary(dictionary)
     private var currentOutput: ReadWriteBuffer? = null
     private var closed = false
+
+    init {
+        // Must be set immediately after construction, before the first deflate() call.
+        dictionaryBuffer?.let { deflater.setDictionaryFrom(it) }
+    }
 
     override fun compress(
         input: ReadBuffer,
@@ -305,6 +375,9 @@ private class JvmDeflateStreamingCompressor(
 
     override fun reset() {
         deflater.reset()
+        // deflateReset does not retain a previously set dictionary; reapply immediately,
+        // before any subsequent deflate() call.
+        dictionaryBuffer?.let { deflater.setDictionaryFrom(it) }
         currentOutput = null
     }
 
@@ -480,15 +553,26 @@ private class JvmGzipStreamingCompressor(
 // =============================================================================
 
 private class JvmInflateStreamingDecompressor(
-    nowrap: Boolean,
+    private val nowrap: Boolean,
     override val bufferFactory: BufferFactory,
     outputBufferSize: Int,
     expectedSize: Int,
+    dictionary: ReadBuffer? = null,
 ) : StreamingDecompressor {
     private val inflater = Inflater(nowrap)
     private val effectiveBufferSize = if (expectedSize > 0) minOf(expectedSize, outputBufferSize) else outputBufferSize
+    private val dictionaryBuffer: ByteBuffer? = bufferFactory.materializeDictionary(dictionary)
     private var currentOutput: ReadWriteBuffer? = null
     private var closed = false
+
+    init {
+        // Raw deflate has no in-band Z_NEED_DICT signal, so the dictionary must be applied
+        // eagerly, before the first inflate() call. Zlib-wrapped (nowrap=false) streams
+        // signal via needsDictionary() instead — applied reactively in drainInflater.
+        if (nowrap) {
+            dictionaryBuffer?.let { inflater.setDictionaryFrom(it) }
+        }
+    }
 
     override fun decompress(
         input: ReadBuffer,
@@ -522,6 +606,11 @@ private class JvmInflateStreamingDecompressor(
 
     override fun reset() {
         inflater.reset()
+        // inflateReset does not retain a previously set dictionary; reapply for raw mode
+        // immediately (see the same note in init). Zlib-wrapped mode reapplies reactively.
+        if (nowrap) {
+            dictionaryBuffer?.let { inflater.setDictionaryFrom(it) }
+        }
         currentOutput = null
     }
 
@@ -551,6 +640,11 @@ private class JvmInflateStreamingDecompressor(
                 }
                 count == 0 -> {
                     if (inflater.needsDictionary()) {
+                        val dict = dictionaryBuffer
+                        if (dict != null) {
+                            inflater.setDictionaryFrom(dict)
+                            continue
+                        }
                         throw CompressionException("Dictionary required")
                     }
                     break
@@ -568,17 +662,19 @@ actual fun SuspendingStreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
     bufferFactory: BufferFactory,
+    dictionary: ReadBuffer?,
 ): SuspendingStreamingCompressor =
     SyncWrappingSuspendingCompressor(
-        StreamingCompressor.create(algorithm, level, bufferFactory),
+        StreamingCompressor.create(algorithm, level, bufferFactory, dictionary = dictionary),
     )
 
 actual fun SuspendingStreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     bufferFactory: BufferFactory,
+    dictionary: ReadBuffer?,
 ): SuspendingStreamingDecompressor =
     SyncWrappingSuspendingDecompressor(
-        StreamingDecompressor.create(algorithm, bufferFactory),
+        StreamingDecompressor.create(algorithm, bufferFactory, dictionary = dictionary),
     )
 
 private class JvmGzipStreamingDecompressor(

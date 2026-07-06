@@ -217,6 +217,9 @@ suspend inline fun <R> StreamingDecompressor.useSuspending(
  *   sign/offset to zlib's `deflateInit2` (see [resolveWindowBits]).
  *   Note: JVM's java.util.zip.Deflater does not support custom window sizes; this parameter
  *   is silently ignored on JVM. Apple and JS/Wasm also currently ignore it.
+ * @param dictionary Optional preset dictionary (see [CompressionAlgorithm.supportsDictionary]).
+ *   Consumed once; the compressor retains its own copy and reapplies it automatically after
+ *   every [StreamingCompressor.reset] — the caller does not need to resupply it per message.
  */
 expect fun StreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Deflate,
@@ -224,6 +227,7 @@ expect fun StreamingCompressor.Companion.create(
     bufferFactory: BufferFactory = BufferFactory.Default,
     outputBufferSize: Int = 32768,
     windowBits: WindowBits = WindowBits.Default,
+    dictionary: ReadBuffer? = null,
 ): StreamingCompressor
 
 /**
@@ -233,12 +237,15 @@ expect fun StreamingCompressor.Companion.create(
  * @param bufferFactory Factory for allocating output buffers.
  * @param outputBufferSize Size of output buffers (default 32KB).
  * @param expectedSize Optional hint for expected decompressed size. Used to pre-allocate buffers.
+ * @param dictionary The same preset dictionary passed to the matching [StreamingCompressor],
+ *   consumed once and reapplied automatically after every [StreamingDecompressor.reset].
  */
 expect fun StreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Deflate,
     bufferFactory: BufferFactory = BufferFactory.Default,
     outputBufferSize: Int = 32768,
     expectedSize: Int = 0,
+    dictionary: ReadBuffer? = null,
 ): StreamingDecompressor
 
 // ============================================================================
@@ -366,6 +373,7 @@ expect fun SuspendingStreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Deflate,
     level: CompressionLevel = CompressionLevel.Default,
     bufferFactory: BufferFactory = BufferFactory.Default,
+    dictionary: ReadBuffer? = null,
 ): SuspendingStreamingCompressor
 
 /**
@@ -374,6 +382,7 @@ expect fun SuspendingStreamingCompressor.Companion.create(
 expect fun SuspendingStreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Deflate,
     bufferFactory: BufferFactory = BufferFactory.Default,
+    dictionary: ReadBuffer? = null,
 ): SuspendingStreamingDecompressor
 
 // ============================================================================

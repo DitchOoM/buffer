@@ -210,11 +210,12 @@ internal actual fun JsByteArray.toPlatformBuffer(bufferFactory: BufferFactory): 
 
 @JsFun(
     """
-(input, algorithm, level, windowBits) => {
+(input, algorithm, level, windowBits, dictionary) => {
     const m = 'zl' + 'ib';
     const zlib = require(m);
     const options = { level: level };
     if (windowBits !== 0) options.windowBits = windowBits;
+    if (dictionary != null) options.dictionary = dictionary;
     switch (algorithm) {
         case 0: return zlib.deflateSync(input, options);
         case 1: return zlib.gzipSync(input, options);
@@ -229,6 +230,7 @@ private external fun jsZlibSync(
     algorithm: Int,
     level: Int,
     windowBits: Int,
+    dictionary: JsAny?,
 ): JsAny
 
 internal actual fun nodeZlibSync(
@@ -236,7 +238,8 @@ internal actual fun nodeZlibSync(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
     windowBits: WindowBits,
-): JsByteArray = JsByteArray(jsZlibSync(input.ref, algorithm.toOrdinal(), level.value, windowBits.sizeLog2))
+    dictionary: JsByteArray?,
+): JsByteArray = JsByteArray(jsZlibSync(input.ref, algorithm.toOrdinal(), level.value, windowBits.sizeLog2, dictionary?.ref))
 
 @JsFun(
     """
@@ -270,14 +273,19 @@ internal actual fun nodeZlibSyncFlush(
 
 @JsFun(
     """
-(input, algorithm) => {
+(input, algorithm, dictionary) => {
     const m = 'zl' + 'ib';
     const zlib = require(m);
     switch (algorithm) {
-        case 0: return zlib.inflateSync(input);
+        case 0: {
+            const options = {};
+            if (dictionary != null) options.dictionary = dictionary;
+            return zlib.inflateSync(input, options);
+        }
         case 1: return zlib.gunzipSync(input);
         case 2: {
             const options = { finishFlush: zlib.constants.Z_SYNC_FLUSH };
+            if (dictionary != null) options.dictionary = dictionary;
             return zlib.inflateRawSync(input, options);
         }
         default: throw new Error('Unknown algorithm: ' + algorithm);
@@ -288,12 +296,14 @@ internal actual fun nodeZlibSyncFlush(
 private external fun jsZlibDecompressSync(
     input: JsAny,
     algorithm: Int,
+    dictionary: JsAny?,
 ): JsAny
 
 internal actual fun nodeZlibDecompressSync(
     input: JsByteArray,
     algorithm: CompressionAlgorithm,
-): JsByteArray = JsByteArray(jsZlibDecompressSync(input.ref, algorithm.toOrdinal()))
+    dictionary: JsByteArray?,
+): JsByteArray = JsByteArray(jsZlibDecompressSync(input.ref, algorithm.toOrdinal(), dictionary?.ref))
 
 // ============================================================================
 // Browser CompressionStream / DecompressionStream
@@ -355,11 +365,12 @@ internal actual class NodeTransformHandle(
 
 @JsFun(
     """
-(algorithm, level, windowBits) => {
+(algorithm, level, windowBits, dictionary) => {
     const m = 'zl' + 'ib';
     const zlib = require(m);
     const options = { level: level };
     if (windowBits !== 0) options.windowBits = windowBits;
+    if (dictionary != null) options.dictionary = dictionary;
     switch (algorithm) {
         case 0: return zlib.createDeflate(options);
         case 1: return zlib.createGzip(options);
@@ -373,25 +384,28 @@ private external fun jsCreateCompressStream(
     algorithm: Int,
     level: Int,
     windowBits: Int,
+    dictionary: JsAny?,
 ): JsAny
 
 internal actual fun createCompressStream(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
     windowBits: WindowBits,
+    dictionary: JsByteArray?,
 ): NodeTransformHandle {
-    val handle = jsCreateCompressStream(algorithm.toOrdinal(), level.value, windowBits.sizeLog2)
+    val handle = jsCreateCompressStream(algorithm.toOrdinal(), level.value, windowBits.sizeLog2, dictionary?.ref)
     return NodeTransformHandle(handle)
 }
 
 @JsFun(
     """
-(algorithm, windowBits) => {
+(algorithm, windowBits, dictionary) => {
     const m = 'zl' + 'ib';
     const zlib = require(m);
     const options = {};
     if (algorithm === 2) options.finishFlush = zlib.constants.Z_SYNC_FLUSH;
     if (windowBits !== 0) options.windowBits = windowBits;
+    if (dictionary != null) options.dictionary = dictionary;
     switch (algorithm) {
         case 0: return zlib.createInflate(options);
         case 1: return zlib.createGunzip(options);
@@ -404,12 +418,14 @@ internal actual fun createCompressStream(
 private external fun jsCreateDecompressStream(
     algorithm: Int,
     windowBits: Int,
+    dictionary: JsAny?,
 ): JsAny
 
 internal actual fun createDecompressStream(
     algorithm: CompressionAlgorithm,
     windowBits: WindowBits,
-): NodeTransformHandle = NodeTransformHandle(jsCreateDecompressStream(algorithm.toOrdinal(), windowBits.sizeLog2))
+    dictionary: JsByteArray?,
+): NodeTransformHandle = NodeTransformHandle(jsCreateDecompressStream(algorithm.toOrdinal(), windowBits.sizeLog2, dictionary?.ref))
 
 @JsFun(
     """
@@ -597,10 +613,11 @@ internal actual fun zlibFinishFlag(): Int = jsZFinish()
 
 @JsFun(
     """
-(inputs, algorithm, level) => {
+(inputs, algorithm, level, dictionary) => {
     const m = 'zl' + 'ib';
     const zlib = require(m);
     const options = { level: level };
+    if (dictionary != null) options.dictionary = dictionary;
     let stream;
     switch (algorithm) {
         case 0: stream = zlib.createDeflate(options); break;
@@ -622,27 +639,34 @@ internal actual fun zlibFinishFlag(): Int = jsZFinish()
 }
 """,
 )
-private external fun jsTransformCompressOneShot(inputs: JsAny, algorithm: Int, level: Int): JsAny // Promise
+private external fun jsTransformCompressOneShot(
+    inputs: JsAny,
+    algorithm: Int,
+    level: Int,
+    dictionary: JsAny?,
+): JsAny // Promise
 
 internal actual suspend fun nodeTransformCompressOneShot(
     inputs: List<JsByteArray>,
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
+    dictionary: JsByteArray?,
 ): JsByteArray {
     val jsInputs = jsNewArray()
     for (input in inputs) jsArrayPush(jsInputs, input.ref)
-    val promise = jsTransformCompressOneShot(jsInputs, algorithm.toOrdinal(), level.value)
+    val promise = jsTransformCompressOneShot(jsInputs, algorithm.toOrdinal(), level.value, dictionary?.ref)
     val result = promise.unsafeCast<Promise<JsAny?>>().await() as JsAny
     return JsByteArray(result)
 }
 
 @JsFun(
     """
-(inputs, algorithm) => {
+(inputs, algorithm, dictionary) => {
     const m = 'zl' + 'ib';
     const zlib = require(m);
     const options = {};
     if (algorithm === 2) options.finishFlush = zlib.constants.Z_SYNC_FLUSH;
+    if (dictionary != null) options.dictionary = dictionary;
     let stream;
     switch (algorithm) {
         case 0: stream = zlib.createInflate(options); break;
@@ -664,15 +688,16 @@ internal actual suspend fun nodeTransformCompressOneShot(
 }
 """,
 )
-private external fun jsTransformDecompressOneShot(inputs: JsAny, algorithm: Int): JsAny // Promise
+private external fun jsTransformDecompressOneShot(inputs: JsAny, algorithm: Int, dictionary: JsAny?): JsAny // Promise
 
 internal actual suspend fun nodeTransformDecompressOneShot(
     inputs: List<JsByteArray>,
     algorithm: CompressionAlgorithm,
+    dictionary: JsByteArray?,
 ): JsByteArray {
     val jsInputs = jsNewArray()
     for (input in inputs) jsArrayPush(jsInputs, input.ref)
-    val promise = jsTransformDecompressOneShot(jsInputs, algorithm.toOrdinal())
+    val promise = jsTransformDecompressOneShot(jsInputs, algorithm.toOrdinal(), dictionary?.ref)
     val result = promise.unsafeCast<Promise<JsAny?>>().await() as JsAny
     return JsByteArray(result)
 }

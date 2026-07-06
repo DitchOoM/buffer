@@ -20,21 +20,30 @@ actual val supportsStatefulFlush: Boolean by lazy(LazyThreadSafetyMode.NONE) { i
 // (SuspendingStreamingCompressor.Companion.create) doesn't take it; future API expansion.
 actual val supportsCustomWindowBits: Boolean by lazy(LazyThreadSafetyMode.NONE) { isNodeJs }
 
-// JsInterop. Node's synchronous zlib throws an opaque JS `Error` on malformed
-// input; across the Kotlin/JS FFI boundary that surfaces only as a broad type,
-// so the catch is intentionally wide. The cause is preserved in the Failure.
+// Node's zlib bindings accept a `dictionary` option; the browser CompressionStream/
+// DecompressionStream Web API has no dictionary parameter at all.
+actual val supportsPresetDictionary: Boolean by lazy(LazyThreadSafetyMode.NONE) { isNodeJs }
+
+// JsInterop. Node's synchronous zlib throws an opaque native JS `Error` on malformed
+// input or a missing/incorrect preset dictionary (Z_NEED_DICT / Z_DATA_ERROR). A raw
+// JS Error thrown across the Kotlin/JS FFI boundary is only guaranteed catchable by
+// `Throwable`, not narrower Kotlin exception types, so the catch is intentionally the
+// broadest type. The cause is preserved in the Failure.
 @Suppress("TooGenericExceptionCaught")
 actual fun compress(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
+    dictionary: ReadBuffer?,
 ): CompressionResult =
     if (isNodeJs) {
         try {
+            requireDictionarySupport(algorithm, dictionary)
             val input = buffer.toJsByteArrayView() // zero-copy: sync zlib consumes immediately
-            val compressed = nodeZlibSync(input, algorithm, level)
+            val dict = dictionary?.toJsByteArrayView()
+            val compressed = nodeZlibSync(input, algorithm, level, dictionary = dict)
             CompressionResult.Success(compressed.toPlatformBuffer() as PlatformBuffer)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             CompressionResult.Failure("Compression failed: ${e.message}", e)
         }
     } else {
@@ -44,17 +53,23 @@ actual fun compress(
         )
     }
 
-@Suppress("TooGenericExceptionCaught") // JS FFI: Node zlib throws opaque JS Error; cause preserved.
+// See the comment on compress() above: a raw JS Error is only guaranteed catchable by
+// Throwable across the Kotlin/JS FFI boundary (e.g. inflateSync with a missing or
+// incorrect preset dictionary throws this way).
+@Suppress("TooGenericExceptionCaught")
 actual fun decompress(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm,
+    dictionary: ReadBuffer?,
 ): CompressionResult =
     if (isNodeJs) {
         try {
+            requireDictionarySupport(algorithm, dictionary)
             val input = buffer.toJsByteArrayView() // zero-copy: sync zlib consumes immediately
-            val decompressed = nodeZlibDecompressSync(input, algorithm)
+            val dict = dictionary?.toJsByteArrayView()
+            val decompressed = nodeZlibDecompressSync(input, algorithm, dict)
             CompressionResult.Success(decompressed.toPlatformBuffer() as PlatformBuffer)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             CompressionResult.Failure("Decompression failed: ${e.message}", e)
         }
     } else {
