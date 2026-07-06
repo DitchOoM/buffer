@@ -1,8 +1,12 @@
 public final class com/ditchoom/buffer/ktor/BufferCodecConverter : io/ktor/serialization/ContentConverter {
-	public fun <init> (Lcom/ditchoom/buffer/codec/Codec;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/EncodeContext;Lcom/ditchoom/buffer/codec/DecodeContext;)V
-	public synthetic fun <init> (Lcom/ditchoom/buffer/codec/Codec;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/EncodeContext;Lcom/ditchoom/buffer/codec/DecodeContext;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public static final field Companion Lcom/ditchoom/buffer/ktor/BufferCodecConverter$Companion;
+	public fun <init> (Lcom/ditchoom/buffer/codec/Codec;Lkotlin/reflect/KClass;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/EncodeContext;Lcom/ditchoom/buffer/codec/DecodeContext;)V
+	public synthetic fun <init> (Lcom/ditchoom/buffer/codec/Codec;Lkotlin/reflect/KClass;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/EncodeContext;Lcom/ditchoom/buffer/codec/DecodeContext;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun deserialize (Ljava/nio/charset/Charset;Lio/ktor/util/reflect/TypeInfo;Lio/ktor/utils/io/ByteReadChannel;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public fun serialize (Lio/ktor/http/ContentType;Ljava/nio/charset/Charset;Lio/ktor/util/reflect/TypeInfo;Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class com/ditchoom/buffer/ktor/BufferCodecConverter$Companion {
 }
 
 public final class com/ditchoom/buffer/ktor/ChannelBridgeKt {

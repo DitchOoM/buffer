@@ -19,6 +19,9 @@ private const val MAX_ENCODE_CAPACITY = 1 shl 30 // 1 GiB safety ceiling
  * [WireSize.BackPatch] encoders the capacity starts from an estimate and doubles on
  * [BufferOverflowException] until the value fits (capped at 1 GiB).
  *
+ * Frees the allocated buffer on any exception from [Encoder.encode] — not just the
+ * overflow-retry path — so a failing encode never leaks native memory.
+ *
  * @param value the value to encode.
  * @param factory allocator for the destination buffer (default [BufferFactory.Default]).
  * @param context encode context threaded to the encoder (default [EncodeContext.Empty]).
@@ -35,14 +38,19 @@ public fun <T> Encoder<T>.encodeToPlatformBuffer(
         }
     while (true) {
         val buffer = factory.allocate(capacity)
+        var freeOnExit = true
         try {
             encode(buffer, value, context)
             buffer.resetForRead()
+            freeOnExit = false
             return buffer
         } catch (overflow: BufferOverflowException) {
+            freeOnExit = false
             buffer.freeNativeMemory()
             if (capacity >= MAX_ENCODE_CAPACITY) throw overflow
             capacity = minOf(capacity * 2, MAX_ENCODE_CAPACITY)
+        } finally {
+            if (freeOnExit) buffer.freeNativeMemory()
         }
     }
 }
