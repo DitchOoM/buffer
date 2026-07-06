@@ -254,9 +254,9 @@ benchmark {
     }
     configurations {
         register("quick") {
-            warmups = 1
-            iterations = 3
-            iterationTime = 300
+            warmups = 2
+            iterations = 4
+            iterationTime = 500
             iterationTimeUnit = "ms"
         }
     }

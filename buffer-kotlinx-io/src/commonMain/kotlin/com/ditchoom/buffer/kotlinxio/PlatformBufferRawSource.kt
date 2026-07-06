@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.kotlinxio
 
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.managedMemoryAccess
 import kotlinx.io.Buffer
 import kotlinx.io.RawSource
 import kotlinx.io.UnsafeIoApi
@@ -19,12 +20,14 @@ import kotlinx.io.unsafe.UnsafeBufferOperations
  * sides are independent afterwards. Mutating [source] (or its backing) after
  * a read does not change bytes already handed to the sink.
  *
- * The copy lands **directly** in the sink's tail segment via
- * [UnsafeBufferOperations.writeToTail]: the segment transfer pulls a managed
- * backing array or native memory straight into the segment (on JVM/Android an
+ * When [source] exposes [com.ditchoom.buffer.ManagedMemoryAccess] the copy is
+ * a single `Buffer.write(backingArray, …)` (benchmarked fastest for managed
+ * backings at every size). Otherwise the copy lands **directly** in the sink's
+ * tail segment via [UnsafeBufferOperations.writeToTail]: the segment transfer
+ * pulls native memory straight into the segment array (on JVM/Android an
  * array-backed ByteBuffer additionally takes a `System.arraycopy` shortcut —
- * see `readIntoSegment`). This is a single copy for **both** backings — there
- * is no intermediate scratch array.
+ * see `readIntoSegment`). Single copy for **both** backings — there is no
+ * intermediate scratch array.
  *
  * ## Lifetime
  *
@@ -65,27 +68,55 @@ internal class PlatformBufferRawSource(
      * Copies exactly [n] bytes from [source] into [sink], returning `n` as a [Long].
      * Split out of [readAtMostTo] so that function keeps a single, easy-to-follow exit
      * path for its three distinct outcomes (empty request / EOF / bytes copied).
+     *
+     * Re-resolves the access path on every read: for a freed pooled buffer this throws
+     * the underlying use-after-free IllegalStateException (fail-fast) instead of aliasing
+     * a cached backing array that may have been reclaimed.
      */
-    @OptIn(UnsafeIoApi::class)
     private fun copyAtMostTo(
         sink: Buffer,
         n: Int,
     ): Long {
+        val mma = source.managedMemoryAccess
+        if (mma != null) {
+            // Managed backing: one Buffer.write straight from the backing array. Benchmarks
+            // (JVM + macosArm64) show this beats the segment-level path at small sizes and
+            // ties at large ones, so it stays the managed fast path.
+            val pos = source.position()
+            val start = mma.arrayOffset + pos
+            sink.write(mma.backingArray, start, start + n)
+            source.position(pos + n)
+        } else {
+            copySegmented(sink, n)
+        }
+        return n.toLong()
+    }
+
+    /**
+     * Native-memory path: copies [n] bytes directly into the sink's tail segment array,
+     * one segment at a time — a single copy, with no intermediate scratch array.
+     *
+     * The lambda captures only immutable state (`request` and `this`); capturing a mutable
+     * loop variable would box it in a Ref wrapper and allocate per iteration on Kotlin/Native.
+     */
+    @OptIn(UnsafeIoApi::class)
+    private fun copySegmented(
+        sink: Buffer,
+        n: Int,
+    ) {
         var remaining = n
         while (remaining > 0) {
             val request = minOf(remaining, UnsafeBufferOperations.maxSafeWriteCapacity)
-            val written =
-                UnsafeBufferOperations.writeToTail(sink, request) { bytes, startIndex, endIndexExclusive ->
-                    val toCopy = minOf(remaining, endIndexExclusive - startIndex)
-                    // Single copy for BOTH backings: readIntoSegment pulls a managed backing array or
-                    // native memory straight into the segment and advances position. For a freed pooled
-                    // buffer this throws the use-after-free IllegalStateException (fail-fast).
-                    source.readIntoSegment(bytes, startIndex, toCopy)
-                    toCopy
-                }
-            remaining -= written
+            // writeToTail guarantees at least `request` writable bytes, so the lambda copies
+            // exactly `request`. readIntoSegment pulls native memory straight into the segment
+            // and advances position; a freed pooled buffer throws its use-after-free
+            // IllegalStateException (fail-fast).
+            UnsafeBufferOperations.writeToTail(sink, request) { bytes, startIndex, _ ->
+                source.readIntoSegment(bytes, startIndex, request)
+                request
+            }
+            remaining -= request
         }
-        return n.toLong()
     }
 
     override fun close() {
