@@ -112,6 +112,7 @@ fun appleSwiftShim(
             inputs.file(src)
             inputs.property("triple", triple)
             inputs.property("sdkPath", sdkPath)
+            inputs.property("runtimeCompatibilityVersion", "none")
             outputs.file(archive)
             doFirst { outDir.mkdirs() }
             commandLine(
@@ -123,6 +124,17 @@ fun appleSwiftShim(
                 triple,
                 "-sdk",
                 sdkPath,
+                // #253: at deployment targets below iOS 17, swiftc emits force-load references to the
+                // Swift back-compat archives (swiftCompatibility56/Concurrency/Packs), which exist ONLY
+                // in the Xcode toolchain dir — not the SDK — so any link that doesn't carry a
+                // machine-specific -L (notably a consumer's cinterop static-cache link) fails with
+                // `_swift_FORCE_LOAD$_swiftCompatibility*` unresolved. The shim uses no Swift feature
+                // that needs back-deployment patching (no async/await, no parameter packs; plain @_cdecl
+                // over CryptoKit), so opt out of the compat archives entirely. Everything else the shim
+                // auto-links (swiftCore, swiftFoundation, CryptoKit, ...) resolves from the SDK, which
+                // every ld invocation already searches via -syslibroot.
+                "-runtime-compatibility-version",
+                "none",
                 "-O",
                 "-o",
                 archive.absolutePath,
@@ -419,16 +431,13 @@ kotlin {
                     "lib${shim.archiveName}.a",
                     "-libraryPath",
                     shim.outDir.absolutePath,
-                    // #253: bake the toolchain's per-SDK Swift runtime lib dir into the cinterop
-                    // klib's own link options. The Swift shim archive auto-links the Swift back-compat
-                    // libs (swiftCompatibility56 / swiftCompatibilityConcurrency / swiftCompatibilityPacks);
-                    // on Xcode 26.5 / K/N 2.4.0 the pre-built cinterop *static cache* link doesn't inherit
-                    // the final-binary linkerOpts below, so those symbols go unresolved (`ld: symbol(s)
-                    // not found`). The compat libs live in the same per-SDK dir as swiftCore/swiftFoundation
-                    // (shim.swiftLibDir = .../usr/lib/swift/<sdk>), so a single -L there resolves them for
-                    // the cached-link path too, without disabling the native cache.
-                    "-linkerOpts",
-                    "-L${shim.swiftLibDir}",
+                    // #253 root fix lives in the swiftc invocation above (-runtime-compatibility-version
+                    // none): the shim archive embedded in this klib carries no Swift back-compat
+                    // force-load references, so neither our link nor a consumer's cinterop static-cache
+                    // link needs the toolchain's Swift lib dir. Do NOT pass -linkerOpts -L<toolchain>
+                    // here: it bakes a machine-specific Xcode path into the published artifact and did
+                    // not propagate to consumers' cache links anyway (klib manifests from extraOpts
+                    // carried no linkerOpts key — see the 6.4.0 regression report on #253).
                 )
             }
             // The cinterop task is registered by the KMP plugin under a derived name; wire the
