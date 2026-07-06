@@ -12,6 +12,10 @@ import kotlin.test.assertTrue
  * The pools recover from a factory [OutOfMemoryError] by draining their cached buffers,
  * hinting a GC cycle, and retrying once — the Android/ART fragmentation mitigation from
  * ANDROID_ART_ALLOCATOR.md. A second consecutive failure propagates unchanged.
+ *
+ * Lives in jvmCommonTest (JVM + Android): the retry path only exists where a factory allocation
+ * can throw [OutOfMemoryError], and that type is JVM/Native-only — it doesn't resolve on JS/Wasm,
+ * where `allocateOrReclaim` is a passthrough. This is exactly the platform the fix targets.
  */
 class PoolOomResilienceTests {
     /** Delegates to a real factory but throws [OutOfMemoryError] for the first [failuresRemaining] allocations. */
