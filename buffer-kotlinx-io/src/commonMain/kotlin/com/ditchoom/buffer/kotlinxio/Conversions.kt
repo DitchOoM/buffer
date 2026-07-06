@@ -13,12 +13,30 @@ import kotlinx.io.buffered
 
 /**
  * Reads up to [byteCount] bytes from this [RawSource] into [dst], advancing
- * [dst]'s write position. Returns the number of bytes actually transferred
- * (may be less than [byteCount] if the source is exhausted first).
+ * [dst]'s write position. Returns the number of bytes actually transferred.
  *
  * Copy semantics: bytes are copied out of the source into [dst]. Defaults to
  * filling [dst]'s remaining capacity. Writing past [dst]'s capacity fails fast
  * with the underlying overflow exception.
+ *
+ * ## Termination
+ *
+ * The read loop is driven by two independent stop conditions, and **the
+ * byteCount check is evaluated first on every iteration**:
+ *  - **Destination full** — once `total == byteCount` the loop exits without
+ *    issuing another read, even if the source also happens to be exhausted at
+ *    that exact boundary. The two conditions cannot race: if the last chunk
+ *    both fills [dst] to [byteCount] and drains the source, this function
+ *    returns [byteCount] directly — it never performs a further probe read
+ *    that would observe EOF.
+ *  - **Source exhausted** — if [RawSource.readAtMostTo] signals EOF (its `-1`
+ *    convention) before `byteCount` bytes have been copied, the loop stops
+ *    and this function returns the partial `total` copied so far.
+ *
+ * **EOF convention differs from [RawSource.readAtMostTo]:** that underlying
+ * call returns `-1` at EOF, but this function folds EOF into its running
+ * total and **never returns a negative value** — a source that is already
+ * exhausted on entry returns `0`, not `-1`.
  */
 public fun RawSource.readInto(
     dst: WriteBuffer,
@@ -43,8 +61,14 @@ public fun RawSource.readInto(
  * source is exhausted, advancing [dst]'s write position. Returns the total
  * number of bytes transferred.
  *
- * Copy semantics. Fails fast with the underlying overflow exception if the
- * source produces more bytes than [dst]'s remaining capacity.
+ * Copy semantics. Unlike [readInto], there is no `byteCount` stop condition —
+ * termination is driven **only** by the source reaching EOF (delegated to
+ * kotlinx-io's `Source.transferTo`, which reads in a loop until its own
+ * `readAtMostTo` returns `-1`). If the source produces more bytes than
+ * [dst]'s remaining capacity, the write into [dst] fails fast with the
+ * underlying overflow exception — there is no "destination full" outcome to
+ * race against EOF, only success (source exhausted, [dst] had enough room) or
+ * an overflow exception (source outlasted [dst]'s capacity).
  */
 public fun RawSource.transferTo(dst: WriteBuffer): Long = buffered().transferTo(dst.asRawSink())
 
