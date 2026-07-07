@@ -738,7 +738,16 @@ annotation class DispatchValue
  * @see ForwardCompatibleFactoryKey
  */
 @Target(AnnotationTarget.CLASS)
-@Retention(AnnotationRetention.BINARY)
+// SOURCE, not BINARY: `@ForwardCompatible` is a pure compile-time codegen
+// directive, read by KSP only on the same-round *source* sealed parent it
+// annotates (discovery is driven by `@ProtocolMessage`, which stays BINARY).
+// SOURCE annotations remain visible on source symbols, so codegen is
+// unaffected — while dropping the annotation from both the `.class` file and
+// Kotlin's `@Metadata` keeps its nested-`KClass` arg (`unknown = ...::class`)
+// out of the metadata that proguard-core 9.3.2 cannot resolve. Contrast with
+// `@ProtocolMessage` / `@EnumDefault`, which are read off *dependency-module*
+// types and must stay BINARY.
+@Retention(AnnotationRetention.SOURCE)
 annotation class ForwardCompatible(
     val unknown: kotlin.reflect.KClass<*>,
 )

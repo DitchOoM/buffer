@@ -75,6 +75,20 @@ to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **`@ForwardCompatible` is now `@Retention(SOURCE)` (was `BINARY`).** The
+  annotation is a pure compile-time codegen directive: KSP reads it only off the
+  same-round *source* sealed parent it annotates (discovery is driven by
+  `@ProtocolMessage`, which stays `BINARY`), so SOURCE retention leaves codegen
+  and the generated `Codec` unchanged. It does, however, drop the annotation —
+  and its nested-`KClass` argument `unknown = <Owner>.Unknown::class` — from the
+  annotated class's bytecode **and** its Kotlin `@Metadata`. That KClass
+  reference (embedded by Kotlin 2.4's annotations-in-metadata) is unresolvable
+  by proguard-core 9.3.2, which aborts a ProGuard shrink of any consumer that
+  applies `@ForwardCompatible` to a nested-class sink (a false positive: the
+  nested class is present and kept by ordinary bytecode refs). Moving to SOURCE
+  fixes that at the source without a consumer-side `-dontwarn`. `@ProtocolMessage`
+  and `@EnumDefault` stay `BINARY` — those are read off *dependency-module* types
+  and must survive to bytecode.
 - **Generated codecs report Exact `wireSize` for runtime-exact variable fields.**
   A `@ProtocolMessage` whose only variable-width fields are variable-length
   `@UseCodec` scalars (varint wrappers — `VariableLengthCodec.wireSize` is
