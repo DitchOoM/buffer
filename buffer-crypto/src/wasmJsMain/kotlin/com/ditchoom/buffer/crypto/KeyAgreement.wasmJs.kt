@@ -49,11 +49,12 @@ private external fun jsX25519Supported(): Boolean
       var subtle = globalThis.crypto.subtle;
       var alg = (curveName === 'X25519') ? { name: 'X25519' } : { name: 'ECDH', namedCurve: curveName };
       function hex(u8) { var s = ''; for (var i = 0; i < u8.length; i++) { var h = u8[i].toString(16); if (h.length < 2) h = '0' + h; s += h; } return s; }
+      function b64uToHex(s) { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) { s += '='; } var bin = atob(s); var h = ''; for (var i = 0; i < bin.length; i++) { h += bin.charCodeAt(i).toString(16).padStart(2, '0'); } return h; }
       try {
         var kp = await subtle.generateKey(alg, true, ['deriveBits']);
         var rawPub = new Uint8Array(await subtle.exportKey('raw', kp.publicKey));
-        var pkcs8 = new Uint8Array(await subtle.exportKey('pkcs8', kp.privateKey));
-        return hex(rawPub) + '|' + hex(pkcs8);
+        var jwk = await subtle.exportKey('jwk', kp.privateKey);
+        return hex(rawPub) + '|' + b64uToHex(jwk.d);
       } catch (e) {
         // A missing algorithm (e.g. X25519 on an older engine) surfaces as NotSupportedError →
         // map to the sentinel so the Kotlin layer throws UnsupportedOperationException, not a leak.

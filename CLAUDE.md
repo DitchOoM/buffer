@@ -141,40 +141,49 @@ val nsMutableData = byteArray.toNSMutableData()
 - `WriteBuffer` - Write operations (relative and absolute)
 - `BufferFactory` - Memory allocation strategy: `Default` (native), `managed()` (heap), `shared()` (IPC), `deterministic()` (explicit cleanup)
 
-### Scoped Buffers (`com.ditchoom.buffer`)
+### Deterministic Memory (`com.ditchoom.buffer`)
 
-High-performance buffers with deterministic memory management for performance-critical code:
-
-- `BufferScope` - Manages lifetime of scoped buffers; all buffers freed when scope closes
-- `ScopedBuffer` - Buffer with guaranteed native memory access and explicit cleanup
-- `withScope { }` - Recommended entry point; creates scope and ensures cleanup
+`BufferFactory.deterministic()` returns buffers that implement `CloseableBuffer` for
+guaranteed resource cleanup independent of garbage collection. Pair it with the
+`PlatformBuffer.use { }` extension (or call `freeNativeMemory()` explicitly) so native
+memory is released immediately rather than waiting on GC:
 
 ```kotlin
-withScope { scope ->
-    val buffer = scope.allocate(8192)
+BufferFactory.deterministic().allocate(8192).use { buffer ->
     buffer.writeInt(42)
     buffer.resetForRead()
     val value = buffer.readInt()
-
-    // Native address for FFI/JNI
-    val address = buffer.nativeAddress
-} // All buffers freed here
+} // freed immediately when the block exits, no GC needed
 ```
+
+`deterministic(threadConfined: Boolean = false)` takes an optional `threadConfined`
+parameter: on JVM 21+ it selects `Arena.ofConfined()` instead of the default
+`Arena.ofShared()`; it is ignored on every other platform.
 
 **Platform Implementations:**
 
 | Platform | Implementation | Allocation |
 |----------|---------------|------------|
-| JVM 21+  | `FfmBufferScope` | FFM Arena + MemorySegment |
-| JVM < 21 | `UnsafeBufferScope` | Unsafe.allocateMemory |
-| Android  | `UnsafeBufferScope` | Unsafe.allocateMemory |
-| Native   | `NativeBufferScope` | malloc/free |
-| WASM     | `WasmBufferScope` | LinearMemory |
-| JS       | `JsBufferScope` | GC-managed ArrayBuffer |
+| JVM 21+  | `FfmBuffer` | FFM `Arena.ofShared()` / `Arena.ofConfined()` |
+| JVM 9-20 | `DeterministicDirectJvmBuffer` | DirectByteBuffer + `Unsafe.invokeCleaner` |
+| JVM 8 / Android | `DeterministicUnsafeJvmBuffer` | `Unsafe.allocateMemory`/`freeMemory` |
+| Apple    | `MutableDataBuffer` | ARC-managed (already deterministic) |
+| Linux    | `NativeBuffer` | malloc/free |
+| WASM     | `LinearBuffer` | Linear memory (already deterministic) |
+| JS       | `JsBuffer` | GC-managed (no deterministic alternative) |
 
-**When to use ScopedBuffer vs PlatformBuffer:**
-- Use `ScopedBuffer` for: FFI/JNI interop, zero-copy I/O, avoiding GC pressure
-- Use `PlatformBuffer` for: General-purpose buffering, long-lived buffers
+**When to use `BufferFactory.deterministic()` vs `BufferFactory.Default`/pooling:**
+- Use `deterministic()` for: FFI/JNI interop, zero-copy I/O, and any path where you need
+  native memory freed at a precise point instead of waiting on GC.
+- Use `BufferFactory.Default` for: general-purpose, GC-managed buffering.
+- Use `BufferPool` (see below) instead when you're allocating/freeing the same size
+  repeatedly in a hot path — pooling amortizes allocation cost across reuses, whereas
+  `deterministic()` buffers are freed for good after each `use { }` block.
+
+`buffer.use { }` is safe to call on *any* `PlatformBuffer`, not just `CloseableBuffer`
+ones: it frees native memory for deterministic buffers, returns pooled buffers to their
+pool (decrementing refcount), and is a harmless no-op for GC-managed buffers and
+non-owning slices.
 
 ### Buffer Comparison & Search Methods
 
@@ -513,6 +522,7 @@ class ProtocolConnection(
 ## Platform Notes
 
 - **JVM/Android:** Direct ByteBuffers (`DirectJvmBuffer`) used by default; `HeapJvmBuffer` for `wrap()` and `BufferFactory.managed()`
+- **Android ART allocator behavior** (LOS vs non-moving space routing, fragmentation OOMs, emulator repro recipe): see `ANDROID_ART_ALLOCATOR.md`
 - **Android SharedMemory:** Use `BufferFactory.shared()` for zero-copy IPC via Parcelable (API 27+)
 - **Apple:** `MutableDataBuffer` wraps NSMutableData (native memory); `wrap(ByteArray)` returns `ByteArrayBuffer`
 - **Apple NSData interop:** Use `BufferFactory.Default.wrap(nsData)` or `BufferFactory.Default.wrap(nsMutableData)` for zero-copy Apple API interop

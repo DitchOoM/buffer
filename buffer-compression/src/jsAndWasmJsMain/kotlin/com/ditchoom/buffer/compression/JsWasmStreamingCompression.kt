@@ -16,51 +16,63 @@ actual fun StreamingCompressor.Companion.create(
     bufferFactory: BufferFactory,
     outputBufferSize: Int,
     windowBits: WindowBits,
-): StreamingCompressor =
-    if (isNodeJs) {
-        JsNodeStreamingCompressor(algorithm, level, bufferFactory, windowBits)
+    dictionary: ReadBuffer?,
+): StreamingCompressor {
+    requireDictionarySupport(algorithm, dictionary)
+    return if (isNodeJs) {
+        JsNodeStreamingCompressor(algorithm, level, bufferFactory, windowBits, dictionary?.toJsByteArray())
     } else {
         throw UnsupportedOperationException(
             "Synchronous streaming compression not supported in browser. " +
                 "Use SuspendingStreamingCompressor.create() instead.",
         )
     }
+}
 
 actual fun StreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     bufferFactory: BufferFactory,
     outputBufferSize: Int,
     expectedSize: Int,
-): StreamingDecompressor =
-    if (isNodeJs) {
-        JsNodeStreamingDecompressor(algorithm, bufferFactory)
+    dictionary: ReadBuffer?,
+): StreamingDecompressor {
+    requireDictionarySupport(algorithm, dictionary)
+    return if (isNodeJs) {
+        JsNodeStreamingDecompressor(algorithm, bufferFactory, dictionary?.toJsByteArray())
     } else {
         throw UnsupportedOperationException(
             "Synchronous streaming decompression not supported in browser. " +
                 "Use SuspendingStreamingDecompressor.create() instead.",
         )
     }
+}
 
 actual fun SuspendingStreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
     bufferFactory: BufferFactory,
-): SuspendingStreamingCompressor =
-    if (isNodeJs) {
-        NodeTransformStreamingCompressor(algorithm, level, bufferFactory)
+    dictionary: ReadBuffer?,
+): SuspendingStreamingCompressor {
+    requireDictionarySupport(algorithm, dictionary)
+    return if (isNodeJs) {
+        NodeTransformStreamingCompressor(algorithm, level, bufferFactory, dictionary?.toJsByteArray())
     } else {
         BrowserStreamingCompressor(algorithm, bufferFactory)
     }
+}
 
 actual fun SuspendingStreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     bufferFactory: BufferFactory,
-): SuspendingStreamingDecompressor =
-    if (isNodeJs) {
-        NodeTransformStreamingDecompressor(algorithm, bufferFactory)
+    dictionary: ReadBuffer?,
+): SuspendingStreamingDecompressor {
+    requireDictionarySupport(algorithm, dictionary)
+    return if (isNodeJs) {
+        NodeTransformStreamingDecompressor(algorithm, bufferFactory, dictionary?.toJsByteArray())
     } else {
         BrowserStreamingDecompressor(algorithm, bufferFactory)
     }
+}
 
 // ============================================================================
 // Node.js sync streaming (accumulate chunks, compress on flush/finish)
@@ -87,8 +99,9 @@ private class JsNodeStreamingCompressor(
     private val level: CompressionLevel,
     override val bufferFactory: BufferFactory,
     private val customWindowBits: WindowBits,
+    private val dictionary: JsByteArray? = null,
 ) : StreamingCompressor {
-    private var stream: NodeTransformHandle? = createCompressStream(algorithm, level, customWindowBits)
+    private var stream: NodeTransformHandle? = createCompressStream(algorithm, level, customWindowBits, dictionary)
     private val accumulatedChunks = mutableListOf<JsByteArray>()
     private var totalBytes = 0
     private var closed = false
@@ -136,12 +149,15 @@ private class JsNodeStreamingCompressor(
         // In-place handle reset (deflateReset) avoids destroying and reallocating the
         // C++ zlib handle on every message — critical under `no_context_takeover`
         // where the websocket layer calls reset() per message. Only allocate a fresh
-        // stream if `finish()` already destroyed it (`stream == null`).
+        // stream if `finish()` already destroyed it (`stream == null`), OR if a
+        // dictionary is set: Node's `stream.reset()` (deflateReset) does not retain a
+        // previously configured dictionary, unlike a fresh createCompressStream() call.
         val s = stream
-        if (s != null) {
+        if (s != null && dictionary == null) {
             s.resetState()
         } else {
-            stream = createCompressStream(algorithm, level, customWindowBits)
+            s?.destroy()
+            stream = createCompressStream(algorithm, level, customWindowBits, dictionary)
         }
     }
 
@@ -162,8 +178,9 @@ private class JsNodeStreamingCompressor(
 private class JsNodeStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
     override val bufferFactory: BufferFactory,
+    private val dictionary: JsByteArray? = null,
 ) : StreamingDecompressor {
-    private var stream: NodeTransformHandle? = createDecompressStream(algorithm)
+    private var stream: NodeTransformHandle? = createDecompressStream(algorithm, dictionary = dictionary)
     private val accumulatedChunks = mutableListOf<JsByteArray>()
     private var totalBytes = 0
     private var closed = false
@@ -212,12 +229,14 @@ private class JsNodeStreamingDecompressor(
     override fun reset() {
         accumulatedChunks.clear()
         totalBytes = 0
-        // Cheap in-place inflateReset — see JsNodeStreamingCompressor.reset for rationale.
+        // Cheap in-place inflateReset — see JsNodeStreamingCompressor.reset for rationale,
+        // including why a dictionary forces full stream recreation instead.
         val s = stream
-        if (s != null) {
+        if (s != null && dictionary == null) {
             s.resetState()
         } else {
-            stream = createDecompressStream(algorithm)
+            s?.destroy()
+            stream = createDecompressStream(algorithm, dictionary = dictionary)
         }
     }
 
@@ -330,6 +349,7 @@ private class NodeTransformStreamingCompressor(
     private val algorithm: CompressionAlgorithm,
     private val level: CompressionLevel,
     override val bufferFactory: BufferFactory,
+    private val dictionary: JsByteArray? = null,
 ) : SuspendingStreamingCompressor {
     private var stream: NodeTransformHandle? = null
     private var closed = false
@@ -340,7 +360,7 @@ private class NodeTransformStreamingCompressor(
     }
 
     private fun initStream() {
-        stream = createCompressStream(algorithm, level)
+        stream = createCompressStream(algorithm, level, dictionary = dictionary)
     }
 
     override suspend fun compress(input: ReadBuffer): List<ReadBuffer> {
@@ -388,6 +408,7 @@ private class NodeTransformStreamingCompressor(
 private class NodeTransformStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
     override val bufferFactory: BufferFactory,
+    private val dictionary: JsByteArray? = null,
 ) : SuspendingStreamingDecompressor {
     private var closed = false
     private val pendingChunks = mutableListOf<JsByteArray>()
@@ -404,7 +425,7 @@ private class NodeTransformStreamingDecompressor(
         if (pendingChunks.isEmpty()) return emptyList()
         val chunks = pendingChunks.toList()
         pendingChunks.clear()
-        val result = nodeTransformDecompressOneShot(chunks, algorithm)
+        val result = nodeTransformDecompressOneShot(chunks, algorithm, dictionary)
         return listOf(result.toPlatformBuffer(bufferFactory))
     }
 

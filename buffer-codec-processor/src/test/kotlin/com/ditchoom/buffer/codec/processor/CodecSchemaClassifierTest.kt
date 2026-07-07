@@ -99,7 +99,11 @@ class CodecSchemaClassifierTest {
         val drift =
             soleDrift(
                 msgRec("p.M", field(0, "a", "scalar:Int wire=4B order=Big")),
-                msgRec("p.M", field(0, "a", "scalar:Int wire=4B order=Big"), field(1, "b", "scalar:UByte wire=1B order=Big")),
+                msgRec(
+                    "p.M",
+                    field(0, "a", "scalar:Int wire=4B order=Big"),
+                    field(1, "b", "scalar:UByte wire=1B order=Big"),
+                ),
             )
         assertEquals(DriftSeverity.SAFE, drift.severity)
     }
@@ -109,7 +113,13 @@ class CodecSchemaClassifierTest {
         // inserting at position 1 shifts position 1's descriptor
         val drifts =
             CodecSchemaClassifier.classify(
-                listOf(msgRec("p.M", field(0, "a", "scalar:Int wire=4B order=Big"), field(1, "b", "scalar:UShort wire=2B order=Big"))),
+                listOf(
+                    msgRec(
+                        "p.M",
+                        field(0, "a", "scalar:Int wire=4B order=Big"),
+                        field(1, "b", "scalar:UShort wire=2B order=Big"),
+                    ),
+                ),
                 listOf(
                     msgRec(
                         "p.M",
@@ -158,7 +168,11 @@ class CodecSchemaClassifierTest {
     fun `remove message field is breaking`() {
         val drift =
             soleDrift(
-                msgRec("p.M", field(0, "a", "scalar:Int wire=4B order=Big"), field(1, "b", "scalar:UByte wire=1B order=Big")),
+                msgRec(
+                    "p.M",
+                    field(0, "a", "scalar:Int wire=4B order=Big"),
+                    field(1, "b", "scalar:UByte wire=1B order=Big"),
+                ),
                 msgRec("p.M", field(0, "a", "scalar:Int wire=4B order=Big")),
             )
         assertEquals(DriftSeverity.BREAKING, drift.severity)
@@ -215,7 +229,11 @@ class CodecSchemaClassifierTest {
         val drift =
             soleDrift(
                 sealedRec("p.S", "fixed-byte/1B", variants = arrayOf("0x01" to "A")),
-                sealedRec("p.S", "valueclass:p.Tag/2B,inner=UShort/Big,dispatchValue=type:Int", variants = arrayOf("0x01" to "A")),
+                sealedRec(
+                    "p.S",
+                    "valueclass:p.Tag/2B,inner=UShort/Big,dispatchValue=type:Int",
+                    variants = arrayOf("0x01" to "A"),
+                ),
             )
         assertEquals(DriftSeverity.BREAKING, drift.severity)
         assertTrue(drift.detail.contains("discriminator"))
@@ -235,7 +253,13 @@ class CodecSchemaClassifierTest {
     @Test
     fun `add ForwardCompatible is safe and remove is breaking`() {
         val without = sealedRec("p.S", "fixed-byte/1B", variants = arrayOf("0x01" to "A"))
-        val with = sealedRec("p.S", "fixed-byte/1B", forwardCompatible = "p.S.Unknown", variants = arrayOf("0x01" to "A"))
+        val with =
+            sealedRec(
+                "p.S",
+                "fixed-byte/1B",
+                forwardCompatible = "p.S.Unknown",
+                variants = arrayOf("0x01" to "A"),
+            )
         assertEquals(DriftSeverity.SAFE, soleDrift(without, with).severity)
         val removed = soleDrift(with, without)
         assertEquals(DriftSeverity.BREAKING, removed.severity)

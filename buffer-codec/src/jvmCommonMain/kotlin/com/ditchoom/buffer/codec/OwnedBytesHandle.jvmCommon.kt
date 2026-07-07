@@ -1,3 +1,5 @@
+@file:Suppress("MatchingDeclarationName") // actual-file MPP naming: OwnedBytesHandle.jvmCommon.kt pairs with expect
+
 package com.ditchoom.buffer.codec
 
 import com.ditchoom.buffer.PlatformBuffer

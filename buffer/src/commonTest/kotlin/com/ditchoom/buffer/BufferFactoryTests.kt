@@ -90,9 +90,9 @@ class BufferFactoryTests {
     @Test
     fun deterministicFactoryUseWithException() {
         val buffer = deterministicAllocateOrSkip(64) ?: return
-        assertFailsWith<RuntimeException> {
+        assertFailsWith<IllegalStateException> {
             buffer.use { _ ->
-                throw RuntimeException("test exception")
+                error("test exception")
             }
         }
     }
@@ -320,9 +320,9 @@ class BufferFactoryTests {
 
     @Test
     fun useHandlesException() {
-        assertFailsWith<RuntimeException> {
+        assertFailsWith<IllegalStateException> {
             BufferFactory.Default.allocate(16).use {
-                throw RuntimeException("test")
+                error("test")
             }
         }
     }

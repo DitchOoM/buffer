@@ -21,7 +21,7 @@ import com.squareup.kotlinpoet.TypeName
  * verified by the snapshot suite.
  */
 
-internal fun scalarHeaderBytes(shape: CodecShape): Int = shape.fields.sumOfFixedWireBytes().requireFixed("scalarHeaderBytes")
+internal fun CodecShape.scalarHeaderBytes(): Int = fields.sumOfFixedWireBytes().requireFixed("scalarHeaderBytes")
 
 internal fun appendDecodeScalar(
     body: CodeBlock.Builder,
@@ -247,9 +247,9 @@ internal fun appendEncodeGuard(
     val accessor = "value.${field.name}"
     val (lhs, maxLit) =
         when (field.kind) {
-            ScalarKind.ULong -> accessor to "((1uL shl ${8 * field.wireBytes}) - 1uL)"
-            ScalarKind.UInt -> accessor to "((1u shl ${8 * field.wireBytes}) - 1u)"
-            ScalarKind.UShort -> "$accessor.toUInt()" to "((1u shl ${8 * field.wireBytes}) - 1u)"
+            ScalarKind.ULong -> accessor to "((1uL shl ${Byte.SIZE_BITS * field.wireBytes}) - 1uL)"
+            ScalarKind.UInt -> accessor to "((1u shl ${Byte.SIZE_BITS * field.wireBytes}) - 1u)"
+            ScalarKind.UShort -> "$accessor.toUInt()" to "((1u shl ${Byte.SIZE_BITS * field.wireBytes}) - 1u)"
             // wireBytes < 1 is rejected by analyzeField
             ScalarKind.UByte -> return
             // signed kinds reject @WireBytes narrowing in analyzeField
@@ -946,8 +946,8 @@ internal fun appendEncodeConditionalLengthPrefixedUseCodecPayload(
     body.addStatement("%T.encode(buffer, %L, context)", inner.payloadCodecType, accessor)
     body.addStatement("val %L = buffer.position()", endPosVar)
     body.addStatement("val %L = %L - %L", byteCountVar, endPosVar, bodyStartVar)
-    if (inner.prefixWidth < 4) {
-        val maxValue = (1L shl (inner.prefixWidth * 8)) - 1
+    if (inner.prefixWidth < Int.SIZE_BYTES) {
+        val maxValue = (1L shl (inner.prefixWidth * Byte.SIZE_BITS)) - 1
         val widthName =
             when (inner.prefixWidth) {
                 1 -> "Byte"
@@ -1187,8 +1187,8 @@ internal fun appendLengthPrefixedStringEncode(
     // Runtime overflow guard. For 4-byte prefixes the max (UInt.MAX_VALUE =
     // 2^32-1) exceeds Int.MAX_VALUE, so a position-delta byte count can never
     // overflow it — the check would be dead code.
-    if (prefixWidth < 4) {
-        val maxValue = (1L shl (prefixWidth * 8)) - 1
+    if (prefixWidth < Int.SIZE_BYTES) {
+        val maxValue = (1L shl (prefixWidth * Byte.SIZE_BITS)) - 1
         val widthName =
             when (prefixWidth) {
                 1 -> "Byte"
@@ -1678,7 +1678,8 @@ internal fun appendDecodeEnum(
         )
     } else {
         body.addStatement(
-            "val %L = %T.entries.getOrElse(__%LOrdinal) { throw %T(fieldPath = %S, bufferPosition = buffer.position(), expected = %S, actual = __%LOrdinal.toString()) }",
+            "val %L = %T.entries.getOrElse(__%LOrdinal) { throw %T(fieldPath = %S, " +
+                "bufferPosition = buffer.position(), expected = %S, actual = __%LOrdinal.toString()) }",
             field.name,
             field.enumType,
             field.name,
@@ -1897,8 +1898,8 @@ internal fun appendEncodeLengthPrefixedUseCodecPayload(
     )
     body.addStatement("val %L = buffer.position()", endPosVar)
     body.addStatement("val %L = %L - %L", byteCountVar, endPosVar, bodyStartVar)
-    if (field.prefixWidth < 4) {
-        val maxValue = (1L shl (field.prefixWidth * 8)) - 1
+    if (field.prefixWidth < Int.SIZE_BYTES) {
+        val maxValue = (1L shl (field.prefixWidth * Byte.SIZE_BITS)) - 1
         val widthName =
             when (field.prefixWidth) {
                 1 -> "Byte"
@@ -1937,23 +1938,19 @@ internal fun appendEncodeLengthPrefixedUseCodecPayload(
  *
  * **Sealed elements** — variants commonly carry BackPatch-wireSize
  * fields (`@LengthPrefixed val: String`, `@When` trailers), so the
- * pre-measure `as WireSize.Exact` cast doesn't apply. Encode each
- * element into a scratch buffer first to capture the actual byte
- * count, then write the VBI prefix and bulk-copy:
+ * pre-measure `as WireSize.Exact` cast doesn't apply. Delegate to the
+ * runtime `LengthPrefixedListEncoder`, which stages the elements into a
+ * growable scratch to measure the exact body size, writes the VBI
+ * prefix, then bulk-copies the body:
  * ```
- * BufferFactory.Default.allocate(64, buffer.byteOrder).use { __<n>Scratch ->
- *     for (__elem in <accessor>) {
- *         ElementCodec.encode(__<n>Scratch, __elem, context)
- *     }
- *     val __<n>BodyBytes = __<n>Scratch.position()
- *     <codecType>.encode(buffer, __<n>BodyBytes.toUInt(), context)
- *     __<n>Scratch.resetForRead()
- *     buffer.write(__<n>Scratch)
- * }
+ * LengthPrefixedListEncoder.encode(
+ *     buffer, BufferFactory.Default, <codecType>, <accessor>, ElementCodec, context,
+ * )
  * ```
- * 64-byte starting allocation is a heuristic — `BufferFactory` grows
- * on demand for buffers that exceed it. Tunable per-field if a
- * measurable hot path emerges.
+ * The scratch grows on demand (via the codec module's
+ * `GrowableWriteBufferPool`), so a list section of any size encodes
+ * correctly. An earlier emit used a fixed 64-byte scratch that silently
+ * truncated sections over 64 bytes.
  *
  * **Data-class elements** — pre-measure body bytes via the element
  * codec's `wireSize as Exact`, write VBI prefix, iterate. BackPatch
@@ -1971,31 +1968,18 @@ internal fun appendEncodeLengthPrefixedListBody(
     namespacePrefix: String,
 ) {
     if (spec.elementIsBackPatch) {
-        val scratchVar = "__${namespacePrefix}Scratch"
-        val bodyBytesVar = "__${namespacePrefix}BodyBytes"
-        body.beginControlFlow(
-            "%T.%M.allocate(64, buffer.byteOrder).%M { %L ->",
+        // Elements are BackPatch-sized, so the body byte count isn't known until they're
+        // encoded. Stage into a growable scratch (via LengthPrefixedListEncoder) that grows
+        // to any size, measures the exact body, writes the length prefix, then bulk-copies.
+        body.addStatement(
+            "%T.encode(buffer, %T.%M, %T, %L, %T, context)",
+            LENGTH_PREFIXED_LIST_ENCODER_CN,
             BUFFER_FACTORY_CN,
             BUFFER_FACTORY_DEFAULT_MN,
-            BUFFER_USE_MN,
-            scratchVar,
-        )
-        body.beginControlFlow("for (__elem in %L)", accessor)
-        body.addStatement(
-            "%T.encode(%L, __elem, context)",
-            spec.elementCodecClassName,
-            scratchVar,
-        )
-        body.endControlFlow()
-        body.addStatement("val %L = %L.position()", bodyBytesVar, scratchVar)
-        body.addStatement(
-            "%T.encode(buffer, %L.toUInt(), context)",
             spec.codecType,
-            bodyBytesVar,
+            accessor,
+            spec.elementCodecClassName,
         )
-        body.addStatement("%L.resetForRead()", scratchVar)
-        body.addStatement("buffer.write(%L)", scratchVar)
-        body.endControlFlow()
     } else {
         val bodyBytesVar = "__${namespacePrefix}BodyBytes"
         body.addStatement(

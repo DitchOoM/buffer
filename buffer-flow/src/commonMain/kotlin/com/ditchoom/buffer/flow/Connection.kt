@@ -31,7 +31,8 @@ interface Connection<T> :
      * For single-stream transports (TCP): 0.
      * For in-memory test pairs: sequential counter.
      */
-    val id: Long
+    override val id: Long
 
-    suspend fun close()
+    /** Close the whole connection (re-abstracts [Sender.close], which is send-side-only). */
+    override suspend fun close()
 }

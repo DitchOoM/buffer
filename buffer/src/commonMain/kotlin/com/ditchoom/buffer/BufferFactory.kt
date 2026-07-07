@@ -2,11 +2,33 @@ package com.ditchoom.buffer
 
 import kotlin.math.roundToInt
 
+/** Largest code point encoded as a single UTF-8 byte (`0x7F`). */
+private const val UTF8_ONE_BYTE_MAX = 0x7F
+
+/** Largest code point encoded as two UTF-8 bytes (`0x7FF`). */
+private const val UTF8_TWO_BYTE_MAX = 0x7FF
+
+/** UTF-8 byte count for a code point that requires three bytes. */
+private const val UTF8_THREE_BYTES = 3
+
+/** UTF-8 byte count for a supplementary code point (surrogate pair → four bytes). */
+private const val UTF8_FOUR_BYTES = 4
+
 fun CharSequence.maxBufferSize(charset: Charset): Int = (charset.maxBytesPerChar * this.length).roundToInt()
 
+/**
+ * Encodes this string into a fresh [ReadBuffer].
+ *
+ * Defaults to [BufferFactory.managed] because the backing buffer is dropped without an
+ * explicit free (only its slice is returned): on platforms whose default factory hands
+ * out owning native buffers (Linux `NativeBuffer`, large Android allocations), a
+ * native-memory default would leak the staging allocation. Pass a [factory] explicitly
+ * to control the allocation — with an owning factory the caller is responsible for the
+ * backing memory's lifetime.
+ */
 fun String.toReadBuffer(
     charset: Charset = Charset.UTF8,
-    factory: BufferFactory = BufferFactory.Default,
+    factory: BufferFactory = BufferFactory.managed(),
 ): ReadBuffer {
     if (this == "") {
         return ReadBuffer.EMPTY_BUFFER
@@ -24,15 +46,15 @@ fun CharSequence.utf8Length(): Int {
     val len = length
     while (i < len) {
         val ch = get(i)
-        if (ch.code <= 0x7F) {
+        if (ch.code <= UTF8_ONE_BYTE_MAX) {
             count++
-        } else if (ch.code <= 0x7FF) {
+        } else if (ch.code <= UTF8_TWO_BYTE_MAX) {
             count += 2
         } else if (ch >= '\uD800' && ch.code < '\uDBFF'.code + 1) {
-            count += 4
+            count += UTF8_FOUR_BYTES
             ++i
         } else {
-            count += 3
+            count += UTF8_THREE_BYTES
         }
         i++
     }

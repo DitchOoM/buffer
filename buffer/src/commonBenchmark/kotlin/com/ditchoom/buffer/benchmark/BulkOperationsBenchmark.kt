@@ -62,8 +62,8 @@ open class BulkOperationsBenchmark {
         heapBuffer1.resetForRead()
         heapBuffer2.resetForRead()
 
-        intArray = IntArray(size64k / 4) { it }
-        shortArray = ShortArray(size64k / 2) { it.toShort() }
+        intArray = IntArray(size64k / Int.SIZE_BYTES) { it }
+        shortArray = ShortArray(size64k / Short.SIZE_BYTES) { it.toShort() }
     }
 
     // =========================================================================
@@ -77,11 +77,11 @@ open class BulkOperationsBenchmark {
     fun xorMask64kDirect(): Int {
         directBuffer1.position(0)
         directBuffer1.setLimit(size64k)
-        directBuffer1.xorMask(0x12345678)
+        directBuffer1.xorMask(WS_MASK)
         // XOR again to restore original data
         directBuffer1.position(0)
         directBuffer1.setLimit(size64k)
-        directBuffer1.xorMask(0x12345678)
+        directBuffer1.xorMask(WS_MASK)
         return directBuffer1.get(0).toInt()
     }
 
@@ -103,7 +103,7 @@ open class BulkOperationsBenchmark {
         val longLimit = size64k - 7
         while (i < longLimit) {
             directBuffer1[i] = directBuffer1.getLong(i) xor maskLong
-            i += 8
+            i += Long.SIZE_BYTES
         }
         while (i < size64k) {
             val maskByte =
@@ -121,7 +121,7 @@ open class BulkOperationsBenchmark {
         i = 0
         while (i < longLimit) {
             directBuffer1[i] = directBuffer1.getLong(i) xor maskLong
-            i += 8
+            i += Long.SIZE_BYTES
         }
         while (i < size64k) {
             val maskByte =
@@ -168,7 +168,7 @@ open class BulkOperationsBenchmark {
             if (directBuffer1.getLong(pos1 + i) != directBuffer2.getLong(pos2 + i)) {
                 return false
             }
-            i += 8
+            i += Long.SIZE_BYTES
         }
         // Remaining bytes
         while (i < size) {
@@ -208,13 +208,13 @@ open class BulkOperationsBenchmark {
         while (i < longLimit) {
             if (directBuffer1.getLong(pos1 + i) != directBuffer2.getLong(pos2 + i)) {
                 // Find exact byte
-                for (j in 0 until 8) {
+                for (j in 0 until Long.SIZE_BYTES) {
                     if (directBuffer1.get(pos1 + i + j) != directBuffer2.get(pos2 + i + j)) {
                         return i + j
                     }
                 }
             }
-            i += 8
+            i += Long.SIZE_BYTES
         }
         while (i < size) {
             if (directBuffer1.get(pos1 + i) != directBuffer2.get(pos2 + i)) {
@@ -255,15 +255,15 @@ open class BulkOperationsBenchmark {
         while (i < longLimit) {
             val xored = directBuffer1.getLong(pos + i) xor broadcastLong
             // Check if any byte is zero using the standard zero-byte detection trick
-            if ((xored - 0x0101010101010101L) and xored.inv() and (0x8080808080808080UL.toLong()) != 0L) {
+            if ((xored - ONES_LONG) and xored.inv() and HIGH_BITS_LONG != 0L) {
                 // Found a match in this 8-byte chunk - find exact position
-                for (j in 0 until 8) {
+                for (j in 0 until Long.SIZE_BYTES) {
                     if (directBuffer1.get(pos + i + j) == byte) {
                         return i + j
                     }
                 }
             }
-            i += 8
+            i += Long.SIZE_BYTES
         }
         // Remaining bytes
         while (i < size) {
@@ -285,7 +285,7 @@ open class BulkOperationsBenchmark {
     @Benchmark
     fun indexOfInt64kDirect(): Int {
         directBuffer1.position(0)
-        return directBuffer1.indexOf(0x7C7D7E7F)
+        return directBuffer1.indexOf(SEARCH_INT)
     }
 
     /**
@@ -294,7 +294,7 @@ open class BulkOperationsBenchmark {
     @Benchmark
     fun indexOfInt64kDirectAligned(): Int {
         directBuffer1.position(0)
-        return directBuffer1.indexOf(0x7C7D7E7F, aligned = true)
+        return directBuffer1.indexOf(SEARCH_INT, aligned = true)
     }
 
     /**
@@ -325,7 +325,7 @@ open class BulkOperationsBenchmark {
     @Benchmark
     fun indexOfLong64kDirect(): Int {
         directBuffer1.position(0)
-        return directBuffer1.indexOf(0x78797A7B7C7D7E7FL)
+        return directBuffer1.indexOf(SEARCH_LONG)
     }
 
     /**
@@ -334,7 +334,7 @@ open class BulkOperationsBenchmark {
     @Benchmark
     fun indexOfLong64kDirectAligned(): Int {
         directBuffer1.position(0)
-        return directBuffer1.indexOf(0x78797A7B7C7D7E7FL, aligned = true)
+        return directBuffer1.indexOf(SEARCH_LONG, aligned = true)
     }
 
     /**
@@ -385,7 +385,7 @@ open class BulkOperationsBenchmark {
         val longLimit = size64k - 7
         while (i < longLimit) {
             directBuffer1[i] = valueLong
-            i += 8
+            i += Long.SIZE_BYTES
         }
         while (i < size64k) {
             directBuffer1[i] = value
@@ -444,7 +444,7 @@ open class BulkOperationsBenchmark {
         directBuffer2.position(0)
         directBuffer1.position(0)
         directBuffer1.setLimit(size64k)
-        directBuffer1.xorMaskCopy(directBuffer2, 0x12345678)
+        directBuffer1.xorMaskCopy(directBuffer2, WS_MASK)
         return directBuffer1.get(0).toInt()
     }
 
@@ -469,10 +469,10 @@ open class BulkOperationsBenchmark {
     fun xorMask64kHeap(): Int {
         heapBuffer1.position(0)
         heapBuffer1.setLimit(size64k)
-        heapBuffer1.xorMask(0x12345678)
+        heapBuffer1.xorMask(WS_MASK)
         heapBuffer1.position(0)
         heapBuffer1.setLimit(size64k)
-        heapBuffer1.xorMask(0x12345678)
+        heapBuffer1.xorMask(WS_MASK)
         return heapBuffer1.get(0).toInt()
     }
 
@@ -481,7 +481,7 @@ open class BulkOperationsBenchmark {
         heapBuffer2.position(0)
         heapBuffer1.position(0)
         heapBuffer1.setLimit(size64k)
-        heapBuffer1.xorMaskCopy(heapBuffer2, 0x12345678)
+        heapBuffer1.xorMaskCopy(heapBuffer2, WS_MASK)
         return heapBuffer1.get(0).toInt()
     }
 
@@ -496,5 +496,13 @@ open class BulkOperationsBenchmark {
     fun indexOfByte64kHeap(): Int {
         heapBuffer1.position(0)
         return heapBuffer1.indexOf(0xFF.toByte())
+    }
+
+    private companion object {
+        private const val WS_MASK = 0x12345678
+        private const val SEARCH_INT = 0x7C7D7E7F
+        private const val SEARCH_LONG = 0x78797A7B7C7D7E7FL
+        private const val ONES_LONG = 0x0101010101010101L
+        private val HIGH_BITS_LONG = 0x8080808080808080UL.toLong()
     }
 }

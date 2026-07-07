@@ -1,5 +1,11 @@
 package com.ditchoom.buffer
 
+import com.ditchoom.buffer.BufferConstants.BYTE_1_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_2_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_3_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_MASK
+import com.ditchoom.buffer.BufferConstants.INT_MASK
+import com.ditchoom.buffer.BufferConstants.WORD_BYTE_MASK
 import js.buffer.BufferSource
 import js.buffer.SharedArrayBuffer
 import org.khronos.webgl.DataView
@@ -11,6 +17,9 @@ import org.khronos.webgl.set
 import web.encoding.TextDecoder
 import web.encoding.TextDecoderOptions
 import web.encoding.TextEncoder
+
+/** Second byte of an Int (`0x0000FF00`), used by the JS-side 32-bit byte-swap. */
+private const val SECOND_BYTE_MASK = 0xFF00
 
 class JsBuffer(
     val buffer: Int8Array,
@@ -79,13 +88,13 @@ class JsBuffer(
 
     override fun loadLong(index: Int): Long =
         if (littleEndian) {
-            val low = dataView.getInt32(index, true).toLong() and 0xFFFFFFFFL
-            val high = dataView.getInt32(index + 4, true).toLong()
-            (high shl 32) or low
+            val low = dataView.getInt32(index, true).toLong() and INT_MASK
+            val high = dataView.getInt32(index + Int.SIZE_BYTES, true).toLong()
+            (high shl Int.SIZE_BITS) or low
         } else {
             val high = dataView.getInt32(index, false).toLong()
-            val low = dataView.getInt32(index + 4, false).toLong() and 0xFFFFFFFFL
-            (high shl 32) or low
+            val low = dataView.getInt32(index + Int.SIZE_BYTES, false).toLong() and INT_MASK
+            (high shl Int.SIZE_BITS) or low
         }
 
     override fun storeLong(
@@ -94,10 +103,10 @@ class JsBuffer(
     ) {
         if (littleEndian) {
             dataView.setInt32(index, value.toInt(), true)
-            dataView.setInt32(index + 4, (value shr 32).toInt(), true)
+            dataView.setInt32(index + Int.SIZE_BYTES, (value shr Int.SIZE_BITS).toInt(), true)
         } else {
-            dataView.setInt32(index, (value shr 32).toInt(), false)
-            dataView.setInt32(index + 4, value.toInt(), false)
+            dataView.setInt32(index, (value shr Int.SIZE_BITS).toInt(), false)
+            dataView.setInt32(index + Int.SIZE_BYTES, value.toInt(), false)
         }
     }
 
@@ -141,14 +150,15 @@ class JsBuffer(
         val encoding =
             when (charset) {
                 Charset.UTF8 -> "utf-8"
-                Charset.UTF16 -> throw UnsupportedOperationException("Not sure how to implement")
                 Charset.UTF16BigEndian -> "utf-16be"
                 Charset.UTF16LittleEndian -> "utf-16le"
                 Charset.ASCII -> "ascii"
                 Charset.ISOLatin1 -> "iso-8859-1"
-                Charset.UTF32 -> throw UnsupportedOperationException("Not sure how to implement")
-                Charset.UTF32LittleEndian -> throw UnsupportedOperationException("Not sure how to implement")
-                Charset.UTF32BigEndian -> throw UnsupportedOperationException("Not sure how to implement")
+                Charset.UTF16,
+                Charset.UTF32,
+                Charset.UTF32LittleEndian,
+                Charset.UTF32BigEndian,
+                -> throw UnsupportedOperationException("Not sure how to implement")
             }
 
         @Suppress("UNCHECKED_CAST_TO_EXTERNAL_INTERFACE")
@@ -207,9 +217,19 @@ class JsBuffer(
             Charset.UTF8 -> {
                 val str = text.toString()
                 if (str.isEmpty()) return this
-                // Zero-alloc: TextEncoder.encodeInto() writes UTF-8 directly into the buffer
-                val target = Uint8Array(buffer.buffer, buffer.byteOffset + positionValue, capacity - positionValue)
+                // Zero-alloc: TextEncoder.encodeInto() writes UTF-8 directly into the buffer.
+                // Bound the target to the write window (limit), not capacity, so we never write
+                // past the limit; encodeInto() silently truncates when the target is too small,
+                // so compare code units read against the input length and throw on a short write.
+                val available = limitValue - positionValue
+                val target = Uint8Array(buffer.buffer, buffer.byteOffset + positionValue, available)
                 val result = textEncoder.asDynamic().encodeInto(str, target)
+                if ((result.read as Int) < str.length) {
+                    throw BufferOverflowException(
+                        "Buffer overflow: cannot encode UTF-8 string of ${str.length} char(s) at position " +
+                            "$positionValue (limit=$limitValue, remaining=$available)",
+                    )
+                }
                 positionValue += (result.written as Int)
             }
             else -> throw UnsupportedOperationException("Unable to encode in $charset. Must use Charset.UTF8")
@@ -222,10 +242,10 @@ class JsBuffer(
      * JS bitwise ops are 32-bit, so this is the widest we can go.
      */
     private fun reverseBytes(value: Int): Int =
-        ((value and 0xFF) shl 24) or
-            ((value and 0xFF00) shl 8) or
-            ((value ushr 8) and 0xFF00) or
-            ((value ushr 24) and 0xFF)
+        ((value and BYTE_MASK) shl BYTE_3_SHIFT) or
+            ((value and SECOND_BYTE_MASK) shl BYTE_1_SHIFT) or
+            ((value ushr BYTE_1_SHIFT) and SECOND_BYTE_MASK) or
+            ((value ushr BYTE_3_SHIFT) and BYTE_MASK)
 
     /**
      * XOR remaining 0-3 bytes after bulk Int32 processing.
@@ -237,15 +257,15 @@ class JsBuffer(
         maskOffset: Int,
         bytesProcessed: Int,
     ) {
-        val m0 = (mask ushr 24).toByte()
-        val m1 = (mask ushr 16).toByte()
-        val m2 = (mask ushr 8).toByte()
+        val m0 = (mask ushr BYTE_3_SHIFT).toByte()
+        val m1 = (mask ushr BYTE_2_SHIFT).toByte()
+        val m2 = (mask ushr BYTE_1_SHIFT).toByte()
         val m3 = mask.toByte()
         var offset = startOffset
         var i = bytesProcessed
         while (offset < endOffset) {
             val mb =
-                when ((i + maskOffset) and 3) {
+                when ((i + maskOffset) and WORD_BYTE_MASK) {
                     0 -> m0
                     1 -> m1
                     2 -> m2
@@ -271,15 +291,15 @@ class JsBuffer(
         val size = lim - pos
         if (size == 0) return
 
-        val shift = (maskOffset and 3) * 8
+        val shift = (maskOffset and WORD_BYTE_MASK) * Byte.SIZE_BITS
         val rotatedMask =
-            if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
+            if (shift == 0) mask else (mask shl shift) or (mask ushr (Int.SIZE_BITS - shift))
 
         val startByte = buffer.byteOffset + pos
         val int32Count = size ushr 2
         var bulkEnd = pos
 
-        if (startByte and 3 == 0 && int32Count > 0) {
+        if (startByte and WORD_BYTE_MASK == 0 && int32Count > 0) {
             // Aligned: Int32Array -- V8 JIT-compiles to direct memory access
             val leMask = reverseBytes(rotatedMask)
             val view = Int32Array(buffer.buffer, startByte, int32Count)
@@ -293,7 +313,7 @@ class JsBuffer(
             val limit4 = lim - 3
             while (offset < limit4) {
                 dataView.setInt32(offset, dataView.getInt32(offset, false) xor rotatedMask, false)
-                offset += 4
+                offset += Int.SIZE_BYTES
             }
             bulkEnd = offset
         }
@@ -325,9 +345,9 @@ class JsBuffer(
             return
         }
 
-        val shift = (maskOffset and 3) * 8
+        val shift = (maskOffset and WORD_BYTE_MASK) * Byte.SIZE_BITS
         val rotatedMask =
-            if (shift == 0) mask else (mask shl shift) or (mask ushr (32 - shift))
+            if (shift == 0) mask else (mask shl shift) or (mask ushr (Int.SIZE_BITS - shift))
 
         val srcPos = source.position()
         val srcStartByte = actualSource.buffer.byteOffset + srcPos
@@ -336,7 +356,7 @@ class JsBuffer(
         var srcOff = srcPos
         var dstOff = positionValue
 
-        if (srcStartByte and 3 == 0 && dstStartByte and 3 == 0 && int32Count > 0) {
+        if (srcStartByte and WORD_BYTE_MASK == 0 && dstStartByte and WORD_BYTE_MASK == 0 && int32Count > 0) {
             // Both aligned: Int32Array -- single-pass read+XOR+write
             val leMask = reverseBytes(rotatedMask)
             val srcView = Int32Array(actualSource.buffer.buffer, srcStartByte, int32Count)
@@ -353,8 +373,8 @@ class JsBuffer(
             val end4 = srcPos + size - 3
             while (srcOff < end4) {
                 dataView.setInt32(dstOff, srcDv.getInt32(srcOff, false) xor rotatedMask, false)
-                srcOff += 4
-                dstOff += 4
+                srcOff += Int.SIZE_BYTES
+                dstOff += Int.SIZE_BYTES
             }
         }
 
@@ -362,14 +382,14 @@ class JsBuffer(
         val end = srcPos + size
         if (srcOff < end) {
             val srcDv = actualSource.dataView
-            val m0 = (mask ushr 24).toByte()
-            val m1 = (mask ushr 16).toByte()
-            val m2 = (mask ushr 8).toByte()
+            val m0 = (mask ushr BYTE_3_SHIFT).toByte()
+            val m1 = (mask ushr BYTE_2_SHIFT).toByte()
+            val m2 = (mask ushr BYTE_1_SHIFT).toByte()
             val m3 = mask.toByte()
             var i = srcOff - srcPos
             while (srcOff < end) {
                 val mb =
-                    when ((i + maskOffset) and 3) {
+                    when ((i + maskOffset) and WORD_BYTE_MASK) {
                         0 -> m0
                         1 -> m1
                         2 -> m2

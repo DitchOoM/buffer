@@ -34,7 +34,9 @@ fun main(args: Array<String>) {
 
     val path =
         file ?: run {
-            val generated = out?.let { File(it) } ?: File.createTempFile("onebrc-run-", ".txt").also { it.deleteOnExit() }
+            val generated =
+                out?.let { File(it) }
+                    ?: File.createTempFile("onebrc-run-", ".txt").also { it.deleteOnExit() }
             print("Generating $rows rows -> ${generated.absolutePath} ... ")
             val started = System.nanoTime()
             generateDataset(generated.absolutePath, rows, seed = 1)
@@ -50,7 +52,11 @@ fun main(args: Array<String>) {
         result = OneBrc.solveFile(path, workers, scanFactory = scanFactory)
         val elapsed = (System.nanoTime() - started) / 1e9
         val label = if (repeat > 1) "[$run/$repeat] " else ""
-        println("${label}Solved ${fmt(sizeMb)} MB with $workers workers [$backend] in ${fmt(elapsed)}s  (${fmt(sizeMb / elapsed)} MB/s)")
+        val throughput = fmt(sizeMb / elapsed)
+        println(
+            "${label}Solved ${fmt(sizeMb)} MB with $workers workers " +
+                "[$backend] in ${fmt(elapsed)}s  ($throughput MB/s)",
+        )
     }
     val preview = if (result.length > 140) result.substring(0, 140) + "…}" else result
     println("Output: $preview")

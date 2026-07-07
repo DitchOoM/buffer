@@ -38,14 +38,17 @@ class FastDirectByteBufferTest {
                 constructor = clazz.getDeclaredConstructor(Long::class.javaPrimitiveType, Int::class.javaPrimitiveType)
                 constructor.isAccessible = true
                 intCap = true
-            } catch (e: NoSuchMethodException) {
-                // Try Java 21 signature: DirectByteBuffer(long addr, long cap)
+            } catch (_: NoSuchMethodException) {
+                // Intentionally ignored: the int-capacity constructor is absent on this JVM,
+                // so fall through and probe the Java 21 long-capacity signature instead.
                 try {
-                    constructor = clazz.getDeclaredConstructor(Long::class.javaPrimitiveType, Long::class.javaPrimitiveType)
+                    constructor =
+                        clazz.getDeclaredConstructor(Long::class.javaPrimitiveType, Long::class.javaPrimitiveType)
                     constructor.isAccessible = true
                     intCap = false
-                } catch (e2: NoSuchMethodException) {
-                    // Constructor not available on this JVM
+                } catch (_: NoSuchMethodException) {
+                    // Intentionally ignored: neither constructor exists on this JVM; the test
+                    // gates on directByteBufferConstructor being non-null before using it.
                 }
             }
 

@@ -304,6 +304,33 @@ class LengthPrefixedUseCodecListCodecTest {
     }
 
     @Test
+    fun stringTaggedPropertyBagOver64BytesRoundTrips() {
+        // Regression for the fixed-64-byte scratch bug (issue #249): a
+        // `@LengthPrefixed @UseCodec List<E>` section whose encoded body
+        // exceeds 64 bytes must round-trip. The old emit staged the body into
+        // a fixed 64-byte scratch, which silently truncated (JVM/JS) or overran
+        // native memory (Linux simdutf) once the section grew past 64 bytes.
+        // Now the body is staged through a growable scratch that grows to fit.
+        val original =
+            StringTaggedPropertyBag(
+                properties =
+                    (0 until 8).map {
+                        StringTaggedProperty(tag = "user-property-value-$it".repeat(2), value = it.toUByte())
+                    },
+            )
+        val buffer = BufferFactory.Default.allocate(1024)
+        StringTaggedPropertyBagCodec.encode(buffer, original, EncodeContext.Empty)
+        buffer.resetForRead()
+        // Body is well over 64 bytes (8 * ~45 = ~360), so the scratch must have grown.
+        assertTrue(
+            buffer.remaining() > 64,
+            "expected an encoded frame larger than the old 64-byte scratch, got ${buffer.remaining()}",
+        )
+        val decoded = StringTaggedPropertyBagCodec.decode(buffer, DecodeContext.Empty)
+        assertEquals(original, decoded)
+    }
+
+    @Test
     fun stringTaggedPropertyBagWireBytesMatchScratchPath() {
         // Independent computation of the expected wire layout: for each
         // element, [lpStringLen (2 BE) | tagBytes | value (1)]; sum lengths,

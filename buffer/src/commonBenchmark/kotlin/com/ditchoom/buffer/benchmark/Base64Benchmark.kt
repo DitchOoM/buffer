@@ -76,17 +76,17 @@ open class Base64Benchmark {
     fun encodeBaseline(): Int {
         encodeDest.resetForWrite()
         var i = 0
-        val full = size64k - size64k % 3
+        val full = size64k - size64k % BYTES_PER_GROUP
         while (i < full) {
             val n =
-                ((raw.get(i).toInt() and 0xFF) shl 16) or
-                    ((raw.get(i + 1).toInt() and 0xFF) shl 8) or
-                    (raw.get(i + 2).toInt() and 0xFF)
-            encodeDest.writeByte(stdAlphabet[(n ushr 18) and 0x3F].code.toByte())
-            encodeDest.writeByte(stdAlphabet[(n ushr 12) and 0x3F].code.toByte())
-            encodeDest.writeByte(stdAlphabet[(n ushr 6) and 0x3F].code.toByte())
-            encodeDest.writeByte(stdAlphabet[n and 0x3F].code.toByte())
-            i += 3
+                ((raw.get(i).toInt() and BYTE_MASK) shl SHIFT_16) or
+                    ((raw.get(i + 1).toInt() and BYTE_MASK) shl SHIFT_8) or
+                    (raw.get(i + 2).toInt() and BYTE_MASK)
+            encodeDest.writeByte(stdAlphabet[(n ushr SHIFT_18) and SEXTET_MASK].code.toByte())
+            encodeDest.writeByte(stdAlphabet[(n ushr SHIFT_12) and SEXTET_MASK].code.toByte())
+            encodeDest.writeByte(stdAlphabet[(n ushr SHIFT_6) and SEXTET_MASK].code.toByte())
+            encodeDest.writeByte(stdAlphabet[n and SEXTET_MASK].code.toByte())
+            i += BYTES_PER_GROUP
         }
         return encodeDest.get(0).toInt()
     }
@@ -109,14 +109,14 @@ open class Base64Benchmark {
         var bits = 0
         var i = 0
         while (i < b64Size) {
-            val c = b64.get(i).toInt() and 0xFF
+            val c = b64.get(i).toInt() and BYTE_MASK
             i++
             if (c == '='.code) break
-            acc = (acc shl 6) or sextet(c)
-            bits += 6
-            if (bits >= 8) {
-                bits -= 8
-                decodeDest.writeByte(((acc ushr bits) and 0xFF).toByte())
+            acc = (acc shl SEXTET_BITS) or sextet(c)
+            bits += SEXTET_BITS
+            if (bits >= BYTE_BITS) {
+                bits -= BYTE_BITS
+                decodeDest.writeByte(((acc ushr bits) and BYTE_MASK).toByte())
             }
         }
         return decodeDest.get(0).toInt()
@@ -124,10 +124,35 @@ open class Base64Benchmark {
 
     private fun sextet(c: Int): Int =
         when (c) {
-            in 0x41..0x5A -> c - 0x41
-            in 0x61..0x7A -> c - 0x61 + 26
-            in 0x30..0x39 -> c - 0x30 + 52
-            0x2B, 0x2D -> 62
-            else -> 63
+            in ASCII_A..ASCII_Z -> c - ASCII_A
+            in ASCII_LOWER_A..ASCII_LOWER_Z -> c - ASCII_LOWER_A + UPPERCASE_COUNT
+            in ASCII_ZERO..ASCII_NINE -> c - ASCII_ZERO + LETTER_COUNT
+            ASCII_PLUS, ASCII_MINUS -> INDEX_PLUS
+            else -> INDEX_SLASH
         }
+
+    private companion object {
+        private const val BYTES_PER_GROUP = 3
+        private const val BYTE_MASK = 0xFF
+        private const val SEXTET_MASK = 0x3F
+        private const val SEXTET_BITS = 6
+        private const val BYTE_BITS = 8
+        private const val SHIFT_6 = 6
+        private const val SHIFT_8 = 8
+        private const val SHIFT_12 = 12
+        private const val SHIFT_16 = 16
+        private const val SHIFT_18 = 18
+        private const val ASCII_A = 0x41
+        private const val ASCII_Z = 0x5A
+        private const val ASCII_LOWER_A = 0x61
+        private const val ASCII_LOWER_Z = 0x7A
+        private const val ASCII_ZERO = 0x30
+        private const val ASCII_NINE = 0x39
+        private const val ASCII_PLUS = 0x2B
+        private const val ASCII_MINUS = 0x2D
+        private const val UPPERCASE_COUNT = 26
+        private const val LETTER_COUNT = 52
+        private const val INDEX_PLUS = 62
+        private const val INDEX_SLASH = 63
+    }
 }

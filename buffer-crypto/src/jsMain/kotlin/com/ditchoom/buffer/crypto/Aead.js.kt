@@ -27,6 +27,7 @@ internal actual suspend fun webCryptoAesGcmDecrypt(
 ): String? = jsAesGcmDecrypt(keyHex, ivHex, aadHex, ciphertextAndTagHex).await()
 
 // Promise chains (not async/await): the Kotlin/JS `js(...)` intrinsic rejects async statements.
+@Suppress("UnusedParameter") // referenced inside the js(...) template
 private fun jsAesGcmEncrypt(
     keyHex: String,
     ivHex: String,
@@ -48,6 +49,7 @@ private fun jsAesGcmEncrypt(
         """,
     )
 
+@Suppress("UnusedParameter") // referenced inside the js(...) template
 private fun jsAesGcmDecrypt(
     keyHex: String,
     ivHex: String,

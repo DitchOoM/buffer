@@ -8,6 +8,11 @@ on:
         required: false
         default: ""
         type: string
+      clean-publish:
+        description: "Publish with --no-build-cache (clean rebuild from source). Set true for the actual release/publish-to-Central path."
+        required: false
+        default: false
+        type: boolean
     outputs:
       version:
         description: "Computed next version"
@@ -27,7 +32,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up JDK 21
-        uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287 # v5
+        uses: actions/setup-java@1bcf9fb12cf4aa7d266a90ae39939e61372fe520 # v5
         with:
           distribution: 'zulu'
           java-version: '21'
@@ -40,23 +45,35 @@ jobs:
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
 
       - name: Cache Konan
-        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.konan
           key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: konan-linux-
 
       - name: Cache simdutf x64
-        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: buffer/build/simdutf/libs/linux-x64
           key: simdutf-linux-x64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
 
       - name: Cache simdutf ARM64
-        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: buffer/build/simdutf/libs/linux-arm64
           key: simdutf-linux-arm64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
+
+      # Cache the Gradle module caches + local build cache (~/.gradle/caches/build-cache-1)
+      # so compiled klibs, cinterop klibs, and KSP/codegen outputs survive across runs.
+      # Keyed on the build definition (version catalog, build scripts, wrapper); restore-keys
+      # fall back to the most recent partial match when those change.
+      - name: Cache Gradle build outputs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.gradle/caches
+          key: gradle-linux-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-linux-
 
       - name: Install ARM64 dependencies
         run: |
@@ -83,7 +100,7 @@ jobs:
       - name: Run KSP processor tests
         run: >-
           ./gradlew :buffer-codec-processor:test
-          --no-build-cache ${{ inputs.gradle-args }}
+          ${{ inputs.gradle-args }}
 
       - name: Run JVM / JS / WASM / Android-host tests
         # The host-JVM Android unit tasks run here so contributors can reproduce
@@ -103,7 +120,7 @@ jobs:
           ./gradlew ktlintCheck
           jvmTest jsNodeTest jsBrowserTest wasmJsNodeTest wasmJsBrowserTest
           testDebugUnitTest testBenchmarkUnitTest
-          --no-build-cache ${{ inputs.gradle-args }}
+          ${{ inputs.gradle-args }}
 
       - name: Run Linux x64 tests
         # :buffer-crypto:linuxX64Test runs the full common crypto suite (KAT + Wycheproof +
@@ -113,7 +130,7 @@ jobs:
         run: >-
           ./gradlew :buffer:linuxX64Test :buffer-compression:linuxX64Test :buffer-flow:linuxX64Test
           :buffer-codec:linuxX64Test :buffer-codec-test:linuxX64Test :buffer-crypto:linuxX64Test
-          --no-build-cache ${{ inputs.gradle-args }}
+          ${{ inputs.gradle-args }}
 
       - name: Build ARM64 test binaries
         # buffer-crypto cross-builds its arm64 BoringSSL via buildBoringsslArm64 (uses the
@@ -121,7 +138,7 @@ jobs:
         run: >-
           ./gradlew :buffer:linkDebugTestLinuxArm64 :buffer-compression:linkDebugTestLinuxArm64 :buffer-flow:linkDebugTestLinuxArm64
           :buffer-codec-test:linkDebugTestLinuxArm64 :buffer-crypto:linkDebugTestLinuxArm64
-          --no-build-cache ${{ inputs.gradle-args }}
+          ${{ inputs.gradle-args }}
 
       - name: Run buffer ARM64 tests via QEMU
         run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer/build/bin/linuxArm64/debugTest/test.kexe
@@ -138,8 +155,10 @@ jobs:
       - name: Run buffer-crypto ARM64 tests via QEMU
         run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-crypto/build/bin/linuxArm64/debugTest/test.kexe
 
+      # The release/publish-to-Central path passes clean-publish: true to force a cold,
+      # cache-free rebuild of the published artifacts. PR validation reuses the build cache.
       - name: Publish to Maven Local
-        run: ./gradlew publishToMavenLocal --no-build-cache ${{ inputs.gradle-args }}
+        run: ./gradlew publishToMavenLocal ${{ inputs.clean-publish && '--no-build-cache' || '' }} ${{ inputs.gradle-args }}
 
       - name: Upload Maven local artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

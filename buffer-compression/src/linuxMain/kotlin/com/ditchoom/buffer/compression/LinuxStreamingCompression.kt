@@ -25,6 +25,7 @@ import kotlinx.cinterop.usePinned
 import platform.zlib.Z_BUF_ERROR
 import platform.zlib.Z_DEFLATED
 import platform.zlib.Z_FINISH
+import platform.zlib.Z_NEED_DICT
 import platform.zlib.Z_NO_FLUSH
 import platform.zlib.Z_OK
 import platform.zlib.Z_STREAM_END
@@ -48,7 +49,18 @@ actual fun StreamingCompressor.Companion.create(
     bufferFactory: BufferFactory,
     outputBufferSize: Int,
     windowBits: WindowBits,
-): StreamingCompressor = LinuxZlibStreamingCompressor(algorithm, level, bufferFactory, outputBufferSize, windowBits)
+    dictionary: ReadBuffer?,
+): StreamingCompressor {
+    requireDictionarySupport(algorithm, dictionary)
+    return LinuxZlibStreamingCompressor(
+        algorithm,
+        level,
+        bufferFactory,
+        outputBufferSize,
+        windowBits,
+        bufferFactory.materializeDictionary(dictionary),
+    )
+}
 
 /**
  * Linux streaming decompressor factory using z_stream for true incremental decompression.
@@ -58,7 +70,16 @@ actual fun StreamingDecompressor.Companion.create(
     bufferFactory: BufferFactory,
     outputBufferSize: Int,
     expectedSize: Int,
-): StreamingDecompressor = LinuxZlibStreamingDecompressor(algorithm, bufferFactory, outputBufferSize)
+    dictionary: ReadBuffer?,
+): StreamingDecompressor {
+    requireDictionarySupport(algorithm, dictionary)
+    return LinuxZlibStreamingDecompressor(
+        algorithm,
+        bufferFactory,
+        outputBufferSize,
+        bufferFactory.materializeDictionary(dictionary),
+    )
+}
 
 /**
  * Holds an output buffer and its native address.
@@ -120,6 +141,7 @@ private class LinuxZlibStreamingCompressor(
     override val bufferFactory: BufferFactory,
     private val outputBufferSize: Int,
     private val customWindowBits: WindowBits = WindowBits.Default,
+    private val dictionary: PlatformBuffer? = null,
 ) : StreamingCompressor {
     private var streamPtr: CPointer<z_stream>? = null
     private var closed = false
@@ -161,6 +183,9 @@ private class LinuxZlibStreamingCompressor(
         }
 
         streamPtr = s.ptr
+        // Must be set immediately after init/reset, before the first deflate() call.
+        // deflateReset does not retain a previously set dictionary.
+        dictionary?.let { applyDeflateDictionary(s.ptr, it) }
     }
 
     private fun ensureOutput() {
@@ -314,6 +339,10 @@ private class LinuxZlibStreamingCompressor(
             nativeHeap.free(s.pointed.rawPtr)
             streamPtr = null
             initStream()
+        } else {
+            // deflateReset does not retain a previously set dictionary; reapply here since
+            // initStream() (which also applies it) isn't re-entered on this fast path.
+            dictionary?.let { applyDeflateDictionary(s, it) }
         }
     }
 
@@ -340,6 +369,7 @@ private class LinuxZlibStreamingDecompressor(
     private val algorithm: CompressionAlgorithm,
     override val bufferFactory: BufferFactory,
     private val outputBufferSize: Int,
+    private val dictionary: PlatformBuffer? = null,
 ) : StreamingDecompressor {
     private var streamPtr: CPointer<z_stream>? = null
     private var closed = false
@@ -374,6 +404,11 @@ private class LinuxZlibStreamingDecompressor(
 
         streamPtr = s.ptr
         streamEnded = false
+        // Raw inflate has no in-band Z_NEED_DICT signal, so the dictionary must be applied
+        // eagerly. Zlib-wrapped streams signal via Z_NEED_DICT during decompress()/finish().
+        if (algorithm == CompressionAlgorithm.Raw) {
+            dictionary?.let { applyInflateDictionary(s.ptr, it) }
+        }
     }
 
     private fun ensureOutput() {
@@ -433,6 +468,14 @@ private class LinuxZlibStreamingDecompressor(
                     when (result) {
                         Z_OK -> {}
                         Z_STREAM_END -> streamEnded = true
+                        Z_NEED_DICT -> {
+                            val dict = dictionary ?: throw CompressionException("Dictionary required")
+                            val setResult = applyInflateDictionary(s, dict)
+                            if (setResult != Z_OK) {
+                                throw CompressionException("inflateSetDictionary failed with code: $setResult")
+                            }
+                            continue
+                        }
                         else -> throw CompressionException("inflate failed with code: $result")
                     }
 
@@ -491,6 +534,14 @@ private class LinuxZlibStreamingDecompressor(
                     // without BFINAL=1 (e.g., WebSocket per-message-deflate RFC 7692).
                     streamEnded = true
                 }
+                Z_NEED_DICT -> {
+                    val dict = dictionary ?: throw CompressionException("Dictionary required")
+                    val setResult = applyInflateDictionary(s, dict)
+                    if (setResult != Z_OK) {
+                        throw CompressionException("inflateSetDictionary failed with code: $setResult")
+                    }
+                    continue
+                }
                 else -> throw CompressionException("inflate finish failed with code: $result")
             }
 
@@ -520,6 +571,12 @@ private class LinuxZlibStreamingDecompressor(
             initStream()
         } else {
             streamEnded = false
+            // inflateReset does not retain a previously set dictionary; reapply for raw
+            // mode immediately (see the same note in initStream()). Zlib-wrapped mode
+            // reapplies reactively via Z_NEED_DICT.
+            if (algorithm == CompressionAlgorithm.Raw) {
+                dictionary?.let { applyInflateDictionary(s, it) }
+            }
         }
     }
 
@@ -580,15 +637,17 @@ actual fun SuspendingStreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
     bufferFactory: BufferFactory,
+    dictionary: ReadBuffer?,
 ): SuspendingStreamingCompressor =
     SyncWrappingSuspendingCompressor(
-        StreamingCompressor.create(algorithm, level, bufferFactory),
+        StreamingCompressor.create(algorithm, level, bufferFactory, dictionary = dictionary),
     )
 
 actual fun SuspendingStreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm,
     bufferFactory: BufferFactory,
+    dictionary: ReadBuffer?,
 ): SuspendingStreamingDecompressor =
     SyncWrappingSuspendingDecompressor(
-        StreamingDecompressor.create(algorithm, bufferFactory),
+        StreamingDecompressor.create(algorithm, bufferFactory, dictionary = dictionary),
     )

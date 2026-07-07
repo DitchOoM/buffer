@@ -148,11 +148,11 @@ interface WriteBuffer : PositionBuffer {
     fun writeShort(short: Short): WriteBuffer {
         val value = short.toInt()
         if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            writeByte((value shr 8).toByte())
+            writeByte((value shr Byte.SIZE_BITS).toByte())
             writeByte(value.toByte())
         } else {
             writeByte(value.toByte())
-            writeByte((value shr 8).toByte())
+            writeByte((value shr Byte.SIZE_BITS).toByte())
         }
         return this
     }
@@ -164,11 +164,11 @@ interface WriteBuffer : PositionBuffer {
     ): WriteBuffer {
         val value = short.toInt()
         if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            set(index, (value shr 8).toByte())
+            set(index, (value shr Byte.SIZE_BITS).toByte())
             set(index + 1, value.toByte())
         } else {
             set(index, value.toByte())
-            set(index + 1, (value shr 8).toByte())
+            set(index + 1, (value shr Byte.SIZE_BITS).toByte())
         }
         return this
     }
@@ -201,11 +201,11 @@ interface WriteBuffer : PositionBuffer {
      */
     fun writeInt(int: Int): WriteBuffer {
         if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            writeShort((int shr 16).toShort())
+            writeShort((int shr Short.SIZE_BITS).toShort())
             writeShort(int.toShort())
         } else {
             writeShort(int.toShort())
-            writeShort((int shr 16).toShort())
+            writeShort((int shr Short.SIZE_BITS).toShort())
         }
         return this
     }
@@ -216,11 +216,11 @@ interface WriteBuffer : PositionBuffer {
         int: Int,
     ): WriteBuffer {
         if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            set(index, (int shr 16).toShort())
-            set(index + 2, int.toShort())
+            set(index, (int shr Short.SIZE_BITS).toShort())
+            set(index + Short.SIZE_BYTES, int.toShort())
         } else {
             set(index, int.toShort())
-            set(index + 2, (int shr 16).toShort())
+            set(index + Short.SIZE_BYTES, (int shr Short.SIZE_BITS).toShort())
         }
         return this
     }
@@ -253,11 +253,11 @@ interface WriteBuffer : PositionBuffer {
      */
     fun writeLong(long: Long): WriteBuffer {
         if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            writeInt((long shr 32).toInt())
+            writeInt((long shr Int.SIZE_BITS).toInt())
             writeInt(long.toInt())
         } else {
             writeInt(long.toInt())
-            writeInt((long shr 32).toInt())
+            writeInt((long shr Int.SIZE_BITS).toInt())
         }
         return this
     }
@@ -268,11 +268,11 @@ interface WriteBuffer : PositionBuffer {
         long: Long,
     ): WriteBuffer {
         if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            set(index, (long shr 32).toInt())
-            set(index + 4, long.toInt())
+            set(index, (long shr Int.SIZE_BITS).toInt())
+            set(index + Int.SIZE_BYTES, long.toInt())
         } else {
             set(index, long.toInt())
-            set(index + 4, (long shr 32).toInt())
+            set(index + Int.SIZE_BYTES, (long shr Int.SIZE_BITS).toInt())
         }
         return this
     }
@@ -291,15 +291,15 @@ interface WriteBuffer : PositionBuffer {
         number: Long,
         byteSize: Int,
     ): WriteBuffer {
-        check(byteSize in 1..8) { "byte size out of range" }
+        check(byteSize in 1..Long.SIZE_BYTES) { "byte size out of range" }
         val byteSizeRange =
             when (byteOrder) {
                 ByteOrder.LITTLE_ENDIAN -> 0 until byteSize
                 ByteOrder.BIG_ENDIAN -> byteSize - 1 downTo 0
             }
         for (i in byteSizeRange) {
-            val bitIndex = i * 8
-            writeByte((number shr bitIndex and 0xff).toByte())
+            val bitIndex = i * Byte.SIZE_BITS
+            writeByte((number shr bitIndex and BufferConstants.BYTE_MASK.toLong()).toByte())
         }
         return this
     }
@@ -318,7 +318,7 @@ interface WriteBuffer : PositionBuffer {
         number: Long,
         byteSize: Int,
     ): WriteBuffer {
-        check(byteSize in 1..8) { "byte size out of range" }
+        check(byteSize in 1..Long.SIZE_BYTES) { "byte size out of range" }
         val p = position()
         position(index)
         writeNumberOfByteSize(number, byteSize)
@@ -423,16 +423,14 @@ interface WriteBuffer : PositionBuffer {
         if (count == 0) return this
 
         // Create a Long with the byte repeated 8 times for bulk writing
-        val b = value.toLong() and 0xFFL
-        val longValue =
-            b or (b shl 8) or (b shl 16) or (b shl 24) or
-                (b shl 32) or (b shl 40) or (b shl 48) or (b shl 56)
+        val b = value.toLong() and BufferConstants.BYTE_MASK.toLong()
+        val longValue = b * BufferConstants.BYTE_BROADCAST
 
         // Write 8 bytes at a time
         var remaining = count
-        while (remaining >= 8) {
+        while (remaining >= Long.SIZE_BYTES) {
             writeLong(longValue)
-            remaining -= 8
+            remaining -= Long.SIZE_BYTES
         }
 
         // Write remaining bytes
@@ -455,24 +453,24 @@ interface WriteBuffer : PositionBuffer {
      */
     fun fill(value: Short): WriteBuffer {
         val count = remaining()
-        require(count % 2 == 0) { "Remaining space ($count) must be a multiple of 2 for Short fill" }
+        require(count % Short.SIZE_BYTES == 0) { "Remaining space ($count) must be a multiple of 2 for Short fill" }
         if (count == 0) return this
 
         // Create a Long with the Short repeated 4 times for bulk writing
-        val s = value.toLong() and 0xFFFFL
-        val longValue = s or (s shl 16) or (s shl 32) or (s shl 48)
+        val s = value.toLong() and BufferConstants.SHORT_MASK.toLong()
+        val longValue = s * BufferConstants.SHORT_BROADCAST
 
         // Write 8 bytes (4 shorts) at a time
         var remaining = count
-        while (remaining >= 8) {
+        while (remaining >= Long.SIZE_BYTES) {
             writeLong(longValue)
-            remaining -= 8
+            remaining -= Long.SIZE_BYTES
         }
 
         // Write remaining shorts
-        while (remaining >= 2) {
+        while (remaining >= Short.SIZE_BYTES) {
             writeShort(value)
-            remaining -= 2
+            remaining -= Short.SIZE_BYTES
         }
         return this
     }
@@ -489,22 +487,22 @@ interface WriteBuffer : PositionBuffer {
      */
     fun fill(value: Int): WriteBuffer {
         val count = remaining()
-        require(count % 4 == 0) { "Remaining space ($count) must be a multiple of 4 for Int fill" }
+        require(count % Int.SIZE_BYTES == 0) { "Remaining space ($count) must be a multiple of 4 for Int fill" }
         if (count == 0) return this
 
         // Create a Long with the Int repeated twice for bulk writing
-        val i = value.toLong() and 0xFFFFFFFFL
-        val longValue = i or (i shl 32)
+        val i = value.toLong() and BufferConstants.INT_MASK
+        val longValue = i * BufferConstants.INT_BROADCAST
 
         // Write 8 bytes (2 ints) at a time
         var remaining = count
-        while (remaining >= 8) {
+        while (remaining >= Long.SIZE_BYTES) {
             writeLong(longValue)
-            remaining -= 8
+            remaining -= Long.SIZE_BYTES
         }
 
         // Write remaining int if any
-        if (remaining >= 4) {
+        if (remaining >= Int.SIZE_BYTES) {
             writeInt(value)
         }
         return this
@@ -522,8 +520,8 @@ interface WriteBuffer : PositionBuffer {
      */
     fun fill(value: Long): WriteBuffer {
         val count = remaining()
-        require(count % 8 == 0) { "Remaining space ($count) must be a multiple of 8 for Long fill" }
-        val iterations = count / 8
+        require(count % Long.SIZE_BYTES == 0) { "Remaining space ($count) must be a multiple of 8 for Long fill" }
+        val iterations = count / Long.SIZE_BYTES
         for (i in 0 until iterations) {
             writeLong(value)
         }

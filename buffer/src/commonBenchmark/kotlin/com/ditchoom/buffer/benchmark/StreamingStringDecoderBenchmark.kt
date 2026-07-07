@@ -64,7 +64,7 @@ open class StreamingStringDecoderBenchmark {
         // ASCII buffer — repeating printable ASCII written directly
         asciiBuffer = BufferFactory.Default.allocate(size64k)
         for (i in 0 until size64k) {
-            asciiBuffer.writeByte((32 + (i % 95)).toByte())
+            asciiBuffer.writeByte((PRINTABLE_ASCII_START + (i % PRINTABLE_ASCII_RANGE)).toByte())
         }
         asciiBuffer.resetForRead()
 
@@ -85,9 +85,9 @@ open class StreamingStringDecoderBenchmark {
 
         // Chunked ASCII — various chunk sizes from the ASCII buffer
         asciiChunks = buildChunks(asciiBuffer, chunkSize)
-        asciiChunks256 = buildChunks(asciiBuffer, 256)
-        asciiChunks4k = buildChunks(asciiBuffer, 4096)
-        asciiChunks16k = buildChunks(asciiBuffer, 16384)
+        asciiChunks256 = buildChunks(asciiBuffer, CHUNK_256)
+        asciiChunks4k = buildChunks(asciiBuffer, CHUNK_4K)
+        asciiChunks16k = buildChunks(asciiBuffer, CHUNK_16K)
     }
 
     @Benchmark
@@ -204,6 +204,13 @@ open class StreamingStringDecoderBenchmark {
     }
 
     companion object {
+        private const val PRINTABLE_ASCII_START = 32
+        private const val PRINTABLE_ASCII_RANGE = 95
+        private const val CHUNK_256 = 256
+        private const val CHUNK_4K = 4096
+        private const val CHUNK_16K = 16384
+        private const val ASCII_SPACE = 0x20
+
         private fun buildChunks(
             source: PlatformBuffer,
             chunkSize: Int,
@@ -244,7 +251,7 @@ open class StreamingStringDecoderBenchmark {
             }
             // Fill remaining bytes with ASCII to stay on valid UTF-8 boundary
             while (written < targetSize) {
-                buffer.writeByte(0x20) // space
+                buffer.writeByte(ASCII_SPACE.toByte()) // space
                 written++
             }
             buffer.resetForRead()

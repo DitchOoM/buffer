@@ -21,17 +21,25 @@ const val SHA384_BLOCK_BYTES = 128
  *
  * Feed bytes with [update] (call repeatedly to hash `a ‖ b` without first concatenating),
  * then [digestInto] to write the 48-byte result into a caller-owned destination. Reading is
- * non-destructive. Not thread-safe — one instance per digest, not reusable after [digestInto].
+ * non-destructive. Not thread-safe — one instance per digest; [update] or [digestInto]
+ * after finalization throws [IllegalStateException] on every platform.
  */
-expect class Sha384Digest() {
+expect class Sha384Digest() : AutoCloseable {
     /** Absorbs the remaining bytes of [input] (non-destructive). Returns `this` for chaining. */
     fun update(input: ReadBuffer): Sha384Digest
 
     /**
      * Finalizes and writes [SHA384_DIGEST_BYTES] bytes into [dest] at its current
      * position, advancing it. [dest] must have at least [SHA384_DIGEST_BYTES] remaining.
+     * Releases the digest state; any further [update]/[digestInto] throws [IllegalStateException].
      */
     fun digestInto(dest: WriteBuffer)
+
+    /**
+     * Releases the digest state without producing a result — for a digest abandoned before
+     * [digestInto] (which releases the state itself). Idempotent; a no-op after [digestInto].
+     */
+    override fun close()
 }
 
 /**

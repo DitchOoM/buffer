@@ -3,6 +3,8 @@ package com.ditchoom.buffer.compression
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
+import java.io.IOException
+import java.util.zip.DataFormatException
 
 /**
  * JVM/Android supports synchronous compression via java.util.zip.
@@ -17,6 +19,11 @@ actual val supportsStatefulFlush: Boolean = true
 // sign: +15 zlib-format, -15 raw-deflate). No public JDK API reaches it.
 actual val supportsCustomWindowBits: Boolean = false
 
+// java.util.zip.{Deflater,Inflater} both expose setDictionary on every supported JDK/Android
+// API level (the byte[] overload predates Java 1.2); the ByteBuffer overload used internally
+// requires JDK 11 / Android API 35+, with an array-based fallback below that.
+actual val supportsPresetDictionary: Boolean = true
+
 /**
  * JVM/Android implementation delegating to streaming compression.
  */
@@ -24,9 +31,11 @@ actual fun compress(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
+    dictionary: ReadBuffer?,
 ): CompressionResult =
     try {
-        val compressor = StreamingCompressor.create(algorithm, level)
+        requireDictionarySupport(algorithm, dictionary)
+        val compressor = StreamingCompressor.create(algorithm, level, dictionary = dictionary)
         val outputChunks = mutableListOf<ReadBuffer>()
         var totalSize = 0
 
@@ -51,16 +60,22 @@ actual fun compress(
         result.resetForRead()
 
         CompressionResult.Success(result)
-    } catch (e: Exception) {
+    } catch (e: CompressionException) {
+        CompressionResult.Failure("Compression failed: ${e.message}", e)
+    } catch (e: IOException) {
+        CompressionResult.Failure("Compression failed: ${e.message}", e)
+    } catch (e: IllegalArgumentException) {
         CompressionResult.Failure("Compression failed: ${e.message}", e)
     }
 
 actual fun decompress(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm,
+    dictionary: ReadBuffer?,
 ): CompressionResult =
     try {
-        val decompressor = StreamingDecompressor.create(algorithm)
+        requireDictionarySupport(algorithm, dictionary)
+        val decompressor = StreamingDecompressor.create(algorithm, dictionary = dictionary)
         val outputChunks = mutableListOf<ReadBuffer>()
         var totalSize = 0
 
@@ -85,6 +100,12 @@ actual fun decompress(
         result.resetForRead()
 
         CompressionResult.Success(result)
-    } catch (e: Exception) {
+    } catch (e: CompressionException) {
+        CompressionResult.Failure("Decompression failed: ${e.message}", e)
+    } catch (e: DataFormatException) {
+        CompressionResult.Failure("Decompression failed: ${e.message}", e)
+    } catch (e: IOException) {
+        CompressionResult.Failure("Decompression failed: ${e.message}", e)
+    } catch (e: IllegalArgumentException) {
         CompressionResult.Failure("Decompression failed: ${e.message}", e)
     }

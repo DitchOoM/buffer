@@ -46,7 +46,7 @@ open class WasmLinearBufferBenchmark {
     @Benchmark
     fun byteArrayBufferOps(): Int {
         byteArrayBuffer.resetForWrite()
-        byteArrayBuffer.writeInt(42)
+        byteArrayBuffer.writeInt(SENTINEL_VALUE)
         byteArrayBuffer.resetForRead()
         return byteArrayBuffer.readInt()
     }
@@ -55,7 +55,7 @@ open class WasmLinearBufferBenchmark {
     @Benchmark
     fun linearBufferOps(): Int {
         linearBuffer.resetForWrite()
-        linearBuffer.writeInt(42)
+        linearBuffer.writeInt(SENTINEL_VALUE)
         linearBuffer.resetForRead()
         return linearBuffer.readInt()
     }
@@ -64,10 +64,10 @@ open class WasmLinearBufferBenchmark {
     @Benchmark
     fun linearBufferBulkOps(): Int {
         linearBuffer.resetForWrite()
-        repeat(bufferSize / 4) { linearBuffer.writeInt(it) }
+        repeat(bufferSize / Int.SIZE_BYTES) { linearBuffer.writeInt(it) }
         linearBuffer.resetForRead()
         var sum = 0
-        repeat(bufferSize / 4) { sum += linearBuffer.readInt() }
+        repeat(bufferSize / Int.SIZE_BYTES) { sum += linearBuffer.readInt() }
         return sum
     }
 
@@ -75,10 +75,10 @@ open class WasmLinearBufferBenchmark {
     @Benchmark
     fun byteArrayBufferBulkOps(): Int {
         byteArrayBuffer.resetForWrite()
-        repeat(bufferSize / 4) { byteArrayBuffer.writeInt(it) }
+        repeat(bufferSize / Int.SIZE_BYTES) { byteArrayBuffer.writeInt(it) }
         byteArrayBuffer.resetForRead()
         var sum = 0
-        repeat(bufferSize / 4) { sum += byteArrayBuffer.readInt() }
+        repeat(bufferSize / Int.SIZE_BYTES) { sum += byteArrayBuffer.readInt() }
         return sum
     }
 
@@ -92,4 +92,8 @@ open class WasmLinearBufferBenchmark {
     // - z3AlignmentWithAssignment: 101.7M ops/sec
     // - z4AllocatorWithAlignment: 98.6M ops/sec
     // - z5AllocatorWithBoundsCheck: 96.4M ops/sec
+
+    private companion object {
+        private const val SENTINEL_VALUE = 42
+    }
 }

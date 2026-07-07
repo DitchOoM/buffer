@@ -1,9 +1,24 @@
 package com.ditchoom.buffer.stream
 
+import com.ditchoom.buffer.BufferConstants.BYTE_1_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_2_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_3_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_4_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_5_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_6_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_7_SHIFT
+import com.ditchoom.buffer.BufferConstants.BYTE_MASK
+import com.ditchoom.buffer.BufferConstants.SHORT_MASK
+import com.ditchoom.buffer.BufferConstants.WORD_BYTE_3
+import com.ditchoom.buffer.BufferConstants.WORD_BYTE_4
+import com.ditchoom.buffer.BufferConstants.WORD_BYTE_5
+import com.ditchoom.buffer.BufferConstants.WORD_BYTE_6
+import com.ditchoom.buffer.BufferConstants.WORD_BYTE_7
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.buffer.pool.PooledBuffer
 
 /**
  * Represents a stream of buffer chunks for protocol parsing.
@@ -277,9 +292,9 @@ internal class DefaultStreamProcessor(
         b1: Int,
     ): Short =
         if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            ((b0 shl 8) or b1).toShort()
+            ((b0 shl BYTE_1_SHIFT) or b1).toShort()
         } else {
-            ((b1 shl 8) or b0).toShort()
+            ((b1 shl BYTE_1_SHIFT) or b0).toShort()
         }
 
     private fun assembleInt(
@@ -289,9 +304,9 @@ internal class DefaultStreamProcessor(
         b3: Int,
     ): Int =
         if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            (b0 shl 24) or (b1 shl 16) or (b2 shl 8) or b3
+            (b0 shl BYTE_3_SHIFT) or (b1 shl BYTE_2_SHIFT) or (b2 shl BYTE_1_SHIFT) or b3
         } else {
-            (b3 shl 24) or (b2 shl 16) or (b1 shl 8) or b0
+            (b3 shl BYTE_3_SHIFT) or (b2 shl BYTE_2_SHIFT) or (b1 shl BYTE_1_SHIFT) or b0
         }
 
     private fun assembleLong(
@@ -305,11 +320,15 @@ internal class DefaultStreamProcessor(
         b7: Int,
     ): Long =
         if (byteOrder == ByteOrder.BIG_ENDIAN) {
-            (b0.toLong() shl 56) or (b1.toLong() shl 48) or (b2.toLong() shl 40) or (b3.toLong() shl 32) or
-                (b4.toLong() shl 24) or (b5.toLong() shl 16) or (b6.toLong() shl 8) or b7.toLong()
+            (b0.toLong() shl BYTE_7_SHIFT) or (b1.toLong() shl BYTE_6_SHIFT) or
+                (b2.toLong() shl BYTE_5_SHIFT) or (b3.toLong() shl BYTE_4_SHIFT) or
+                (b4.toLong() shl BYTE_3_SHIFT) or (b5.toLong() shl BYTE_2_SHIFT) or
+                (b6.toLong() shl BYTE_1_SHIFT) or b7.toLong()
         } else {
-            (b7.toLong() shl 56) or (b6.toLong() shl 48) or (b5.toLong() shl 40) or (b4.toLong() shl 32) or
-                (b3.toLong() shl 24) or (b2.toLong() shl 16) or (b1.toLong() shl 8) or b0.toLong()
+            (b7.toLong() shl BYTE_7_SHIFT) or (b6.toLong() shl BYTE_6_SHIFT) or
+                (b5.toLong() shl BYTE_5_SHIFT) or (b4.toLong() shl BYTE_4_SHIFT) or
+                (b3.toLong() shl BYTE_3_SHIFT) or (b2.toLong() shl BYTE_2_SHIFT) or
+                (b1.toLong() shl BYTE_1_SHIFT) or b0.toLong()
         }
 
     override fun append(chunk: ReadBuffer) {
@@ -342,8 +361,8 @@ internal class DefaultStreamProcessor(
         }
 
         return assembleShort(
-            peekByte(offset).toInt() and 0xFF,
-            peekByte(offset + 1).toInt() and 0xFF,
+            peekByte(offset).toInt() and BYTE_MASK,
+            peekByte(offset + 1).toInt() and BYTE_MASK,
         )
     }
 
@@ -356,10 +375,10 @@ internal class DefaultStreamProcessor(
         }
 
         return assembleInt(
-            peekByte(offset).toInt() and 0xFF,
-            peekByte(offset + 1).toInt() and 0xFF,
-            peekByte(offset + 2).toInt() and 0xFF,
-            peekByte(offset + 3).toInt() and 0xFF,
+            peekByte(offset).toInt() and BYTE_MASK,
+            peekByte(offset + 1).toInt() and BYTE_MASK,
+            peekByte(offset + 2).toInt() and BYTE_MASK,
+            peekByte(offset + WORD_BYTE_3).toInt() and BYTE_MASK,
         )
     }
 
@@ -372,14 +391,14 @@ internal class DefaultStreamProcessor(
         }
 
         return assembleLong(
-            peekByte(offset).toInt() and 0xFF,
-            peekByte(offset + 1).toInt() and 0xFF,
-            peekByte(offset + 2).toInt() and 0xFF,
-            peekByte(offset + 3).toInt() and 0xFF,
-            peekByte(offset + 4).toInt() and 0xFF,
-            peekByte(offset + 5).toInt() and 0xFF,
-            peekByte(offset + 6).toInt() and 0xFF,
-            peekByte(offset + 7).toInt() and 0xFF,
+            peekByte(offset).toInt() and BYTE_MASK,
+            peekByte(offset + 1).toInt() and BYTE_MASK,
+            peekByte(offset + 2).toInt() and BYTE_MASK,
+            peekByte(offset + WORD_BYTE_3).toInt() and BYTE_MASK,
+            peekByte(offset + WORD_BYTE_4).toInt() and BYTE_MASK,
+            peekByte(offset + WORD_BYTE_5).toInt() and BYTE_MASK,
+            peekByte(offset + WORD_BYTE_6).toInt() and BYTE_MASK,
+            peekByte(offset + WORD_BYTE_7).toInt() and BYTE_MASK,
         )
     }
 
@@ -514,7 +533,7 @@ internal class DefaultStreamProcessor(
         b: Long,
     ): Int {
         val xor = a xor b
-        return xor.countLeadingZeroBits() / 8
+        return xor.countLeadingZeroBits() / Byte.SIZE_BITS
     }
 
     // Find first mismatched byte index within an Int (big-endian)
@@ -523,7 +542,7 @@ internal class DefaultStreamProcessor(
         b: Int,
     ): Int {
         val xor = a xor b
-        return xor.countLeadingZeroBits() / 8
+        return xor.countLeadingZeroBits() / Byte.SIZE_BITS
     }
 
     // Find first mismatched byte index within a Short (big-endian)
@@ -531,9 +550,9 @@ internal class DefaultStreamProcessor(
         a: Short,
         b: Short,
     ): Int {
-        val xor = (a.toInt() xor b.toInt()) and 0xFFFF
+        val xor = (a.toInt() xor b.toInt()) and SHORT_MASK
         // countLeadingZeroBits on Int counts 16 extra zeros, subtract them
-        return (xor.countLeadingZeroBits() - 16) / 8
+        return (xor.countLeadingZeroBits() - Short.SIZE_BITS) / Byte.SIZE_BITS
     }
 
     override fun readByte(): Byte {
@@ -545,7 +564,7 @@ internal class DefaultStreamProcessor(
         return byte
     }
 
-    override fun readUnsignedByte(): Int = readByte().toInt() and 0xFF
+    override fun readUnsignedByte(): Int = readByte().toInt() and BYTE_MASK
 
     override fun readShort(): Short {
         require(totalAvailable >= Short.SIZE_BYTES) { "Not enough data for Short" }
@@ -557,8 +576,8 @@ internal class DefaultStreamProcessor(
             return value
         }
         return assembleShort(
-            readByte().toInt() and 0xFF,
-            readByte().toInt() and 0xFF,
+            readByte().toInt() and BYTE_MASK,
+            readByte().toInt() and BYTE_MASK,
         )
     }
 
@@ -572,10 +591,10 @@ internal class DefaultStreamProcessor(
             return value
         }
         return assembleInt(
-            readByte().toInt() and 0xFF,
-            readByte().toInt() and 0xFF,
-            readByte().toInt() and 0xFF,
-            readByte().toInt() and 0xFF,
+            readByte().toInt() and BYTE_MASK,
+            readByte().toInt() and BYTE_MASK,
+            readByte().toInt() and BYTE_MASK,
+            readByte().toInt() and BYTE_MASK,
         )
     }
 
@@ -589,14 +608,14 @@ internal class DefaultStreamProcessor(
             return value
         }
         return assembleLong(
-            readByte().toInt() and 0xFF,
-            readByte().toInt() and 0xFF,
-            readByte().toInt() and 0xFF,
-            readByte().toInt() and 0xFF,
-            readByte().toInt() and 0xFF,
-            readByte().toInt() and 0xFF,
-            readByte().toInt() and 0xFF,
-            readByte().toInt() and 0xFF,
+            readByte().toInt() and BYTE_MASK,
+            readByte().toInt() and BYTE_MASK,
+            readByte().toInt() and BYTE_MASK,
+            readByte().toInt() and BYTE_MASK,
+            readByte().toInt() and BYTE_MASK,
+            readByte().toInt() and BYTE_MASK,
+            readByte().toInt() and BYTE_MASK,
+            readByte().toInt() and BYTE_MASK,
         )
     }
 
@@ -631,9 +650,19 @@ internal class DefaultStreamProcessor(
             // before the current position. Slice to ensure position 0 = start of payload,
             // so resetForRead() can't expose those bytes to the caller.
             if (chunk.position() == 0) {
-                return chunk // already clean — zero-copy transfer
+                return chunk // already clean — zero-copy transfer, caller frees it
             }
-            return chunk.slice()
+            val slice = chunk.slice()
+            // The chunk was just removed from the deque, so its original reference must be
+            // released. For a PooledBuffer, slice() bumped the refcount, so the returned slice
+            // keeps the backing alive until the caller frees it; without this release the
+            // pooled buffer's refcount is stuck above zero and it never returns to the pool —
+            // a per-frame direct-memory leak (the Autobahn cat-12 OOM). A non-pooled slice
+            // aliases the parent's storage and is freed through the slice itself, so releasing
+            // the parent there would free memory the slice still points at — only pooled
+            // parents are released here.
+            if (chunk is PooledBuffer) freeConsumedChunk(chunk)
+            return slice
         }
         if (chunk.remaining() > size) {
             // Data is contiguous, return a slice

@@ -7,6 +7,9 @@ import kotlin.wasm.unsafe.UnsafeWasmMemoryApi
 
 private const val PAGE_SIZE = 65536 // 64KB per WASM page
 
+/** Mask for rounding a size up to the next 8-byte boundary (`Long.SIZE_BYTES - 1`). */
+private const val ALIGN_8_MASK = 7
+
 /**
  * Allocation statistics for debugging and monitoring.
  */
@@ -19,10 +22,15 @@ data class AllocationStats(
 /**
  * JavaScript interop for memory growth.
  * Uses the WASM module's exported memory object.
+ *
+ * The @JsFun body is a single JS expression string that cannot be wrapped without breaking interop.
  */
+@Suppress("MaxLineLength")
 @JsFun("(pages) => { if (typeof wasmExports !== 'undefined' && wasmExports.memory) { return wasmExports.memory.grow(pages); } return -1; }")
 private external fun jsMemoryGrow(pages: Int): Int
 
+/** The @JsFun body is a single JS expression string that cannot be wrapped without breaking interop. */
+@Suppress("MaxLineLength")
 @JsFun("() => { if (typeof wasmExports !== 'undefined' && wasmExports.memory) { return wasmExports.memory.buffer.byteLength; } return 0; }")
 private external fun jsMemorySize(): Int
 
@@ -147,7 +155,7 @@ object LinearMemoryAllocator {
         }
 
         // 8-byte alignment for optimal memory access
-        val aligned = (size + 7) and 7.inv()
+        val aligned = (size + ALIGN_8_MASK) and ALIGN_8_MASK.inv()
         lastAlignedSize = aligned
 
         // Check bounds but don't try to grow (would require @JsFun call)
@@ -196,7 +204,7 @@ object LinearMemoryAllocator {
         if (!initialized) {
             initializeMemory()
         }
-        val aligned = (size + 7) and 7.inv()
+        val aligned = (size + ALIGN_8_MASK) and ALIGN_8_MASK.inv()
         val offset = nextOffset
         nextOffset += aligned
         return offset
@@ -221,13 +229,13 @@ object LinearMemoryAllocator {
     /**
      * Test: Just the alignment math, nothing else
      */
-    fun testAlignmentOnly(size: Int): Int = (size + 7) and 7.inv()
+    fun testAlignmentOnly(size: Int): Int = (size + ALIGN_8_MASK) and ALIGN_8_MASK.inv()
 
     /**
      * Test: Alignment + assignment to lastAlignedSize
      */
     fun testAlignmentWithAssignment(size: Int): Int {
-        val aligned = (size + 7) and 7.inv()
+        val aligned = (size + ALIGN_8_MASK) and ALIGN_8_MASK.inv()
         lastAlignedSize = aligned
         return aligned
     }

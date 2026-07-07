@@ -3,10 +3,13 @@
 package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_ecdsa_sign_from_scalar
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_ed25519_public_key
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_ed25519_sign
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_ed25519_verify
 import com.ditchoom.buffer.toNSData
@@ -54,7 +57,7 @@ import platform.posix.size_tVar
  *
  * **Ed25519** is not exposed by the Security.framework C API — it lives in CryptoKit. It is wired
  * through the `cryptokitshim` cinterop ([bcks_ed25519_sign] / [bcks_ed25519_verify]), which calls
- * CryptoKit `Curve25519.Signing`. [supportsSyncEd25519] is therefore `true` on Apple.
+ * CryptoKit `Curve25519.Signing`. The Ed25519 witness is therefore [SignatureSupport.Blocking] on Apple.
  *
  * **ECDSA signing-from-scalar (Apple-specific):** `SecKeyCreateWithData` for an EC *private* key
  * requires the full ANSI X9.63 representation `04 ‖ X ‖ Y ‖ K`, not the bare scalar — it cannot
@@ -65,18 +68,27 @@ import platform.posix.size_tVar
  * `04 ‖ X ‖ Y` and DER signatures directly.
  */
 
-actual val supportsSyncEd25519: Boolean get() = true
-
-actual val supportsSyncEcdsa: Boolean get() = true
-
 actual val ecdsaSignatureEncoding: EcdsaSignatureEncoding get() = EcdsaSignatureEncoding.Der
+
+/**
+ * Every scheme has a synchronous path on Apple: ECDSA via Security.framework + the CryptoKit
+ * sign-from-scalar shim, Ed25519 via the CryptoKit `Curve25519.Signing` shim.
+ */
+actual fun CryptoCapabilities.signatures(scheme: SignatureScheme): SignatureSupport =
+    SignatureSupport.Blocking(SignatureBlockingOpsImpl(scheme))
+
+private const val P256_CURVE_BITS = 256
+private const val P384_CURVE_BITS = 384
+private const val P521_CURVE_BITS = 521
+private const val ED25519_SIGNATURE_BYTES = 64
+private const val ED25519_KEY_BYTES = 32
 
 /** Curve order in bits for the CryptoKit ECDSA-from-scalar shim (256 / 384 / 521). */
 private fun ecdsaCurveCode(scheme: SignatureScheme): Int =
     when (scheme) {
-        SignatureScheme.EcdsaP256 -> 256
-        SignatureScheme.EcdsaP384 -> 384
-        SignatureScheme.EcdsaP521 -> 521
+        SignatureScheme.EcdsaP256 -> P256_CURVE_BITS
+        SignatureScheme.EcdsaP384 -> P384_CURVE_BITS
+        SignatureScheme.EcdsaP521 -> P521_CURVE_BITS
         SignatureScheme.Ed25519 -> error("not an ECDSA scheme")
     }
 
@@ -151,7 +163,7 @@ private fun cryptoKitSign(
     message: ReadBuffer,
 ): ByteArray {
     val cap = maxSignatureBytes(key.scheme)
-    val scalar = key.requireOpen()
+    val scalar = key.requireInMemoryMaterial()
     return memScoped {
         val sigOut = allocArray<ByteVar>(cap)
         val sigLen = alloc<size_tVar>()
@@ -199,10 +211,10 @@ private fun appleEd25519Verify(
     signature: ReadBuffer,
 ): Boolean {
     // Ed25519 signatures are a fixed 64 bytes; reject anything else without calling into CryptoKit.
-    if (signature.remaining() != 64) return false
+    if (signature.remaining() != ED25519_SIGNATURE_BYTES) return false
     var status = -1
     val msgLen = message.remaining()
-    key.material.withRemainingBytes { pubPtr, pubLen ->
+    key.requireInMemoryMaterial().withRemainingBytes { pubPtr, pubLen ->
         message.withRemainingBytes2(msgLen) { msgPtr ->
             signature.withRemainingBytes { sigPtr, sigLen ->
                 status =
@@ -220,6 +232,13 @@ private fun appleEd25519Verify(
     return status == BCKS_OK
 }
 
+private const val BYTE_MASK = 0xFF
+private const val DER_LONG_FORM_FLAG = 0x80 // high bit set ⇒ long-form length / negative integer
+private const val DER_LENGTH_COUNT_MASK = 0x7f // low 7 bits of a long-form first octet = octet count
+private const val DER_MAX_LENGTH_OCTETS = 4 // we accept at most a 4-byte length
+private const val DER_TAG_INTEGER = 0x02
+private const val DER_TAG_SEQUENCE = 0x30
+
 /**
  * Returns (decoded length, index just past the length octets) for a minimal-form DER length at
  * [i], or `null` if the length is non-canonical (indefinite form, leading-zero octet, or long
@@ -230,15 +249,15 @@ private fun readDerLen(
     i: Int,
 ): Pair<Int, Int>? {
     if (i >= b.size) return null
-    val first = b[i].toInt() and 0xFF
-    if (first < 0x80) return first to (i + 1) // short form
-    val numBytes = first and 0x7f
-    if (numBytes == 0 || numBytes > 4) return null // indefinite form / unreasonably large
+    val first = b[i].toInt() and BYTE_MASK
+    if (first < DER_LONG_FORM_FLAG) return first to (i + 1) // short form
+    val numBytes = first and DER_LENGTH_COUNT_MASK
+    if (numBytes == 0 || numBytes > DER_MAX_LENGTH_OCTETS) return null // indefinite form / unreasonably large
     if (i + 1 + numBytes > b.size) return null
-    if ((b[i + 1].toInt() and 0xFF) == 0x00) return null // leading-zero length octet (non-minimal)
+    if ((b[i + 1].toInt() and BYTE_MASK) == 0x00) return null // leading-zero length octet (non-minimal)
     var len = 0
-    for (k in 0 until numBytes) len = (len shl 8) or (b[i + 1 + k].toInt() and 0xFF)
-    if (len < 0x80) return null // long form used where short form fits (non-minimal)
+    for (k in 0 until numBytes) len = (len shl Byte.SIZE_BITS) or (b[i + 1 + k].toInt() and BYTE_MASK)
+    if (len < DER_LONG_FORM_FLAG) return null // long form used where short form fits (non-minimal)
     return len to (i + 1 + numBytes)
 }
 
@@ -251,12 +270,14 @@ private fun readDerPositiveInt(
     i: Int,
     end: Int,
 ): Int {
-    if (i >= end || (b[i].toInt() and 0xFF) != 0x02) return -1
+    if (i >= end || (b[i].toInt() and BYTE_MASK) != DER_TAG_INTEGER) return -1
     val (len, contentStart) = readDerLen(b, i + 1) ?: return -1
     if (len < 1 || contentStart + len > end) return -1
-    val c0 = b[contentStart].toInt() and 0xFF
-    if (c0 and 0x80 != 0) return -1 // negative (r/s must be positive)
-    if (c0 == 0x00 && len > 1 && (b[contentStart + 1].toInt() and 0x80) == 0) return -1 // superfluous 0x00
+    val c0 = b[contentStart].toInt() and BYTE_MASK
+    if (c0 and DER_LONG_FORM_FLAG != 0) return -1 // negative (r/s must be positive)
+    if (c0 == 0x00 && len > 1 && (b[contentStart + 1].toInt() and DER_LONG_FORM_FLAG) == 0) {
+        return -1 // superfluous 0x00
+    }
     return contentStart + len
 }
 
@@ -274,7 +295,7 @@ private fun isCanonicalEcdsaDer(signature: ReadBuffer): Boolean {
     val n = signature.remaining()
     if (n < 2) return false
     val b = ByteArray(n) { signature.get(start + it) }
-    if ((b[0].toInt() and 0xFF) != 0x30) return false
+    if ((b[0].toInt() and BYTE_MASK) != DER_TAG_SEQUENCE) return false
     val (seqLen, contentStart) = readDerLen(b, 1) ?: return false
     if (contentStart + seqLen != n) return false // exact consumption, no trailing bytes
     val afterR = readDerPositiveInt(b, contentStart, n)
@@ -290,7 +311,7 @@ private fun appleEcdsaVerify(
 ): Boolean {
     // SecKeyVerifySignature accepts non-canonical BER; reject anything that is not strict DER first.
     if (!isCanonicalEcdsaDer(signature)) return false
-    val pub = createKey(key.material.toNsData(), isPrivate = false) ?: return false
+    val pub = createKey(key.requireInMemoryMaterial().toNsData(), isPrivate = false) ?: return false
 
     @Suppress("UNCHECKED_CAST")
     val msgData = CFBridgingRetain(message.toNsData()) as CFDataRef
@@ -309,7 +330,7 @@ private fun appleEcdsaVerify(
     }
 }
 
-actual fun signInto(
+internal actual fun signIntoPlatform(
     key: SigningKey,
     message: ReadBuffer,
     dest: WriteBuffer,
@@ -321,7 +342,7 @@ actual fun signInto(
     return n
 }
 
-actual fun verify(
+internal actual fun verifyPlatform(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,
@@ -332,7 +353,7 @@ actual fun verify(
         appleEcdsaVerify(key, message, signature)
     }
 
-actual suspend fun signAsync(
+internal actual suspend fun signAsyncPlatform(
     key: SigningKey,
     message: ReadBuffer,
     factory: BufferFactory,
@@ -344,12 +365,109 @@ actual suspend fun signAsync(
     return out
 }
 
-actual suspend fun verifyAsync(
+internal actual suspend fun verifyAsyncPlatform(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,
-): Boolean = verify(key, message, signature)
+): Boolean = verifyPlatform(key, message, signature)
 
 actual suspend fun ed25519AsyncAvailable(): Boolean = true
 
 actual val supportsEcdsaSigningFromScalar: Boolean get() = true
+
+// ---------------------------------------------------------------------------
+// Ed25519 key generation (ECDSA generation is common, reusing key agreement).
+// A fresh 32-byte seed from the platform CSPRNG; the matching public key is derived from it via the
+// CryptoKit shim ([bcks_ed25519_public_key]).
+// ---------------------------------------------------------------------------
+
+/** Read-ready buffer wrapping [bytes] (a fresh copy). */
+private fun bufferOf(bytes: ByteArray): PlatformBuffer {
+    val b = BufferFactory.Default.allocate(bytes.size)
+    b.writeBytes(bytes)
+    b.resetForRead()
+    return b
+}
+
+private fun generateEd25519(factory: BufferFactory): SyncCapableSigningKey {
+    val seedBuf = secureScratch.allocate(ED25519_KEY_BYTES)
+    cryptoRandomInto(seedBuf)
+    seedBuf.resetForRead()
+    val pubBytes = ByteArray(ED25519_KEY_BYTES)
+    return try {
+        memScoped {
+            val pubOut = allocArray<ByteVar>(ED25519_KEY_BYTES)
+            val pubLen = alloc<size_tVar>()
+            var status = -1
+            seedBuf.withRemainingBytes { seedPtr, seedLen ->
+                status =
+                    bcks_ed25519_public_key(
+                        seedPtr.reinterpret(),
+                        seedLen.convert(),
+                        pubOut.reinterpret(),
+                        ED25519_KEY_BYTES.convert(),
+                        pubLen.ptr,
+                    )
+            }
+            require(status == BCKS_OK) { "Ed25519 public-key derivation failed (status=$status)" }
+            for (i in 0 until ED25519_KEY_BYTES) pubBytes[i] = pubOut[i]
+        }
+        val verifyKey = VerifyKey.ed25519(bufferOf(pubBytes))
+        signingKeyOf(SignatureScheme.Ed25519, seedBuf, verifyKey, factory)
+    } finally {
+        seedBuf.freeNativeMemory()
+    }
+}
+
+/** Field width (coordinate / scalar bytes) for an ECDSA [scheme]. */
+private fun ecFieldBytes(scheme: SignatureScheme): Int =
+    when (scheme) {
+        SignatureScheme.EcdsaP256 -> 32
+        SignatureScheme.EcdsaP384 -> 48
+        SignatureScheme.EcdsaP521 -> 66
+        SignatureScheme.Ed25519 -> error("not ECDSA")
+    }
+
+private fun generateEcdsa(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey {
+    // Reuse the key-agreement generator over the same NIST curve. On Apple the KA public key is the
+    // uncompressed point (exactly the signature verify-key encoding), and the KA private key now
+    // exports the raw big-endian scalar the CryptoKit signing shim expects — so the trailing-bytes
+    // copy below is an identity copy (total == field), kept defensively.
+    val pair = generateKeyPairPlatform(scheme.toKeyAgreementCurve())
+    try {
+        val verifyKey = verifyKeyOf(scheme, pair.publicKey.encoded)
+        val x963 = pair.privateKey.exportEncoded(secureScratch)
+        val field = ecFieldBytes(scheme)
+        val scalar = secureScratch.allocate(field)
+        val start = x963.position()
+        val total = x963.remaining()
+        for (i in 0 until field) scalar.writeByte(x963.get(start + total - field + i))
+        scalar.resetForRead()
+        return try {
+            signingKeyOf(scheme, scalar, verifyKey, factory)
+        } finally {
+            scalar.freeNativeMemory()
+            (x963 as? PlatformBuffer)?.freeNativeMemory()
+        }
+    } finally {
+        pair.close()
+    }
+}
+
+internal actual fun generateSigningKeyPlatform(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey =
+    if (scheme == SignatureScheme.Ed25519) {
+        generateEd25519(factory)
+    } else {
+        generateEcdsa(scheme, factory)
+    }
+
+internal actual suspend fun generateSigningKeyAsyncPlatform(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey = generateSigningKeyPlatform(scheme, factory)

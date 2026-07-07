@@ -39,7 +39,11 @@ class AndroidDeterministicUnsafeJvmBuffer private constructor(
                 val byteBuffer = JniDirectByteBufferAllocator.newDirectByteBuffer(address, size)
                 byteBuffer.order(byteOrder.toJava())
                 return AndroidDeterministicUnsafeJvmBuffer(byteBuffer, address)
-            } catch (e: Throwable) {
+                // Any failure (including Errors/OOM) must free the just-allocated native memory
+                // before the original Throwable propagates unchanged.
+            } catch (
+                @Suppress("TooGenericExceptionCaught") e: Throwable,
+            ) {
                 UnsafeAllocator.freeMemory(address)
                 throw e
             }

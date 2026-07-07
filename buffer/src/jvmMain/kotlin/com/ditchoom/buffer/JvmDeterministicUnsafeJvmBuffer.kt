@@ -27,7 +27,11 @@ internal class JvmDeterministicUnsafeJvmBuffer(
                 val byteBuffer = UnsafeMemory.wrapAsDirectByteBuffer(address, size)
                 byteBuffer.order(byteOrder.toJava())
                 return JvmDeterministicUnsafeJvmBuffer(byteBuffer, address)
-            } catch (e: Throwable) {
+                // Any failure (including Errors/OOM) must free the just-allocated native memory
+                // before the original Throwable propagates unchanged.
+            } catch (
+                @Suppress("TooGenericExceptionCaught") e: Throwable,
+            ) {
                 UnsafeAllocator.freeMemory(address)
                 throw e
             }

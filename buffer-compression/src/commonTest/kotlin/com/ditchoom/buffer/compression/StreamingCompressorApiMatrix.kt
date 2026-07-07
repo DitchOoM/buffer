@@ -179,7 +179,10 @@ class StreamingCompressorApiMatrix {
         // 12 iterations gives multiple alignment chances without burning a long CI budget;
         // the 60-combo matrix (3 algorithms × 4 levels × 5 payload shapes) keeps the total
         // work well under the kotlin.test default timeout on slower CI Node runners.
-        runMatrix(lifecycleFlushResetCycle(iterations = 12), payloadFilter = { it.first != "empty" && it.first != "random_64k" })
+        runMatrix(
+            lifecycleFlushResetCycle(iterations = 12),
+            payloadFilter = { it.first != "empty" && it.first != "random_64k" },
+        )
     }
 
     private fun runMatrix(
@@ -218,7 +221,8 @@ class StreamingCompressorApiMatrix {
             // Truncate large diffs for readability.
             val expHex = expected.take(32).joinToString(" ") { ((it.toInt() and 0xFF)).toString(16).padStart(2, '0') }
             val actHex = actual.take(32).joinToString(" ") { ((it.toInt() and 0xFF)).toString(16).padStart(2, '0') }
-            fail("$message — sizes expected=${expected.size} actual=${actual.size}, head expected=[$expHex] actual=[$actHex]")
+            val sizes = "sizes expected=${expected.size} actual=${actual.size}"
+            fail("$message — $sizes, head expected=[$expHex] actual=[$actHex]")
         }
     }
 

@@ -93,9 +93,9 @@ class CodecSchemaDriftGateTest {
         // Advisory (pure rename) warns but never fails — matches the plugin's failOnBreaking contract.
         advisory.forEach { println("codec schema drift (advisory): ${it.typeName} — ${it.detail}") }
 
-        if (breaking.isEmpty()) return
-
-        fail(buildFailureMessage(breaking))
+        if (breaking.isNotEmpty()) {
+            fail(buildFailureMessage(breaking))
+        }
     }
 
     private fun buildFailureMessage(breaking: List<com.ditchoom.buffer.codec.schema.SchemaDrift>): String {

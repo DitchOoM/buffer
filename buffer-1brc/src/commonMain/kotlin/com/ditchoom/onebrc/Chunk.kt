@@ -26,10 +26,19 @@ object ChunkSplitter {
         desiredChunks: Int,
         byteAt: (Long) -> Byte,
     ): List<Chunk> {
-        if (fileSize <= 0L) return emptyList()
         val n = if (desiredChunks < 1) 1 else desiredChunks
-        if (n == 1) return listOf(Chunk(0L, fileSize))
+        return when {
+            fileSize <= 0L -> emptyList()
+            n == 1 -> listOf(Chunk(0L, fileSize))
+            else -> splitMultiple(fileSize, n, byteAt)
+        }
+    }
 
+    private fun splitMultiple(
+        fileSize: Long,
+        n: Int,
+        byteAt: (Long) -> Byte,
+    ): List<Chunk> {
         val chunks = ArrayList<Chunk>(n)
         var start = 0L
         for (k in 1 until n) {

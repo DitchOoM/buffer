@@ -45,16 +45,16 @@ class LinuxNativeDataContentTests {
 
     @Test
     fun toNativeDataPartialBufferPreservesContent() {
-        val buf = BufferFactory.Default.allocate(8)
-        buf.writeInt(0x01020304)
-        buf.writeInt(0x05060708)
+        val buf = BufferFactory.Default.allocate(LEN_8)
+        buf.writeInt(INT_FIRST)
+        buf.writeInt(INT_SECOND)
         buf.resetForRead()
-        buf.position(4) // Skip first int
+        buf.position(INT_SIZE) // Skip first int
 
         val nativeData = buf.toNativeData()
         val nativeBuffer = nativeData.nativeBuffer
-        assertEquals(4, nativeBuffer.remaining())
-        assertEquals(0x05060708, nativeBuffer.readInt())
+        assertEquals(INT_SIZE, nativeBuffer.remaining())
+        assertEquals(INT_SECOND, nativeBuffer.readInt())
     }
 
     @Test
@@ -71,8 +71,8 @@ class LinuxNativeDataContentTests {
 
     @Test
     fun toNativeDataHasValidNativeAddress() {
-        val buf = BufferFactory.Default.allocate(16)
-        buf.writeInt(42)
+        val buf = BufferFactory.Default.allocate(LEN_16)
+        buf.writeInt(INT_42)
         buf.resetForRead()
 
         val nativeData = buf.toNativeData()
@@ -90,38 +90,53 @@ class LinuxNativeDataContentTests {
 
     @Test
     fun intRoundTripViaNativeData() {
-        val buf = BufferFactory.Default.allocate(4)
-        buf.writeInt(0xDEADBEEF.toInt())
+        val buf = BufferFactory.Default.allocate(INT_SIZE)
+        buf.writeInt(INT_DEAD_BEEF)
         buf.resetForRead()
 
         val nativeData = buf.toNativeData()
-        assertEquals(0xDEADBEEF.toInt(), nativeData.nativeBuffer.readInt())
+        assertEquals(INT_DEAD_BEEF, nativeData.nativeBuffer.readInt())
     }
 
     @Test
     fun longRoundTripViaNativeData() {
-        val buf = BufferFactory.Default.allocate(8)
-        buf.writeLong(0x123456789ABCDEF0L)
+        val buf = BufferFactory.Default.allocate(LEN_8)
+        buf.writeLong(LONG_SEQ)
         buf.resetForRead()
 
         val nativeData = buf.toNativeData()
-        assertEquals(0x123456789ABCDEF0L, nativeData.nativeBuffer.readLong())
+        assertEquals(LONG_SEQ, nativeData.nativeBuffer.readLong())
     }
 
     @Test
     fun mixedTypesRoundTripViaNativeData() {
-        val buf = BufferFactory.Default.allocate(15)
-        buf.writeByte(0x42)
-        buf.writeShort(0x1234.toShort())
-        buf.writeInt(0xDEADBEEF.toInt())
-        buf.writeLong(0x0102030405060708L)
+        val buf = BufferFactory.Default.allocate(MIXED_TYPES_SIZE)
+        buf.writeByte(BYTE_42.toByte())
+        buf.writeShort(SHORT_1234)
+        buf.writeInt(INT_DEAD_BEEF)
+        buf.writeLong(LONG_INCREMENTING)
         buf.resetForRead()
 
         val nativeData = buf.toNativeData()
         val nb = nativeData.nativeBuffer
-        assertEquals(0x42.toByte(), nb.readByte())
-        assertEquals(0x1234.toShort(), nb.readShort())
-        assertEquals(0xDEADBEEF.toInt(), nb.readInt())
-        assertEquals(0x0102030405060708L, nb.readLong())
+        assertEquals(BYTE_42.toByte(), nb.readByte())
+        assertEquals(SHORT_1234, nb.readShort())
+        assertEquals(INT_DEAD_BEEF, nb.readInt())
+        assertEquals(LONG_INCREMENTING, nb.readLong())
+    }
+
+    private companion object {
+        private const val INT_SIZE = 4
+        private const val LEN_8 = 8
+        private const val LEN_16 = 16
+        private const val MIXED_TYPES_SIZE = 15
+        private const val INT_42 = 42
+        private const val BYTE_42 = 0x42
+        private const val SHORT_1234: Short = 0x1234
+        private const val INT_FIRST = 0x01020304
+        private const val INT_SECOND = 0x05060708
+        private const val INT_DEAD_BEEF = 0xDEADBEEF.toInt()
+        private const val LONG_SEQ = 0x123456789ABCDEF0L
+        private const val LONG_INCREMENTING = 0x0102030405060708L
     }
 }

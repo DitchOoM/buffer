@@ -1,16 +1,23 @@
-@file:Suppress("UNCHECKED_CAST")
+@file:Suppress("UNCHECKED_CAST", "MatchingDeclarationName")
 
 package com.ditchoom.buffer
 
 import sun.misc.Unsafe
 
 actual object UnsafeMemory {
+    // Reflective probe for theUnsafe; failure is an intentional degrade-to-unsupported path,
+    // so the caught exception carries no actionable information and is deliberately not propagated.
+    @Suppress("SwallowedException")
     private val unsafe: Unsafe? =
         try {
             val field = Unsafe::class.java.getDeclaredField("theUnsafe")
             field.isAccessible = true
             field.get(null) as Unsafe
-        } catch (e: Exception) {
+        } catch (e: ReflectiveOperationException) {
+            // theUnsafe is absent/inaccessible on this runtime; UnsafeMemory degrades to unsupported.
+            null
+        } catch (e: SecurityException) {
+            // A SecurityManager forbids the reflective lookup; degrade to unsupported.
             null
         }
 
@@ -194,7 +201,11 @@ actual object UnsafeMemory {
                 )
             constructor.isAccessible = true
             DirectByteBufferAccess.Available(constructor)
-        } catch (e: Throwable) {
+            // Reflective class/constructor lookup may surface Errors (e.g. hidden-API enforcement);
+            // capture the full Throwable as the cause so callers can report the real reason.
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Throwable,
+        ) {
             DirectByteBufferAccess.Unavailable(e)
         }
     }
@@ -220,7 +231,11 @@ actual object UnsafeMemory {
             is DirectByteBufferAccess.Available ->
                 try {
                     state.constructor.newInstance(address, capacity) as java.nio.ByteBuffer
-                } catch (e: Throwable) {
+                    // Reflective invocation may wrap arbitrary Throwables (InvocationTargetException,
+                    // Errors); the real cause is chained into the UnsupportedOperationException below.
+                } catch (
+                    @Suppress("TooGenericExceptionCaught") e: Throwable,
+                ) {
                     throw UnsupportedOperationException(
                         "Reflective DirectByteBuffer constructor invocation failed " +
                             "(address=$address, capacity=$capacity): ${e.message ?: e::class.qualifiedName}",

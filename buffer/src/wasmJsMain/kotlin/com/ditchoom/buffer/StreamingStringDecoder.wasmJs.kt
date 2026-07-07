@@ -101,7 +101,10 @@ private class WasmJsStreamingStringDecoder(
                 totalChars += result.length
                 offset += chunkSize
             }
-        } catch (e: Throwable) {
+            // TextDecoder surfaces decode failures as arbitrary JS errors (Throwable on Wasm/JS).
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Throwable,
+        ) {
             totalChars += handleError(destination, e)
         } finally {
             buffer.position(startPos + remaining)
@@ -156,7 +159,10 @@ private class WasmJsStreamingStringDecoder(
                 destination.append(result)
             }
             result.length
-        } catch (e: Throwable) {
+            // TextDecoder surfaces flush failures as arbitrary JS errors (Throwable on Wasm/JS).
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Throwable,
+        ) {
             handleError(destination, e)
         }
 
@@ -186,4 +192,6 @@ private class WasmJsStreamingStringDecoder(
         }
 }
 
+// ktlint (no .editorconfig) collapses this expression body onto one line, so it cannot be wrapped.
+@Suppress("MaxLineLength")
 actual fun StreamingStringDecoder(config: StreamingStringDecoderConfig): StreamingStringDecoder = WasmJsStreamingStringDecoder(config)

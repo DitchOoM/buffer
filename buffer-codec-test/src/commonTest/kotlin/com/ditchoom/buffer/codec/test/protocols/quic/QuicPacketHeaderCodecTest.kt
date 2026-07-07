@@ -71,8 +71,14 @@ class QuicPacketHeaderCodecTest {
 
     @Test
     fun wireSizeIsOneByteForBothVariants() {
-        assertEquals(WireSize.Exact(1), QuicPacketHeaderCodec.wireSize(QuicPacketHeader.ShortHeader(), EncodeContext.Empty))
-        assertEquals(WireSize.Exact(1), QuicPacketHeaderCodec.wireSize(QuicPacketHeader.LongHeader(), EncodeContext.Empty))
+        assertEquals(
+            WireSize.Exact(1),
+            QuicPacketHeaderCodec.wireSize(QuicPacketHeader.ShortHeader(), EncodeContext.Empty),
+        )
+        assertEquals(
+            WireSize.Exact(1),
+            QuicPacketHeaderCodec.wireSize(QuicPacketHeader.LongHeader(), EncodeContext.Empty),
+        )
     }
 
     @Test

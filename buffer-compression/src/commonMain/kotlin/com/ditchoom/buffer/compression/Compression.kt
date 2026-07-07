@@ -43,8 +43,18 @@ sealed interface CompressionLevel {
         override val value: Int,
     ) : CompressionLevel {
         init {
-            require(value in 0..9) { "Compression level must be between 0 and 9" }
+            require(value in MIN_LEVEL..MAX_LEVEL) {
+                "Compression level must be between $MIN_LEVEL and $MAX_LEVEL"
+            }
         }
+    }
+
+    companion object {
+        /** Lowest zlib compression level (no compression). */
+        const val MIN_LEVEL: Int = 0
+
+        /** Highest zlib compression level (best compression). */
+        const val MAX_LEVEL: Int = 9
     }
 }
 
@@ -65,20 +75,32 @@ sealed interface CompressionResult {
 /**
  * Compresses data from a ReadBuffer using the specified algorithm.
  * Reads from current position to limit.
+ *
+ * @param dictionary Optional preset dictionary (see [supportsPresetDictionary]). Consumed
+ *   fully if provided. A small dictionary tuned to the corpus's common byte sequences
+ *   improves compression of many small, structurally-similar messages (MQTT, WebSocket
+ *   frames, telemetry) at no runtime cost — smaller output compresses faster too.
+ *   [CompressionAlgorithm.Gzip] never supports a dictionary (see [CompressionAlgorithm.supportsDictionary]);
+ *   passing one throws [CompressionException].
  */
 expect fun compress(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Deflate,
     level: CompressionLevel = CompressionLevel.Default,
+    dictionary: ReadBuffer? = null,
 ): CompressionResult
 
 /**
  * Decompresses data from a ReadBuffer using the specified algorithm.
  * Reads from current position to limit.
+ *
+ * @param dictionary The same preset dictionary passed to [compress]. Consumed fully if
+ *   provided. Must match what the encoder used, or decompression fails/produces garbage.
  */
 expect fun decompress(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Deflate,
+    dictionary: ReadBuffer? = null,
 ): CompressionResult
 
 /**
@@ -161,6 +183,63 @@ expect val supportsStatefulFlush: Boolean
  */
 expect val supportsCustomWindowBits: Boolean
 
+/**
+ * Whether this platform's compression backend exposes a preset-dictionary knob at all,
+ * independent of algorithm.
+ *
+ * - JVM, Android, Apple, Linux: `true` - `Deflater`/`Inflater`/zlib all expose
+ *   `setDictionary`.
+ * - JS (Node.js), Wasm (Node.js): `true` - Node's zlib bindings accept a `dictionary`
+ *   option.
+ * - JS (Browser), Wasm (Browser): `false` - the CompressionStream/DecompressionStream
+ *   Web API has no dictionary parameter.
+ *
+ * Use [CompressionAlgorithm.supportsDictionary] rather than this flag directly — it also
+ * accounts for [CompressionAlgorithm.Gzip], which never supports a dictionary regardless
+ * of platform.
+ */
+expect val supportsPresetDictionary: Boolean
+
+/**
+ * Whether this [CompressionAlgorithm] can use a preset dictionary on the current platform.
+ *
+ * [CompressionAlgorithm.Gzip] is always `false`: RFC 1952 has no preset-dictionary
+ * mechanism at the format level. This holds even on platforms whose gzip implementation
+ * happens to be built on a raw deflate stream under the hood (see the JVM/Android
+ * implementation notes on [supportsPresetDictionary]'s call sites) — the restriction is
+ * about wire-format interop, not a particular backend's internals.
+ *
+ * [CompressionAlgorithm.Deflate] and [CompressionAlgorithm.Raw] follow
+ * [supportsPresetDictionary].
+ *
+ * Passing a dictionary when this is `false` throws [CompressionException] rather than
+ * silently ignoring it: unlike window bits (where both sides fall back to the same safe
+ * default), a dictionary applied on only one side of a compress/decompress pair corrupts
+ * the stream.
+ */
+fun CompressionAlgorithm.supportsDictionary(): Boolean = this != CompressionAlgorithm.Gzip && supportsPresetDictionary
+
+/**
+ * Validates that [dictionary] is only supplied when [algorithm] actually supports one.
+ * Called by every platform backend before wiring a dictionary into the underlying
+ * compressor/decompressor, so an unsupported combination fails loudly instead of being
+ * silently dropped (see [CompressionAlgorithm.supportsDictionary] for why silent
+ * dropping is unsafe here).
+ */
+internal fun requireDictionarySupport(
+    algorithm: CompressionAlgorithm,
+    dictionary: ReadBuffer?,
+) {
+    if (dictionary == null || algorithm.supportsDictionary()) return
+    val reason =
+        if (algorithm == CompressionAlgorithm.Gzip) {
+            "Gzip does not support preset dictionaries (RFC 1952 has no preset-dictionary mechanism)"
+        } else {
+            "This platform's compression backend does not support preset dictionaries"
+        }
+    throw CompressionException(reason)
+}
+
 // =============================================================================
 // Suspending One-Shot API (works on all platforms including browser JS)
 // =============================================================================
@@ -176,6 +255,8 @@ expect val supportsCustomWindowBits: Boolean
  * @param algorithm The compression algorithm to use
  * @param level The compression level
  * @param factory The buffer factory for the output buffer
+ * @param dictionary Optional preset dictionary, consumed fully if provided. See
+ *   [CompressionAlgorithm.supportsDictionary].
  * @return The compressed data as a single buffer (position=0, limit=compressed size)
  */
 suspend fun compressAsync(
@@ -183,8 +264,9 @@ suspend fun compressAsync(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Gzip,
     level: CompressionLevel = CompressionLevel.Default,
     factory: BufferFactory = BufferFactory.Default,
+    dictionary: ReadBuffer? = null,
 ): PlatformBuffer {
-    val compressor = SuspendingStreamingCompressor.create(algorithm, level)
+    val compressor = SuspendingStreamingCompressor.create(algorithm, level, dictionary = dictionary)
     return try {
         val output = mutableListOf<ReadBuffer>()
         output += compressor.compress(buffer)
@@ -208,6 +290,8 @@ suspend fun compressAsync(
  * @param expectedOutputSize Hint for pre-allocating the output buffer. If the actual
  *   decompressed size exceeds this, the buffer grows automatically. Use 0 (default)
  *   if unknown. Providing a good estimate reduces memory allocations.
+ * @param dictionary The same preset dictionary passed to [compressAsync], consumed fully
+ *   if provided. See [CompressionAlgorithm.supportsDictionary].
  * @return The decompressed data as a single buffer (position=0, limit=decompressed size)
  */
 suspend fun decompressAsync(
@@ -215,8 +299,9 @@ suspend fun decompressAsync(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Gzip,
     factory: BufferFactory = BufferFactory.Default,
     expectedOutputSize: Int = 0,
+    dictionary: ReadBuffer? = null,
 ): PlatformBuffer {
-    val decompressor = SuspendingStreamingDecompressor.create(algorithm)
+    val decompressor = SuspendingStreamingDecompressor.create(algorithm, dictionary = dictionary)
     return try {
         if (expectedOutputSize > 0) {
             // Optimized path: write directly to pre-allocated buffer
@@ -343,6 +428,9 @@ object DeflateFormat {
      * The sequence represents an empty non-final stored block in the deflate format.
      */
     const val SYNC_FLUSH_MARKER: Int = 0x0000FFFF
+
+    /** Length in bytes of the [SYNC_FLUSH_MARKER] (`00 00 FF FF`). */
+    const val SYNC_FLUSH_MARKER_BYTES: Int = 4
 }
 
 /**
@@ -356,9 +444,9 @@ object DeflateFormat {
  *   is not present, returns the buffer unchanged.
  */
 fun ReadBuffer.stripSyncFlushMarker(): ReadBuffer {
-    if (remaining() < 4) return this
+    if (remaining() < DeflateFormat.SYNC_FLUSH_MARKER_BYTES) return this
 
-    val markerStart = limit() - 4
+    val markerStart = limit() - DeflateFormat.SYNC_FLUSH_MARKER_BYTES
     val lastFourBytes = getInt(markerStart)
 
     // Sync marker bytes are 00 00 FF FF. When read as int:

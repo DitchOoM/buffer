@@ -14,7 +14,18 @@ plugins {
     alias(libs.plugins.maven.publish)
     alias(libs.plugins.dokka)
     alias(libs.plugins.kotlinx.benchmark)
+    alias(libs.plugins.binary.compatibility.validator)
     signing
+}
+
+// Binary-compatibility validation locks the published public ABI so additive minors (e.g. the raw
+// ByteStreamMux primitive) are proven non-breaking by `apiCheck`. Like :buffer-crypto we validate
+// the JVM ABI only: it is host-independent and the common public surface is wholly contained in
+// the JVM dump; klib validation would diverge between partial-target dev hosts and CI runners.
+apiValidation {
+    klib {
+        enabled = false
+    }
 }
 
 // Required for JMH @State classes
@@ -155,19 +166,16 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":buffer"))
+            // The typed frame pipe (ByteSource/ByteSink/ByteStream.typed) bridges a Codec across a
+            // byte stream, so buffer-codec is part of buffer-flow's public API surface here.
+            api(project(":buffer-codec"))
             api(libs.kotlinx.coroutines.core)
-            // The codec bridge (asCodecConnection) lives in commonMain but is
-            // optional: consumers who only use Connection / StreamMux pay no
-            // codec-module compile cost. Consumers who use the bridge add
-            // :buffer-codec to their own dependencies.
-            compileOnly(project(":buffer-codec"))
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
-            // The bridge tests need the actual codec module + the MQTT fixtures
-            // generated into :buffer-codec-test's commonMain by KSP.
-            implementation(project(":buffer-codec"))
+            // The bridge tests need the MQTT fixtures generated into :buffer-codec-test's
+            // commonMain by KSP (buffer-codec itself is now a main dependency, above).
             implementation(project(":buffer-codec-test"))
         }
 

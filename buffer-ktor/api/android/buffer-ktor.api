@@ -1,0 +1,36 @@
+public final class com/ditchoom/buffer/ktor/BufferCodecConverter : io/ktor/serialization/ContentConverter {
+	public static final field Companion Lcom/ditchoom/buffer/ktor/BufferCodecConverter$Companion;
+	public fun <init> (Lcom/ditchoom/buffer/codec/Codec;Lkotlin/reflect/KClass;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/EncodeContext;Lcom/ditchoom/buffer/codec/DecodeContext;)V
+	public synthetic fun <init> (Lcom/ditchoom/buffer/codec/Codec;Lkotlin/reflect/KClass;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/EncodeContext;Lcom/ditchoom/buffer/codec/DecodeContext;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun deserialize (Ljava/nio/charset/Charset;Lio/ktor/util/reflect/TypeInfo;Lio/ktor/utils/io/ByteReadChannel;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun serialize (Lio/ktor/http/ContentType;Ljava/nio/charset/Charset;Lio/ktor/util/reflect/TypeInfo;Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class com/ditchoom/buffer/ktor/BufferCodecConverter$Companion {
+}
+
+public final class com/ditchoom/buffer/ktor/ChannelBridgeKt {
+	public static final fun readRemainingBuffer (Lio/ktor/utils/io/ByteReadChannel;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun readRemainingBuffer$default (Lio/ktor/utils/io/ByteReadChannel;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static final fun writeBuffer (Lio/ktor/utils/io/ByteWriteChannel;Lcom/ditchoom/buffer/ReadBuffer;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class com/ditchoom/buffer/ktor/CodecEncodingKt {
+	public static final fun encodeToPlatformBuffer (Lcom/ditchoom/buffer/codec/Encoder;Ljava/lang/Object;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/EncodeContext;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public static synthetic fun encodeToPlatformBuffer$default (Lcom/ditchoom/buffer/codec/Encoder;Ljava/lang/Object;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/EncodeContext;ILjava/lang/Object;)Lcom/ditchoom/buffer/PlatformBuffer;
+}
+
+public final class com/ditchoom/buffer/ktor/FrameStreamingKt {
+	public static final fun decodeFrames (Lio/ktor/utils/io/ByteReadChannel;Lcom/ditchoom/buffer/codec/Codec;Lcom/ditchoom/buffer/codec/DecodeContext;Lcom/ditchoom/buffer/ByteOrder;I)Lkotlinx/coroutines/flow/Flow;
+	public static synthetic fun decodeFrames$default (Lio/ktor/utils/io/ByteReadChannel;Lcom/ditchoom/buffer/codec/Codec;Lcom/ditchoom/buffer/codec/DecodeContext;Lcom/ditchoom/buffer/ByteOrder;IILjava/lang/Object;)Lkotlinx/coroutines/flow/Flow;
+	public static final fun encodeFrame (Lio/ktor/utils/io/ByteWriteChannel;Lcom/ditchoom/buffer/codec/Encoder;Ljava/lang/Object;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/EncodeContext;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun encodeFrame$default (Lio/ktor/utils/io/ByteWriteChannel;Lcom/ditchoom/buffer/codec/Encoder;Ljava/lang/Object;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/EncodeContext;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+}
+
+public final class com/ditchoom/buffer/ktor/WebSocketMaskingKt {
+	public static final fun applyWebSocketMask (Lcom/ditchoom/buffer/ReadWriteBuffer;II)V
+	public static synthetic fun applyWebSocketMask$default (Lcom/ditchoom/buffer/ReadWriteBuffer;IIILjava/lang/Object;)V
+	public static final fun writeMaskedWebSocketPayload (Lio/ktor/utils/io/ByteWriteChannel;Lcom/ditchoom/buffer/ReadBuffer;ILcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun writeMaskedWebSocketPayload$default (Lio/ktor/utils/io/ByteWriteChannel;Lcom/ditchoom/buffer/ReadBuffer;ILcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+}
+

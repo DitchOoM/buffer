@@ -29,7 +29,7 @@ internal class GrowableWriteBuffer : WriteBuffer {
     private var factory: BufferFactory? = null
     private var inner: PlatformBuffer? = null
 
-    private fun requireInner(): PlatformBuffer = inner ?: throw IllegalStateException("GrowableWriteBuffer used before attach()")
+    private fun requireInner(): PlatformBuffer = inner ?: error("GrowableWriteBuffer used before attach()")
 
     fun attach(
         factory: BufferFactory,
@@ -47,6 +47,19 @@ internal class GrowableWriteBuffer : WriteBuffer {
      * the returned slice — the slice's refcount / chunk will free the inner.
      */
     fun detach() {
+        inner = null
+        factory = null
+    }
+
+    /**
+     * Frees the inner buffer (if attached) and clears state. Used by callers that
+     * own the scratch for its whole lifetime — e.g. [LengthPrefixedListEncoder],
+     * which copies the measured body into the target buffer and then discards the
+     * scratch, rather than transferring ownership to a returned slice the way
+     * [FramedEncoder] does.
+     */
+    fun freeAndDetach() {
+        inner?.freeNativeMemory()
         inner = null
         factory = null
     }
@@ -108,25 +121,25 @@ internal class GrowableWriteBuffer : WriteBuffer {
     }
 
     override fun writeInt(int: Int): WriteBuffer {
-        ensureCapacity(4)
+        ensureCapacity(Int.SIZE_BYTES)
         requireInner().writeInt(int)
         return this
     }
 
     override fun writeLong(long: Long): WriteBuffer {
-        ensureCapacity(8)
+        ensureCapacity(Long.SIZE_BYTES)
         requireInner().writeLong(long)
         return this
     }
 
     override fun writeFloat(float: Float): WriteBuffer {
-        ensureCapacity(4)
+        ensureCapacity(Float.SIZE_BYTES)
         requireInner().writeFloat(float)
         return this
     }
 
     override fun writeDouble(double: Double): WriteBuffer {
-        ensureCapacity(8)
+        ensureCapacity(Double.SIZE_BYTES)
         requireInner().writeDouble(double)
         return this
     }

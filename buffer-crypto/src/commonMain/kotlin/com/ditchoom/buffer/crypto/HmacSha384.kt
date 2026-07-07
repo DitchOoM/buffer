@@ -21,18 +21,26 @@ const val HMAC_SHA384_BYTES = SHA384_DIGEST_BYTES
  * 48-byte tag into a caller-owned destination. Reads are non-destructive.
  *
  * Not thread-safe — one instance per MAC. Key-bearing intermediates are wiped after use.
+ * One-shot: [update] or [doFinalInto] after finalization throws [IllegalStateException].
  */
 expect class HmacSha384Mac(
     key: ReadBuffer,
-) {
+) : AutoCloseable {
     /** Absorbs the remaining bytes of [input] (non-destructive). Returns `this` for chaining. */
     fun update(input: ReadBuffer): HmacSha384Mac
 
     /**
      * Finalizes and writes [HMAC_SHA384_BYTES] bytes into [dest] at its current
      * position, advancing it. [dest] must have at least [HMAC_SHA384_BYTES] remaining.
+     * Releases the MAC state; any further [update]/[doFinalInto] throws [IllegalStateException].
      */
     fun doFinalInto(dest: WriteBuffer)
+
+    /**
+     * Releases the (key-derived) MAC state without producing a tag — for a MAC abandoned before
+     * [doFinalInto] (which releases the state itself). Idempotent; a no-op after [doFinalInto].
+     */
+    override fun close()
 }
 
 /**

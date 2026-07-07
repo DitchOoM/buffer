@@ -72,10 +72,75 @@ int32_t bcks_x25519_agree(
     uint8_t *secretOut, size_t secretCap,
     size_t *secretLenOut);
 
+// ECDH: reconstruct the ANSI X9.63 private representation (04 ‖ X ‖ Y ‖ K) from a bare scalar
+// (curve: 256, 384, or 521). Lets the Security-framework agreement path accept a stored raw scalar,
+// so the key-agreement private encoding is the same raw big-endian scalar on every platform.
+int32_t bcks_ecdh_x963_from_scalar(
+    int32_t curve,
+    const uint8_t *scalarPtr, size_t scalarLen,
+    uint8_t *x963Out, size_t x963Cap,
+    size_t *x963LenOut);
+
+// EC point decompression (curve: 256, 384, or 521): SEC1 compressed (0x02/0x03 || X) -> uncompressed
+// (0x04 || X || Y) via CryptoKit. Returns BCKS_ERR_INPUT for an off-curve point and BCKS_ERR_INTERNAL
+// when the running OS predates CryptoKit's compressed-point support (macOS 13 / iOS 16 / watchOS 9 /
+// tvOS 16); the Kotlin actual maps the latter to UnsupportedOperationException.
+int32_t bcks_ec_decompress(
+    int32_t curve,
+    const uint8_t *pointPtr, size_t pointLen,
+    uint8_t *out, size_t outCap,
+    size_t *outLenOut);
+
 // ECDSA signing from a bare scalar (curve: 256, 384, or 521).
 int32_t bcks_ecdsa_sign_from_scalar(
     int32_t curve,
     const uint8_t *scalarPtr, size_t scalarLen,
+    const uint8_t *msgPtr, size_t msgLen,
+    uint8_t *sigOut, size_t sigCap,
+    size_t *sigLenOut);
+
+// Secure Enclave (hardware-backed P-256 signing).
+int32_t bcks_secure_enclave_available(void);
+
+int32_t bcks_secure_enclave_p256_generate(
+    uint8_t *blobOut, size_t blobCap, size_t *blobLenOut,
+    uint8_t *pointOut, size_t pointCap, size_t *pointLenOut);
+
+int32_t bcks_secure_enclave_p256_sign(
+    const uint8_t *blobPtr, size_t blobLen,
+    const uint8_t *msgPtr, size_t msgLen,
+    uint8_t *sigOut, size_t sigCap,
+    size_t *sigLenOut);
+
+// User-authentication binding (LocalAuthentication + SecAccessControl). LocalAuthentication does
+// not exist on every Apple platform (no tvOS): bcks_la_context_create returns 0 there and the
+// Kotlin side surfaces a typed unsupported/authenticator-required error instead.
+
+// Creates a LocalAuthentication context carrying the user-facing prompt reason (UTF-8).
+// Returns an opaque handle (> 0), or 0 when LocalAuthentication is unavailable.
+int64_t bcks_la_context_create(const char *reasonUtf8);
+
+// Invalidates and releases a context created by bcks_la_context_create. Idempotent.
+void bcks_la_context_release(int64_t handle);
+
+// Evaluates the context's auth policy, prompting the user (method: 1 = biometric or device
+// credential, 2 = biometric only). interactionAllowed == 0 fails instead of prompting. BLOCKING —
+// call off the main thread. BCKS_OK on success, BCKS_ERR_AUTH on denial.
+int32_t bcks_la_evaluate(int64_t handle, int32_t method, int32_t interactionAllowed);
+
+// Generates a Secure Enclave P-256 signing key bound to user authentication via SecAccessControl
+// (authReq: 1 = userPresence, 2 = biometryCurrentSet). Outputs match
+// bcks_secure_enclave_p256_generate.
+int32_t bcks_secure_enclave_p256_generate_ac(
+    int32_t authReq,
+    uint8_t *blobOut, size_t blobCap, size_t *blobLenOut,
+    uint8_t *pointOut, size_t pointCap, size_t *pointLenOut);
+
+// Signs with the Enclave key reconstructed from its blob, authorized through the LAContext behind
+// laHandle (0 = no context). BCKS_ERR_AUTH when user authentication was denied.
+int32_t bcks_secure_enclave_p256_sign_ctx(
+    const uint8_t *blobPtr, size_t blobLen,
+    int64_t laHandle,
     const uint8_t *msgPtr, size_t msgLen,
     uint8_t *sigOut, size_t sigCap,
     size_t *sigLenOut);

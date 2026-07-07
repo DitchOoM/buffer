@@ -118,10 +118,16 @@ class CodecSchemaDescriptorCodegenTest {
         // emit and parse are locked against each other (dogfood both ways).
         assertEquals(schema, renderSchemaRecords(CodecSchemaParser.parse(schema)))
         // The value-class discriminator (a multi-attribute token) survives as one space-free token.
+        val parsed = CodecSchemaParser.parse(schema)
         val frame =
-            CodecSchemaParser.parse(schema).filterIsInstance<SchemaRecord.SealedRecord>().single { it.typeName == "test.Frame" }
+            parsed
+                .filterIsInstance<SchemaRecord.SealedRecord>()
+                .single { it.typeName == "test.Frame" }
         assertFalse(frame.dispatch.contains(' '), "discriminator must be one space-free token: '${frame.dispatch}'")
-        assertTrue(frame.dispatch.startsWith("valueclass:test.EtherType/2B,"), "unexpected dispatch token: ${frame.dispatch}")
+        assertTrue(
+            frame.dispatch.startsWith("valueclass:test.EtherType/2B,"),
+            "unexpected dispatch token: ${frame.dispatch}",
+        )
     }
 
     @Test

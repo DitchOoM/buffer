@@ -42,6 +42,8 @@ data class SchemaDrift(
  *   [ADVISORY], and the name is never needed to catch a real break.
  */
 object CodecSchemaClassifier {
+    private const val HEX_RADIX = 16
+
     fun classify(
         baseline: List<SchemaRecord>,
         current: List<SchemaRecord>,
@@ -312,7 +314,7 @@ object CodecSchemaClassifier {
     /** Numeric sort for dispatch labels (hex `0x..`, decimal, and negative decimals all order naturally). */
     private fun sortableLabel(label: String): Long =
         if (label.startsWith("0x") || label.startsWith("0X")) {
-            label.substring(2).toLong(16)
+            label.substring(2).toLong(HEX_RADIX)
         } else {
             label.toLongOrNull() ?: 0L
         }

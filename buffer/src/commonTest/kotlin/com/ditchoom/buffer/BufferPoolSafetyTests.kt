@@ -246,10 +246,10 @@ class BufferPoolSafetyTests {
     fun withBufferReleasesOnException() {
         val pool = BufferPool(defaultBufferSize = 64, maxPoolSize = 10)
 
-        assertFailsWith<RuntimeException> {
+        assertFailsWith<IllegalStateException> {
             pool.withBuffer(8) { buffer ->
                 buffer.writeInt(42)
-                throw RuntimeException("test")
+                error("test")
             }
         }
 

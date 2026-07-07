@@ -16,6 +16,9 @@ import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.usePinned
 
+/** A `byteCount` above this index means the UTF-8 sequence carries a 4th (b3) byte. */
+private const val FOURTH_BYTE_PRESENT_THRESHOLD = 3
+
 /**
  * Linux implementation using simdutf for SIMD-accelerated UTF-8 decoding.
  *
@@ -113,7 +116,8 @@ private class LinuxStreamingStringDecoder(
             pendingLong = 0L
             val basePos = buffer.position() + bytesConsumed + boundary
             for (i in 0 until pendingCount) {
-                pendingLong = pendingLong or ((buffer.get(basePos + i).toLong() and 0xFF) shl (i * 8))
+                val maskedByte = buffer.get(basePos + i).toLong() and Utf8.BYTE_MASK.toLong()
+                pendingLong = pendingLong or (maskedByte shl (i * Utf8.BITS_PER_BYTE))
             }
         }
 
@@ -167,13 +171,13 @@ private class LinuxStreamingStringDecoder(
         destination: Appendable,
     ): DecodeResult {
         // Determine expected sequence length from lead byte
-        val leadByte = (pendingLong and 0xFF).toInt()
+        val leadByte = (pendingLong and Utf8.BYTE_MASK.toLong()).toInt()
         val expectedLen =
             when {
-                leadByte < 0x80 -> 1
-                leadByte and 0xE0 == 0xC0 -> 2
-                leadByte and 0xF0 == 0xE0 -> 3
-                leadByte and 0xF8 == 0xF0 -> 4
+                leadByte < Utf8.ASCII_LIMIT -> 1
+                leadByte and Utf8.TWO_BYTE_LEAD_MASK == Utf8.TWO_BYTE_LEAD -> 2
+                leadByte and Utf8.THREE_BYTE_LEAD_MASK == Utf8.THREE_BYTE_LEAD -> 3
+                leadByte and Utf8.FOUR_BYTE_LEAD_MASK == Utf8.FOUR_BYTE_LEAD -> 4
                 else -> {
                     // Invalid lead byte
                     pendingCount = 0
@@ -189,7 +193,8 @@ private class LinuxStreamingStringDecoder(
             val basePos = buffer.position()
             for (i in 0 until available) {
                 val b = buffer.get(basePos + i)
-                pendingLong = pendingLong or ((b.toLong() and 0xFF) shl ((pendingCount + i) * 8))
+                val maskedByte = b.toLong() and Utf8.BYTE_MASK.toLong()
+                pendingLong = pendingLong or (maskedByte shl ((pendingCount + i) * Utf8.BITS_PER_BYTE))
             }
             pendingCount += available
             return DecodeResult(0, available)
@@ -199,7 +204,8 @@ private class LinuxStreamingStringDecoder(
         val basePos = buffer.position()
         for (i in 0 until needed) {
             val b = buffer.get(basePos + i)
-            pendingLong = pendingLong or ((b.toLong() and 0xFF) shl ((pendingCount + i) * 8))
+            pendingLong =
+                pendingLong or ((b.toLong() and Utf8.BYTE_MASK.toLong()) shl ((pendingCount + i) * Utf8.BITS_PER_BYTE))
         }
         pendingCount = 0
 
@@ -212,42 +218,59 @@ private class LinuxStreamingStringDecoder(
         byteCount: Int,
         destination: Appendable,
     ): Int {
-        val b0 = (pendingLong and 0xFF).toInt()
-        val b1 = if (byteCount > 1) ((pendingLong ushr 8) and 0xFF).toInt() else 0
-        val b2 = if (byteCount > 2) ((pendingLong ushr 16) and 0xFF).toInt() else 0
-        val b3 = if (byteCount > 3) ((pendingLong ushr 24) and 0xFF).toInt() else 0
+        val b0 = (pendingLong and Utf8.BYTE_MASK.toLong()).toInt()
+        val b1 = if (byteCount > 1) ((pendingLong ushr 8) and Utf8.BYTE_MASK.toLong()).toInt() else 0
+        val b2 = if (byteCount > 2) ((pendingLong ushr 16) and Utf8.BYTE_MASK.toLong()).toInt() else 0
+        val b3 = if (byteCount > 3) ((pendingLong ushr 24) and Utf8.BYTE_MASK.toLong()).toInt() else 0
 
         // Validate continuation bytes
-        if (byteCount > 1 && (b1 and 0xC0) != 0x80) return handleMalformedInput(destination).charsWritten
-        if (byteCount > 2 && (b2 and 0xC0) != 0x80) return handleMalformedInput(destination).charsWritten
-        if (byteCount > 3 && (b3 and 0xC0) != 0x80) return handleMalformedInput(destination).charsWritten
+        if (byteCount > 1 && (b1 and Utf8.CONTINUATION_MASK) != Utf8.CONTINUATION_MARKER) {
+            return handleMalformedInput(destination).charsWritten
+        }
+        if (byteCount > 2 && (b2 and Utf8.CONTINUATION_MASK) != Utf8.CONTINUATION_MARKER) {
+            return handleMalformedInput(destination).charsWritten
+        }
+        if (byteCount > FOURTH_BYTE_PRESENT_THRESHOLD && (b3 and Utf8.CONTINUATION_MASK) != Utf8.CONTINUATION_MARKER) {
+            return handleMalformedInput(destination).charsWritten
+        }
 
         val codePoint =
             when (byteCount) {
                 1 -> b0
-                2 -> ((b0 and 0x1F) shl 6) or (b1 and 0x3F)
-                3 -> ((b0 and 0x0F) shl 12) or ((b1 and 0x3F) shl 6) or (b2 and 0x3F)
-                4 -> ((b0 and 0x07) shl 18) or ((b1 and 0x3F) shl 12) or ((b2 and 0x3F) shl 6) or (b3 and 0x3F)
+                2 ->
+                    ((b0 and Utf8.TWO_BYTE_PAYLOAD_MASK) shl Utf8.CONTINUATION_SHIFT) or
+                        (b1 and Utf8.CONTINUATION_PAYLOAD_MASK)
+                3 ->
+                    ((b0 and Utf8.THREE_BYTE_PAYLOAD_MASK) shl (Utf8.CONTINUATION_SHIFT * 2)) or
+                        ((b1 and Utf8.CONTINUATION_PAYLOAD_MASK) shl Utf8.CONTINUATION_SHIFT) or
+                        (b2 and Utf8.CONTINUATION_PAYLOAD_MASK)
+                4 ->
+                    ((b0 and Utf8.FOUR_BYTE_PAYLOAD_MASK) shl (Utf8.CONTINUATION_SHIFT * 3)) or
+                        ((b1 and Utf8.CONTINUATION_PAYLOAD_MASK) shl (Utf8.CONTINUATION_SHIFT * 2)) or
+                        ((b2 and Utf8.CONTINUATION_PAYLOAD_MASK) shl Utf8.CONTINUATION_SHIFT) or
+                        (b3 and Utf8.CONTINUATION_PAYLOAD_MASK)
                 else -> return handleMalformedInput(destination).charsWritten
             }
 
         // Reject overlong encodings and surrogate codepoints
         val isValid =
             when (byteCount) {
-                2 -> codePoint >= 0x80
-                3 -> codePoint >= 0x800 && (codePoint < 0xD800 || codePoint > 0xDFFF)
-                4 -> codePoint in 0x10000..0x10FFFF
+                2 -> codePoint >= Utf8.ASCII_LIMIT
+                3 ->
+                    codePoint >= Utf8.THREE_BYTE_MIN &&
+                        (codePoint < Utf8.HIGH_SURROGATE_START || codePoint > Utf8.LOW_SURROGATE_END)
+                4 -> codePoint in Utf8.FOUR_BYTE_MIN..Utf8.MAX_CODE_POINT
                 else -> true
             }
         if (!isValid) return handleMalformedInput(destination).charsWritten
 
-        return if (codePoint <= 0xFFFF) {
+        return if (codePoint <= Utf8.BMP_MAX) {
             destination.append(codePoint.toChar())
             1
         } else {
-            val adjusted = codePoint - 0x10000
-            destination.append((0xD800 + (adjusted shr 10)).toChar())
-            destination.append((0xDC00 + (adjusted and 0x3FF)).toChar())
+            val adjusted = codePoint - Utf8.FOUR_BYTE_MIN
+            destination.append((Utf8.HIGH_SURROGATE_START + (adjusted shr Utf8.SURROGATE_SHIFT)).toChar())
+            destination.append((Utf8.LOW_SURROGATE_START + (adjusted and Utf8.LOW_SURROGATE_MASK)).toChar())
             2
         }
     }

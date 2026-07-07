@@ -9,12 +9,12 @@ import com.ditchoom.buffer.WriteBuffer
  * js/wasmJs AEAD.
  *
  * AES-GCM is provided only through the asynchronous WebCrypto path: SubtleCrypto.encrypt /
- * decrypt are Promise-based, so there is no synchronous AES-GCM on the web — supportsSyncAesGcm
+ * decrypt are Promise-based, so there is no synchronous AES-GCM on the web — the aesGcm witness
  * is false and the sync expect funs throw. Use aesGcmSealAsync / aesGcmOpenAsync, which await
  * WebCrypto.
  *
  * ChaCha20-Poly1305 is not part of WebCrypto (w3c/webcrypto#223) and is never polyfilled:
- * supportsChaChaPoly / supportsSyncChaChaPoly are false and every ChaCha entry point — sync and
+ * the chaChaPoly witness is Unavailable and every ChaCha entry point — sync and
  * async — throws UnsupportedOperationException.
  *
  * The bridge marshals key/nonce/AAD/data as lowercase hex strings to the per-target WebCrypto
@@ -22,13 +22,23 @@ import com.ditchoom.buffer.WriteBuffer
  * and the Wasm backend without typed-array interop differences leaking in. No ByteArray crosses
  * the boundary, and the tag stays attached to the ciphertext (WebCrypto appends it), so
  * plaintext is only produced after WebCrypto verifies it.
+ *
+ * ZEROIZATION LIMITATION (documented, accepted): the hex marshalling means key material (and
+ * plaintext) transits the boundary as immutable JS Strings, which cannot be wiped — the copies
+ * live on the GC heap until collected. WebCrypto additionally copies the bytes into
+ * engine-internal key state that Kotlin also cannot wipe, so switching the bridge to Int8Array
+ * would narrow but not close the exposure. In-memory secrecy on the web targets is therefore
+ * best-effort only; the wipe-on-close contract of SecureBuffer applies to the Kotlin-side
+ * buffers, not to these boundary copies.
  */
 
-actual val supportsSyncAesGcm: Boolean = false
+private const val NO_CHACHA_POLY = "ChaCha20-Poly1305 is not part of WebCrypto and is not polyfilled"
 
-actual val supportsChaChaPoly: Boolean = false
+/** AES-GCM on the web is async-only (WebCrypto `SubtleCrypto` is Promise-based). */
+actual val CryptoCapabilities.aesGcm: Aead<AesGcmKey, SyncCapableAesGcmKey> get() = Aead.AsyncOnly(AesGcmAsyncOps)
 
-actual val supportsSyncChaChaPoly: Boolean = false
+/** ChaCha20-Poly1305 is not part of WebCrypto and is never polyfilled. */
+actual val CryptoCapabilities.chaChaPoly: OptionalAead<ChaChaPolyKey> get() = OptionalAead.Unavailable
 
 internal actual fun aesGcmSeal(
     key: AesGcmKey,
@@ -52,7 +62,7 @@ internal actual fun chaChaPolySeal(
     aad: ReadBuffer?,
     plaintext: ReadBuffer,
     dest: WriteBuffer,
-): Unit = throw UnsupportedOperationException("ChaCha20-Poly1305 is not part of WebCrypto and is not polyfilled")
+): Unit = throw UnsupportedOperationException(NO_CHACHA_POLY)
 
 internal actual fun chaChaPolyOpen(
     key: ChaChaPolyKey,
@@ -60,50 +70,9 @@ internal actual fun chaChaPolyOpen(
     aad: ReadBuffer?,
     ciphertextAndTag: ReadBuffer,
     dest: WriteBuffer,
-): Unit = throw UnsupportedOperationException("ChaCha20-Poly1305 is not part of WebCrypto and is not polyfilled")
+): Unit = throw UnsupportedOperationException(NO_CHACHA_POLY)
 
-actual suspend fun aesGcmSealAsync(
-    key: AesGcmKey,
-    plaintext: ReadBuffer,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer {
-    // Generate the nonce here so a (key, nonce) pair can never be reused by accident, then
-    // frame as nonce ‖ ciphertext ‖ tag (the with-nonce helper returns ciphertext ‖ tag).
-    val nonce = cryptoRandom(AEAD_NONCE_BYTES)
-    val ctTag = aesGcmSealWithNonceAsync(key, nonce, aad, plaintext, factory)
-    val out = allocateFramed(plaintext.remaining(), factory)
-    out.write(nonce)
-    out.write(ctTag)
-    out.resetForRead()
-    return out
-}
-
-actual suspend fun aesGcmOpenAsync(
-    sealed: ReadBuffer,
-    key: AesGcmKey,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer {
-    val (nonce, ctAndTag, _) = splitFramed(sealed)
-    return aesGcmOpenWithNonceAsync(key, nonce, aad, ctAndTag, factory)
-}
-
-actual suspend fun chaChaPolySealAsync(
-    key: ChaChaPolyKey,
-    plaintext: ReadBuffer,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = throw UnsupportedOperationException("ChaCha20-Poly1305 is not part of WebCrypto and is not polyfilled")
-
-actual suspend fun chaChaPolyOpenAsync(
-    sealed: ReadBuffer,
-    key: ChaChaPolyKey,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = throw UnsupportedOperationException("ChaCha20-Poly1305 is not part of WebCrypto and is not polyfilled")
-
-actual suspend fun aesGcmSealWithNonceAsync(
+internal actual suspend fun aesGcmSealWithNonceAsync(
     key: AesGcmKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
@@ -115,7 +84,7 @@ actual suspend fun aesGcmSealWithNonceAsync(
     }
     val ctTagHex =
         webCryptoAesGcmEncrypt(
-            keyHex = key.material.toHexRemaining(),
+            keyHex = key.requireInMemoryMaterial().toHexRemaining(),
             ivHex = nonce.toHexRemaining(),
             aadHex = aad?.toHexRemaining() ?: "",
             plaintextHex = plaintext.toHexRemaining(),
@@ -126,7 +95,7 @@ actual suspend fun aesGcmSealWithNonceAsync(
     return out
 }
 
-actual suspend fun aesGcmOpenWithNonceAsync(
+internal actual suspend fun aesGcmOpenWithNonceAsync(
     key: AesGcmKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
@@ -138,7 +107,7 @@ actual suspend fun aesGcmOpenWithNonceAsync(
     }
     val ptHex =
         webCryptoAesGcmDecrypt(
-            keyHex = key.material.toHexRemaining(),
+            keyHex = key.requireInMemoryMaterial().toHexRemaining(),
             ivHex = nonce.toHexRemaining(),
             aadHex = aad?.toHexRemaining() ?: "",
             ciphertextAndTagHex = ciphertextAndTag.toHexRemaining(),
@@ -154,6 +123,8 @@ actual suspend fun aesGcmOpenWithNonceAsync(
 // =============================================================================
 
 private const val HEX = "0123456789abcdef"
+private const val HEX_RADIX = 16
+private const val NIBBLE_BITS = 4
 
 /** Lowercase hex of this buffer's remaining bytes (non-destructive). */
 internal fun ReadBuffer.toHexRemaining(): String {
@@ -162,7 +133,7 @@ internal fun ReadBuffer.toHexRemaining(): String {
     val sb = StringBuilder(n * 2)
     for (i in 0 until n) {
         val v = get(start + i).toInt() and 0xFF
-        sb.append(HEX[v ushr 4])
+        sb.append(HEX[v ushr NIBBLE_BITS])
         sb.append(HEX[v and 0xF])
     }
     return sb.toString()
@@ -172,9 +143,9 @@ internal fun ReadBuffer.toHexRemaining(): String {
 internal fun WriteBuffer.writeHex(hex: String) {
     var i = 0
     while (i < hex.length) {
-        val hi = hex[i].digitToInt(16)
-        val lo = hex[i + 1].digitToInt(16)
-        writeByte(((hi shl 4) or lo).toByte())
+        val hi = hex[i].digitToInt(HEX_RADIX)
+        val lo = hex[i + 1].digitToInt(HEX_RADIX)
+        writeByte(((hi shl NIBBLE_BITS) or lo).toByte())
         i += 2
     }
 }

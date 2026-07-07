@@ -51,6 +51,13 @@ import com.ditchoom.buffer.stream.StreamProcessor
  * [com.ditchoom.buffer.codec.annotations.UseCodec] for the extension pattern.
  */
 object AsciiStringCodec : Codec<String> {
+    /** Highest 7-bit ASCII codepoint (US-ASCII, RFC 20); anything above is rejected on encode. */
+    private const val MAX_ASCII_CODE = 0x7F
+
+    /** Radix and minimum width for the `U+XXXX` codepoint shown in the encode-error message. */
+    private const val HEX_RADIX = 16
+    private const val CODEPOINT_HEX_WIDTH = 4
+
     override fun decode(
         buffer: ReadBuffer,
         context: DecodeContext,
@@ -63,12 +70,12 @@ object AsciiStringCodec : Codec<String> {
     ) {
         for (i in value.indices) {
             val code = value[i].code
-            if (code > 0x7F) {
+            if (code > MAX_ASCII_CODE) {
                 throw EncodeException(
                     fieldPath = "AsciiStringCodec",
                     reason =
                         "non-ASCII character at index $i: U+" +
-                            code.toString(16).uppercase().padStart(4, '0') +
+                            code.toString(HEX_RADIX).uppercase().padStart(CODEPOINT_HEX_WIDTH, '0') +
                             " (allowed range: U+0000..U+007F)",
                 )
             }

@@ -21,7 +21,10 @@ class BufferAllocatorAssumptionTests {
         val buffer = factory.allocate(64)
         val readBuf = buffer as ReadBuffer
         val hasAccess = readBuf.nativeMemoryAccess != null || readBuf.managedMemoryAccess != null
-        assertTrue(hasAccess, "BufferFactory.Default should produce buffers with nativeMemoryAccess or managedMemoryAccess")
+        assertTrue(
+            hasAccess,
+            "BufferFactory.Default should produce buffers with nativeMemoryAccess or managedMemoryAccess",
+        )
     }
 
     @Test
@@ -31,7 +34,10 @@ class BufferAllocatorAssumptionTests {
         val buffer = factory.allocate(64)
         val readBuf = buffer as ReadBuffer
         val hasAccess = readBuf.nativeMemoryAccess != null || readBuf.managedMemoryAccess != null
-        assertTrue(hasAccess, "Pool-backed BufferFactory should produce buffers with nativeMemoryAccess or managedMemoryAccess")
+        assertTrue(
+            hasAccess,
+            "Pool-backed BufferFactory should produce buffers with nativeMemoryAccess or managedMemoryAccess",
+        )
         pool.release(buffer)
         pool.clear()
     }

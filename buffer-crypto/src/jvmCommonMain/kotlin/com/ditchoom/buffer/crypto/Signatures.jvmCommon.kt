@@ -1,6 +1,7 @@
 package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
@@ -10,6 +11,7 @@ import java.math.BigInteger
 import java.security.AlgorithmParameters
 import java.security.GeneralSecurityException
 import java.security.KeyFactory
+import java.security.KeyPairGenerator
 import java.security.Signature
 import java.security.spec.ECGenParameterSpec
 import java.security.spec.ECParameterSpec
@@ -27,8 +29,8 @@ import java.security.spec.X509EncodedKeySpec
  *   ECDSA signature format), pinned by ecdsaSignatureEncoding.
  * - Ed25519 uses JCA Signature("Ed25519") (JDK 15+ / Conscrypt on Android 14+). Whether it is
  *   available at all is decided per-platform by ed25519RuntimeSupported: a JDK probe on JVM, a
- *   Build.VERSION.SDK_INT >= 34 runtime gate on Android. When it is false, every Ed25519 op throws
- *   UnsupportedOperationException and supportsSyncEd25519 reports false.
+ *   Build.VERSION.SDK_INT >= 34 runtime gate on Android. When it is false, the Ed25519 witness
+ *   resolves to SignatureSupport.Unavailable, so the op cannot be reached at all.
  *
  * Key import: callers hand us the standard raw encoding (Ed25519 32-byte seed / public key, ECDSA
  * raw scalar / uncompressed SEC1 point). We assemble the JCA KeySpec from those at the boundary;
@@ -38,21 +40,30 @@ import java.security.spec.X509EncodedKeySpec
 /** Decided per-platform: JVM probes the JDK, Android gates on `SDK_INT >= 34`. */
 internal expect val ed25519RuntimeSupported: Boolean
 
-actual val supportsSyncEd25519: Boolean
-    get() = ed25519RuntimeSupported
-
-actual val supportsSyncEcdsa: Boolean
-    get() = true
-
 actual val ecdsaSignatureEncoding: EcdsaSignatureEncoding
     get() = EcdsaSignatureEncoding.Der
+
+/**
+ * ECDSA is always synchronous via JCA; Ed25519 is synchronous when the runtime supports raw-key
+ * import (JDK 15+ on the JVM, never on Android), else [SignatureSupport.Unavailable].
+ */
+actual fun CryptoCapabilities.signatures(scheme: SignatureScheme): SignatureSupport =
+    when (scheme) {
+        SignatureScheme.Ed25519 ->
+            if (ed25519RuntimeSupported) {
+                SignatureSupport.Blocking(SignatureBlockingOpsImpl(scheme))
+            } else {
+                SignatureSupport.Unavailable
+            }
+        else -> SignatureSupport.Blocking(SignatureBlockingOpsImpl(scheme))
+    }
 
 // ---------------------------------------------------------------------------
 // Byte extraction at the JCA boundary (non-destructive). Mirrors the hashes bridge:
 // heap buffers expose their backing range, others copy via toByteArray().
 // ---------------------------------------------------------------------------
 
-private fun ReadBuffer.remainingBytes(): ByteArray {
+internal fun ReadBuffer.remainingBytes(): ByteArray {
     val managed = managedMemoryAccess
     return if (managed != null) {
         managed.backingArray.copyOfRange(
@@ -91,12 +102,27 @@ private fun ecdsaSigAlg(scheme: SignatureScheme): String =
         SignatureScheme.Ed25519 -> error("not ECDSA")
     }
 
+private const val P256_FIELD_BYTES = 32
+private const val P384_FIELD_BYTES = 48
+private const val P521_FIELD_BYTES = 66
+private const val ED25519_KEY_BYTES = 32
+private const val SEC1_UNCOMPRESSED_POINT = 0x04
+
+private const val HEX_RADIX = 16
+private const val BYTE_MASK = 0xFF
+private const val DER_TAG_SEQUENCE = 0x30
+private const val DER_TAG_INTEGER = 0x02
+private const val DER_LONG_FORM_FLAG = 0x80 // high bit set ⇒ long-form length / negative integer
+private const val DER_LONG_FORM_ONE_OCTET = 0x81 // long form with a single following length octet
+private const val DER_MIN_ECDSA_SIG_BYTES = 8 // smallest plausible SEQUENCE{INTEGER,INTEGER}
+private const val DER_LONG_FORM_HEADER_BYTES = 3 // tag + 0x81 + one length octet
+
 /** Field size in bytes for the scheme's curve (coordinate width of an uncompressed point). */
 private fun ecFieldBytes(scheme: SignatureScheme): Int =
     when (scheme) {
-        SignatureScheme.EcdsaP256 -> 32
-        SignatureScheme.EcdsaP384 -> 48
-        SignatureScheme.EcdsaP521 -> 66
+        SignatureScheme.EcdsaP256 -> P256_FIELD_BYTES
+        SignatureScheme.EcdsaP384 -> P384_FIELD_BYTES
+        SignatureScheme.EcdsaP521 -> P521_FIELD_BYTES
         SignatureScheme.Ed25519 -> error("not ECDSA")
     }
 
@@ -143,13 +169,13 @@ private val ED25519_SPKI_PREFIX =
     )
 
 private fun ed25519PrivateKey(seed: ByteArray): java.security.PrivateKey {
-    require(seed.size == 32) { "Ed25519 seed must be 32 bytes, was ${seed.size}" }
+    require(seed.size == ED25519_KEY_BYTES) { "Ed25519 seed must be 32 bytes, was ${seed.size}" }
     val pkcs8 = ED25519_PKCS8_PREFIX + seed
     return KeyFactory.getInstance("Ed25519").generatePrivate(PKCS8EncodedKeySpec(pkcs8))
 }
 
 private fun ed25519PublicKey(pub: ByteArray): java.security.PublicKey {
-    require(pub.size == 32) { "Ed25519 public key must be 32 bytes, was ${pub.size}" }
+    require(pub.size == ED25519_KEY_BYTES) { "Ed25519 public key must be 32 bytes, was ${pub.size}" }
     val spki = ED25519_SPKI_PREFIX + pub
     return KeyFactory.getInstance("Ed25519").generatePublic(X509EncodedKeySpec(spki))
 }
@@ -173,7 +199,7 @@ private fun ecdsaPublicKey(
     point: ByteArray,
 ): java.security.PublicKey {
     val fieldBytes = ecFieldBytes(scheme)
-    require(point.size == 1 + 2 * fieldBytes && point[0].toInt() == 0x04) {
+    require(point.size == 1 + 2 * fieldBytes && point[0].toInt() == SEC1_UNCOMPRESSED_POINT) {
         "expected uncompressed SEC1 point (0x04 ‖ X ‖ Y) of ${1 + 2 * fieldBytes} bytes"
     }
     val x = BigInteger(1, point.copyOfRange(1, 1 + fieldBytes))
@@ -225,7 +251,7 @@ internal fun signToByteArray(
     message: ReadBuffer,
 ): ByteArray {
     val material =
-        key.requireOpen().let { buf ->
+        key.requireInMemoryMaterial().let { buf ->
             // material is read-ready; snapshot its bytes for the JCA spec.
             val start = buf.position()
             val n = buf.remaining()
@@ -239,7 +265,7 @@ internal fun signToByteArray(
     return sig.sign()
 }
 
-actual fun signInto(
+internal actual fun signIntoPlatform(
     key: SigningKey,
     message: ReadBuffer,
     dest: WriteBuffer,
@@ -259,19 +285,19 @@ actual fun signInto(
 private fun curveOrder(scheme: SignatureScheme): BigInteger =
     when (scheme) {
         SignatureScheme.EcdsaP256 ->
-            BigInteger("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551", 16)
+            BigInteger("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551", HEX_RADIX)
         SignatureScheme.EcdsaP384 ->
             BigInteger(
                 "ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf" +
                     "581a0db248b0a77aecec196accc52973",
-                16,
+                HEX_RADIX,
             )
         SignatureScheme.EcdsaP521 ->
             // SECG sec2-v2 P-521 order n (521-bit).
             BigInteger(
                 "01ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" +
                     "fa51868783bf2f966b7fcc0148f709a5d03bb5c9b8899c47aebb6fb71e91386409",
-                16,
+                HEX_RADIX,
             )
         SignatureScheme.Ed25519 -> error("not ECDSA")
     }
@@ -289,34 +315,34 @@ private fun parseCanonicalEcdsaDer(
 ): Pair<BigInteger, BigInteger>? {
     var p = 0
 
-    fun u(i: Int) = sig[i].toInt() and 0xFF
-    if (sig.size < 8 || u(0) != 0x30) return null
+    fun u(i: Int) = sig[i].toInt() and BYTE_MASK
+    if (sig.size < DER_MIN_ECDSA_SIG_BYTES || u(0) != DER_TAG_SEQUENCE) return null
     // SEQUENCE length: short form, or DER long form (1-byte length, used by P-521 ~139B sigs).
     val seqLen: Int
-    if (u(1) < 0x80) {
+    if (u(1) < DER_LONG_FORM_FLAG) {
         seqLen = u(1)
         p = 2
-    } else if (u(1) == 0x81) {
-        if (sig.size < 3) return null
+    } else if (u(1) == DER_LONG_FORM_ONE_OCTET) {
+        if (sig.size < DER_LONG_FORM_HEADER_BYTES) return null
         seqLen = u(2)
-        if (seqLen < 0x80) return null // long form must be minimal
-        p = 3
+        if (seqLen < DER_LONG_FORM_FLAG) return null // long form must be minimal
+        p = DER_LONG_FORM_HEADER_BYTES
     } else {
         return null // 2+ length octets not needed for these curves ⇒ reject
     }
     if (p + seqLen != sig.size) return null // exact match, no trailing garbage
 
     fun readInt(): BigInteger? {
-        if (p + 2 > sig.size || u(p) != 0x02) return null
+        if (p + 2 > sig.size || u(p) != DER_TAG_INTEGER) return null
         val len = u(p + 1)
-        if (len == 0 || len >= 0x80) return null // empty or long-form ⇒ non-canonical
+        if (len == 0 || len >= DER_LONG_FORM_FLAG) return null // empty or long-form ⇒ non-canonical
         val start = p + 2
         if (start + len > sig.size) return null
         // Minimal encoding: no leading 0x00 unless needed for sign bit; high bit ⇒ must be padded.
-        if (len > 1 && u(start) == 0x00 && (u(start + 1) and 0x80) == 0) return null
-        if (u(start) and 0x80 != 0) return null // would be negative ⇒ non-canonical/illegal
+        if (len > 1 && u(start) == 0x00 && (u(start + 1) and DER_LONG_FORM_FLAG) == 0) return null
+        if (u(start) and DER_LONG_FORM_FLAG != 0) return null // would be negative ⇒ non-canonical/illegal
         var v = BigInteger.ZERO
-        for (i in 0 until len) v = v.shiftLeft(8).or(BigInteger.valueOf(u(start + i).toLong()))
+        for (i in 0 until len) v = v.shiftLeft(Byte.SIZE_BITS).or(BigInteger.valueOf(u(start + i).toLong()))
         p = start + len
         return v
     }
@@ -343,7 +369,7 @@ internal fun verifyBytes(
         if (parseCanonicalEcdsaDer(sigBytes, curveOrder(key.scheme)) == null) return false
     }
     return try {
-        val pub = publicKeyFor(key.scheme, key.material.remainingBytes())
+        val pub = publicKeyFor(key.scheme, key.requireInMemoryMaterial().remainingBytes())
         val sig = signatureFor(key.scheme)
         sig.initVerify(pub)
         sig.update(message.remainingBytes())
@@ -356,7 +382,7 @@ internal fun verifyBytes(
     }
 }
 
-actual fun verify(
+internal actual fun verifyPlatform(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,
@@ -366,7 +392,7 @@ actual fun verify(
 // Async wrappers — native, so just fulfil synchronously.
 // ---------------------------------------------------------------------------
 
-actual suspend fun signAsync(
+internal actual suspend fun signAsyncPlatform(
     key: SigningKey,
     message: ReadBuffer,
     factory: BufferFactory,
@@ -378,7 +404,7 @@ actual suspend fun signAsync(
     return out
 }
 
-actual suspend fun verifyAsync(
+internal actual suspend fun verifyAsyncPlatform(
     key: VerifyKey,
     message: ReadBuffer,
     signature: ReadBuffer,
@@ -388,3 +414,67 @@ actual suspend fun ed25519AsyncAvailable(): Boolean = ed25519RuntimeSupported
 
 actual val supportsEcdsaSigningFromScalar: Boolean
     get() = true
+
+// ---------------------------------------------------------------------------
+// Ed25519 key generation (ECDSA generation is common, reusing key agreement).
+// ---------------------------------------------------------------------------
+
+/** Read-ready buffer wrapping [bytes] (a fresh copy). */
+private fun bufferOf(bytes: ByteArray): PlatformBuffer {
+    val b = BufferFactory.Default.allocate(bytes.size)
+    b.writeBytes(bytes)
+    b.resetForRead()
+    return b
+}
+
+/** The 32-byte seed from a generated Ed25519 PKCS#8 (the inverse of [ed25519PrivateKey]'s prefix wrap). */
+private fun ed25519SeedFromPkcs8(pkcs8: ByteArray): ByteArray {
+    require(pkcs8.size >= ED25519_PKCS8_PREFIX.size + ED25519_KEY_BYTES) {
+        "unexpected Ed25519 PKCS#8 length ${pkcs8.size}"
+    }
+    return pkcs8.copyOfRange(ED25519_PKCS8_PREFIX.size, ED25519_PKCS8_PREFIX.size + ED25519_KEY_BYTES)
+}
+
+/** The 32-byte public key from a generated Ed25519 SPKI (the inverse of [ed25519PublicKey]'s prefix wrap). */
+private fun ed25519PublicFromSpki(spki: ByteArray): ByteArray {
+    require(spki.size == ED25519_SPKI_PREFIX.size + ED25519_KEY_BYTES) {
+        "unexpected Ed25519 SPKI length ${spki.size}"
+    }
+    return spki.copyOfRange(ED25519_SPKI_PREFIX.size, spki.size)
+}
+
+private fun generateEd25519(factory: BufferFactory): SyncCapableSigningKey {
+    requireEd25519Supported()
+    val kp = KeyPairGenerator.getInstance("Ed25519").generateKeyPair()
+    val seedBytes = ed25519SeedFromPkcs8(kp.private.encoded)
+    val verifyKey = VerifyKey.ed25519(bufferOf(ed25519PublicFromSpki(kp.public.encoded)))
+    // Stage the secret seed in a wiped buffer; the import factory copies it into `factory`.
+    val seedBuf =
+        secureScratch.allocate(seedBytes.size).also {
+            it.writeBytes(seedBytes)
+            it.resetForRead()
+        }
+    return try {
+        signingKeyOf(SignatureScheme.Ed25519, seedBuf, verifyKey, factory)
+    } finally {
+        seedBuf.freeNativeMemory()
+        seedBytes.fill(0)
+    }
+}
+
+internal actual fun generateSigningKeyPlatform(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey =
+    if (scheme == SignatureScheme.Ed25519) {
+        generateEd25519(factory)
+    } else {
+        // ECDSA: the key-agreement generator over the same NIST curve yields the identical raw scalar
+        // (private) and uncompressed point (public) the signing key needs.
+        ecdsaSigningKeyFromKeyAgreement(scheme, generateKeyPairPlatform(scheme.toKeyAgreementCurve()), factory)
+    }
+
+internal actual suspend fun generateSigningKeyAsyncPlatform(
+    scheme: SignatureScheme,
+    factory: BufferFactory,
+): SyncCapableSigningKey = generateSigningKeyPlatform(scheme, factory)

@@ -217,6 +217,9 @@ suspend inline fun <R> StreamingDecompressor.useSuspending(
  *   sign/offset to zlib's `deflateInit2` (see [resolveWindowBits]).
  *   Note: JVM's java.util.zip.Deflater does not support custom window sizes; this parameter
  *   is silently ignored on JVM. Apple and JS/Wasm also currently ignore it.
+ * @param dictionary Optional preset dictionary (see [CompressionAlgorithm.supportsDictionary]).
+ *   Consumed once; the compressor retains its own copy and reapplies it automatically after
+ *   every [StreamingCompressor.reset] — the caller does not need to resupply it per message.
  */
 expect fun StreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Deflate,
@@ -224,6 +227,7 @@ expect fun StreamingCompressor.Companion.create(
     bufferFactory: BufferFactory = BufferFactory.Default,
     outputBufferSize: Int = 32768,
     windowBits: WindowBits = WindowBits.Default,
+    dictionary: ReadBuffer? = null,
 ): StreamingCompressor
 
 /**
@@ -233,12 +237,15 @@ expect fun StreamingCompressor.Companion.create(
  * @param bufferFactory Factory for allocating output buffers.
  * @param outputBufferSize Size of output buffers (default 32KB).
  * @param expectedSize Optional hint for expected decompressed size. Used to pre-allocate buffers.
+ * @param dictionary The same preset dictionary passed to the matching [StreamingCompressor],
+ *   consumed once and reapplied automatically after every [StreamingDecompressor.reset].
  */
 expect fun StreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Deflate,
     bufferFactory: BufferFactory = BufferFactory.Default,
     outputBufferSize: Int = 32768,
     expectedSize: Int = 0,
+    dictionary: ReadBuffer? = null,
 ): StreamingDecompressor
 
 // ============================================================================
@@ -337,7 +344,7 @@ interface SuspendingStreamingDecompressor : AutoCloseable {
  * }
  * ```
  */
-suspend inline fun <R> SuspendingStreamingCompressor.use(block: (compress: suspend (ReadBuffer) -> List<ReadBuffer>) -> R): R {
+suspend inline fun <R> SuspendingStreamingCompressor.use(block: (suspend (ReadBuffer) -> List<ReadBuffer>) -> R): R {
     try {
         return block { input -> compress(input) }
     } finally {
@@ -349,7 +356,7 @@ suspend inline fun <R> SuspendingStreamingCompressor.use(block: (compress: suspe
 /**
  * Convenience function that handles decompress, finish, and close automatically.
  */
-suspend inline fun <R> SuspendingStreamingDecompressor.use(block: (decompress: suspend (ReadBuffer) -> List<ReadBuffer>) -> R): R {
+suspend inline fun <R> SuspendingStreamingDecompressor.use(block: (suspend (ReadBuffer) -> List<ReadBuffer>) -> R): R {
     try {
         return block { input -> decompress(input) }
     } finally {
@@ -366,6 +373,7 @@ expect fun SuspendingStreamingCompressor.Companion.create(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Deflate,
     level: CompressionLevel = CompressionLevel.Default,
     bufferFactory: BufferFactory = BufferFactory.Default,
+    dictionary: ReadBuffer? = null,
 ): SuspendingStreamingCompressor
 
 /**
@@ -374,6 +382,7 @@ expect fun SuspendingStreamingCompressor.Companion.create(
 expect fun SuspendingStreamingDecompressor.Companion.create(
     algorithm: CompressionAlgorithm = CompressionAlgorithm.Deflate,
     bufferFactory: BufferFactory = BufferFactory.Default,
+    dictionary: ReadBuffer? = null,
 ): SuspendingStreamingDecompressor
 
 // ============================================================================
@@ -464,6 +473,27 @@ internal object GzipFormat {
     const val FLAG_FEXTRA: Int = 0x04 // Extra field present
     const val FLAG_FNAME: Int = 0x08 // Original filename present
     const val FLAG_FCOMMENT: Int = 0x10 // Comment present
+
+    /** Length of the fixed gzip header in bytes. */
+    const val HEADER_BYTES: Int = 10
+
+    /** Index of the flags byte within the fixed header. */
+    const val FLAG_BYTE_INDEX: Int = 3
+
+    /** Bit shift to place a byte into the high position of a 16-bit big-endian field. */
+    const val HI_BYTE_SHIFT: Int = 8
+
+    /** Byte offset just past the FEXTRA 2-byte length field (header + 2). */
+    const val FEXTRA_LENGTH_END: Int = 12
+
+    /** Length of the FHCRC header CRC16 field in bytes. */
+    const val FHCRC_BYTES: Int = 2
+
+    /** Mask isolating the low 8 bits of an Int (one byte). */
+    const val BYTE_MASK: Int = 0xFF
+
+    /** Mask isolating the low 32 bits of a Long (gzip ISIZE / CRC32 are 32-bit). */
+    const val LOW_32_BITS_MASK: Long = 0xFFFFFFFFL
 }
 
 /**
@@ -491,15 +521,31 @@ internal fun gzipTrailerLong(
     return reverseBytesLong(combined)
 }
 
+// Bit-shift distances for swapping a Long's byte lanes (8 bits per byte).
+private const val SHIFT_1_BYTE = 8
+private const val SHIFT_3_BYTES = 24
+private const val SHIFT_5_BYTES = 40
+private const val SHIFT_7_BYTES = 56
+
+// Single-byte selector masks for each lane of a 64-bit value, byte 0 (LSB) to byte 7 (MSB).
+private const val BYTE_0_MASK = 0x00000000000000FFL
+private const val BYTE_1_MASK = 0x000000000000FF00L
+private const val BYTE_2_MASK = 0x0000000000FF0000L
+private const val BYTE_3_MASK = 0x00000000FF000000L
+private const val BYTE_4_MASK = 0x000000FF00000000L
+private const val BYTE_5_MASK = 0x0000FF0000000000L
+private const val BYTE_6_MASK = 0x00FF000000000000L
+private val BYTE_7_MASK = 0xFF00000000000000UL.toLong()
+
 /**
  * Reverses the bytes in a Long value (big-endian to little-endian or vice versa).
  */
 private fun reverseBytesLong(value: Long): Long =
-    ((value and 0x00000000000000FFL) shl 56) or
-        ((value and 0x000000000000FF00L) shl 40) or
-        ((value and 0x0000000000FF0000L) shl 24) or
-        ((value and 0x00000000FF000000L) shl 8) or
-        ((value and 0x000000FF00000000L) ushr 8) or
-        ((value and 0x0000FF0000000000L) ushr 24) or
-        ((value and 0x00FF000000000000L) ushr 40) or
-        ((value and 0xFF00000000000000UL.toLong()) ushr 56)
+    ((value and BYTE_0_MASK) shl SHIFT_7_BYTES) or
+        ((value and BYTE_1_MASK) shl SHIFT_5_BYTES) or
+        ((value and BYTE_2_MASK) shl SHIFT_3_BYTES) or
+        ((value and BYTE_3_MASK) shl SHIFT_1_BYTE) or
+        ((value and BYTE_4_MASK) ushr SHIFT_1_BYTE) or
+        ((value and BYTE_5_MASK) ushr SHIFT_3_BYTES) or
+        ((value and BYTE_6_MASK) ushr SHIFT_5_BYTES) or
+        ((value and BYTE_7_MASK) ushr SHIFT_7_BYTES)

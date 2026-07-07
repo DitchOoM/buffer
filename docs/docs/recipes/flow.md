@@ -60,16 +60,21 @@ incoming
 
 ## Transport Abstractions
 
-Protocol code shouldn't know what carries its bytes. `buffer-flow` provides three
-interfaces, layered from raw bytes up to typed messages:
+Protocol code shouldn't know what carries its bytes. `buffer-flow` provides interfaces
+layered from raw bytes up to typed messages:
 
 ```
-ByteStream         raw bidirectional bytes (TCP, unix socket, in-memory)
+ByteSource / ByteSink / ByteStream   raw bytes, split by direction (TCP, unix socket, in-memory)
    ↓ framing
-Connection<T>      typed bidirectional messages
+Connection<T>                        typed bidirectional messages
    ↓ multiplexing
-StreamMux<T>       many independent Connection<T> streams (QUIC, HTTP/2)
+StreamMux<T>                         many independent Connection<T> streams (QUIC, HTTP/2)
 ```
+
+`ByteStream` itself is a duplex combination of two direction-scoped halves,
+`ByteSource` (read) and `ByteSink` (write) — mirroring the `Sender`/`Receiver`/`Connection`
+split at the typed-message layer. Beyond these three, the module also ships
+`HalfCloseable`, `Resettable`, `ByteStreamMux`, and `BufferedByteSource`, covered below.
 
 Each layer can also be adapted back down. A `Connection<WebSocketMessage>` can expose
 a `ByteStream` of binary-frame payloads, which the next protocol layer frames into a
@@ -88,20 +93,40 @@ contracts; transports provide them.
 
 ### `ByteStream` — raw bytes
 
-The fundamental transport: a bidirectional, byte-level stream.
+The fundamental transport is split into a read half (`ByteSource`) and a write half
+(`ByteSink`); `ByteStream` combines both for duplex transports. Each half carries its
+deadline as a **policy val** rather than a defaulted timeout parameter — `readPolicy` /
+`writePolicy` — so an implementation can override it (e.g. a persistent stream sets
+`override val readPolicy = ReadPolicy.UntilClosed`), which a default parameter value
+can never do:
 
 ```kotlin
-interface ByteStream {
+interface ByteSource {
     val isOpen: Boolean
-    suspend fun read(timeout: Duration = 15.seconds): ReadResult
-    suspend fun write(buffer: ReadBuffer, timeout: Duration = 15.seconds): BytesWritten
-    suspend fun writeGathered(
-        buffers: List<ReadBuffer>,
-        timeout: Duration = 15.seconds,
-    ): BytesWritten
-    suspend fun close()
+    val readPolicy: ReadPolicy
+    suspend fun read(deadline: Duration): ReadResult
+    suspend fun read(): ReadResult = read(readPolicy.toDeadline())
+}
+
+interface ByteSink {
+    val isOpen: Boolean
+    val writePolicy: WritePolicy
+    suspend fun write(buffer: ReadBuffer, deadline: Duration): BytesWritten
+    suspend fun write(buffer: ReadBuffer): BytesWritten = write(buffer, writePolicy.toDeadline())
+    suspend fun writeGathered(buffers: List<ReadBuffer>, deadline: Duration): BytesWritten
+    suspend fun writeGathered(buffers: List<ReadBuffer>): BytesWritten =
+        writeGathered(buffers, writePolicy.toDeadline())
+    suspend fun close() {}
+}
+
+interface ByteStream : ByteSource, ByteSink {
+    override suspend fun close()
 }
 ```
+
+`ReadPolicy` and `WritePolicy` are sealed interfaces with two cases each: `Bounded(deadline)`
+for request/response shapes, and `UntilClosed` (maps to `Duration.INFINITE`) for persistent
+streams whose liveness is delegated to the transport's idle-timeout.
 
 `read()` returns a `ReadResult`, which distinguishes a clean close from a peer reset:
 
@@ -115,6 +140,24 @@ when (val result = stream.read()) {
 
 `write()` returns `BytesWritten` (a value class wrapping the count). `writeGathered()`
 writes several buffers in one call — useful for header + payload without concatenating.
+
+Two capabilities extend `ByteStream` for protocols that need finer-grained lifecycle
+control:
+
+- **`HalfCloseable`** — adds `shutdownSend()`, a send-side FIN that leaves the read side
+  open (the half-close HTTP/3 request/response needs, RFC 9114 §4).
+- **`Resettable`** — adds `reset(errorCode: Long)`, an abrupt abort with an application
+  error code (QUIC RESET_STREAM/STOP_SENDING, RFC 9000 §19.4/§19.5) rather than a graceful
+  close. It mixes onto whichever direction a stream actually has — `ByteSink, Resettable`
+  for send-only, `ByteSource, Resettable` for receive-only.
+
+For heterogeneous muxes where the codec isn't fixed per stream (e.g. HTTP/3's
+self-describing unidirectional streams, RFC 9114 §6.2), `ByteStreamMux` returns raw
+`ByteStream`/`ByteSink`/`ByteSource` from its `open*`/`accept*` methods instead of a typed
+`Connection<T>`. Classifying an accepted stream before choosing a decoder — without consuming
+or copying the prefix — is what `BufferedByteSource` is for: it wraps a `ByteSource` and adds
+a non-consuming `peek(n)` backed by a small look-ahead queue, re-delivering the same bytes,
+uncopied, to the next `read()`.
 
 ### `Connection<T>` — typed messages
 
@@ -205,8 +248,13 @@ assembled: each layer is a `mapNotNull` (or richer framing) over the layer below
 | You have… | Use… |
 |-----------|------|
 | A `Flow` of chunked strings/buffers to transform | Flow extensions (`lines`, `mapBuffer`, `asStringFlow`) |
-| Raw bytes from a socket | `ByteStream` |
+| Raw duplex bytes from a socket | `ByteStream` |
+| A one-directional byte dependency | `ByteSource` or `ByteSink` |
+| A stream that needs to FIN one direction independently | `HalfCloseable` |
+| A stream that can be abruptly aborted with an error code | `Resettable` |
 | Typed messages over one stream | `Connection<T>` |
 | A one-directional message dependency | `Sender<T>` or `Receiver<T>` |
-| A transport with native multiplexing (QUIC/HTTP2) | `StreamMux<T>` |
+| A transport with native multiplexing, one codec for all streams | `StreamMux<T>` |
+| A transport with native multiplexing, self-describing/per-stream codec | `ByteStreamMux` |
+| Classifying a stream before consuming its payload | `BufferedByteSource.peek` |
 | To adapt a connection to a narrower message type | `Connection.mapNotNull` |

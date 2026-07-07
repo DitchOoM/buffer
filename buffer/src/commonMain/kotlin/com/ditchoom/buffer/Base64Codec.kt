@@ -15,6 +15,39 @@ internal const val BASE64_STD_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl
 internal const val BASE64_URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 private const val BASE64_PAD = '='.code
 
+// RFC 4648 alphabet offsets: 'a'..'z' follow the 26 upper-case letters, '0'..'9' follow the 52 letters.
+private const val BASE64_LOWERCASE_OFFSET = 26
+private const val BASE64_DIGIT_OFFSET = 52
+
+/** Sextet value of '+'/'-' (index 62) and '/'/'_' (index 63) in the Base64 alphabet. */
+private const val BASE64_PLUS_VALUE = 62
+private const val BASE64_SLASH_VALUE = 63
+
+/** Base64 groups 3 input bytes into 4 output characters. */
+private const val BYTES_PER_GROUP = 3
+private const val CHARS_PER_GROUP = 4
+
+/** Bits per Base64 sextet (input/output unit widths). */
+private const val SEXTET_BITS = 6
+private const val OCTET_BITS = 8
+
+/** Mask isolating one Base64 sextet (6 bits). */
+private const val SEXTET_MASK = 0x3F
+
+/** Low-2-bit mask carried from the first byte into the second sextet. */
+private const val LOW_TWO_BITS = 0x03
+
+/** Low-4-bit mask carried from the second byte into the third sextet. */
+private const val LOW_FOUR_BITS = 0x0F
+
+/** Shift amounts that align the carried bits within a Base64 group. */
+private const val SHIFT_TWO = 2
+private const val SHIFT_FOUR = 4
+
+/** Output-length remainder of 2 input bytes within a group decodes to 1 extra byte; 3 → 2. */
+private const val GROUP_TAIL_TWO = 2
+private const val GROUP_TAIL_THREE = 3
+
 /**
  * Maps one ASCII Base64 character to its 0..63 sextet value, or -1 if it is not a Base64 digit.
  * Accepts both the standard ('+', '/') and URL-safe ('-', '_') alphabets. Table-free (branch arithmetic).
@@ -22,10 +55,10 @@ private const val BASE64_PAD = '='.code
 internal fun base64DecodeChar(c: Int): Int =
     when (c) {
         in 'A'.code..'Z'.code -> c - 'A'.code
-        in 'a'.code..'z'.code -> c - 'a'.code + 26
-        in '0'.code..'9'.code -> c - '0'.code + 52
-        '+'.code, '-'.code -> 62
-        '/'.code, '_'.code -> 63
+        in 'a'.code..'z'.code -> c - 'a'.code + BASE64_LOWERCASE_OFFSET
+        in '0'.code..'9'.code -> c - '0'.code + BASE64_DIGIT_OFFSET
+        '+'.code, '-'.code -> BASE64_PLUS_VALUE
+        '/'.code, '_'.code -> BASE64_SLASH_VALUE
         else -> -1
     }
 
@@ -37,9 +70,9 @@ fun base64EncodedLength(
     byteCount: Int,
     padded: Boolean = true,
 ): Int {
-    if (padded) return (byteCount + 2) / 3 * 4
-    val rem = byteCount % 3
-    return byteCount / 3 * 4 + if (rem == 0) 0 else rem + 1
+    if (padded) return (byteCount + GROUP_TAIL_TWO) / BYTES_PER_GROUP * CHARS_PER_GROUP
+    val rem = byteCount % BYTES_PER_GROUP
+    return byteCount / BYTES_PER_GROUP * CHARS_PER_GROUP + if (rem == 0) 0 else rem + 1
 }
 
 /**
@@ -48,10 +81,10 @@ fun base64EncodedLength(
  * input carries '=' padding. Every 4 chars decode to 3 bytes.
  */
 fun base64DecodedMaxLength(charCount: Int): Int =
-    charCount / 4 * 3 +
-        when (charCount % 4) {
-            2 -> 1
-            3 -> 2
+    charCount / CHARS_PER_GROUP * BYTES_PER_GROUP +
+        when (charCount % CHARS_PER_GROUP) {
+            GROUP_TAIL_TWO -> 1
+            GROUP_TAIL_THREE -> 2
             else -> 0
         }
 
@@ -73,34 +106,34 @@ internal fun ReadBuffer.encodeBase64Common(
     dest: WriteBuffer,
 ) {
     val alphabet = if (urlSafe) BASE64_URL_ALPHABET else BASE64_STD_ALPHABET
-    val fullEnd = srcOffset + length / 3 * 3
+    val fullEnd = srcOffset + length / BYTES_PER_GROUP * BYTES_PER_GROUP
     var idx = srcOffset
     while (idx < fullEnd) {
-        val b0 = getUnchecked(idx).toInt() and 0xFF
-        val b1 = getUnchecked(idx + 1).toInt() and 0xFF
-        val b2 = getUnchecked(idx + 2).toInt() and 0xFF
-        dest.writeByte(alphabet[b0 ushr 2].code.toByte())
-        dest.writeByte(alphabet[((b0 and 0x03) shl 4) or (b1 ushr 4)].code.toByte())
-        dest.writeByte(alphabet[((b1 and 0x0F) shl 2) or (b2 ushr 6)].code.toByte())
-        dest.writeByte(alphabet[b2 and 0x3F].code.toByte())
-        idx += 3
+        val b0 = getUnchecked(idx).toInt() and BufferConstants.BYTE_MASK
+        val b1 = getUnchecked(idx + 1).toInt() and BufferConstants.BYTE_MASK
+        val b2 = getUnchecked(idx + 2).toInt() and BufferConstants.BYTE_MASK
+        dest.writeByte(alphabet[b0 ushr SHIFT_TWO].code.toByte())
+        dest.writeByte(alphabet[((b0 and LOW_TWO_BITS) shl SHIFT_FOUR) or (b1 ushr SHIFT_FOUR)].code.toByte())
+        dest.writeByte(alphabet[((b1 and LOW_FOUR_BITS) shl SHIFT_TWO) or (b2 ushr SEXTET_BITS)].code.toByte())
+        dest.writeByte(alphabet[b2 and SEXTET_MASK].code.toByte())
+        idx += BYTES_PER_GROUP
     }
     when ((srcOffset + length) - fullEnd) {
         1 -> {
-            val b0 = getUnchecked(fullEnd).toInt() and 0xFF
-            dest.writeByte(alphabet[b0 ushr 2].code.toByte())
-            dest.writeByte(alphabet[(b0 and 0x03) shl 4].code.toByte())
+            val b0 = getUnchecked(fullEnd).toInt() and BufferConstants.BYTE_MASK
+            dest.writeByte(alphabet[b0 ushr SHIFT_TWO].code.toByte())
+            dest.writeByte(alphabet[(b0 and LOW_TWO_BITS) shl SHIFT_FOUR].code.toByte())
             if (padded) {
                 dest.writeByte(BASE64_PAD.toByte())
                 dest.writeByte(BASE64_PAD.toByte())
             }
         }
         2 -> {
-            val b0 = getUnchecked(fullEnd).toInt() and 0xFF
-            val b1 = getUnchecked(fullEnd + 1).toInt() and 0xFF
-            dest.writeByte(alphabet[b0 ushr 2].code.toByte())
-            dest.writeByte(alphabet[((b0 and 0x03) shl 4) or (b1 ushr 4)].code.toByte())
-            dest.writeByte(alphabet[(b1 and 0x0F) shl 2].code.toByte())
+            val b0 = getUnchecked(fullEnd).toInt() and BufferConstants.BYTE_MASK
+            val b1 = getUnchecked(fullEnd + 1).toInt() and BufferConstants.BYTE_MASK
+            dest.writeByte(alphabet[b0 ushr SHIFT_TWO].code.toByte())
+            dest.writeByte(alphabet[((b0 and LOW_TWO_BITS) shl SHIFT_FOUR) or (b1 ushr SHIFT_FOUR)].code.toByte())
+            dest.writeByte(alphabet[(b1 and LOW_FOUR_BITS) shl SHIFT_TWO].code.toByte())
             if (padded) dest.writeByte(BASE64_PAD.toByte())
         }
     }
@@ -123,18 +156,18 @@ internal inline fun decodeBase64Fallback(
     var bits = 0
     var i = 0
     while (i < length) {
-        val c = getByte(srcOffset + i).toInt() and 0xFF
+        val c = getByte(srcOffset + i).toInt() and BufferConstants.BYTE_MASK
         i++
         if (c == BASE64_PAD) break
         val v = base64DecodeChar(c)
         if (v < 0) {
             throw IllegalArgumentException("invalid base64 character at index ${srcOffset + i - 1}")
         }
-        acc = (acc shl 6) or v
-        bits += 6
-        if (bits >= 8) {
-            bits -= 8
-            putByte(((acc ushr bits) and 0xFF).toByte())
+        acc = (acc shl SEXTET_BITS) or v
+        bits += SEXTET_BITS
+        if (bits >= OCTET_BITS) {
+            bits -= OCTET_BITS
+            putByte(((acc ushr bits) and BufferConstants.BYTE_MASK).toByte())
         }
     }
 }

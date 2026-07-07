@@ -106,6 +106,7 @@ internal actual fun nodeZlibSync(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
     windowBits: WindowBits,
+    dictionary: JsByteArray?,
 ): JsByteArray {
     val zlib = getNodeZlib()
     val options = js("{}")
@@ -115,6 +116,9 @@ internal actual fun nodeZlibSync(
         // name (gzipSync / deflateSync / deflateRawSync) selects the format; Node
         // applies the raw negation / gzip +16 internally.
         options["windowBits"] = windowBits.sizeLog2
+    }
+    if (dictionary != null) {
+        options["dictionary"] = dictionary.array
     }
     val inputArray = input.array
     val result: Uint8Array =
@@ -152,16 +156,22 @@ internal actual fun nodeZlibSyncFlush(
 internal actual fun nodeZlibDecompressSync(
     input: JsByteArray,
     algorithm: CompressionAlgorithm,
+    dictionary: JsByteArray?,
 ): JsByteArray {
     val zlib = getNodeZlib()
     val inputArray = input.array
     val result: Uint8Array =
         when (algorithm) {
             CompressionAlgorithm.Gzip -> zlib.gunzipSync(inputArray).unsafeCast<Uint8Array>()
-            CompressionAlgorithm.Deflate -> zlib.inflateSync(inputArray).unsafeCast<Uint8Array>()
+            CompressionAlgorithm.Deflate -> {
+                val options = js("{}")
+                if (dictionary != null) options["dictionary"] = dictionary.array
+                zlib.inflateSync(inputArray, options).unsafeCast<Uint8Array>()
+            }
             CompressionAlgorithm.Raw -> {
                 val options = js("{}")
                 options["finishFlush"] = zlib.constants.Z_SYNC_FLUSH
+                if (dictionary != null) options["dictionary"] = dictionary.array
                 zlib.inflateRawSync(inputArray, options).unsafeCast<Uint8Array>()
             }
         }
@@ -172,10 +182,15 @@ internal actual fun nodeZlibDecompressSync(
 // Browser CompressionStream / DecompressionStream
 // ============================================================================
 
+// Parameters below are referenced inside the js(...) template strings, which detekt
+// cannot see, so they are flagged unused despite being required by the generated JS.
+@Suppress("UnusedParameter")
 private fun createCompressionStream(format: String): dynamic = js("new CompressionStream(format)")
 
+@Suppress("UnusedParameter")
 private fun createDecompressionStream(format: String): dynamic = js("new DecompressionStream(format)")
 
+@Suppress("UnusedParameter")
 private fun createBlob(data: Uint8Array): dynamic = js("new Blob([data])")
 
 private fun getStream(blob: dynamic): dynamic = blob.stream()
@@ -185,11 +200,13 @@ private fun pipeThrough(
     transform: dynamic,
 ): dynamic = stream.pipeThrough(transform)
 
+@Suppress("UnusedParameter")
 private fun createResponse(stream: dynamic): dynamic = js("new Response(stream)")
 
 private fun getArrayBuffer(response: dynamic): Promise<dynamic> = response.arrayBuffer().unsafeCast<Promise<dynamic>>()
 
-private fun createUint8ArrayFromBuffer(buffer: dynamic): Uint8Array = js("new Uint8Array(buffer)").unsafeCast<Uint8Array>()
+@Suppress("UnusedParameter")
+private fun createUint8ArrayFromBuffer(buffer: dynamic) = js("new Uint8Array(buffer)").unsafeCast<Uint8Array>()
 
 internal actual suspend fun browserCompress(
     input: JsByteArray,
@@ -233,12 +250,16 @@ internal actual fun createCompressStream(
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
     windowBits: WindowBits,
+    dictionary: JsByteArray?,
 ): NodeTransformHandle {
     val zlib = getNodeZlib()
     val options = js("{}")
     options["level"] = level.value
     if (windowBits != WindowBits.Default) {
         options["windowBits"] = windowBits.sizeLog2
+    }
+    if (dictionary != null) {
+        options["dictionary"] = dictionary.array
     }
     val stream: dynamic =
         when (algorithm) {
@@ -252,6 +273,7 @@ internal actual fun createCompressStream(
 internal actual fun createDecompressStream(
     algorithm: CompressionAlgorithm,
     windowBits: WindowBits,
+    dictionary: JsByteArray?,
 ): NodeTransformHandle {
     val zlib = getNodeZlib()
     val options = js("{}")
@@ -260,6 +282,9 @@ internal actual fun createDecompressStream(
     }
     if (windowBits != WindowBits.Default) {
         options["windowBits"] = windowBits.sizeLog2
+    }
+    if (dictionary != null) {
+        options["dictionary"] = dictionary.array
     }
     val stream: dynamic =
         when (algorithm) {
@@ -420,10 +445,14 @@ internal actual suspend fun nodeTransformCompressOneShot(
     inputs: List<JsByteArray>,
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
+    dictionary: JsByteArray?,
 ): JsByteArray {
     val zlib = getNodeZlib()
     val options = js("{}")
     options["level"] = level.value
+    if (dictionary != null) {
+        options["dictionary"] = dictionary.array
+    }
     val algStr = algorithm.toNodeString()
 
     val result =
@@ -452,12 +481,16 @@ internal actual suspend fun nodeTransformCompressOneShot(
 internal actual suspend fun nodeTransformDecompressOneShot(
     inputs: List<JsByteArray>,
     algorithm: CompressionAlgorithm,
+    dictionary: JsByteArray?,
 ): JsByteArray {
     val zlib = getNodeZlib()
     val options: dynamic = js("{}")
     val algStr = algorithm.toNodeString()
     if (algStr == "raw") {
         options["finishFlush"] = zlib.constants.Z_SYNC_FLUSH
+    }
+    if (dictionary != null) {
+        options["dictionary"] = dictionary.array
     }
 
     val result =

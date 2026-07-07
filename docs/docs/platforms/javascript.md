@@ -79,10 +79,10 @@ val sharedBuffer = BufferFactory.shared().allocate(1024)
 sharedBuffer.writeInt(42)
 
 // Pass to worker (zero-copy with SharedArrayBuffer)
-worker.postMessage(sharedBuffer.asArrayBuffer())
+worker.postMessage(sharedBuffer.toNativeData().arrayBuffer)
 
 // Worker thread
-val buffer = BufferFactory.Default.wrap(receivedArrayBuffer)
+val buffer = PlatformBuffer.wrap(receivedArrayBuffer)
 val value = buffer.readInt()  // 42
 ```
 
@@ -109,12 +109,12 @@ val int8Array: Int8Array = mutableData.int8Array
 
 | Conversion | JsBuffer |
 |------------|----------|
-| `toNativeData()` | Zero-copy for mutable buffers, copy for read-only |
+| `toNativeData()` | Zero-copy only if the buffer spans the *entire* underlying `ArrayBuffer` at position 0; otherwise copies |
 | `toMutableNativeData()` | Zero-copy (subarray view) |
 | `toByteArray()` | Zero-copy (subarray) |
 
 :::note ArrayBuffer Limitation
-`ArrayBuffer` itself is immutable (you can't create a view of a portion). When converting to `ArrayBuffer`, a copy may be needed for partial views. `Int8Array` supports zero-copy subarray views.
+`ArrayBuffer` itself is immutable (you can't create a view of a portion). Zero-copy for `toNativeData()` therefore depends on the view covering the whole backing `ArrayBuffer` at offset 0 — a partial view (sliced, repositioned, or non-zero `byteOffset`) always requires a copy, whether or not the buffer is mutable. `Int8Array` (used by `toMutableNativeData()` and `toByteArray()`) supports zero-copy subarray views regardless of position.
 :::
 
 ### Web API Examples
@@ -123,12 +123,12 @@ val int8Array: Int8Array = mutableData.int8Array
 // Fetch API
 val response = fetch(url).await()
 val arrayBuffer = response.arrayBuffer().await()
-val buffer = BufferFactory.Default.wrap(arrayBuffer)
+val buffer = PlatformBuffer.wrap(arrayBuffer)
 
 // WebSocket
 webSocket.onmessage = { event ->
     val data = event.data as ArrayBuffer
-    val buffer = BufferFactory.Default.wrap(data)
+    val buffer = PlatformBuffer.wrap(data)
     processMessage(buffer)
 }
 

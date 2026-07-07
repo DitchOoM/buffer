@@ -1,3 +1,5 @@
+@file:Suppress("MatchingDeclarationName") // MPP platform-suffixed actual file
+
 package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.ReadBuffer
@@ -10,26 +12,44 @@ import javax.crypto.spec.SecretKeySpec
 /** JVM/Android HMAC-SHA384 backed by the JCA [Mac]. */
 actual class HmacSha384Mac actual constructor(
     key: ReadBuffer,
-) {
+) : AutoCloseable {
     private val mac =
         Mac.getInstance("HmacSHA384").apply {
             val managed = key.managedMemoryAccess
             val spec =
                 if (managed != null) {
                     // SecretKeySpec copies the requested range, so no aliasing of the source buffer.
-                    SecretKeySpec(managed.backingArray, managed.arrayOffset + key.position(), key.remaining(), "HmacSHA384")
+                    SecretKeySpec(
+                        managed.backingArray,
+                        managed.arrayOffset + key.position(),
+                        key.remaining(),
+                        "HmacSHA384",
+                    )
                 } else {
                     SecretKeySpec(key.toByteArray(), "HmacSHA384")
                 }
             init(spec)
         }
+    private var finalized = false
 
     actual fun update(input: ReadBuffer): HmacSha384Mac {
+        check(!finalized) { "mac already finalized" }
         mac.updateRemaining(input)
         return this
     }
 
     actual fun doFinalInto(dest: WriteBuffer) {
+        // JCA resets the mac for reuse; the cross-platform contract is one-shot, so reject reuse.
+        check(!finalized) { "mac already finalized" }
+        // doFinalInto validates capacity BEFORE consuming the JCA state, so a too-small
+        // dest throws with the MAC still intact — the finalize stays retryable (C1).
         mac.doFinalInto(dest)
+        finalized = true
+    }
+
+    actual override fun close() {
+        if (finalized) return
+        finalized = true
+        mac.reset()
     }
 }

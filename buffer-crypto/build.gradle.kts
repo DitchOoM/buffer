@@ -14,7 +14,20 @@ plugins {
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
     alias(libs.plugins.dokka)
+    alias(libs.plugins.binary.compatibility.validator)
     signing
+}
+
+// Binary-compatibility validation locks the published 6.0 public ABI so a later minor (e.g. the
+// Hardware* key variants) is proven non-breaking by `apiCheck`. We validate the JVM ABI only: it is
+// host-independent (this dev host is Linux/WSL and cannot build the Apple klibs) and the common
+// public surface — which is what 6.0 freezes — is wholly contained in the JVM dump. Klib ABI
+// validation is left off precisely because it would diverge between a partial-target dev host and
+// the all-target Mac/Linux CI runners.
+apiValidation {
+    klib {
+        enabled = false
+    }
 }
 
 group = "com.ditchoom"
@@ -99,6 +112,7 @@ fun appleSwiftShim(
             inputs.file(src)
             inputs.property("triple", triple)
             inputs.property("sdkPath", sdkPath)
+            inputs.property("runtimeCompatibilityVersion", "none")
             outputs.file(archive)
             doFirst { outDir.mkdirs() }
             commandLine(
@@ -110,6 +124,17 @@ fun appleSwiftShim(
                 triple,
                 "-sdk",
                 sdkPath,
+                // #253: at deployment targets below iOS 17, swiftc emits force-load references to the
+                // Swift back-compat archives (swiftCompatibility56/Concurrency/Packs), which exist ONLY
+                // in the Xcode toolchain dir — not the SDK — so any link that doesn't carry a
+                // machine-specific -L (notably a consumer's cinterop static-cache link) fails with
+                // `_swift_FORCE_LOAD$_swiftCompatibility*` unresolved. The shim uses no Swift feature
+                // that needs back-deployment patching (no async/await, no parameter packs; plain @_cdecl
+                // over CryptoKit), so opt out of the compat archives entirely. Everything else the shim
+                // auto-links (swiftCore, swiftFoundation, CryptoKit, ...) resolves from the SDK, which
+                // every ld invocation already searches via -syslibroot.
+                "-runtime-compatibility-version",
+                "none",
                 "-O",
                 "-o",
                 archive.absolutePath,
@@ -310,8 +335,18 @@ kotlin {
     }
     js {
         outputModuleName.set("buffer-crypto-kt")
-        browser()
+        browser {
+            // Bundle the whole module graph (stdlib + coroutines + buffer + buffer-crypto) into one
+            // self-contained webpack file that exposes the @JsExport surface as a `bufferCryptoKt`
+            // global, so the docs site can load the real CryptoDemo facade with a single <script>.
+            // Only adds a JS distribution artifact; the Maven publication remains the klib.
+            webpackTask {
+                output.library = "bufferCryptoKt"
+                output.libraryTarget = "umd"
+            }
+        }
         nodejs()
+        binaries.executable()
     }
     wasmJs {
         browser()
@@ -352,11 +387,12 @@ kotlin {
             macosX64()
         }
     } else if (HostManager.hostIsLinux) {
-        if (System.getProperty("os.arch") == "aarch64") {
-            linuxArm64()
-        } else {
-            linuxX64()
-        }
+        // Register BOTH linux targets locally (mirrors buffer-flow/buffer-codec) so the linuxArm64
+        // klib publishes to mavenLocal even on an x64 host — socket-quic-quiche's linuxArm64 seam
+        // swap (buffer-crypto.sha256) needs it to resolve. The non-host arch libcrypto.a is prebuilt
+        // under libs/boringssl/linux-arm64 (buildBoringSslArm64 is a no-op when already present).
+        linuxX64()
+        linuxArm64()
     }
 
     // AES-GCM on Apple needs CommonCrypto's streaming GCM entry points, which live in the
@@ -395,6 +431,13 @@ kotlin {
                     "lib${shim.archiveName}.a",
                     "-libraryPath",
                     shim.outDir.absolutePath,
+                    // #253 root fix lives in the swiftc invocation above (-runtime-compatibility-version
+                    // none): the shim archive embedded in this klib carries no Swift back-compat
+                    // force-load references, so neither our link nor a consumer's cinterop static-cache
+                    // link needs the toolchain's Swift lib dir. Do NOT pass -linkerOpts -L<toolchain>
+                    // here: it bakes a machine-specific Xcode path into the published artifact and did
+                    // not propagate to consumers' cache links anyway (klib manifests from extraOpts
+                    // carried no linkerOpts key — see the 6.4.0 regression report on #253).
                 )
             }
             // The cinterop task is registered by the KMP plugin under a derived name; wire the
@@ -469,6 +512,11 @@ kotlin {
         }
         androidMain {
             dependsOn(jvmCommonMain)
+            dependencies {
+                // `api`: BiometricPromptAuthenticator's constructor exposes FragmentActivity and
+                // BiometricPrompt types, so consumers must see them on their compile classpath.
+                api(libs.androidx.biometric)
+            }
         }
         jvmTest {
             dependsOn(jvmCommonTest)

@@ -25,16 +25,25 @@ import kotlinx.cinterop.usePinned
 import platform.posix.memcpy
 import platform.zlib.Z_DEFLATED
 import platform.zlib.Z_FINISH
+import platform.zlib.Z_NEED_DICT
 import platform.zlib.Z_OK
 import platform.zlib.Z_STREAM_END
 import platform.zlib.compressBound
 import platform.zlib.deflate
 import platform.zlib.deflateEnd
 import platform.zlib.deflateInit2
+import platform.zlib.deflateSetDictionary
 import platform.zlib.inflate
 import platform.zlib.inflateEnd
 import platform.zlib.inflateInit2
+import platform.zlib.inflateSetDictionary
 import platform.zlib.z_stream
+
+/**
+ * zlib's `Z_BUF_ERROR` (-5): inflate made no progress because the output buffer is
+ * full or input was exhausted. Treated as "needs more output space", not a failure.
+ */
+private const val Z_BUF_ERROR_CODE = -5
 
 /**
  * Apple supports synchronous compression via system zlib.
@@ -46,6 +55,57 @@ actual val supportsStatefulFlush: Boolean = true
 // Apple system zlib's deflateInit2 honors the windowBits argument; threaded through
 // AppleZlibStreamingCompressor.
 actual val supportsCustomWindowBits: Boolean = true
+
+// Apple system zlib exposes deflateSetDictionary/inflateSetDictionary directly.
+actual val supportsPresetDictionary: Boolean = true
+
+/**
+ * Materializes an optional dictionary [ReadBuffer] into an owned [PlatformBuffer], consuming
+ * the source buffer fully (the "consume once, retain internally" contract on the streaming
+ * `create()` factories). No native-pointer resolution happens here — that's done per-call by
+ * [withBufferPointer], since a managed buffer's backing array is only safely dereferenced
+ * while pinned for that call.
+ */
+internal fun BufferFactory.materializeDictionary(dictionary: ReadBuffer?): PlatformBuffer? {
+    if (dictionary == null) return null
+    val owned = allocate(dictionary.remaining())
+    owned.write(dictionary)
+    owned.resetForRead()
+    return owned
+}
+
+/**
+ * Applies [dictionary] via `deflateSetDictionary`. Must be called immediately after
+ * `deflateInit2`/`deflateReset`, before any `deflate()` call (zlib-wrapped), or before any
+ * `deflate()` call / at a block boundary (raw) — see the zlib manual on `deflateSetDictionary`.
+ */
+@OptIn(ExperimentalForeignApi::class, UnsafeNumber::class)
+internal fun applyDeflateDictionary(
+    stream: CPointer<z_stream>,
+    dictionary: ReadBuffer,
+) {
+    val result =
+        withBufferPointer(dictionary) { ptr ->
+            deflateSetDictionary(stream, ptr.reinterpret(), dictionary.remaining().convert())
+        }
+    if (result != Z_OK) {
+        throw CompressionException("deflateSetDictionary failed with code: $result")
+    }
+}
+
+/**
+ * Applies [dictionary] via `inflateSetDictionary`. For raw inflate this can be called any
+ * time before the data needing it; for zlib-wrapped streams it must be called right after an
+ * `inflate()` call returns [Z_NEED_DICT] — see the zlib manual on `inflateSetDictionary`.
+ */
+@OptIn(ExperimentalForeignApi::class, UnsafeNumber::class)
+internal fun applyInflateDictionary(
+    stream: CPointer<z_stream>,
+    dictionary: ReadBuffer,
+): Int =
+    withBufferPointer(dictionary) { ptr ->
+        inflateSetDictionary(stream, ptr.reinterpret(), dictionary.remaining().convert())
+    }
 
 /**
  * Helper to copy memory with platform-appropriate size_t conversion.
@@ -78,16 +138,22 @@ actual fun compress(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
+    dictionary: ReadBuffer?,
 ): CompressionResult =
     try {
+        requireDictionarySupport(algorithm, dictionary)
         val remaining = buffer.remaining()
         if (remaining == 0) {
             CompressionResult.Success(createEmptyCompressed(algorithm))
         } else {
-            val result = compressWithZStream(buffer, algorithm, level)
+            val result = compressWithZStream(buffer, algorithm, level, dictionary)
             CompressionResult.Success(result)
         }
-    } catch (e: Exception) {
+    } catch (e: CompressionException) {
+        CompressionResult.Failure("Compression failed: ${e.message}", e)
+    } catch (e: IllegalStateException) {
+        CompressionResult.Failure("Compression failed: ${e.message}", e)
+    } catch (e: IllegalArgumentException) {
         CompressionResult.Failure("Compression failed: ${e.message}", e)
     }
 
@@ -95,16 +161,22 @@ actual fun compress(
 actual fun decompress(
     buffer: ReadBuffer,
     algorithm: CompressionAlgorithm,
+    dictionary: ReadBuffer?,
 ): CompressionResult =
     try {
+        requireDictionarySupport(algorithm, dictionary)
         val remaining = buffer.remaining()
         if (remaining == 0) {
             CompressionResult.Success(BufferFactory.Default.allocate(0))
         } else {
-            val result = decompressWithZStream(buffer, algorithm)
+            val result = decompressWithZStream(buffer, algorithm, dictionary)
             CompressionResult.Success(result)
         }
-    } catch (e: Exception) {
+    } catch (e: CompressionException) {
+        CompressionResult.Failure("Decompression failed: ${e.message}", e)
+    } catch (e: IllegalStateException) {
+        CompressionResult.Failure("Decompression failed: ${e.message}", e)
+    } catch (e: IllegalArgumentException) {
         CompressionResult.Failure("Decompression failed: ${e.message}", e)
     }
 
@@ -117,6 +189,7 @@ private fun compressWithZStream(
     input: ReadBuffer,
     algorithm: CompressionAlgorithm,
     level: CompressionLevel,
+    dictionary: ReadBuffer?,
 ): PlatformBuffer {
     val inputSize = input.remaining()
     val inputPosition = input.position()
@@ -149,6 +222,9 @@ private fun compressWithZStream(
         if (result != Z_OK) {
             throw CompressionException("deflateInit2 failed with code: $result")
         }
+
+        // Must be set immediately after init, before the first deflate() call.
+        dictionary?.let { applyDeflateDictionary(s.ptr, it) }
 
         withBufferPointer(input) { inputPtr ->
             s.next_in = (inputPtr + inputPosition)?.reinterpret()
@@ -185,6 +261,7 @@ private fun compressWithZStream(
 private fun decompressWithZStream(
     input: ReadBuffer,
     algorithm: CompressionAlgorithm,
+    dictionary: ReadBuffer?,
 ): PlatformBuffer {
     val inputSize = input.remaining()
     val inputPosition = input.position()
@@ -201,6 +278,12 @@ private fun decompressWithZStream(
 
         if (result != Z_OK) {
             throw CompressionException("inflateInit2 failed with code: $result")
+        }
+
+        // Raw inflate has no in-band Z_NEED_DICT signal, so the dictionary must be applied
+        // eagerly. Zlib-wrapped streams signal via Z_NEED_DICT during the inflate loop below.
+        if (algorithm == CompressionAlgorithm.Raw) {
+            dictionary?.let { applyInflateDictionary(s.ptr, it) }
         }
 
         // Start with estimate, grow if needed
@@ -226,7 +309,7 @@ private fun decompressWithZStream(
 
                 when (result) {
                     Z_STREAM_END -> break
-                    Z_OK, -5 -> {
+                    Z_OK, Z_BUF_ERROR_CODE -> {
                         if (s.avail_out > 0u && s.avail_in == 0u) {
                             // No more input and output space available means inflate
                             // can't make progress. Stream is complete even without
@@ -245,6 +328,17 @@ private fun decompressWithZStream(
                             output = newOutput
                             outputPtr = newPtr
                             outputSize = newSize
+                        }
+                    }
+                    Z_NEED_DICT -> {
+                        if (dictionary == null) {
+                            inflateEnd(s.ptr)
+                            throw CompressionException("Dictionary required")
+                        }
+                        val setResult = applyInflateDictionary(s.ptr, dictionary)
+                        if (setResult != Z_OK) {
+                            inflateEnd(s.ptr)
+                            throw CompressionException("inflateSetDictionary failed with code: $setResult")
                         }
                     }
                     else -> {

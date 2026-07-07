@@ -115,6 +115,9 @@ jobs:
     uses: ./.github/workflows/build-linux.yaml
     with:
       gradle-args: ${{ needs.check-release.outputs.gradle-args }}
+      # For an actual release/draft publish-to-Central, force a clean, cache-free rebuild
+      # of the published artifacts. Non-publishing flows (dry-run) reuse the build cache.
+      clean-publish: ${{ needs.check-release.outputs.flow == 'release' || needs.check-release.outputs.flow == 'draft' }}
 
   build-apple:
     needs: check-release
@@ -122,6 +125,9 @@ jobs:
     uses: ./.github/workflows/build-apple.yaml
     with:
       gradle-args: ${{ needs.check-release.outputs.gradle-args }}
+      # For an actual release/draft publish-to-Central, force a clean, cache-free rebuild
+      # of the published artifacts. Non-publishing flows (dry-run) reuse the build cache.
+      clean-publish: ${{ needs.check-release.outputs.flow == 'release' || needs.check-release.outputs.flow == 'draft' }}
 
   validate:
     needs: [check-release, build-linux, build-apple]
@@ -240,7 +246,7 @@ jobs:
 
       - name: Attest build provenance
         if: needs.publish.result == 'success'
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           # The shipped binaries: JVM/Android jars+aars and Kotlin/Native klibs.
           subject-path: |

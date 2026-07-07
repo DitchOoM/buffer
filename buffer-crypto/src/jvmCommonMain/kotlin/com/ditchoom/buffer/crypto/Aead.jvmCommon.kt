@@ -35,11 +35,17 @@ private val chaChaPolyAvailable: Boolean =
         false
     }
 
-actual val supportsSyncAesGcm: Boolean = true
+/** AES-GCM is synchronous via JCA. */
+actual val CryptoCapabilities.aesGcm: Aead<AesGcmKey, SyncCapableAesGcmKey> get() = Aead.Blocking(AesGcmBlockingOps)
 
-actual val supportsChaChaPoly: Boolean = chaChaPolyAvailable
-
-actual val supportsSyncChaChaPoly: Boolean = chaChaPolyAvailable
+/** ChaCha20-Poly1305 is synchronous via JCA when the transform is present (JDK 11+ / Conscrypt). */
+actual val CryptoCapabilities.chaChaPoly: OptionalAead<ChaChaPolyKey>
+    get() =
+        if (chaChaPolyAvailable) {
+            OptionalAead.Blocking(ChaChaPolyBlockingOps)
+        } else {
+            OptionalAead.Unavailable
+        }
 
 internal actual fun aesGcmSeal(
     key: AesGcmKey,
@@ -52,7 +58,7 @@ internal actual fun aesGcmSeal(
     val cipher = Cipher.getInstance("AES/GCM/NoPadding")
     cipher.init(
         Cipher.ENCRYPT_MODE,
-        SecretKeySpec(materialBytes(key.material), "AES"),
+        keySpec(key.requireInMemoryMaterial(), "AES"),
         GCMParameterSpec(GCM_TAG_BITS, nonceBytes(nonce)),
     )
     aad?.let { cipher.updateAADRemaining(it) }
@@ -71,7 +77,7 @@ internal actual fun aesGcmOpen(
     val cipher = Cipher.getInstance("AES/GCM/NoPadding")
     cipher.init(
         Cipher.DECRYPT_MODE,
-        SecretKeySpec(materialBytes(key.material), "AES"),
+        keySpec(key.requireInMemoryMaterial(), "AES"),
         GCMParameterSpec(GCM_TAG_BITS, nonceBytes(nonce)),
     )
     aad?.let { cipher.updateAADRemaining(it) }
@@ -85,14 +91,14 @@ internal actual fun chaChaPolySeal(
     plaintext: ReadBuffer,
     dest: WriteBuffer,
 ) {
-    if (!supportsSyncChaChaPoly) {
+    if (!chaChaPolyAvailable) {
         throw UnsupportedOperationException("ChaCha20-Poly1305 is not supported on this platform")
     }
     requireNonce(nonce)
     val cipher = Cipher.getInstance("ChaCha20-Poly1305")
     cipher.init(
         Cipher.ENCRYPT_MODE,
-        SecretKeySpec(materialBytes(key.material), "ChaCha20"),
+        keySpec(key.requireInMemoryMaterial(), "ChaCha20"),
         IvParameterSpec(nonceBytes(nonce)),
     )
     aad?.let { cipher.updateAADRemaining(it) }
@@ -106,7 +112,7 @@ internal actual fun chaChaPolyOpen(
     ciphertextAndTag: ReadBuffer,
     dest: WriteBuffer,
 ) {
-    if (!supportsSyncChaChaPoly) {
+    if (!chaChaPolyAvailable) {
         throw UnsupportedOperationException("ChaCha20-Poly1305 is not supported on this platform")
     }
     requireNonce(nonce)
@@ -114,7 +120,7 @@ internal actual fun chaChaPolyOpen(
     val cipher = Cipher.getInstance("ChaCha20-Poly1305")
     cipher.init(
         Cipher.DECRYPT_MODE,
-        SecretKeySpec(materialBytes(key.material), "ChaCha20"),
+        keySpec(key.requireInMemoryMaterial(), "ChaCha20"),
         IvParameterSpec(nonceBytes(nonce)),
     )
     aad?.let { cipher.updateAADRemaining(it) }
@@ -123,35 +129,7 @@ internal actual fun chaChaPolyOpen(
 
 // Native async simply delegates to the synchronous JCA path — no event loop needed off-web.
 
-actual suspend fun aesGcmSealAsync(
-    key: AesGcmKey,
-    plaintext: ReadBuffer,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = aesGcmSeal(key, plaintext, aad, factory)
-
-actual suspend fun aesGcmOpenAsync(
-    sealed: ReadBuffer,
-    key: AesGcmKey,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = aesGcmOpen(sealed, key, aad, factory)
-
-actual suspend fun chaChaPolySealAsync(
-    key: ChaChaPolyKey,
-    plaintext: ReadBuffer,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = chaChaPolySeal(key, plaintext, aad, factory)
-
-actual suspend fun chaChaPolyOpenAsync(
-    sealed: ReadBuffer,
-    key: ChaChaPolyKey,
-    aad: ReadBuffer?,
-    factory: BufferFactory,
-): PlatformBuffer = chaChaPolyOpen(sealed, key, aad, factory)
-
-actual suspend fun aesGcmSealWithNonceAsync(
+internal actual suspend fun aesGcmSealWithNonceAsync(
     key: AesGcmKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
@@ -164,7 +142,7 @@ actual suspend fun aesGcmSealWithNonceAsync(
     return out
 }
 
-actual suspend fun aesGcmOpenWithNonceAsync(
+internal actual suspend fun aesGcmOpenWithNonceAsync(
     key: AesGcmKey,
     nonce: ReadBuffer,
     aad: ReadBuffer?,
@@ -181,22 +159,37 @@ actual suspend fun aesGcmOpenWithNonceAsync(
 // JCA glue
 // =============================================================================
 
-private fun requireNonce(nonce: ReadBuffer) {
+internal fun requireNonce(nonce: ReadBuffer) {
     require(nonce.remaining() == AEAD_NONCE_BYTES) {
         "nonce must be $AEAD_NONCE_BYTES bytes, was ${nonce.remaining()}"
     }
 }
 
-private fun requireTagged(ciphertextAndTag: ReadBuffer) {
+internal fun requireTagged(ciphertextAndTag: ReadBuffer) {
     require(ciphertextAndTag.remaining() >= AEAD_TAG_BYTES) {
         "ciphertext+tag must be at least $AEAD_TAG_BYTES bytes, was ${ciphertextAndTag.remaining()}"
     }
 }
 
-/** Copies a key/nonce buffer's remaining bytes into a JCA-consumable array (non-destructive). */
-private fun materialBytes(buffer: ReadBuffer): ByteArray = remainingBytes(buffer)
+/**
+ * Builds a [SecretKeySpec] from the key buffer's remaining bytes (non-destructive). The staging
+ * array is zeroed as soon as the spec is constructed — [SecretKeySpec] copies the bytes internally,
+ * so the wipe cannot affect the spec and the raw key does not linger on the heap. The wipe runs in
+ * a `finally` so the staged key is erased even when the spec constructor rejects the material.
+ */
+private fun keySpec(
+    key: ReadBuffer,
+    algorithm: String,
+): SecretKeySpec {
+    val staged = remainingBytes(key)
+    try {
+        return SecretKeySpec(staged, algorithm)
+    } finally {
+        staged.fill(0)
+    }
+}
 
-private fun nonceBytes(nonce: ReadBuffer): ByteArray = remainingBytes(nonce)
+internal fun nonceBytes(nonce: ReadBuffer): ByteArray = remainingBytes(nonce)
 
 /** Materializes a buffer's remaining bytes into an array without disturbing its position. */
 private fun remainingBytes(buffer: ReadBuffer): ByteArray {
@@ -212,7 +205,7 @@ private fun remainingBytes(buffer: ReadBuffer): ByteArray {
 }
 
 /** Feeds a buffer's remaining bytes into the cipher as AAD, zero-copy where possible. */
-private fun Cipher.updateAADRemaining(buffer: ReadBuffer) {
+internal fun Cipher.updateAADRemaining(buffer: ReadBuffer) {
     if (buffer.remaining() == 0) return
     val managed = buffer.managedMemoryAccess
     if (managed != null) {
@@ -226,7 +219,7 @@ private fun Cipher.updateAADRemaining(buffer: ReadBuffer) {
  * Runs `doFinal` over [input]'s remaining bytes (ENCRYPT mode), writing `ciphertext ‖ tag`
  * into [dest]. Direct-dest fast path writes straight into the destination's backing array.
  */
-private fun finalInto(
+internal fun finalInto(
     cipher: Cipher,
     input: ReadBuffer,
     dest: WriteBuffer,
@@ -249,7 +242,7 @@ private fun finalInto(
  * a bad tag throws `AEADBadTagException`, which we collapse to the opaque [VerificationFailed]
  * so the failure carries no oracle-friendly reason.
  */
-private fun openInto(
+internal fun openInto(
     cipher: Cipher,
     ciphertextAndTag: ReadBuffer,
     dest: WriteBuffer,

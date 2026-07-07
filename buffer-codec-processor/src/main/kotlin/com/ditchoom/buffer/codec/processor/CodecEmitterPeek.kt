@@ -34,6 +34,12 @@ import com.squareup.kotlinpoet.U_SHORT
  * suite.
  */
 
+// Worst-case peek budgets (bytes) per scalar width, `max(⌈typeBits / 7⌉, 1 + typeBytes)`.
+private const val BYTE_PEEK_BUDGET = 2
+private const val SHORT_PEEK_BUDGET = 3
+private const val INT_PEEK_BUDGET = 5
+private const val LONG_PEEK_BUDGET = 10
+
 /**
  * Per-field-type peek-budget table.
  *
@@ -63,10 +69,10 @@ import com.squareup.kotlinpoet.U_SHORT
  */
 internal fun peekBudgetFor(typeName: TypeName): Int? =
     when (typeName) {
-        BYTE, U_BYTE -> 2
-        SHORT, U_SHORT -> 3
-        INT, U_INT -> 5
-        LONG, U_LONG -> 10
+        BYTE, U_BYTE -> BYTE_PEEK_BUDGET
+        SHORT, U_SHORT -> SHORT_PEEK_BUDGET
+        INT, U_INT -> INT_PEEK_BUDGET
+        LONG, U_LONG -> LONG_PEEK_BUDGET
         else -> null
     }
 
@@ -1035,7 +1041,8 @@ internal fun appendSequentialPeekConditional(
             // natural width when the predicate is true (the value
             // class wraps with no extra wire bytes).
             appendPeekAvailabilityCheck(body, inner.innerKind.wireWidth)
-            body.addStatement("__offset += %L", inner.innerKind.wireWidth.requireFixed("appendSequentialPeekConditional"))
+            val innerWidth = inner.innerKind.wireWidth.requireFixed("appendSequentialPeekConditional")
+            body.addStatement("__offset += %L", innerWidth)
         }
         is ConditionalInner.LengthPrefixedUseCodecList ->
             // Unreachable: any shape with this inner

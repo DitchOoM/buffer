@@ -145,14 +145,14 @@ class MutableDataBuffer private constructor(
     }
 
     override fun getInt(index: Int): Int {
-        requireIndex(index, 4)
+        requireIndex(index, Int.SIZE_BYTES)
         val ptr = (bytePointer + index)!!.reinterpret<IntVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun getLong(index: Int): Long {
-        requireIndex(index, 8)
+        requireIndex(index, Long.SIZE_BYTES)
         val ptr = (bytePointer + index)!!.reinterpret<LongVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
@@ -236,18 +236,18 @@ class MutableDataBuffer private constructor(
     }
 
     override fun readInt(): Int {
-        requireReadable(4)
+        requireReadable(Int.SIZE_BYTES)
         val ptr = (bytePointer + position)!!.reinterpret<IntVar>()
         val value = ptr[0]
-        position += 4
+        position += Int.SIZE_BYTES
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun readLong(): Long {
-        requireReadable(8)
+        requireReadable(Long.SIZE_BYTES)
         val ptr = (bytePointer + position)!!.reinterpret<LongVar>()
         val value = ptr[0]
-        position += 8
+        position += Long.SIZE_BYTES
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
@@ -344,10 +344,10 @@ class MutableDataBuffer private constructor(
     }
 
     override fun writeInt(int: Int): WriteBuffer {
-        checkWriteBounds(4)
+        checkWriteBounds(Int.SIZE_BYTES)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) int.reverseBytes() else int
         (bytePointer + position)!!.reinterpret<IntVar>()[0] = value
-        position += 4
+        position += Int.SIZE_BYTES
         return this
     }
 
@@ -355,17 +355,17 @@ class MutableDataBuffer private constructor(
         index: Int,
         int: Int,
     ): WriteBuffer {
-        checkIndexBounds(index, 4)
+        checkIndexBounds(index, Int.SIZE_BYTES)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) int.reverseBytes() else int
         (bytePointer + index)!!.reinterpret<IntVar>()[0] = value
         return this
     }
 
     override fun writeLong(long: Long): WriteBuffer {
-        checkWriteBounds(8)
+        checkWriteBounds(Long.SIZE_BYTES)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) long.reverseBytes() else long
         (bytePointer + position)!!.reinterpret<LongVar>()[0] = value
-        position += 8
+        position += Long.SIZE_BYTES
         return this
     }
 
@@ -373,7 +373,7 @@ class MutableDataBuffer private constructor(
         index: Int,
         long: Long,
     ): WriteBuffer {
-        checkIndexBounds(index, 8)
+        checkIndexBounds(index, Long.SIZE_BYTES)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) long.reverseBytes() else long
         (bytePointer + index)!!.reinterpret<LongVar>()[0] = value
         return this
@@ -415,7 +415,8 @@ class MutableDataBuffer private constructor(
             val srcManaged = buffer.managedMemoryAccess
             if (srcManaged != null) {
                 srcManaged.backingArray.usePinned { pinned ->
-                    memcpy(bytePointer + position, pinned.addressOf(srcManaged.arrayOffset + buffer.position()), bytesToCopy.convert())
+                    val srcPtr = pinned.addressOf(srcManaged.arrayOffset + buffer.position())
+                    memcpy(bytePointer + position, srcPtr, bytesToCopy.convert())
                 }
             } else {
                 writeBytes(buffer.readByteArray(bytesToCopy))
@@ -662,7 +663,7 @@ class MutableDataBuffer private constructor(
         aligned: Boolean,
     ): Int {
         val size = remaining()
-        if (size < 4) return -1
+        if (size < Int.SIZE_BYTES) return -1
         val nativeValue = if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
         val fn = if (aligned) ::buf_indexof_int_aligned else ::buf_indexof_int
         return fn(
@@ -681,7 +682,7 @@ class MutableDataBuffer private constructor(
         aligned: Boolean,
     ): Int {
         val size = remaining()
-        if (size < 8) return -1
+        if (size < Long.SIZE_BYTES) return -1
         val nativeValue = if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
         val fn = if (aligned) ::buf_indexof_long_aligned else ::buf_indexof_long
         return fn(
@@ -769,14 +770,14 @@ class MutableDataBufferSlice(
     }
 
     override fun getInt(index: Int): Int {
-        requireIndex(index, 4)
+        requireIndex(index, Int.SIZE_BYTES)
         val ptr = (bytePointer + index)!!.reinterpret<IntVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun getLong(index: Int): Long {
-        requireIndex(index, 8)
+        requireIndex(index, Long.SIZE_BYTES)
         val ptr = (bytePointer + index)!!.reinterpret<LongVar>()
         val value = ptr[0]
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
@@ -860,18 +861,18 @@ class MutableDataBufferSlice(
     }
 
     override fun readInt(): Int {
-        requireReadable(4)
+        requireReadable(Int.SIZE_BYTES)
         val ptr = (bytePointer + position)!!.reinterpret<IntVar>()
         val value = ptr[0]
-        position += 4
+        position += Int.SIZE_BYTES
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
     override fun readLong(): Long {
-        requireReadable(8)
+        requireReadable(Long.SIZE_BYTES)
         val ptr = (bytePointer + position)!!.reinterpret<LongVar>()
         val value = ptr[0]
-        position += 8
+        position += Long.SIZE_BYTES
         return if (byteOrder == ByteOrder.BIG_ENDIAN) value.reverseBytes() else value
     }
 
@@ -989,7 +990,7 @@ class MutableDataBufferSlice(
         index: Int,
         int: Int,
     ): WriteBuffer {
-        checkIndexBounds(index, 4)
+        checkIndexBounds(index, Int.SIZE_BYTES)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) int.reverseBytes() else int
         (bytePointer + index)!!.reinterpret<IntVar>()[0] = value
         return this
@@ -999,7 +1000,7 @@ class MutableDataBufferSlice(
         index: Int,
         long: Long,
     ): WriteBuffer {
-        checkIndexBounds(index, 8)
+        checkIndexBounds(index, Long.SIZE_BYTES)
         val value = if (byteOrder == ByteOrder.BIG_ENDIAN) long.reverseBytes() else long
         (bytePointer + index)!!.reinterpret<LongVar>()[0] = value
         return this
