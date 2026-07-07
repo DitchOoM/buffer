@@ -104,6 +104,16 @@ sealed interface BufferPool : BufferFactory {
      */
     fun clear()
 
+    /**
+     * Whether this pool is safe for concurrent access from multiple threads/coroutines.
+     *
+     * A pool that is shared across coroutines — e.g. one passed to a socket/websocket, where a buffer
+     * is acquired on the read coroutine and freed on the consumer/send coroutine — MUST be
+     * [ThreadingMode.MultiThreaded]. Consumers that hand a pre-built pool to such a library should
+     * check or construct it accordingly; the library may `require` it.
+     */
+    val threadingMode: ThreadingMode
+
     companion object {
         /**
          * Creates a buffer pool with the specified threading model and buffer factory.
@@ -119,12 +129,19 @@ sealed interface BufferPool : BufferFactory {
             defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
             factory: BufferFactory = BufferFactory.Default,
         ): BufferPool =
-            when (threadingMode) {
-                ThreadingMode.SingleThreaded ->
-                    SingleThreadedBufferPool(maxPoolSize, defaultBufferSize, factory)
-                ThreadingMode.MultiThreaded ->
-                    LockFreeBufferPool(maxPoolSize, defaultBufferSize, factory)
-            }
+            // Never nest a pool inside a pool. `BufferPool : BufferFactory`, so a pool can be passed
+            // as `factory`; wrapping it would produce PooledBuffer(inner = PooledBuffer(pool = inner),
+            // pool = outer), and a normal free then runs `outer.release(inner)` where inner belongs to
+            // the inner pool — tripping the cross-pool `require` in release() (websocket #19 / 6.8.1
+            // Android crash: socket ReadBufferSource does BufferPool(factory = consumer's shared pool)).
+            // Reuse the existing pool instead — double-pooling is pure overhead with broken accounting.
+            (factory as? BufferPool)
+                ?: when (threadingMode) {
+                    ThreadingMode.SingleThreaded ->
+                        SingleThreadedBufferPool(maxPoolSize, defaultBufferSize, factory)
+                    ThreadingMode.MultiThreaded ->
+                        LockFreeBufferPool(maxPoolSize, defaultBufferSize, factory)
+                }
 
         /**
          * Creates a buffer pool with default single-threaded mode.
@@ -137,7 +154,9 @@ sealed interface BufferPool : BufferFactory {
             maxPoolSize: Int = 64,
             defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
             factory: BufferFactory = BufferFactory.Default,
-        ): BufferPool = SingleThreadedBufferPool(maxPoolSize, defaultBufferSize, factory)
+        ): BufferPool =
+            // See the threading-mode overload above: never nest a pool inside a pool.
+            (factory as? BufferPool) ?: SingleThreadedBufferPool(maxPoolSize, defaultBufferSize, factory)
     }
 }
 

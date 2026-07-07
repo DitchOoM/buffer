@@ -41,6 +41,8 @@ internal class LockFreeBufferPool(
     private val defaultBufferSize: Int,
     private val factory: BufferFactory,
 ) : BufferPool {
+    override val threadingMode: ThreadingMode get() = ThreadingMode.MultiThreaded
+
     // Treiber stack node
     private class Node(
         val buffer: PlatformBuffer,
@@ -103,12 +105,23 @@ internal class LockFreeBufferPool(
     override fun release(buffer: ReadWriteBuffer) {
         val raw =
             when (buffer) {
-                is PooledBuffer -> {
-                    require(buffer.pool === this) {
-                        "Cannot release a buffer to a different pool than the one it was acquired from"
+                is PooledBuffer ->
+                    when {
+                        buffer.pool === this -> buffer.inner
+                        // Defensive backstop for nested pools (BufferPool.invoke collapses these, so
+                        // this only fires if one is built directly via the internal constructor): a
+                        // buffer whose owner is THIS pool's own backing factory legitimately belongs to
+                        // that inner pool — route it back there instead of crashing. Genuine misuse
+                        // (an unrelated pool) still throws below.
+                        buffer.pool === factory -> {
+                            buffer.freeNativeMemory()
+                            return
+                        }
+                        else ->
+                            throw IllegalArgumentException(
+                                "Cannot release a buffer to a different pool than the one it was acquired from",
+                            )
                     }
-                    buffer.inner
-                }
                 is PlatformBuffer -> buffer
                 else -> return
             }

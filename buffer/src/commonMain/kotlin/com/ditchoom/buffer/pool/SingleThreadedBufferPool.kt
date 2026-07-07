@@ -22,6 +22,8 @@ internal class SingleThreadedBufferPool(
     private val defaultBufferSize: Int,
     private val factory: BufferFactory,
 ) : BufferPool {
+    override val threadingMode: ThreadingMode get() = ThreadingMode.SingleThreaded
+
     // One deque per size class; a buffer lives in the bucket of its capacity's floor
     // log2, so every buffer in bucket k has capacity >= 1 shl k.
     private val buckets = Array(BufferSizeClass.BUCKET_COUNT) { ArrayDeque<PlatformBuffer>() }
@@ -74,12 +76,23 @@ internal class SingleThreadedBufferPool(
     override fun release(buffer: ReadWriteBuffer) {
         val raw =
             when (buffer) {
-                is PooledBuffer -> {
-                    require(buffer.pool === this) {
-                        "Cannot release a buffer to a different pool than the one it was acquired from"
+                is PooledBuffer ->
+                    when {
+                        buffer.pool === this -> buffer.inner
+                        // Defensive backstop for nested pools (BufferPool.invoke collapses these, so
+                        // this only fires if one is built directly via the internal constructor): a
+                        // buffer whose owner is THIS pool's own backing factory legitimately belongs to
+                        // that inner pool — route it back there instead of crashing. Genuine misuse
+                        // (an unrelated pool) still throws below.
+                        buffer.pool === factory -> {
+                            buffer.freeNativeMemory()
+                            return
+                        }
+                        else ->
+                            throw IllegalArgumentException(
+                                "Cannot release a buffer to a different pool than the one it was acquired from",
+                            )
                     }
-                    buffer.inner
-                }
                 is PlatformBuffer -> buffer
                 else -> return
             }
