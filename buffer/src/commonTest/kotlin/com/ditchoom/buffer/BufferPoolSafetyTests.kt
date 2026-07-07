@@ -1,11 +1,13 @@
 package com.ditchoom.buffer
 
 import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.buffer.pool.LockFreeBufferPool
 import com.ditchoom.buffer.pool.withBuffer
 import com.ditchoom.buffer.pool.withPool
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -81,6 +83,71 @@ class BufferPoolSafetyTests {
         pool1.release(buffer)
         pool1.clear()
         pool2.clear()
+    }
+
+    /**
+     * Regression for the websocket #19 / buffer 6.8.1 cross-pool crash.
+     *
+     * A **nested** pool — one whose backing [factory] is itself a [BufferPool] — is a legal
+     * construction today (`BufferPool : BufferFactory`, so a pool is accepted anywhere a factory
+     * is), and it is exactly the topology the socket transport's `ReadBufferSource` builds when a
+     * consumer passes a shared [BufferPool] as its `bufferFactory`:
+     *
+     * ```
+     * outer.acquire() == PooledBuffer(inner = PooledBuffer(pool = inner), pool = outer)
+     * ```
+     *
+     * Freeing that buffer the normal way runs `PooledBuffer.releaseRef → outer.release(inner)`,
+     * where `inner.pool === inner ≠ outer`, tripping the cross-pool `require` in
+     * `LockFreeBufferPool.release` / `SingleThreadedBufferPool.release` — an
+     * `IllegalArgumentException` thrown from an ordinary free of a legitimately-acquired buffer.
+     *
+     * The cure: `BufferPool(factory = x)` collapses to reuse `x` when `x is BufferPool`, so the
+     * nested structure never forms. This test asserts both the collapse (same-instance) and that a
+     * normal free never raises a cross-pool error.
+     */
+    @Test
+    fun nestedPoolCollapsesAndFreesWithoutCrossPoolError() {
+        val inner = BufferPool(defaultBufferSize = 64)
+        val outer = BufferPool(defaultBufferSize = 64, factory = inner)
+
+        // Collapse: wrapping a pool in a pool must reuse the existing pool, not nest it.
+        assertSame(inner, outer, "BufferPool(factory = aPool) must reuse aPool, not nest it")
+
+        val buffer = outer.acquire(8) as PlatformBuffer
+        buffer.writeInt(42)
+
+        // A normal free of a buffer acquired from `outer` must not raise a cross-pool error.
+        buffer.freeNativeMemory()
+
+        outer.clear()
+        inner.clear()
+    }
+
+    /**
+     * Defensive backstop: even if a nested pool is built *directly* via the internal constructor
+     * (bypassing the `BufferPool.invoke` collapse), a normal free must route the buffer back to its
+     * owner pool instead of throwing the cross-pool error. Genuine misuse (an unrelated pool) still
+     * throws — see [crossPoolReleaseThrows].
+     */
+    @Test
+    fun directlyNestedPoolRoutesReleaseToOwnerInsteadOfThrowing() {
+        val inner = BufferPool(defaultBufferSize = 64)
+        // Force the nested structure the invoke-guard would otherwise collapse.
+        val outer = LockFreeBufferPool(maxPoolSize = 64, defaultBufferSize = 64, factory = inner)
+
+        val buffer = outer.acquire(8) as PlatformBuffer
+        buffer.writeInt(42)
+
+        // Must not throw: the buffer belongs to `inner` (outer's backing factory), so it is routed
+        // there rather than rejected.
+        buffer.freeNativeMemory()
+
+        // The buffer went back to the inner pool, so inner can hand it out again.
+        assertTrue(inner.stats().currentPoolSize >= 1)
+
+        outer.clear()
+        inner.clear()
     }
 
     // ============================================================================
