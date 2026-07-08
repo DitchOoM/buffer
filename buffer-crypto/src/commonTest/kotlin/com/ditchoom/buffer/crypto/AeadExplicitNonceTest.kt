@@ -106,7 +106,8 @@ class AeadExplicitNonceTest {
         val ops = aesGcmBlockingOpsOrNull() ?: return
         for (v in listOf(aes128, aes256)) {
             val key = AesGcmKey.of(hexBuffer(v.key))
-            val sealed = ops.sealWithNonceBlocking(key, hexBuffer(v.iv), hexBuffer(v.pt), v.aad(), BufferFactory.Default)
+            val sealed =
+                ops.sealWithNonceBlocking(key, hexBuffer(v.iv), hexBuffer(v.pt), v.aad(), BufferFactory.Default)
             assertEquals(v.ct + v.tag, sealed.toHex(), "AES-GCM blocking ct+tag (key=${v.keyBits()})")
             val opened =
                 ops.openWithNonceBlocking(hexBuffer(v.iv), hexBuffer(v.ct + v.tag), key, v.aad(), BufferFactory.Default)
@@ -126,7 +127,13 @@ class AeadExplicitNonceTest {
             assertEquals(chacha.ptLen() + AEAD_TAG_BYTES, sealed.remaining(), "no nonce framing")
             assertEquals(chacha.ct + chacha.tag, sealed.toHex(), "ChaCha20-Poly1305 ct+tag")
             val opened =
-                ops.openWithNonce(hexBuffer(chacha.iv), hexBuffer(chacha.ct + chacha.tag), key, chacha.aad(), BufferFactory.Default)
+                ops.openWithNonce(
+                    hexBuffer(chacha.iv),
+                    hexBuffer(chacha.ct + chacha.tag),
+                    key,
+                    chacha.aad(),
+                    BufferFactory.Default,
+                )
             assertEquals(chacha.pt, opened.toHex(), "ChaCha20-Poly1305 decrypt")
         }
 
@@ -144,7 +151,13 @@ class AeadExplicitNonceTest {
                     ops.sealWithNonce(key, hexBuffer(bad), hexBuffer(aes128.pt), aes128.aad(), BufferFactory.Default)
                 }
                 assertFailsWith<IllegalArgumentException>("open nonce=${bad.length / 2}B") {
-                    ops.openWithNonce(hexBuffer(bad), hexBuffer(aes128.ct + aes128.tag), key, aes128.aad(), BufferFactory.Default)
+                    ops.openWithNonce(
+                        hexBuffer(bad),
+                        hexBuffer(aes128.ct + aes128.tag),
+                        key,
+                        aes128.aad(),
+                        BufferFactory.Default,
+                    )
                 }
             }
         }
@@ -176,7 +189,13 @@ class AeadExplicitNonceTest {
             // Flip the low bit of the first ciphertext byte.
             val flipped = (aes128.ct.substring(0, 1).toInt(16) xor 0x1).toString(16) + aes128.ct.substring(1)
             assertFailsWith<VerificationFailed> {
-                ops.openWithNonce(hexBuffer(aes128.iv), hexBuffer(flipped + aes128.tag), key, aes128.aad(), BufferFactory.Default)
+                ops.openWithNonce(
+                    hexBuffer(aes128.iv),
+                    hexBuffer(flipped + aes128.tag),
+                    key,
+                    aes128.aad(),
+                    BufferFactory.Default,
+                )
             }
             // Wrong AAD must fail identically (same opaque type).
             assertFailsWith<VerificationFailed> {
