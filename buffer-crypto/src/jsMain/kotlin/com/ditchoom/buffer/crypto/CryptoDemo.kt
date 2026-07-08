@@ -125,7 +125,7 @@ object CryptoDemo {
     }
 
     /** The AES-GCM async ops, resolved once from the witness (always `AsyncOnly` on the web). */
-    private fun aesGcmOps(): AeadAsyncOps<AesGcmKey> =
+    private fun aesGcmOps(): AeadAsyncOps<AesGcmKey, SyncCapableAesGcmKey> =
         when (val witness = CryptoCapabilities.aesGcm) {
             is Aead.AsyncOnly -> witness.ops
             is Aead.Blocking -> witness.ops
