@@ -50,25 +50,37 @@ public final class com/ditchoom/buffer/crypto/Aead$Blocking : com/ditchoom/buffe
 public abstract interface class com/ditchoom/buffer/crypto/AeadAsyncOps {
 	public abstract fun open (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public static synthetic fun open$default (Lcom/ditchoom/buffer/crypto/AeadAsyncOps;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun openWithNonce (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun openWithNonce$default (Lcom/ditchoom/buffer/crypto/AeadAsyncOps;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
 	public abstract fun seal (Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public static synthetic fun seal$default (Lcom/ditchoom/buffer/crypto/AeadAsyncOps;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun sealWithNonce (Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun sealWithNonce$default (Lcom/ditchoom/buffer/crypto/AeadAsyncOps;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
 }
 
 public final class com/ditchoom/buffer/crypto/AeadAsyncOps$DefaultImpls {
 	public static synthetic fun open$default (Lcom/ditchoom/buffer/crypto/AeadAsyncOps;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun openWithNonce$default (Lcom/ditchoom/buffer/crypto/AeadAsyncOps;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
 	public static synthetic fun seal$default (Lcom/ditchoom/buffer/crypto/AeadAsyncOps;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun sealWithNonce$default (Lcom/ditchoom/buffer/crypto/AeadAsyncOps;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
 }
 
 public abstract interface class com/ditchoom/buffer/crypto/AeadBlockingOps : com/ditchoom/buffer/crypto/AeadAsyncOps {
 	public abstract fun openBlocking (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/PlatformBuffer;
 	public static synthetic fun openBlocking$default (Lcom/ditchoom/buffer/crypto/AeadBlockingOps;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public abstract fun openWithNonceBlocking (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public static synthetic fun openWithNonceBlocking$default (Lcom/ditchoom/buffer/crypto/AeadBlockingOps;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/PlatformBuffer;
 	public abstract fun sealBlocking (Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/PlatformBuffer;
 	public static synthetic fun sealBlocking$default (Lcom/ditchoom/buffer/crypto/AeadBlockingOps;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public abstract fun sealWithNonceBlocking (Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public static synthetic fun sealWithNonceBlocking$default (Lcom/ditchoom/buffer/crypto/AeadBlockingOps;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/PlatformBuffer;
 }
 
 public final class com/ditchoom/buffer/crypto/AeadBlockingOps$DefaultImpls {
 	public static synthetic fun openBlocking$default (Lcom/ditchoom/buffer/crypto/AeadBlockingOps;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public static synthetic fun openWithNonceBlocking$default (Lcom/ditchoom/buffer/crypto/AeadBlockingOps;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/PlatformBuffer;
 	public static synthetic fun sealBlocking$default (Lcom/ditchoom/buffer/crypto/AeadBlockingOps;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public static synthetic fun sealWithNonceBlocking$default (Lcom/ditchoom/buffer/crypto/AeadBlockingOps;Lcom/ditchoom/buffer/crypto/AeadKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/PlatformBuffer;
 }
 
 public abstract interface class com/ditchoom/buffer/crypto/AeadKey {
