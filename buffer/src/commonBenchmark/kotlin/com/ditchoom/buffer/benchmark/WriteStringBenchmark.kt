@@ -72,7 +72,7 @@ open class WriteStringBenchmark {
         emojiMedium = repeatSurrogatePairsTo(medium)
         emojiLarge = repeatSurrogatePairsTo(large)
 
-        destination = BufferFactory.Default.allocate(large * 4)
+        destination = BufferFactory.Default.allocate(large * MAX_UTF8_BYTES_PER_CHAR)
     }
 
     private fun write(text: String): Int {
@@ -102,6 +102,9 @@ open class WriteStringBenchmark {
     companion object {
         private const val PRINTABLE_ASCII_START = 32
         private const val PRINTABLE_ASCII_RANGE = 95
+
+        // Worst-case UTF-8 expansion: a surrogate pair (2 chars) encodes to 4 bytes.
+        private const val MAX_UTF8_BYTES_PER_CHAR = 4
 
         // Mixed 2- and 3-byte code points: accented Latin (é, ü) and CJK (世, 界).
         private const val CJK_PATTERN = "é世ü界"
