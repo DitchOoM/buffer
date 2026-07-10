@@ -23,6 +23,10 @@ size_t buf_simdutf_utf16_length_from_utf8(const char* input, size_t length) {
     return simdutf::utf16_length_from_utf8(input, length);
 }
 
+size_t buf_simdutf_utf8_length_from_utf16le(const uint16_t* input, size_t length) {
+    return simdutf::utf8_length_from_utf16le(reinterpret_cast<const char16_t*>(input), length);
+}
+
 size_t buf_simdutf_convert_utf8_to_chararray(
     const char* input,
     size_t length,
