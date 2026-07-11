@@ -72,6 +72,13 @@ class DirectJvmBuffer(
         return if (byteOrder == ByteOrder.BIG_ENDIAN) java.lang.Long.reverseBytes(raw) else raw
     }
 
+    override fun tryWriteUtf8ToNative(text: CharSequence): Boolean {
+        val base = directBase()
+        if (base == 0L) return false // no --add-opens on JVM<21: fall back to the CharsetEncoder path
+        position(encodeUtf8ToNative(text, position(), limit(), base))
+        return true
+    }
+
     // ktlint (no .editorconfig) collapses this expression body onto one line, so it cannot be wrapped.
     @Suppress("MaxLineLength")
     override fun slice(byteOrder: ByteOrder): DirectJvmBuffer = DirectJvmBuffer(byteBuffer.slice().order(byteOrder.toJava()))

@@ -416,6 +416,12 @@ abstract class BaseJvmBuffer(
         text: CharSequence,
         charset: Charset,
     ): WriteBuffer {
+        // Native-backed buffers encode UTF-8 straight to the address (no per-byte session() check,
+        // no intermediate char[]/byte[]). Heap buffers and non-UTF-8 fall through to the encoder,
+        // whose encodeArrayLoop is already fast for heap destinations.
+        if (charset == Charset.UTF8 && tryWriteUtf8ToNative(text)) {
+            return this
+        }
         val encoder = charset.toEncoder()
         encoder.reset()
         val result = encoder.encode(CharBuffer.wrap(text), byteBuffer, true)
@@ -432,6 +438,14 @@ abstract class BaseJvmBuffer(
         }
         return this
     }
+
+    /**
+     * UTF-8 fast path for native-backed buffers: encode [text] straight to the native address and
+     * advance the position, returning true. The default returns false so heap buffers (and any
+     * native buffer without a resolvable address) fall back to the [java.nio.charset.CharsetEncoder]
+     * path. Overridden by [DirectJvmBuffer] and the FFM buffers, which have a native base address.
+     */
+    protected open fun tryWriteUtf8ToNative(text: CharSequence): Boolean = false
 
     override fun write(buffer: ReadBuffer) {
         val actual = buffer.unwrapFully()
