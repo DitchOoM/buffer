@@ -1,3 +1,7 @@
+// UTF-8 is defined in terms of bit patterns (0x80/0xC0/0xE0/0xF0 lead bytes, 0x3F continuation mask,
+// 0xD800..0xDFFF surrogates); naming each would obscure the encoding rather than clarify it.
+@file:Suppress("MagicNumber")
+
 package com.ditchoom.buffer
 
 // SHADOW TWIN: an identical copy lives in src/jvm21Main. The algorithm is JDK-agnostic; only the
@@ -22,6 +26,10 @@ import java.nio.charset.MalformedInputException
  *  - running out of window throws [BufferOverflowException] before writing past [limit].
  * On either throw the destination may hold a partial encoding and the caller's position is unchanged.
  */
+// One when-branch per UTF-8 sequence length (1-4 bytes) plus the surrogate-pair path drives the
+// cyclomatic count; the malformed-surrogate and overflow guards drive the throw count. Both are
+// intrinsic to a correct, single-pass encoder.
+@Suppress("CyclomaticComplexMethod", "ThrowsCount")
 internal fun encodeUtf8ToNative(
     text: CharSequence,
     startPosition: Int,
