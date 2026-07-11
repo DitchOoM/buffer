@@ -529,6 +529,13 @@ benchmark {
             iterationTimeUnit = "ms"
             include("StreamingStringDecoder")
         }
+        register("string") {
+            warmups = 3
+            iterations = 5
+            iterationTime = 1000
+            iterationTimeUnit = "ms"
+            include("(WriteString|Utf8Length)")
+        }
         register("codec") {
             warmups = 3
             iterations = 5

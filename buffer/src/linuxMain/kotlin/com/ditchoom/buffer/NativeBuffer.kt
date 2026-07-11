@@ -14,6 +14,7 @@ import com.ditchoom.buffer.cinterop.buf_xor_mask_copy
 import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_convert_utf16le_to_utf8
 import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_convert_utf8_to_chararray
 import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_utf16_length_from_utf8
+import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_utf8_length_from_utf16le
 import com.ditchoom.buffer.cinterop.simdutf.buf_simdutf_validate_utf8
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
@@ -460,19 +461,21 @@ class NativeBuffer private constructor(
         val str = text.toString()
         val len = str.length
         if (len == 0) return this
-        // simdutf writes the full multi-byte UTF-8 output with no destination-capacity cap, so the
-        // bound must be checked against the actual encoded byte count, not the char count. Checking
-        // only `len` (the ASCII minimum) would let a multi-byte string overrun the native buffer.
-        checkWriteBounds(str.utf8Length())
-        // SIMD-accelerated UTF-16->UTF-8 conversion via simdutf.
-        // toCharArray() copies the String's chars, then simdutf converts directly into native memory.
-        // ~28x faster than the per-character loop for large strings (518ms -> 18ms at 16MB).
+        // Pin the chars once and let simdutf do both jobs from the same pointer: measure the
+        // encoded UTF-8 byte length, then transcode. This replaces the former str.utf8Length()
+        // Kotlin char loop (CharSequence#get virtual dispatch + Int boxing), which walked the
+        // string a second time purely for the bounds check.
         val chars = str.toCharArray()
         val dstAddr = nativeAddress + positionValue
         val written =
             chars.usePinned { pinned ->
+                val src = pinned.addressOf(0)
+                // simdutf writes the full multi-byte output with no destination-capacity cap, so the
+                // bound must be checked against the actual encoded byte count, not the char count.
+                // Checking only `len` (the ASCII minimum) would let a multi-byte string overrun.
+                checkWriteBounds(buf_simdutf_utf8_length_from_utf16le(src.reinterpret(), len.convert()).toInt())
                 buf_simdutf_convert_utf16le_to_utf8(
-                    pinned.addressOf(0).reinterpret(),
+                    src.reinterpret(),
                     len.convert(),
                     dstAddr.toCPointer()!!,
                 ).toInt()
@@ -1064,16 +1067,18 @@ private class NativeBufferSlice(
         val str = text.toString()
         val len = str.length
         if (len == 0) return this
-        // simdutf writes the full multi-byte UTF-8 output with no destination-capacity cap, so the
-        // bound must be checked against the actual encoded byte count, not the char count. Checking
-        // only `len` (the ASCII minimum) would let a multi-byte string overrun the native buffer.
-        checkWriteBounds(str.utf8Length())
+        // Pin the chars once and let simdutf both measure the encoded UTF-8 byte length and
+        // transcode from the same pointer, replacing the former str.utf8Length() char loop.
         val chars = str.toCharArray()
         val dstAddr = baseAddress + positionValue
         val written =
             chars.usePinned { pinned ->
+                val src = pinned.addressOf(0)
+                // simdutf writes the full multi-byte output with no destination-capacity cap, so the
+                // bound must be checked against the actual encoded byte count, not the char count.
+                checkWriteBounds(buf_simdutf_utf8_length_from_utf16le(src.reinterpret(), len.convert()).toInt())
                 buf_simdutf_convert_utf16le_to_utf8(
-                    pinned.addressOf(0).reinterpret(),
+                    src.reinterpret(),
                     len.convert(),
                     dstAddr.toCPointer()!!,
                 ).toInt()
