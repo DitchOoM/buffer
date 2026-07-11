@@ -1,3 +1,7 @@
+// Surrogate code units (0xD800..0xDFFF) and other UTF-16 boundary literals are the subject under
+// test; naming each would obscure the cases rather than clarify them.
+@file:Suppress("MagicNumber")
+
 package com.ditchoom.buffer
 
 import kotlin.test.Test
