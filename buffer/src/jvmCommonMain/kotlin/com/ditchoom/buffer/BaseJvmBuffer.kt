@@ -4,7 +4,6 @@ import java.io.RandomAccessFile
 import java.nio.Buffer
 import java.nio.ByteBuffer
 import java.nio.CharBuffer
-import java.nio.charset.CodingErrorAction
 
 // IndexOutOfBoundsException is exactly the type the JDK throws from absolute-index
 // ByteBuffer.get/put(index, ...) and System.arraycopy; it is the most specific catchable
@@ -279,26 +278,9 @@ abstract class BaseJvmBuffer(
         val finalPosition = buffer.position() + length
         val readBuffer = byteBuffer.asReadOnlyBuffer()
         (readBuffer as Buffer).limit(finalPosition)
-        val charsetConverted =
-            when (charset) {
-                Charset.UTF8 -> Charsets.UTF_8
-                Charset.UTF16 -> Charsets.UTF_16
-                Charset.UTF16BigEndian -> Charsets.UTF_16BE
-                Charset.UTF16LittleEndian -> Charsets.UTF_16LE
-                Charset.ASCII -> Charsets.US_ASCII
-                Charset.ISOLatin1 -> Charsets.ISO_8859_1
-                Charset.UTF32 -> Charsets.UTF_32
-                Charset.UTF32LittleEndian -> Charsets.UTF_32LE
-                Charset.UTF32BigEndian -> Charsets.UTF_32BE
-            }
-        val decoded =
-            charsetConverted
-                .newDecoder()
-                .onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT)
-                .decode(readBuffer)
+        val decoded = charset.toDecoder().decodeReusing(readBuffer, length)
         buffer.position(finalPosition)
-        return decoded.toString()
+        return decoded
     }
 
     override fun writeByte(byte: Byte): WriteBuffer {
