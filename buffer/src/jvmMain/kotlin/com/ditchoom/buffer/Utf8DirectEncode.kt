@@ -25,10 +25,11 @@ import java.nio.charset.MalformedInputException
  *  - a lone/unpaired surrogate throws [MalformedInputException] (no substitution), and
  *  - running out of window throws [BufferOverflowException] before writing past [limit].
  * On either throw the destination may hold a partial encoding and the caller's position is unchanged.
+ *
+ * The one when-branch per UTF-8 sequence length (1-4 bytes) plus the surrogate-pair path drive
+ * detekt's CyclomaticComplexMethod count, and the malformed-surrogate + overflow guards drive its
+ * ThrowsCount — both intrinsic to a correct single-pass encoder, hence the suppressions.
  */
-// One when-branch per UTF-8 sequence length (1-4 bytes) plus the surrogate-pair path drives the
-// cyclomatic count; the malformed-surrogate and overflow guards drive the throw count. Both are
-// intrinsic to a correct, single-pass encoder.
 @Suppress("CyclomaticComplexMethod", "ThrowsCount")
 internal fun encodeUtf8ToNative(
     text: CharSequence,
