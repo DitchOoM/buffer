@@ -11,3 +11,10 @@ package com.ditchoom.buffer
 internal fun directGetByte(address: Long): Byte = UnsafeMemory.getByte(address)
 
 internal fun directGetLong(address: Long): Long = UnsafeMemory.getLong(address)
+
+// Unchecked native write mirror of directGetByte, used by encodeUtf8ToNative to emit UTF-8 straight
+// to the destination without DirectByteBuffer.put(byte)'s per-byte session-liveness check.
+internal fun directPutByte(
+    address: Long,
+    value: Byte,
+): Unit = UnsafeMemory.putByte(address, value)

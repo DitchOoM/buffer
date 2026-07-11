@@ -98,6 +98,15 @@ class FfmBuffer(
         super.resetForWrite()
     }
 
+    override fun tryWriteUtf8ToNative(text: CharSequence): Boolean {
+        // After free the arena is closed and byteBuffer.limit is 0; fall back so the encoder path's
+        // limit=0 guard throws BufferOverflowException exactly as before (and we never read a closed
+        // segment's address). While alive, encode straight to the shared segment's native memory.
+        if (isFreed) return false
+        position(encodeUtf8ToNative(text, position(), limit(), segment.address()))
+        return true
+    }
+
     /**
      * Returns an [FfmSliceBuffer] slice with a global-scope ByteBuffer view.
      * The slice retains the arena-scoped segment for lifecycle checking via [FfmSliceBuffer.checkAlive].

@@ -17,3 +17,10 @@ private val EVERYTHING: MemorySegment = MemorySegment.NULL.reinterpret(Long.MAX_
 internal fun directGetByte(address: Long): Byte = EVERYTHING.get(ValueLayout.JAVA_BYTE, address)
 
 internal fun directGetLong(address: Long): Long = EVERYTHING.get(ValueLayout.JAVA_LONG_UNALIGNED, address)
+
+// Write mirror of directGetByte. EVERYTHING is global-scope, so set() carries no per-access liveness
+// check — the same folded-away bare store Unsafe would do, through the supported FFM API.
+internal fun directPutByte(
+    address: Long,
+    value: Byte,
+): Unit = EVERYTHING.set(ValueLayout.JAVA_BYTE, address, value)

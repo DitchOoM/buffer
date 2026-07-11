@@ -34,6 +34,11 @@ class FfmAutoBuffer(
         // no-op: GC-managed memory has no explicit free.
     }
 
+    override fun tryWriteUtf8ToNative(text: CharSequence): Boolean {
+        position(encodeUtf8ToNative(text, position(), limit(), segment.address()))
+        return true
+    }
+
     override fun slice(byteOrder: ByteOrder): PlatformBuffer {
         val slicedSegment = segment.asSlice(position().toLong(), remaining().toLong())
         val globalView = MemorySegment.ofAddress(slicedSegment.address()).reinterpret(slicedSegment.byteSize())
