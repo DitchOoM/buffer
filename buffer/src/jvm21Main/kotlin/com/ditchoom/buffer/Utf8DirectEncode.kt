@@ -21,6 +21,16 @@ import java.nio.charset.MalformedInputException
  * 8–20 it is `Unsafe`. The JDK `CharsetEncoder` path this replaces used `encodeBufferLoop`, which
  * does a `DirectByteBuffer.put(byte)` — and thus a session check — for every single byte.
  *
+ * The char read is bound to a `String` up front ([text] itself when it already is one — the frame
+ * path always passes a `String`, so this is a same-object bind with **no copy**; a non-`String`
+ * `CharSequence` is materialized once via `toString()`). Indexing a statically-`String` reference
+ * makes `s[i]` an inlinable `String.charAt` (invokevirtual on the final class) instead of the
+ * megamorphic `CharSequence.get` (invokeinterface) the JIT could not inline across this function's
+ * call sites — the post-#285 re-profile showed that dispatch (`java.lang.String.charAt`) as the #2
+ * JVM CPU frame. Measured char-access speedup: ~1.5× multi-byte, ~neutral ASCII, no regression
+ * (see WriteStringCharAccessBench). A bulk `getChars`-into-`char[]` variant was faster on ASCII but
+ * adds a copy and regresses 4-byte/surrogate content, so it was rejected in favour of this no-copy form.
+ *
  * Behaviour matches the REPORT-mode `CharsetEncoder` it replaces:
  *  - a lone/unpaired surrogate throws [MalformedInputException] (no substitution), and
  *  - running out of window throws [BufferOverflowException] before writing past [limit].
@@ -37,11 +47,14 @@ internal fun encodeUtf8ToNative(
     limit: Int,
     base: Long,
 ): Int {
+    // Bind to a String so the per-char read below is a devirtualized String.charAt, not an
+    // invokeinterface CharSequence.get. Same object (no copy) when text is already a String.
+    val s = if (text is String) text else text.toString()
     var pos = startPosition
-    val len = text.length
+    val len = s.length
     var i = 0
     while (i < len) {
-        val c = text[i].code
+        val c = s[i].code
         when {
             c < 0x80 -> {
                 if (pos >= limit) throw overflow(pos, limit)
@@ -65,7 +78,7 @@ internal fun encodeUtf8ToNative(
             c < 0xDC00 -> {
                 // High surrogate — must be followed by a low surrogate to form a supplementary scalar.
                 if (i + 1 >= len) throw MalformedInputException(1)
-                val low = text[i + 1].code
+                val low = s[i + 1].code
                 if (low < 0xDC00 || low >= 0xE000) throw MalformedInputException(1)
                 val cp = 0x10000 + ((c - 0xD800) shl 10) + (low - 0xDC00)
                 if (pos + 4 > limit) throw overflow(pos, limit)
