@@ -44,6 +44,8 @@ Authenticated Encryption with Associated Data covers AES-GCM (128/256-bit keys) 
 
 The self-framing seal ops draw a fresh 12-byte CSPRNG nonce, prepend it, and return a self-describing `nonce ‖ ciphertext ‖ tag` buffer — so a caller can never accidentally reuse a `(key, nonce)` pair, and `open` needs no separate nonce argument. Plaintext is released **only after the tag verifies**; a bad tag, tampered ciphertext, swapped AAD, or wrong key all surface as the same opaque `VerificationFailed`. The nonce is a fixed 96 bits and the tag a fixed 128 bits on every platform; any other nonce length is rejected and truncated tags are never produced or accepted.
 
+This is the surface you want unless you have a specific reason not to. If you derive your own nonce out of band and don't want it framed onto the ciphertext, see [Explicit-nonce seal / open](#explicit-nonce-seal--open) below — but read the caveat there first.
+
 ### AES-GCM
 
 `CryptoCapabilities.aesGcm` is always present — `Aead.Blocking` on JVM/Android/Apple/Linux, `Aead.AsyncOnly` on JS/WASM. `when`ing over it gives one body that compiles everywhere (both branches are reachable from a `suspend` function):
@@ -103,6 +105,31 @@ when (val cc = CryptoCapabilities.chaChaPoly) {
 
 :::warning ChaCha20-Poly1305 is not in WebCrypto
 ChaCha20-Poly1305 is **not** part of WebCrypto and is never polyfilled. On JS/WASM `CryptoCapabilities.chaChaPoly` is `OptionalAead.Unavailable`, so no seal/open path is reachable. AES-GCM is the portable AEAD choice.
+:::
+
+### Explicit-nonce seal / open
+
+Sometimes the nonce isn't the library's to pick. If both sides derive the same nonce out of band — a counter, a ratchet, a value hashed from data they already share — then framing a random nonce onto every message is wasted bytes, and the derived nonce never needs to travel. For that, every AEAD witness also exposes an **explicit-nonce** pair alongside the self-framing ops:
+
+```kotlin
+// key is the in-memory key AesGcmKey.of / ChaChaPolyKey.of returns (a SyncCapableAesGcmKey / ChaChaPolyKey).
+val nonce = myDerivation.next() // exactly 12 bytes, unique per message under this key — your contract
+
+val ctTag = when (val gcm = CryptoCapabilities.aesGcm) {
+    is Aead.Blocking  -> gcm.ops.sealWithNonceBlocking(key, nonce, plaintext, aad)
+    is Aead.AsyncOnly -> gcm.ops.sealWithNonce(key, nonce, plaintext, aad) // suspend (web)
+} // returns bare ciphertext ‖ tag — no nonce prefix
+
+val recovered = when (val gcm = CryptoCapabilities.aesGcm) {
+    is Aead.Blocking  -> gcm.ops.openWithNonceBlocking(nonce, ctTag, key, aad)
+    is Aead.AsyncOnly -> gcm.ops.openWithNonce(nonce, ctTag, key, aad)
+}
+```
+
+The output is bare `ciphertext ‖ tag`; the receiver reconstructs the same `nonce` from its own derivation and passes it to `open`. Everything else matches the self-framing ops — fixed 96-bit nonce (any other length is rejected), fixed 128-bit tag, opaque `VerificationFailed`. Like `sealBlocking`, these are bound to the **in-memory** key type, so a hardware-backed key — which mints its own nonce and cannot honor an external one — is a compile error on this path, not a runtime throw.
+
+:::danger You now own nonce uniqueness
+The self-framing ops make `(key, nonce)` reuse impossible by construction; the explicit-nonce ops hand that guarantee to you. **Reusing a `(key, nonce)` pair with AES-GCM or ChaCha20-Poly1305 is catastrophic** — it leaks the XOR of the two plaintexts, and for GCM leaks the authentication key, enabling forgery. Use these ops only with a derivation that provably yields a fresh nonce for every message under a given key (a monotonic counter that never rewinds, a ratchet, etc.). If you're unsure, use the self-framing `seal` / `open` — or, for a managed per-message counter, an [HPKE context](#hpke-rfc-9180), which derives `base_nonce XOR seq` for you and advances it only on success.
 :::
 
 ## Sign / Verify
