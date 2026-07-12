@@ -334,6 +334,22 @@ public final class com/ditchoom/buffer/crypto/HkdfSha512 {
 	public final fun extractInto (Lcom/ditchoom/buffer/crypto/Salt;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/WriteBuffer;)V
 }
 
+public final class com/ditchoom/buffer/crypto/HmacSha1Kt {
+	public static final field HMAC_SHA1_BYTES I
+	public static final field SHA1_BLOCK_BYTES I
+	public static final field SHA1_DIGEST_BYTES I
+	public static final fun hmacSha1 (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static final fun hmacSha1 (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/WriteBuffer;)V
+	public static synthetic fun hmacSha1$default (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+}
+
+public final class com/ditchoom/buffer/crypto/HmacSha1Mac : java/lang/AutoCloseable {
+	public fun <init> (Lcom/ditchoom/buffer/ReadBuffer;)V
+	public fun close ()V
+	public final fun doFinalInto (Lcom/ditchoom/buffer/WriteBuffer;)V
+	public final fun update (Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/HmacSha1Mac;
+}
+
 public final class com/ditchoom/buffer/crypto/HmacSha256Kt {
 	public static final field HMAC_SHA256_BYTES I
 	public static final fun hmacSha256 (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;

@@ -93,6 +93,9 @@ static inline HMAC_CTX *bcl_hmac_new(const EVP_MD *md, const uint8_t *key, size_
     }
     return c;
 }
+static inline HMAC_CTX *bcl_hmac_sha1_new(const uint8_t *key, size_t key_len) {
+    return bcl_hmac_new(EVP_sha1(), key, key_len);
+}
 static inline HMAC_CTX *bcl_hmac_sha256_new(const uint8_t *key, size_t key_len) {
     return bcl_hmac_new(EVP_sha256(), key, key_len);
 }
