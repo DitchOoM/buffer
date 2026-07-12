@@ -10,14 +10,21 @@ package com.ditchoom.buffer
 //
 // Implemented as a top-level extension in the same family as hash64()/regionEquals() rather than a
 // ReadBuffer member: no protocol needs a native-accelerated CRC today (the covered spans — a STUN
-// message, a PNG chunk — are small), so a common byte-at-a-time table walk keeps every buffer
-// implementation sharing one path. Promote to a member with a cinterop override (cf. buf_fnv1a_64)
-// if a hot bulk-CRC path ever appears.
+// message, a PNG chunk — are small), so a common table walk keeps every buffer implementation
+// sharing one path. Promote to a member with a cinterop override (cf. buf_fnv1a_64) if a hot bulk
+// CRC path ever appears.
+//
+// The input is consumed in bulk 8-byte words (one getLongUnchecked per 8 bytes, byte-tail last),
+// the same pattern as bufferHashCode()/contentEquals() — a single up-front bounds check then
+// unchecked reads. Unlike FNV, a CRC is a byte-ordered wire value, so the word is split into its
+// bytes in ascending address order (which depends on byteOrder); the two branches below are the
+// only difference from a per-byte loop. The table step itself stays per-byte — that is intrinsic
+// to a 256-entry table CRC, not an extra copy.
 
 /** CRC-32 polynomial in reversed (LSB-first) bit order — the reflected form the table walk uses. */
 private const val CRC32_REVERSED_POLYNOMIAL = 0xEDB88320.toInt()
 
-/** Bits folded per table entry when building [CRC32_TABLE]. */
+/** Bits folded per table entry when building [CRC32_TABLE], and the CRC shift per byte step. */
 private const val CRC32_TABLE_BITS = 8
 
 /** 32-bit word width of a table entry. */
@@ -25,6 +32,15 @@ private const val CRC32_ENTRY_BYTES = 4
 
 /** Number of entries in the lookup table (one per byte value). */
 private const val CRC32_TABLE_ENTRIES = 1 shl CRC32_TABLE_BITS
+
+/** Low-byte mask for indexing the table with `(crc xor inputByte) and BYTE_MASK`. */
+private const val BYTE_MASK = 0xFF
+
+/** Bit width of a byte — the per-lane shift when splitting a bulk word into its 8 bytes. */
+private const val BYTE_BITS = 8
+
+/** Shift landing the most-significant byte of a big-endian word (byte at the lowest address). */
+private const val WORD_HIGH_BYTE_SHIFT = 56
 
 /**
  * 256-entry lookup table computed once at class-init from [CRC32_REVERSED_POLYNOMIAL], stored in a
@@ -43,12 +59,19 @@ private val CRC32_TABLE: ReadBuffer =
         }
     }
 
+/** Folds one input byte [b] into the running [crc]. */
+private inline fun crc32Step(
+    crc: Int,
+    b: Int,
+): Int = CRC32_TABLE.getInt(((crc xor b) and BYTE_MASK) * CRC32_ENTRY_BYTES) xor (crc ushr CRC32_TABLE_BITS)
+
 /**
  * CRC-32 (ISO 3309 / zlib) over the absolute byte range `[offset, offset + length)`.
  *
- * Reads through the unchecked absolute accessor after one up-front bounds check, and does not
- * change [position]. The value is byte-order-independent (a per-byte checksum). See the file
- * header for the exact CRC-32 variant.
+ * Reads the region in bulk 8-byte words after one up-front bounds check, and does not change
+ * [position]. The value is byte-order-independent (a per-byte checksum) even though the bulk read
+ * is not — the word is decomposed into bytes in address order. See the file header for the exact
+ * CRC-32 variant.
  *
  * @param offset absolute index of the first byte
  * @param length number of bytes to checksum
@@ -60,9 +83,30 @@ fun ReadBuffer.crc32(
     requireRange(offset, length)
     var crc = -1 // 0xFFFFFFFF
     var i = 0
+    val bulkEnd = length - Long.SIZE_BYTES
+    if (byteOrder == ByteOrder.BIG_ENDIAN) {
+        while (i <= bulkEnd) {
+            val w = getLongUnchecked(offset + i)
+            var shift = WORD_HIGH_BYTE_SHIFT
+            while (shift >= 0) {
+                crc = crc32Step(crc, (w ushr shift).toInt() and BYTE_MASK)
+                shift -= BYTE_BITS
+            }
+            i += Long.SIZE_BYTES
+        }
+    } else {
+        while (i <= bulkEnd) {
+            val w = getLongUnchecked(offset + i)
+            var shift = 0
+            while (shift <= WORD_HIGH_BYTE_SHIFT) {
+                crc = crc32Step(crc, (w ushr shift).toInt() and BYTE_MASK)
+                shift += BYTE_BITS
+            }
+            i += Long.SIZE_BYTES
+        }
+    }
     while (i < length) {
-        val b = getUnchecked(offset + i).toInt()
-        crc = CRC32_TABLE.getInt(((crc xor b) and 0xFF) * CRC32_ENTRY_BYTES) xor (crc ushr CRC32_TABLE_BITS)
+        crc = crc32Step(crc, getUnchecked(offset + i).toInt())
         i++
     }
     return crc.inv().toUInt()

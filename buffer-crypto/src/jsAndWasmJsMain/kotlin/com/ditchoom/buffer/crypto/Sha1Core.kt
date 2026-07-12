@@ -127,10 +127,10 @@ internal class Sha1Core {
                     k = K4
                 }
             }
-            val temp = a.rotateLeft(5) + f + e + k + work.getInt(t * WORD_BYTES).toUInt()
+            val temp = a.rotateLeft(ROTL_TEMP) + f + e + k + work.getInt(t * WORD_BYTES).toUInt()
             e = d
             d = c
-            c = b.rotateLeft(30)
+            c = b.rotateLeft(ROTL_C)
             b = a
             a = temp
         }
@@ -156,6 +156,11 @@ internal class Sha1Core {
         private const val ROUND1_END = 20
         private const val ROUND2_END = 40
         private const val ROUND3_END = 60
+
+        // SHA-1 round mixing left-rotate amounts (FIPS 180-4 §6.1.2): ROTL^5(a) in the temp, ROTL^30(b) into c.
+        private const val ROTL_TEMP = 5
+        private const val ROTL_C = 30
+
         private const val K1 = 0x5A827999u
         private const val K2 = 0x6ED9EBA1u
         private const val K3 = 0x8F1BBCDCu

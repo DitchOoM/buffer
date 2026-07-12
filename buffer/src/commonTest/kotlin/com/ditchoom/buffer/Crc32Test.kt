@@ -38,6 +38,20 @@ class Crc32Test {
     }
 
     @Test
+    fun byteOrderIndependent() {
+        // The bulk 8-byte read has a per-byte-order branch; the checksum must be identical either way.
+        // 13 bytes exercises one bulk word + a 5-byte tail.
+        val text = "123456789ABCD"
+        val be = BufferFactory.Default.allocate(text.length, ByteOrder.BIG_ENDIAN)
+        be.writeString(text)
+        be.resetForRead()
+        val le = BufferFactory.Default.allocate(text.length, ByteOrder.LITTLE_ENDIAN)
+        le.writeString(text)
+        le.resetForRead()
+        assertEquals(be.crc32(), le.crc32())
+    }
+
+    @Test
     fun subRangeMatchesWholeOfThatSlice() {
         // crc32(offset,length) over the middle "456" equals crc32() of just "456".
         val whole = bufferOf("123456789")
