@@ -79,6 +79,13 @@ class DirectJvmBuffer(
         return true
     }
 
+    // No readString override here: the direct-from-native UTF-8 decode is a win only where the byte
+    // accessor is a JIT intrinsic — the FFM buffers on JDK 21+ (see jvm21Main/Utf8DirectDecode.kt).
+    // On the sun.misc.Unsafe path this class takes (JVM 8-20 / Android) a per-byte Unsafe.getByte loop
+    // measured 2-3x SLOWER than the JDK CharsetDecoder's decodeBufferLoop, so UTF-8 reads stay on the
+    // base BaseJvmBuffer.readString (CharsetDecoder) path. The write side (tryWriteUtf8ToNative) is a
+    // separate, already-shipped decision.
+
     // ktlint (no .editorconfig) collapses this expression body onto one line, so it cannot be wrapped.
     @Suppress("MaxLineLength")
     override fun slice(byteOrder: ByteOrder): DirectJvmBuffer = DirectJvmBuffer(byteBuffer.slice().order(byteOrder.toJava()))

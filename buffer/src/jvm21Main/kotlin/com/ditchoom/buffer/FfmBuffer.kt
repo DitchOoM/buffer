@@ -107,6 +107,22 @@ class FfmBuffer(
         return true
     }
 
+    // Read mirror of tryWriteUtf8ToNative: decode UTF-8 straight off the segment's native address
+    // instead of taking the direct-ByteBuffer decodeBufferLoop. Falls back to the base CharsetDecoder
+    // path for non-UTF-8, and for a freed segment (whose closed address must never be read).
+    override fun readString(
+        length: Int,
+        charset: Charset,
+    ): String {
+        if (charset == Charset.UTF8 && !isFreed) {
+            val start = position()
+            val decoded = decodeUtf8FromNative(segment.address(), start, start + length)
+            position(start + length)
+            return decoded
+        }
+        return super.readString(length, charset)
+    }
+
     /**
      * Returns an [FfmSliceBuffer] slice with a global-scope ByteBuffer view.
      * The slice retains the arena-scoped segment for lifecycle checking via [FfmSliceBuffer.checkAlive].

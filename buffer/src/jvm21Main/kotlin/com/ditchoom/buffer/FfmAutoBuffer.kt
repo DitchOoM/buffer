@@ -39,6 +39,22 @@ class FfmAutoBuffer(
         return true
     }
 
+    // Read mirror of tryWriteUtf8ToNative: decode UTF-8 straight off the segment's native address
+    // instead of taking the direct-ByteBuffer decodeBufferLoop. Non-UTF-8 falls back to the base
+    // CharsetDecoder path.
+    override fun readString(
+        length: Int,
+        charset: Charset,
+    ): String {
+        if (charset == Charset.UTF8) {
+            val start = position()
+            val decoded = decodeUtf8FromNative(segment.address(), start, start + length)
+            position(start + length)
+            return decoded
+        }
+        return super.readString(length, charset)
+    }
+
     override fun slice(byteOrder: ByteOrder): PlatformBuffer {
         val slicedSegment = segment.asSlice(position().toLong(), remaining().toLong())
         val globalView = MemorySegment.ofAddress(slicedSegment.address()).reinterpret(slicedSegment.byteSize())
