@@ -82,6 +82,10 @@ Run the full suite:
 - Key agreement: `KeyAgreementKatTest`, `KeyAgreementWycheproofTest`, `KeyAgreementTest`
 - HPKE / DHKEM (RFC 9180): `HpkeKatTest` (RFC 9180 Appendix A vectors, all four modes),
   `HpkeRoundTripTest`, `HpkeTamperTest`, `HpkeBackingTests`, `HpkeCapabilityTest`
+- Non-exportable / hardware-backed keys & custody: `HardwareKeyConformanceTest` (SPI +
+  gated-closure machinery, via a fake secure element), `KeyProviderResolverTest` (total
+  per-algorithm routing + `requireTier`), `WebCryptoProtectedKeyProviderTest` (the js/wasmJs
+  WebCrypto non-exportable provider end-to-end: ECDSA, AES-GCM, ECDH, HPKE `openBase`)
 - Foundation: `ConstantTimeTest`, `CryptoRandomTest`, `SecureBufferTest`,
   `WycheproofRunnerSelfTest`
 - Vendored Wycheproof vector sets (curated, in `WycheproofVectors*.kt`): AES-GCM,
@@ -156,6 +160,15 @@ prevented by API/type design · **(e)** out of scope / documented trust assumpti
 | Message-sequence overflow forcing nonce reuse | **(d)** HPKE per-context monotonic seq throws `MessageLimitReached` before wrap (see §3 HPKE) |
 | `L > 255·HashLen` HKDF expansion | **(a)/(b)** length cap (see §3 KDF/MAC) |
 
+### Non-exportable & hardware-backed keys (key custody)
+| Vector | Defense |
+|---|---|
+| Private key material readable in process memory | **(d)** a non-exportable key is **not** a `SyncCapable*` type, so no blocking / material-reading op accepts it (a compile error, not a runtime throw); every use routes through a `suspend` gated closure that drives the backend — WebCrypto `CryptoKey`, Android Keystore, Secure Enclave — and the material seam throws for it as a defensive backstop |
+| Non-exportable *software* key mis-reported as a secure element | **(d)** custody is one sealed `KeyCustody` value, not free boolean fields, so impossible states (an exportable secure-element key, a software "dedicated element") do not typecheck. WebCrypto `extractable:false` is `NonExportable.Software`; `CryptoCapabilities.hardware` reports `Available` **only** for a real secure element, so a software-isolated key never masquerades as hardware |
+| Silent downgrade when the required custody is absent | **(b)/(d)** `keyProvider()` routes per-algorithm to the strongest eligible tier with the software floor as fallback (never a custody throw at the default); a caller that *requires* a stronger tier asserts it with `requireTier(alg, tier)`, which throws the structured, non-secret `InsufficientKeyCustody` rather than degrading |
+| HPKE recipient scalar leaking to the process on the web | **(d)** the DHKEM decap `DH(skR, enc)` runs through the key's gated closure (`subtle.deriveBits` over the non-exportable handle); the recipient scalar never enters process memory, and `hpke().openBase(...)` composes unchanged via `hpkeRecipientPrivateKey` |
+| Advisory-gate bypass on a provider key | **(b)** the provider evaluates `ProtectedKeySpec.authorization` before **every** gated op, throwing `AuthorizationFailed` (a structured `CryptoMisuseException`) on deny — never proceeding with the crypto op |
+
 ## 4. Platform support & capability gating
 
 These are tested error paths, not assumptions — the capability flag drives a `true`→works /
@@ -181,6 +194,38 @@ KEM encodings (raw X25519 u-coordinate, uncompressed SEC1 EC points); the RFC 91
 known-answer vectors (raw private scalars) run on JVM/Android, and Apple/web get HPKE round-trip
 coverage with platform-generated keys.
 
+### Key custody (non-exportable & hardware-backed keys)
+
+Separate from *op* availability above is **key custody** — where a private key's secret lives and
+whether this process can read it. `CryptoCapabilities.keyProvider()` is **total**: it always returns
+a usable `KeyProvider`, resolving each algorithm to the strongest custody the platform offers with a
+commonMain software floor beneath it (so it never returns `null` and never throws for custody reasons
+at the default). The tiers, weakest → strongest (`CustodyTier`): `ExportableSoftware` <
+`NonExportableSoftware` < `Hardware`.
+
+| Platform | Strongest custody | Backing | Algorithms at that tier |
+|---|---|---|---|
+| JVM / Linux | `ExportableSoftware` | in-process software keys | (floor) all — no portable non-exportable store exists |
+| **JS / WASM** | `NonExportableSoftware` | **WebCrypto `extractable:false`** — software isolation, *not* a secure element | ECDSA P-256/384/521, AES-GCM, ECDH P-256/384/521; X25519 where the engine exposes it (feature-detected). Ed25519 excluded (uneven engine support) → routes to the floor |
+| Android (API 28+) | `Hardware` | Android Keystore — StrongBox secure element where present, else TEE | AES-GCM, ECDSA P-256 |
+| Apple | `Hardware` | Secure Enclave | ECDSA P-256 |
+
+Whatever an algorithm's platform tier does not back routes **down** to the next eligible tier
+(ultimately the software floor), so `keyProvider().generateSigning(EcdsaP521, …)` on a secure element
+that backs only P-256 transparently produces a software key instead of throwing. Keys are
+self-describing — each carries its own `KeyCustody` — so a consumer can `when`-branch on, or assert
+(`requireTier`) the custody it actually received.
+
+**Non-exportable ≠ hardware.** Exportability (can the process read the secret?) and provenance (where
+the secret lives) are orthogonal axes. A WebCrypto key is non-exportable *software*: the process heap
+never sees the private bytes, yet it is not a dedicated secure element. Filing it under `Hardware`
+would corrupt the signal the `hardware` accessor carries, so it is `NonExportable.Software`, surfaced
+through `CryptoCapabilities.protectedKeys` (the non-exportable superset) but **not**
+`CryptoCapabilities.hardware` (the secure-element-only refinement). Desktop JVM / Linux have no
+portable non-exportable store (DPAPI / Keychain / Secret Service are all platform-native, none
+reachable from pure KMP), so they stay at the exportable software floor — a key-on-disk is
+exportable and is never surfaced behind `protectedKeys` / `hardware`.
+
 ## 5. Known limitations & tracked follow-ups
 
 These are **not vulnerabilities** — every case below is gated by a capability flag that is
@@ -199,6 +244,12 @@ tracked to completion:
   compile-time one.
 - **Linux** — no native crypto target is registered yet; deferred. When added it will wrap
   BoringSSL (not OpenSSL), consistent with the sibling networking module.
+- **Non-exportable key persistence & desktop custody** — the provider mints an in-process
+  non-exportable *handle* and returns a key; persisting it across sessions (IndexedDB on web, a
+  keystore alias on a device) is application policy and out of scope here. Desktop JVM / Linux
+  expose no portable non-exportable store, so `keyProvider()` resolves them to the exportable
+  software floor (see §4) — this is by design, not a capability that throws; a key-on-disk is
+  exportable and is deliberately never surfaced behind `protectedKeys` / `hardware`.
 
 Open tracking issues are linked from the pull request that introduces this module.
 
