@@ -83,6 +83,18 @@ class InvalidPublicKey internal constructor(
 class AuthorizationFailed internal constructor() : CryptoMisuseException("hardware key authorization denied")
 
 /**
+ * A [KeyProvider.requireTier] assertion failed: the platform's strongest eligible custody for [alg]
+ * ([available]) is weaker than the [required] tier the caller demanded. Structured and non-secret —
+ * it names only public tiers, never key material — so a security-sensitive caller can branch on it.
+ * Only ever constructed on the unmet path, so an "available ≥ required" instance is unrepresentable.
+ */
+class InsufficientKeyCustody internal constructor(
+    val alg: ProtectedKeyAlgorithm,
+    val required: CustodyTier,
+    val available: CustodyTier,
+) : CryptoMisuseException("$alg requires custody $required, platform offers only $available")
+
+/**
  * A hardware-backed key operation failed in the secure element / keystore itself. `sealed` so every
  * distinct outcome is its own type — callers handle them exhaustively without parsing a message, and
  * each maps to a natural platform exception (e.g. on Android: `StrongBoxUnavailableException`,

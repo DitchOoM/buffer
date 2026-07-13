@@ -738,6 +738,12 @@ public final class com/ditchoom/buffer/crypto/Info$Of : com/ditchoom/buffer/cryp
 	public final synthetic fun unbox-impl ()Lcom/ditchoom/buffer/ReadBuffer;
 }
 
+public final class com/ditchoom/buffer/crypto/InsufficientKeyCustody : com/ditchoom/buffer/crypto/CryptoMisuseException {
+	public final fun getAlg ()Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
+	public final fun getAvailable ()Lcom/ditchoom/buffer/crypto/CustodyTier;
+	public final fun getRequired ()Lcom/ditchoom/buffer/crypto/CustodyTier;
+}
+
 public final class com/ditchoom/buffer/crypto/InvalidPublicKey : com/ditchoom/buffer/crypto/CryptoMisuseException {
 	public final fun getCurve ()Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;
 }
@@ -951,6 +957,11 @@ public abstract interface class com/ditchoom/buffer/crypto/KeyProvider {
 
 public final class com/ditchoom/buffer/crypto/KeyProviderKt {
 	public static final fun getProtectedKeys (Lcom/ditchoom/buffer/crypto/CryptoCapabilities;)Lcom/ditchoom/buffer/crypto/ProtectedKeySupport;
+}
+
+public final class com/ditchoom/buffer/crypto/KeyProviderResolutionKt {
+	public static final fun keyProvider (Lcom/ditchoom/buffer/crypto/CryptoCapabilities;)Lcom/ditchoom/buffer/crypto/KeyProvider;
+	public static final fun requireTier (Lcom/ditchoom/buffer/crypto/KeyProvider;Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;Lcom/ditchoom/buffer/crypto/CustodyTier;)Lcom/ditchoom/buffer/crypto/KeyProvider;
 }
 
 public final class com/ditchoom/buffer/crypto/MessageLimitReached : com/ditchoom/buffer/crypto/CryptoMisuseException {
