@@ -120,7 +120,7 @@ sealed class HardwareKeyException protected constructor(
     class UnsupportedHardwareKey internal constructor() : HardwareKeyException("unsupported hardware key parameters")
 
     /**
-     * Generation was requested for a [HardwareAlgorithm] where [HardwareKeyProvider.eligible] is
+     * Generation was requested for a [ProtectedKeyAlgorithm] where [HardwareKeyProvider.eligible] is
      * `false` (e.g. AES-GCM on the Apple Secure Enclave). Typed — not an
      * `IllegalArgumentException` with a message — so a caller can branch on it exhaustively; the
      * fix is to consult [HardwareKeyProvider.eligible] before generating.

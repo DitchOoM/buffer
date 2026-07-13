@@ -12,7 +12,7 @@ import kotlin.time.TimeSource
  * It models a secure element with software crypto behind an auth gate:
  *  - The gated closures perform real AES-GCM / ECDSA via the module's own async primitives, so a
  *    successful op produces standard ciphertext / signatures (proving the seam wires through).
- *  - Each use is gated on [HardwareKeySpec.authorization]; a denying gate raises [AuthorizationFailed],
+ *  - Each use is gated on [ProtectedKeySpec.authorization]; a denying gate raises [AuthorizationFailed],
  *    exactly as a refused biometric / keystore unlock would.
  *  - Eligibility is a realistic subset: AES-GCM and ECDSA P-256 only. ChaCha20-Poly1305 and Ed25519
  *    are rejected (Enclave/StrongBox do not back them), matching the no-hardware-variant decision.
@@ -66,19 +66,19 @@ internal class FakeHardware(
      */
     fun userAuthenticated(gate: HardwareAuthorization): UserAuthenticatedKeyProvider =
         object : UserAuthenticatedKeyProvider {
-            override fun eligible(alg: HardwareAlgorithm): Boolean = this@FakeHardware.eligible(alg)
+            override fun eligible(alg: ProtectedKeyAlgorithm): Boolean = this@FakeHardware.eligible(alg)
 
             override suspend fun generateAesGcm(
                 policy: UserAuthenticationPolicy,
                 aesKeySizeBits: Int,
-            ): AesGcmKey = aesGcmPair(HardwareKeySpec(gate, aesKeySizeBits), policy).hardware
+            ): AesGcmKey = aesGcmPair(ProtectedKeySpec(gate, aesKeySizeBits), policy).hardware
 
             override suspend fun generateSigning(
                 scheme: SignatureScheme,
                 policy: UserAuthenticationPolicy,
             ): SigningKey {
-                if (!eligible(scheme.toHardwareAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
-                return signingPair(HardwareKeySpec(gate), policy).hardware
+                if (!eligible(scheme.toProtectedKeyAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
+                return signingPair(ProtectedKeySpec(gate), policy).hardware
             }
         }
 
@@ -94,21 +94,22 @@ internal class FakeHardware(
         val verifyKey: VerifyKey,
     )
 
-    override fun eligible(alg: HardwareAlgorithm): Boolean = alg == HardwareAlgorithm.AesGcm || alg == HardwareAlgorithm.EcdsaP256
+    override fun eligible(alg: ProtectedKeyAlgorithm): Boolean =
+        alg == ProtectedKeyAlgorithm.AesGcm || alg == ProtectedKeyAlgorithm.EcdsaP256
 
-    override suspend fun generateAesGcm(spec: HardwareKeySpec): AesGcmKey = aesGcmPair(spec).hardware
+    override suspend fun generateAesGcm(spec: ProtectedKeySpec): AesGcmKey = aesGcmPair(spec).hardware
 
     override suspend fun generateSigning(
         scheme: SignatureScheme,
-        spec: HardwareKeySpec,
+        spec: ProtectedKeySpec,
     ): SigningKey {
-        if (!eligible(scheme.toHardwareAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
+        if (!eligible(scheme.toProtectedKeyAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
         return signingPair(spec).hardware
     }
 
     /** Richer result for the conformance test: the hardware key and a software twin with the same key. */
     fun aesGcmPair(
-        spec: HardwareKeySpec,
+        spec: ProtectedKeySpec,
         policy: UserAuthenticationPolicy? = null,
     ): AesGcmPair {
         if (spec.aesKeySizeBits != AES_128_KEY_BYTES * Byte.SIZE_BITS &&
@@ -150,7 +151,7 @@ internal class FakeHardware(
 
     /** Richer result for the conformance test: the hardware signing key and its public verify key. */
     fun signingPair(
-        spec: HardwareKeySpec,
+        spec: ProtectedKeySpec,
         policy: UserAuthenticationPolicy? = null,
     ): SigningPair {
         val verifyKey = VerifyKey.ecdsaP256(hexBuffer(P256_POINT_HEX))

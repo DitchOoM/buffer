@@ -217,17 +217,6 @@ public final class com/ditchoom/buffer/crypto/EcdsaSignatureEncoding : java/lang
 	public static fun values ()[Lcom/ditchoom/buffer/crypto/EcdsaSignatureEncoding;
 }
 
-public final class com/ditchoom/buffer/crypto/HardwareAlgorithm : java/lang/Enum {
-	public static final field AesGcm Lcom/ditchoom/buffer/crypto/HardwareAlgorithm;
-	public static final field EcdsaP256 Lcom/ditchoom/buffer/crypto/HardwareAlgorithm;
-	public static final field EcdsaP384 Lcom/ditchoom/buffer/crypto/HardwareAlgorithm;
-	public static final field EcdsaP521 Lcom/ditchoom/buffer/crypto/HardwareAlgorithm;
-	public static final field Ed25519 Lcom/ditchoom/buffer/crypto/HardwareAlgorithm;
-	public static fun getEntries ()Lkotlin/enums/EnumEntries;
-	public static fun valueOf (Ljava/lang/String;)Lcom/ditchoom/buffer/crypto/HardwareAlgorithm;
-	public static fun values ()[Lcom/ditchoom/buffer/crypto/HardwareAlgorithm;
-}
-
 public abstract interface class com/ditchoom/buffer/crypto/HardwareAuthorization {
 	public abstract fun authorize (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
@@ -256,18 +245,10 @@ public final class com/ditchoom/buffer/crypto/HardwareKeyException$UserAuthentic
 }
 
 public abstract interface class com/ditchoom/buffer/crypto/HardwareKeyProvider {
-	public abstract fun eligible (Lcom/ditchoom/buffer/crypto/HardwareAlgorithm;)Z
-	public abstract fun generateAesGcm (Lcom/ditchoom/buffer/crypto/HardwareKeySpec;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
-	public abstract fun generateSigning (Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/crypto/HardwareKeySpec;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun eligible (Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;)Z
+	public abstract fun generateAesGcm (Lcom/ditchoom/buffer/crypto/ProtectedKeySpec;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun generateSigning (Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/crypto/ProtectedKeySpec;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public abstract fun getDedicatedSecureElement ()Z
-}
-
-public final class com/ditchoom/buffer/crypto/HardwareKeySpec {
-	public fun <init> ()V
-	public fun <init> (Lcom/ditchoom/buffer/crypto/HardwareAuthorization;I)V
-	public synthetic fun <init> (Lcom/ditchoom/buffer/crypto/HardwareAuthorization;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun getAesKeySizeBits ()I
-	public final fun getAuthorization ()Lcom/ditchoom/buffer/crypto/HardwareAuthorization;
 }
 
 public final class com/ditchoom/buffer/crypto/HardwareKeysKt {
@@ -940,6 +921,29 @@ public final class com/ditchoom/buffer/crypto/OptionalAead$Unavailable : com/dit
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class com/ditchoom/buffer/crypto/ProtectedKeyAlgorithm : java/lang/Enum {
+	public static final field AesGcm Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
+	public static final field EcdhP256 Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
+	public static final field EcdhP384 Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
+	public static final field EcdhP521 Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
+	public static final field EcdsaP256 Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
+	public static final field EcdsaP384 Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
+	public static final field EcdsaP521 Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
+	public static final field Ed25519 Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
+	public static final field X25519 Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
+	public static fun values ()[Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
+}
+
+public final class com/ditchoom/buffer/crypto/ProtectedKeySpec {
+	public fun <init> ()V
+	public fun <init> (Lcom/ditchoom/buffer/crypto/HardwareAuthorization;I)V
+	public synthetic fun <init> (Lcom/ditchoom/buffer/crypto/HardwareAuthorization;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getAesKeySizeBits ()I
+	public final fun getAuthorization ()Lcom/ditchoom/buffer/crypto/HardwareAuthorization;
+}
+
 public abstract interface class com/ditchoom/buffer/crypto/Salt {
 }
 
@@ -1293,7 +1297,7 @@ public abstract interface class com/ditchoom/buffer/crypto/SyncCapableSigningKey
 }
 
 public abstract interface class com/ditchoom/buffer/crypto/UserAuthenticatedKeyProvider {
-	public abstract fun eligible (Lcom/ditchoom/buffer/crypto/HardwareAlgorithm;)Z
+	public abstract fun eligible (Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;)Z
 	public abstract fun generateAesGcm (Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public static synthetic fun generateAesGcm$default (Lcom/ditchoom/buffer/crypto/UserAuthenticatedKeyProvider;Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
 	public abstract fun generateSigning (Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;

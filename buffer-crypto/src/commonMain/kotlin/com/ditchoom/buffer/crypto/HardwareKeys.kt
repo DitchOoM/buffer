@@ -35,10 +35,10 @@ import kotlin.time.Duration.Companion.seconds
 
 /**
  * The algorithms a [HardwareKeyProvider] may be asked to generate keys for. A flat, closed enum (not
- * free-text identifiers) so eligibility checks and dispatch are exhaustive and typo-proof. Only the
- * families a secure element actually backs appear here.
+ * free-text identifiers) so eligibility checks and dispatch are exhaustive and typo-proof. Covers the
+ * families a non-exportable key backend (secure element or non-exportable software) actually mints.
  */
-enum class HardwareAlgorithm {
+enum class ProtectedKeyAlgorithm {
     /** AES-256-GCM (symmetric AEAD). */
     AesGcm,
 
@@ -53,15 +53,31 @@ enum class HardwareAlgorithm {
 
     /** ECDSA over NIST P-521 with SHA-512. */
     EcdsaP521,
+
+    /** X25519 key agreement (RFC 7748). */
+    X25519,
+
+    /** ECDH key agreement over NIST P-256. */
+    EcdhP256,
+
+    /** ECDH key agreement over NIST P-384. */
+    EcdhP384,
+
+    /** ECDH key agreement over NIST P-521. */
+    EcdhP521,
 }
 
-/** The [HardwareAlgorithm] a signature [scheme] maps to, for eligibility checks. */
-internal fun SignatureScheme.toHardwareAlgorithm(): HardwareAlgorithm =
+/** Renamed to [ProtectedKeyAlgorithm]. */
+@Deprecated("Renamed to ProtectedKeyAlgorithm", ReplaceWith("ProtectedKeyAlgorithm"))
+typealias HardwareAlgorithm = ProtectedKeyAlgorithm
+
+/** The [ProtectedKeyAlgorithm] a signature [scheme] maps to, for eligibility checks. */
+internal fun SignatureScheme.toProtectedKeyAlgorithm(): ProtectedKeyAlgorithm =
     when (this) {
-        SignatureScheme.Ed25519 -> HardwareAlgorithm.Ed25519
-        SignatureScheme.EcdsaP256 -> HardwareAlgorithm.EcdsaP256
-        SignatureScheme.EcdsaP384 -> HardwareAlgorithm.EcdsaP384
-        SignatureScheme.EcdsaP521 -> HardwareAlgorithm.EcdsaP521
+        SignatureScheme.Ed25519 -> ProtectedKeyAlgorithm.Ed25519
+        SignatureScheme.EcdsaP256 -> ProtectedKeyAlgorithm.EcdsaP256
+        SignatureScheme.EcdsaP384 -> ProtectedKeyAlgorithm.EcdsaP384
+        SignatureScheme.EcdsaP521 -> ProtectedKeyAlgorithm.EcdsaP521
     }
 
 /**
@@ -138,7 +154,7 @@ sealed interface UserAuthenticationPolicy {
 /**
  * Mints hardware keys that are **bound to user authentication inside the secure element** — an op
  * on an unauthenticated key fails in hardware no matter what the process does, unlike the advisory
- * [HardwareKeySpec.authorization] gate on [HardwareKeyProvider]'s unbound keys.
+ * [ProtectedKeySpec.authorization] gate on [HardwareKeyProvider]'s unbound keys.
  *
  * Obtained from a [HardwareKeyProvider] through a **platform** `userAuthenticated(...)` extension
  * (androidMain takes a `BiometricAuthorization` prompt host, appleMain a `LocalAuthAuthenticator`),
@@ -156,7 +172,7 @@ sealed interface UserAuthenticationPolicy {
  */
 interface UserAuthenticatedKeyProvider {
     /** Whether the underlying secure element can generate a key for [alg] (same subset as the base provider). */
-    fun eligible(alg: HardwareAlgorithm): Boolean
+    fun eligible(alg: ProtectedKeyAlgorithm): Boolean
 
     /**
      * Generates a fresh AES-GCM key inside the secure element, OS-bound to [policy].
@@ -176,10 +192,10 @@ interface UserAuthenticatedKeyProvider {
 }
 
 /**
- * Generation parameters for a hardware-backed key. Carried by value (no platform handles) so the
- * shape is identical on every target.
+ * Generation parameters for a protected (non-exportable) key. Carried by value (no platform handles)
+ * so the shape is identical on every target.
  */
-class HardwareKeySpec(
+class ProtectedKeySpec(
     /**
      * The advisory gate evaluated before each use of the generated key. The default authorizes
      * unconditionally. Library code deciding whether to proceed — *not* an OS binding; for keys
@@ -194,6 +210,10 @@ class HardwareKeySpec(
     val aesKeySizeBits: Int = AES_256_KEY_BYTES * Byte.SIZE_BITS,
 )
 
+/** Renamed to [ProtectedKeySpec]. */
+@Deprecated("Renamed to ProtectedKeySpec", ReplaceWith("ProtectedKeySpec"))
+typealias HardwareKeySpec = ProtectedKeySpec
+
 /**
  * Service-provider interface a platform implements to mint hardware-backed keys from a secure
  * element / keystore. No platform ships one in 6.0; the type is the integration seam a later minor
@@ -206,7 +226,7 @@ class HardwareKeySpec(
  * closures a provider builds into each key, but the *gate itself is the provider's responsibility* —
  * the common code holds no authorization to evaluate. Therefore an implementation **MUST**, for every
  * key it generates:
- *  1. evaluate [HardwareKeySpec.authorization] (`authorize()`) before each use of the key, and throw
+ *  1. evaluate [ProtectedKeySpec.authorization] (`authorize()`) before each use of the key, and throw
  *     [AuthorizationFailed] when it returns `false` or throws — never proceed with the crypto op;
  *  2. keep secret key material inside the secure element — never expose it through any returned type
  *     (the [KeyProvenance.Hardware] key types carry no exportable material by construction);
@@ -229,23 +249,23 @@ interface HardwareKeyProvider {
     val dedicatedSecureElement: Boolean
 
     /** Whether this provider can generate a key for [alg] (a secure element backs only a subset). */
-    fun eligible(alg: HardwareAlgorithm): Boolean
+    fun eligible(alg: ProtectedKeyAlgorithm): Boolean
 
     /**
      * Generates a fresh AES-GCM key inside the secure element. The returned [AesGcmKey] has
      * [KeyProvenance.Hardware] and no exportable material; it operates only through the async AEAD
-     * witness ops, gated by [spec]'s [HardwareKeySpec.authorization].
+     * witness ops, gated by [spec]'s [ProtectedKeySpec.authorization].
      */
-    suspend fun generateAesGcm(spec: HardwareKeySpec): AesGcmKey
+    suspend fun generateAesGcm(spec: ProtectedKeySpec): AesGcmKey
 
     /**
      * Generates a fresh signing key for [scheme] inside the secure element. The returned [SigningKey]
      * has [KeyProvenance.Hardware] and no exportable material; it signs only through the async
-     * signature witness ops, gated by [spec]'s [HardwareKeySpec.authorization].
+     * signature witness ops, gated by [spec]'s [ProtectedKeySpec.authorization].
      */
     suspend fun generateSigning(
         scheme: SignatureScheme,
-        spec: HardwareKeySpec,
+        spec: ProtectedKeySpec,
     ): SigningKey
 }
 

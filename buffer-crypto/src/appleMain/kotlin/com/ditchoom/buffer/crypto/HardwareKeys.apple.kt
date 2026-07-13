@@ -71,15 +71,15 @@ import kotlin.time.TimeSource
 internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
     override val dedicatedSecureElement: Boolean get() = true
 
-    override fun eligible(alg: HardwareAlgorithm): Boolean = alg == HardwareAlgorithm.EcdsaP256
+    override fun eligible(alg: ProtectedKeyAlgorithm): Boolean = alg == ProtectedKeyAlgorithm.EcdsaP256
 
-    override suspend fun generateAesGcm(spec: HardwareKeySpec): AesGcmKey =
+    override suspend fun generateAesGcm(spec: ProtectedKeySpec): AesGcmKey =
         // No app-controlled non-exportable symmetric Enclave key exists on Apple.
         throw HardwareKeyException.AlgorithmNotEligible()
 
     override suspend fun generateSigning(
         scheme: SignatureScheme,
-        spec: HardwareKeySpec,
+        spec: ProtectedKeySpec,
     ): SigningKey = generateSigningBound(ResolvedApplePolicy.Advisory(spec.authorization), scheme)
 
     /** Generates an Enclave P-256 key under [policy] — the shared path for unbound and OS-bound keys. */
@@ -87,7 +87,7 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
         policy: ResolvedApplePolicy,
         scheme: SignatureScheme,
     ): SigningKey {
-        if (!eligible(scheme.toHardwareAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
+        if (!eligible(scheme.toProtectedKeyAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
         val generated =
             when (policy) {
                 is ResolvedApplePolicy.Advisory -> enclaveGenerateP256()
@@ -183,7 +183,7 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
  * authenticator" is unrepresentable.
  */
 internal sealed interface ResolvedApplePolicy {
-    /** No `SecAccessControl`; [gate] is the advisory [HardwareKeySpec.authorization]. */
+    /** No `SecAccessControl`; [gate] is the advisory [ProtectedKeySpec.authorization]. */
     class Advisory(
         val gate: HardwareAuthorization,
     ) : ResolvedApplePolicy
@@ -209,7 +209,7 @@ internal class AppleUserAuthenticatedKeyProvider(
     private val base: SecureEnclaveHardwareKeyProvider,
     private val authenticator: LocalAuthAuthenticator,
 ) : UserAuthenticatedKeyProvider {
-    override fun eligible(alg: HardwareAlgorithm): Boolean = base.eligible(alg)
+    override fun eligible(alg: ProtectedKeyAlgorithm): Boolean = base.eligible(alg)
 
     override suspend fun generateAesGcm(
         policy: UserAuthenticationPolicy,

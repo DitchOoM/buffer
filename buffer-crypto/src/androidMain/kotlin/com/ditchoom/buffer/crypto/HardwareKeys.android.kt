@@ -105,18 +105,18 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
      */
     override val dedicatedSecureElement: Boolean by lazy { probeStrongBox() }
 
-    override fun eligible(alg: HardwareAlgorithm): Boolean =
+    override fun eligible(alg: ProtectedKeyAlgorithm): Boolean =
         when (alg) {
-            HardwareAlgorithm.AesGcm, HardwareAlgorithm.EcdsaP256 -> true
+            ProtectedKeyAlgorithm.AesGcm, ProtectedKeyAlgorithm.EcdsaP256 -> true
             else -> false
         }
 
-    override suspend fun generateAesGcm(spec: HardwareKeySpec): AesGcmKey =
+    override suspend fun generateAesGcm(spec: ProtectedKeySpec): AesGcmKey =
         generateAesGcmBound(ResolvedAndroidPolicy.Advisory(spec.authorization), spec.aesKeySizeBits)
 
     override suspend fun generateSigning(
         scheme: SignatureScheme,
-        spec: HardwareKeySpec,
+        spec: ProtectedKeySpec,
     ): SigningKey = generateSigningBound(ResolvedAndroidPolicy.Advisory(spec.authorization), scheme)
 
     /** Generates an AES-GCM keystore key under [policy] — the shared path for unbound and OS-bound keys. */
@@ -186,7 +186,7 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
         policy: ResolvedAndroidPolicy,
         scheme: SignatureScheme,
     ): SigningKey {
-        if (!eligible(scheme.toHardwareAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
+        if (!eligible(scheme.toProtectedKeyAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
         val alias = newAlias("ec")
         val keyPair = keystoreOp { generateEcKeyPair(alias, policy) }
         val privateKey = keyPair.private

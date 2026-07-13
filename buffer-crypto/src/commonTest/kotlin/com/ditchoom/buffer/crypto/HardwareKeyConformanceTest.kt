@@ -32,8 +32,8 @@ import kotlin.time.TestTimeSource
  */
 class HardwareKeyConformanceTest {
     private val provider = FakeHardware()
-    private val grant = HardwareKeySpec()
-    private val deny = HardwareKeySpec(authorization = HardwareAuthorization { false })
+    private val grant = ProtectedKeySpec()
+    private val deny = ProtectedKeySpec(authorization = HardwareAuthorization { false })
 
     @Test
     fun hardwareCapabilityReflectsThePlatformBackend() =
@@ -52,7 +52,7 @@ class HardwareKeyConformanceTest {
     /** A real (non-fake) provider must round-trip its eligible primitives and expose the verify key. */
     private suspend fun assertRealProviderWorks(provider: HardwareKeyProvider) {
         // Every shipping secure element backs ECDSA P-256; prove a real sign → verify-under-public-key.
-        assertTrue(provider.eligible(HardwareAlgorithm.EcdsaP256), "a real provider backs ECDSA P-256")
+        assertTrue(provider.eligible(ProtectedKeyAlgorithm.EcdsaP256), "a real provider backs ECDSA P-256")
         val signing = provider.generateSigning(SignatureScheme.EcdsaP256, grant)
         try {
             assertEquals(KeyProvenance.Hardware, signing.provenance)
@@ -68,7 +68,7 @@ class HardwareKeyConformanceTest {
         }
 
         // AES-GCM is backed by StrongBox/TEE (Android) but not the Enclave (Apple) — gate on eligibility.
-        if (provider.eligible(HardwareAlgorithm.AesGcm)) {
+        if (provider.eligible(ProtectedKeyAlgorithm.AesGcm)) {
             val aes = provider.generateAesGcm(grant)
             try {
                 assertEquals(KeyProvenance.Hardware, aes.provenance)
@@ -85,12 +85,12 @@ class HardwareKeyConformanceTest {
 
     @Test
     fun eligibilityIsARealisticSubset() {
-        assertTrue(provider.eligible(HardwareAlgorithm.AesGcm), "AES-GCM is eligible")
-        assertTrue(provider.eligible(HardwareAlgorithm.EcdsaP256), "ECDSA P-256 is eligible")
+        assertTrue(provider.eligible(ProtectedKeyAlgorithm.AesGcm), "AES-GCM is eligible")
+        assertTrue(provider.eligible(ProtectedKeyAlgorithm.EcdsaP256), "ECDSA P-256 is eligible")
         // A secure element backs neither ChaCha20-Poly1305 nor Ed25519 (nor P-384/P-521 here).
-        assertTrue(!provider.eligible(HardwareAlgorithm.Ed25519), "Ed25519 not eligible")
-        assertTrue(!provider.eligible(HardwareAlgorithm.EcdsaP384), "P-384 not eligible")
-        assertTrue(!provider.eligible(HardwareAlgorithm.EcdsaP521), "P-521 not eligible")
+        assertTrue(!provider.eligible(ProtectedKeyAlgorithm.Ed25519), "Ed25519 not eligible")
+        assertTrue(!provider.eligible(ProtectedKeyAlgorithm.EcdsaP384), "P-384 not eligible")
+        assertTrue(!provider.eligible(ProtectedKeyAlgorithm.EcdsaP521), "P-521 not eligible")
     }
 
     @Test
@@ -114,7 +114,7 @@ class HardwareKeyConformanceTest {
     fun generateAesGcmRejectsUnsupportedKeySizeTyped() =
         runTest {
             assertFailsWith<HardwareKeyException.UnsupportedHardwareKey> {
-                provider.generateAesGcm(HardwareKeySpec(aesKeySizeBits = 192))
+                provider.generateAesGcm(ProtectedKeySpec(aesKeySizeBits = 192))
             }
         }
 
