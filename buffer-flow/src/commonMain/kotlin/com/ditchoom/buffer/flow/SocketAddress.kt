@@ -69,19 +69,30 @@ interface SocketAddress {
         ): SocketAddress = resolver.resolve(host, port)
 
         /**
+         * Install the platform hostname [resolver] that backs [resolve]. `:socket-udp` calls this once
+         * with a DNS resolver for its platform; until then [resolve] handles numeric literals only and
+         * throws for hostnames (buffer-flow performs no I/O). Last install wins; idempotent to re-install
+         * the same resolver.
+         */
+        fun installResolver(resolver: SocketAddressResolver) {
+            this.resolver = resolver
+        }
+
+        /**
          * Pluggable hostname resolver. Defaults to a literal-only resolver; `:socket-udp` installs a
-         * platform DNS resolver. Internal so it is not part of the locked public/ABI surface.
+         * platform DNS resolver via [installResolver]. The backing field is internal so it is not part of
+         * the locked public/ABI surface — [installResolver] is the only public mutator.
          */
         internal var resolver: SocketAddressResolver = LiteralOnlyResolver
     }
 }
 
 /**
- * Resolves a host/port to a [SocketAddress]. Installed by the platform socket module (`:socket-udp`);
- * buffer-flow ships only [LiteralOnlyResolver].
+ * Resolves a host/port to a [SocketAddress]. Implemented and installed by the platform socket module
+ * (`:socket-udp`) via [SocketAddress.installResolver]; buffer-flow ships only [LiteralOnlyResolver].
  */
 @ExperimentalDatagramApi
-internal fun interface SocketAddressResolver {
+fun interface SocketAddressResolver {
     suspend fun resolve(
         host: String,
         port: Int,
