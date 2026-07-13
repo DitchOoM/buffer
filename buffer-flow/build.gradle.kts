@@ -23,6 +23,11 @@ plugins {
 // the JVM ABI only: it is host-independent and the common public surface is wholly contained in
 // the JVM dump; klib validation would diverge between partial-target dev hosts and CI runners.
 apiValidation {
+    // The datagram trichotomy is incubating under @ExperimentalDatagramApi: exclude it from the
+    // locked ABI so changing an opt-in-experimental signature during conformance is not flagged as a
+    // breaking change (RFC §11.2). The marker is dropped — and the surface enters the dump — only
+    // once conformance is green across every witness and platform.
+    nonPublicMarkers.add("com.ditchoom.buffer.flow.ExperimentalDatagramApi")
     klib {
         enabled = false
     }
