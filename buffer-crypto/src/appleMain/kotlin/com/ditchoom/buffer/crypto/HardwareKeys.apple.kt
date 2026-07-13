@@ -82,6 +82,13 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
         spec: ProtectedKeySpec,
     ): SigningKey = generateSigningBound(ResolvedApplePolicy.Advisory(spec.authorization), scheme)
 
+    override suspend fun generateKeyAgreement(
+        curve: KeyAgreementCurve,
+        spec: ProtectedKeySpec,
+    ): KeyAgreementKeyPair =
+        // The Secure Enclave backs no app-controlled ECDH agreement key through this SPI; not eligible.
+        throw HardwareKeyException.AlgorithmNotEligible()
+
     /** Generates an Enclave P-256 key under [policy] — the shared path for unbound and OS-bound keys. */
     internal suspend fun generateSigningBound(
         policy: ResolvedApplePolicy,
@@ -94,8 +101,9 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
                 is ResolvedApplePolicy.Session -> enclaveGenerateP256AccessControlled(policy.method)
                 is ResolvedApplePolicy.PerUse -> enclaveGenerateP256AccessControlled(policy.method)
             }
-        return HardwareSigningKey(
+        return ProtectedSigningKey(
             scheme = SignatureScheme.EcdsaP256,
+            custody = custody,
             gatedSign = gatedSign(policy, generated.blob),
             verifyKey = VerifyKey.ecdsaP256(generated.point),
         )
@@ -423,4 +431,4 @@ private val appleProvider: HardwareKeyProvider? by lazy {
     }
 }
 
-internal actual fun platformHardwareKeyProvider(): HardwareKeyProvider? = appleProvider
+internal actual fun platformProtectedKeyProvider(): ProtectedKeyProvider? = appleProvider

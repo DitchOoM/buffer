@@ -20,8 +20,8 @@ import kotlin.time.TimeSource
  *    fixed NIST P-256 test keypair (buffer-crypto exposes no ECDSA keypair generation, so a known
  *    keypair is used so the test can build the matching public [VerifyKey] — verify keys are public).
  *
- * Because commonTest sees the module's `internal` declarations, it can construct [HardwareAesGcmKey]
- * / [HardwareSigningKey] directly — which is how a real provider in a later minor would build them.
+ * Because commonTest sees the module's `internal` declarations, it can construct [ProtectedAesGcmKey]
+ * / [ProtectedSigningKey] directly — which is how a real provider in a later minor would build them.
  */
 internal class FakeHardware(
     override val dedicatedSecureElement: Boolean = true,
@@ -107,6 +107,14 @@ internal class FakeHardware(
         return signingPair(spec).hardware
     }
 
+    override suspend fun generateKeyAgreement(
+        curve: KeyAgreementCurve,
+        spec: ProtectedKeySpec,
+    ): KeyAgreementKeyPair =
+        // The fake secure element backs only AES-GCM + ECDSA P-256, matching Enclave/StrongBox; a
+        // key-agreement request is not eligible, exactly as on the real hardware providers.
+        throw HardwareKeyException.AlgorithmNotEligible()
+
     /** Richer result for the conformance test: the hardware key and a software twin with the same key. */
     fun aesGcmPair(
         spec: ProtectedKeySpec,
@@ -126,8 +134,9 @@ internal class FakeHardware(
         val twin = AesGcmKey.of(material)
         val auth = FakeAuthPolicy(spec.authorization, policy)
         val hardware =
-            HardwareAesGcmKey(
+            ProtectedAesGcmKey(
                 sizeBits = spec.aesKeySizeBits,
+                custody = custody,
                 gatedSeal = { aad, plaintext, factory ->
                     auth.beforeOp()
                     // A real secure element generates the nonce itself, so the seam hands the closure
@@ -158,8 +167,9 @@ internal class FakeHardware(
         val inner = SigningKey.ecdsaP256(hexBuffer(P256_SCALAR_HEX), verifyKey)
         val auth = FakeAuthPolicy(spec.authorization, policy)
         val hardware =
-            HardwareSigningKey(
+            ProtectedSigningKey(
                 scheme = SignatureScheme.EcdsaP256,
+                custody = custody,
                 gatedSign = { message, factory ->
                     auth.beforeOp()
                     signAsyncPlatform(inner, message, factory)

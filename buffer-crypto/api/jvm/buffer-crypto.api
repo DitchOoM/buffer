@@ -101,7 +101,8 @@ public final class com/ditchoom/buffer/crypto/Aead_jvmCommonKt {
 
 public abstract interface class com/ditchoom/buffer/crypto/AesGcmKey : com/ditchoom/buffer/crypto/AeadKey, java/lang/AutoCloseable {
 	public static final field Companion Lcom/ditchoom/buffer/crypto/AesGcmKey$Companion;
-	public abstract fun getProvenance ()Lcom/ditchoom/buffer/crypto/KeyProvenance;
+	public abstract fun getCustody ()Lcom/ditchoom/buffer/crypto/KeyCustody;
+	public fun getProvenance ()Lcom/ditchoom/buffer/crypto/KeyProvenance;
 	public abstract fun getSizeBits ()I
 	public fun getSizeBytes ()I
 }
@@ -112,6 +113,7 @@ public final class com/ditchoom/buffer/crypto/AesGcmKey$Companion {
 }
 
 public final class com/ditchoom/buffer/crypto/AesGcmKey$DefaultImpls {
+	public static fun getProvenance (Lcom/ditchoom/buffer/crypto/AesGcmKey;)Lcom/ditchoom/buffer/crypto/KeyProvenance;
 	public static fun getSizeBytes (Lcom/ditchoom/buffer/crypto/AesGcmKey;)I
 }
 
@@ -126,6 +128,15 @@ public abstract interface class com/ditchoom/buffer/crypto/ChaChaPolyKey : com/d
 public final class com/ditchoom/buffer/crypto/ChaChaPolyKey$Companion {
 	public final fun of (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/crypto/ChaChaPolyKey;
 	public static synthetic fun of$default (Lcom/ditchoom/buffer/crypto/ChaChaPolyKey$Companion;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/ChaChaPolyKey;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/ConcreteKeyProvider : com/ditchoom/buffer/crypto/KeyProvider {
+	public fun custodyFor (Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;)Lcom/ditchoom/buffer/crypto/KeyCustody;
+	public abstract fun getCustody ()Lcom/ditchoom/buffer/crypto/KeyCustody;
+}
+
+public final class com/ditchoom/buffer/crypto/ConcreteKeyProvider$DefaultImpls {
+	public static fun custodyFor (Lcom/ditchoom/buffer/crypto/ConcreteKeyProvider;Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;)Lcom/ditchoom/buffer/crypto/KeyCustody;
 }
 
 public final class com/ditchoom/buffer/crypto/ConstantTimeKt {
@@ -153,6 +164,15 @@ public final class com/ditchoom/buffer/crypto/CryptoRandomKt {
 
 public final class com/ditchoom/buffer/crypto/CryptoRandom_jvmCommonKt {
 	public static final fun cryptoRandomInto (Lcom/ditchoom/buffer/WriteBuffer;)V
+}
+
+public final class com/ditchoom/buffer/crypto/CustodyTier : java/lang/Enum {
+	public static final field ExportableSoftware Lcom/ditchoom/buffer/crypto/CustodyTier;
+	public static final field Hardware Lcom/ditchoom/buffer/crypto/CustodyTier;
+	public static final field NonExportableSoftware Lcom/ditchoom/buffer/crypto/CustodyTier;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/ditchoom/buffer/crypto/CustodyTier;
+	public static fun values ()[Lcom/ditchoom/buffer/crypto/CustodyTier;
 }
 
 public final class com/ditchoom/buffer/crypto/EcEncodingError : java/lang/Enum {
@@ -244,11 +264,19 @@ public final class com/ditchoom/buffer/crypto/HardwareKeyException$UnsupportedHa
 public final class com/ditchoom/buffer/crypto/HardwareKeyException$UserAuthenticationRequired : com/ditchoom/buffer/crypto/HardwareKeyException {
 }
 
-public abstract interface class com/ditchoom/buffer/crypto/HardwareKeyProvider {
+public abstract interface class com/ditchoom/buffer/crypto/HardwareKeyProvider : com/ditchoom/buffer/crypto/ProtectedKeyProvider {
 	public abstract fun eligible (Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;)Z
 	public abstract fun generateAesGcm (Lcom/ditchoom/buffer/crypto/ProtectedKeySpec;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public abstract fun generateSigning (Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/crypto/ProtectedKeySpec;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getCustody ()Lcom/ditchoom/buffer/crypto/KeyCustody$NonExportable$Hardware;
+	public synthetic fun getCustody ()Lcom/ditchoom/buffer/crypto/KeyCustody$NonExportable;
+	public synthetic fun getCustody ()Lcom/ditchoom/buffer/crypto/KeyCustody;
 	public abstract fun getDedicatedSecureElement ()Z
+}
+
+public final class com/ditchoom/buffer/crypto/HardwareKeyProvider$DefaultImpls {
+	public static fun custodyFor (Lcom/ditchoom/buffer/crypto/HardwareKeyProvider;Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;)Lcom/ditchoom/buffer/crypto/KeyCustody;
+	public static fun getCustody (Lcom/ditchoom/buffer/crypto/HardwareKeyProvider;)Lcom/ditchoom/buffer/crypto/KeyCustody$NonExportable$Hardware;
 }
 
 public final class com/ditchoom/buffer/crypto/HardwareKeysKt {
@@ -864,12 +892,65 @@ public final class com/ditchoom/buffer/crypto/KeyAgreement_jvmCommonKt {
 	public static final fun keyAgreement (Lcom/ditchoom/buffer/crypto/CryptoCapabilities;Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;)Lcom/ditchoom/buffer/crypto/KeyAgreementSupport;
 }
 
+public abstract interface class com/ditchoom/buffer/crypto/KeyCustody {
+	public abstract fun getTier ()Lcom/ditchoom/buffer/crypto/CustodyTier;
+}
+
+public final class com/ditchoom/buffer/crypto/KeyCustody$ExportableSoftware : com/ditchoom/buffer/crypto/KeyCustody {
+	public static final field INSTANCE Lcom/ditchoom/buffer/crypto/KeyCustody$ExportableSoftware;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getTier ()Lcom/ditchoom/buffer/crypto/CustodyTier;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/KeyCustody$NonExportable : com/ditchoom/buffer/crypto/KeyCustody {
+}
+
+public final class com/ditchoom/buffer/crypto/KeyCustody$NonExportable$Hardware : com/ditchoom/buffer/crypto/KeyCustody$NonExportable {
+	public fun <init> (Z)V
+	public final fun component1 ()Z
+	public final fun copy (Z)Lcom/ditchoom/buffer/crypto/KeyCustody$NonExportable$Hardware;
+	public static synthetic fun copy$default (Lcom/ditchoom/buffer/crypto/KeyCustody$NonExportable$Hardware;ZILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/KeyCustody$NonExportable$Hardware;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDedicatedSecureElement ()Z
+	public fun getTier ()Lcom/ditchoom/buffer/crypto/CustodyTier;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/KeyCustody$NonExportable$Software : com/ditchoom/buffer/crypto/KeyCustody$NonExportable {
+	public static final field INSTANCE Lcom/ditchoom/buffer/crypto/KeyCustody$NonExportable$Software;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getTier ()Lcom/ditchoom/buffer/crypto/CustodyTier;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/KeyCustodyKt {
+	public static final fun getDedicatedSecureElement (Lcom/ditchoom/buffer/crypto/KeyCustody;)Z
+	public static final fun getExportable (Lcom/ditchoom/buffer/crypto/KeyCustody;)Z
+	public static final fun getProvenance (Lcom/ditchoom/buffer/crypto/KeyCustody;)Lcom/ditchoom/buffer/crypto/KeyProvenance;
+}
+
 public final class com/ditchoom/buffer/crypto/KeyProvenance : java/lang/Enum {
 	public static final field Hardware Lcom/ditchoom/buffer/crypto/KeyProvenance;
 	public static final field Software Lcom/ditchoom/buffer/crypto/KeyProvenance;
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lcom/ditchoom/buffer/crypto/KeyProvenance;
 	public static fun values ()[Lcom/ditchoom/buffer/crypto/KeyProvenance;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/KeyProvider {
+	public abstract fun custodyFor (Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;)Lcom/ditchoom/buffer/crypto/KeyCustody;
+	public abstract fun eligible (Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;)Z
+	public abstract fun generateAesGcm (Lcom/ditchoom/buffer/crypto/ProtectedKeySpec;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun generateKeyAgreement (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/crypto/ProtectedKeySpec;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun generateSigning (Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/crypto/ProtectedKeySpec;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class com/ditchoom/buffer/crypto/KeyProviderKt {
+	public static final fun getProtectedKeys (Lcom/ditchoom/buffer/crypto/CryptoCapabilities;)Lcom/ditchoom/buffer/crypto/ProtectedKeySupport;
 }
 
 public final class com/ditchoom/buffer/crypto/MessageLimitReached : com/ditchoom/buffer/crypto/CryptoMisuseException {
@@ -936,12 +1017,42 @@ public final class com/ditchoom/buffer/crypto/ProtectedKeyAlgorithm : java/lang/
 	public static fun values ()[Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
 }
 
+public abstract interface class com/ditchoom/buffer/crypto/ProtectedKeyProvider : com/ditchoom/buffer/crypto/ConcreteKeyProvider {
+	public abstract fun getCustody ()Lcom/ditchoom/buffer/crypto/KeyCustody$NonExportable;
+	public synthetic fun getCustody ()Lcom/ditchoom/buffer/crypto/KeyCustody;
+}
+
+public final class com/ditchoom/buffer/crypto/ProtectedKeyProvider$DefaultImpls {
+	public static fun custodyFor (Lcom/ditchoom/buffer/crypto/ProtectedKeyProvider;Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;)Lcom/ditchoom/buffer/crypto/KeyCustody;
+}
+
 public final class com/ditchoom/buffer/crypto/ProtectedKeySpec {
 	public fun <init> ()V
 	public fun <init> (Lcom/ditchoom/buffer/crypto/HardwareAuthorization;I)V
 	public synthetic fun <init> (Lcom/ditchoom/buffer/crypto/HardwareAuthorization;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun getAesKeySizeBits ()I
 	public final fun getAuthorization ()Lcom/ditchoom/buffer/crypto/HardwareAuthorization;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/ProtectedKeySupport {
+}
+
+public final class com/ditchoom/buffer/crypto/ProtectedKeySupport$Available : com/ditchoom/buffer/crypto/ProtectedKeySupport {
+	public fun <init> (Lcom/ditchoom/buffer/crypto/ProtectedKeyProvider;)V
+	public final fun component1 ()Lcom/ditchoom/buffer/crypto/ProtectedKeyProvider;
+	public final fun copy (Lcom/ditchoom/buffer/crypto/ProtectedKeyProvider;)Lcom/ditchoom/buffer/crypto/ProtectedKeySupport$Available;
+	public static synthetic fun copy$default (Lcom/ditchoom/buffer/crypto/ProtectedKeySupport$Available;Lcom/ditchoom/buffer/crypto/ProtectedKeyProvider;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/ProtectedKeySupport$Available;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getProvider ()Lcom/ditchoom/buffer/crypto/ProtectedKeyProvider;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/ProtectedKeySupport$Unavailable : com/ditchoom/buffer/crypto/ProtectedKeySupport {
+	public static final field INSTANCE Lcom/ditchoom/buffer/crypto/ProtectedKeySupport$Unavailable;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public abstract interface class com/ditchoom/buffer/crypto/Salt {
@@ -1270,7 +1381,8 @@ public final class com/ditchoom/buffer/crypto/Signatures_jvmCommonKt {
 
 public abstract interface class com/ditchoom/buffer/crypto/SigningKey : java/lang/AutoCloseable {
 	public static final field Companion Lcom/ditchoom/buffer/crypto/SigningKey$Companion;
-	public abstract fun getProvenance ()Lcom/ditchoom/buffer/crypto/KeyProvenance;
+	public abstract fun getCustody ()Lcom/ditchoom/buffer/crypto/KeyCustody;
+	public fun getProvenance ()Lcom/ditchoom/buffer/crypto/KeyProvenance;
 	public abstract fun getScheme ()Lcom/ditchoom/buffer/crypto/SignatureScheme;
 	public abstract fun getVerifyKey ()Lcom/ditchoom/buffer/crypto/VerifyKey;
 }
@@ -1286,14 +1398,23 @@ public final class com/ditchoom/buffer/crypto/SigningKey$Companion {
 	public static synthetic fun ed25519$default (Lcom/ditchoom/buffer/crypto/SigningKey$Companion;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/VerifyKey;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/SyncCapableSigningKey;
 }
 
+public final class com/ditchoom/buffer/crypto/SigningKey$DefaultImpls {
+	public static fun getProvenance (Lcom/ditchoom/buffer/crypto/SigningKey;)Lcom/ditchoom/buffer/crypto/KeyProvenance;
+}
+
 public abstract interface class com/ditchoom/buffer/crypto/SyncCapableAesGcmKey : com/ditchoom/buffer/crypto/AesGcmKey {
 }
 
 public final class com/ditchoom/buffer/crypto/SyncCapableAesGcmKey$DefaultImpls {
+	public static fun getProvenance (Lcom/ditchoom/buffer/crypto/SyncCapableAesGcmKey;)Lcom/ditchoom/buffer/crypto/KeyProvenance;
 	public static fun getSizeBytes (Lcom/ditchoom/buffer/crypto/SyncCapableAesGcmKey;)I
 }
 
 public abstract interface class com/ditchoom/buffer/crypto/SyncCapableSigningKey : com/ditchoom/buffer/crypto/SigningKey {
+}
+
+public final class com/ditchoom/buffer/crypto/SyncCapableSigningKey$DefaultImpls {
+	public static fun getProvenance (Lcom/ditchoom/buffer/crypto/SyncCapableSigningKey;)Lcom/ditchoom/buffer/crypto/KeyProvenance;
 }
 
 public abstract interface class com/ditchoom/buffer/crypto/UserAuthenticatedKeyProvider {

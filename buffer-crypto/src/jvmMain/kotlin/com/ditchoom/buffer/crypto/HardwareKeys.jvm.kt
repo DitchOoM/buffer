@@ -5,4 +5,4 @@ package com.ditchoom.buffer.crypto
  * Enclave reachable from this runtime, so [CryptoCapabilities.hardware] stays
  * [HardwareSupport.Unavailable]. (The Android target supplies its own actual.)
  */
-internal actual fun platformHardwareKeyProvider(): HardwareKeyProvider? = null
+internal actual fun platformProtectedKeyProvider(): ProtectedKeyProvider? = null

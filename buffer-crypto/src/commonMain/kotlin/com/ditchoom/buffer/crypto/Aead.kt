@@ -91,8 +91,15 @@ sealed interface AesGcmKey :
     /** 128 or 256 — the AES key size in bits. */
     val sizeBits: Int
 
-    /** Whether the key material is in software memory or hardware-backed. */
-    val provenance: KeyProvenance
+    /**
+     * This key's custody — where its secret lives and whether the process can read it. A key is
+     * self-describing: it carries its own [KeyCustody] so it stays honest across module boundaries,
+     * independent of the provider that minted it.
+     */
+    val custody: KeyCustody
+
+    /** Whether the key material is in software memory or hardware-backed. Derived from [custody]. */
+    val provenance: KeyProvenance get() = custody.provenance
 
     /** Key size in bytes (16 for AES-128, 32 for AES-256). */
     val sizeBytes: Int get() = sizeBits / 8
@@ -132,7 +139,7 @@ internal class InMemoryAesGcmKey(
     override val sizeBits: Int,
     private val material: PlatformBuffer,
 ) : SyncCapableAesGcmKey {
-    override val provenance: KeyProvenance get() = KeyProvenance.Software
+    override val custody: KeyCustody get() = KeyCustody.ExportableSoftware
     private var closed = false
 
     override fun close() {
@@ -214,7 +221,7 @@ internal fun AesGcmKey.requireInMemoryMaterial(): PlatformBuffer =
         // not supported for it — hardware keys operate only through the async witness ops, which
         // dispatch to the gated closures and never reach here. This throw is the safety net if a
         // caller routes a hardware key into a blocking op (e.g. AES-GCM is Blocking on the JVM).
-        is HardwareAesGcmKey -> throw UnsupportedOperationException("hardware AES-GCM key has no synchronous path")
+        is ProtectedAesGcmKey -> throw UnsupportedOperationException("hardware AES-GCM key has no synchronous path")
     }
 
 /** See [AesGcmKey.requireInMemoryMaterial]. */
@@ -230,14 +237,14 @@ internal fun ChaChaPolyKey.requireInMemoryMaterial(): PlatformBuffer =
  * catastrophic), so this is a passthrough. Shared by the async- and blocking-witness ops so a
  * hardware key behaves the same regardless of which witness resolved.
  */
-private suspend fun HardwareAesGcmKey.sealFramed(
+private suspend fun ProtectedAesGcmKey.sealFramed(
     plaintext: ReadBuffer,
     aad: Aad,
     factory: BufferFactory,
 ): PlatformBuffer = gatedSeal(aad.bytesOrNull, plaintext, factory)
 
 /** Opens a `nonce ‖ ciphertext ‖ tag` buffer through a hardware key's gated closure. */
-private suspend fun HardwareAesGcmKey.openFramed(
+private suspend fun ProtectedAesGcmKey.openFramed(
     sealed: ReadBuffer,
     aad: Aad,
     factory: BufferFactory,
@@ -504,7 +511,7 @@ internal object AesGcmBlockingOps : AeadBlockingOps<AesGcmKey, SyncCapableAesGcm
     ): PlatformBuffer =
         when (key) {
             is InMemoryAesGcmKey -> sealBlocking(key, plaintext, aad, factory)
-            is HardwareAesGcmKey -> key.sealFramed(plaintext, aad, factory)
+            is ProtectedAesGcmKey -> key.sealFramed(plaintext, aad, factory)
         }
 
     override suspend fun open(
@@ -515,7 +522,7 @@ internal object AesGcmBlockingOps : AeadBlockingOps<AesGcmKey, SyncCapableAesGcm
     ): PlatformBuffer =
         when (key) {
             is InMemoryAesGcmKey -> openBlocking(sealed, key, aad, factory)
-            is HardwareAesGcmKey -> key.openFramed(sealed, aad, factory)
+            is ProtectedAesGcmKey -> key.openFramed(sealed, aad, factory)
         }
 }
 
@@ -563,8 +570,8 @@ internal object AesGcmAsyncOps : AeadAsyncOps<AesGcmKey, SyncCapableAesGcmKey> {
                 out
             }
             // A hardware key has no in-process material, so it routes through its gated closure;
-            // adding HardwareAesGcmKey forces this branch (the sealed-impl point).
-            is HardwareAesGcmKey -> key.sealFramed(plaintext, aad, factory)
+            // adding ProtectedAesGcmKey forces this branch (the sealed-impl point).
+            is ProtectedAesGcmKey -> key.sealFramed(plaintext, aad, factory)
         }
 
     override suspend fun open(
@@ -578,7 +585,7 @@ internal object AesGcmAsyncOps : AeadAsyncOps<AesGcmKey, SyncCapableAesGcmKey> {
                 val (nonce, ctAndTag, _) = splitFramed(sealed)
                 aesGcmOpenWithNonceAsync(key, nonce, aad.bytesOrNull, ctAndTag, factory)
             }
-            is HardwareAesGcmKey -> key.openFramed(sealed, aad, factory)
+            is ProtectedAesGcmKey -> key.openFramed(sealed, aad, factory)
         }
 }
 

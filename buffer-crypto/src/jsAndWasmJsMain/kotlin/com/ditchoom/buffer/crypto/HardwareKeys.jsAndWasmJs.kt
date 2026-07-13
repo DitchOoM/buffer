@@ -5,4 +5,4 @@ package com.ditchoom.buffer.crypto
  * secure element under this SPI's non-exportable contract), so [CryptoCapabilities.hardware] stays
  * [HardwareSupport.Unavailable].
  */
-internal actual fun platformHardwareKeyProvider(): HardwareKeyProvider? = null
+internal actual fun platformProtectedKeyProvider(): ProtectedKeyProvider? = null

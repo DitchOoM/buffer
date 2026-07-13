@@ -38,7 +38,7 @@ class LocalAuthAuthenticatorTest {
 
     @Test
     fun userAuthenticatedRefusesAClosedAuthenticator() {
-        val provider = platformHardwareKeyProvider() ?: return // no Enclave provider on this runner
+        val provider = platformProtectedKeyProvider() ?: return // no Enclave provider on this runner
         val auth = LocalAuthAuthenticator(reason = "unit test")
         if (!auth.available) return
         auth.close()
