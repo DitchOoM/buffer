@@ -124,7 +124,7 @@ internal actual fun deriveSharedSecretPlatform(
     return deriveFromRawSecret(curve, raw, info, length, salt, factory)
 }
 
-internal actual suspend fun dhRawSecret(
+internal actual suspend fun dhRawSecretInMemory(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,
 ): PlatformBuffer = validateRawSecret(privateKey.curve, rawAgree(privateKey, peerPublicKey))

@@ -265,7 +265,7 @@ internal actual fun deriveSharedSecretPlatform(
  * Raw DH secret seam for HPKE/DHKEM (no KDF). Delegates to the same Security-framework exchange
  * as [deriveSharedSecret] and applies the audited [validateRawSecret] post-check.
  */
-internal actual suspend fun dhRawSecret(
+internal actual suspend fun dhRawSecretInMemory(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,
 ): PlatformBuffer = validateRawSecret(privateKey.curve, rawAgreeApple(privateKey, peerPublicKey))

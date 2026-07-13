@@ -598,6 +598,7 @@ public final class com/ditchoom/buffer/crypto/HpkeKt {
 	public static final fun hpkeGenerateKeyPair (Lcom/ditchoom/buffer/crypto/HpkeKem;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public static final fun hpkeImportPrivateKey (Lcom/ditchoom/buffer/crypto/HpkeKem;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/HpkePrivateKey;
 	public static final fun hpkeImportPublicKey (Lcom/ditchoom/buffer/crypto/HpkeKem;Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/HpkePublicKey;
+	public static final fun hpkeRecipientPrivateKey (Lcom/ditchoom/buffer/crypto/HpkeKem;Lcom/ditchoom/buffer/crypto/KeyAgreementKeyPair;)Lcom/ditchoom/buffer/crypto/HpkePrivateKey;
 }
 
 public abstract interface class com/ditchoom/buffer/crypto/HpkeMode {

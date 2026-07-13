@@ -26,7 +26,27 @@ import com.ditchoom.buffer.ReadBuffer
  * @throws InvalidPublicKey for a rejected peer point (or X25519 all-zero secret).
  * @throws UnsupportedOperationException if the curve has no support on this platform.
  */
-internal expect suspend fun dhRawSecret(
+internal suspend fun dhRawSecret(
+    privateKey: KeyAgreementPrivateKey,
+    peerPublicKey: KeyAgreementPublicKey,
+): PlatformBuffer =
+    // A non-exportable key computes DH inside its backend (WebCrypto / secure element) via the gated
+    // closure — its scalar never enters process memory, so it never reaches the in-memory actual. The
+    // closure returns the raw secret; [validateRawSecret] applies the shared X25519 all-zero rejection
+    // in one audited place, exactly as the in-memory actuals do.
+    when (privateKey) {
+        is ProtectedKeyAgreementPrivateKey -> {
+            require(privateKey.curve == peerPublicKey.curve) { "private/public key curve mismatch" }
+            validateRawSecret(privateKey.curve, privateKey.gatedDh(peerPublicKey))
+        }
+        else -> dhRawSecretInMemory(privateKey, peerPublicKey)
+    }
+
+/**
+ * The in-memory raw-DH seam: the platform's native agreement over an [InMemoryKeyAgreementPrivateKey].
+ * Non-exportable keys never reach it (they route through the gated closure in [dhRawSecret]).
+ */
+internal expect suspend fun dhRawSecretInMemory(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,
 ): PlatformBuffer

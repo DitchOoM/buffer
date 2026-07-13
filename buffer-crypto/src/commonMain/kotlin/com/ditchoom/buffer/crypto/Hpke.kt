@@ -715,6 +715,28 @@ fun hpkeImportPrivateKey(
     return hpkePrivateKeyOf(kem, importPrivateKey(kem.curve, privateEncoded), pubCopy)
 }
 
+/**
+ * Adapts an existing [KeyAgreementKeyPair] — in particular a **non-exportable** one minted by
+ * [KeyProvider.generateKeyAgreement] — into an [HpkePrivateKey] for [kem], so it composes with
+ * [HpkeOps.openBase] and the receiver setups with no change to the HPKE surface. The pair's
+ * [KeyAgreementKeyPair.curve] must equal [kem]'s curve.
+ *
+ * Unlike [hpkeImportPrivateKey], which requires the raw private scalar, this takes the live key pair
+ * whole: the DHKEM decap's single `DH(skR, enc)` step runs through the pair's private key — for a
+ * non-exportable pair, through its gated closure, so the recipient scalar never enters process memory.
+ * The returned key **shares** the pair's private key; close the pair (not this) to release it, and do
+ * not use the pair independently afterward.
+ */
+fun hpkeRecipientPrivateKey(
+    kem: HpkeKem,
+    keyPair: KeyAgreementKeyPair,
+): HpkePrivateKey {
+    require(keyPair.curve == kem.curve) {
+        "key pair curve ${keyPair.curve.curveName} does not match ${kem.kemName}"
+    }
+    return hpkePrivateKeyOf(kem, keyPair.privateKey, copyBuffer(keyPair.publicKey.encoded, BufferFactory.Default))
+}
+
 // =============================================================================
 // Encapsulation results
 // =============================================================================

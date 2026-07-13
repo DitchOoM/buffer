@@ -196,7 +196,7 @@ internal actual suspend fun deriveSharedSecretAsyncPlatform(
  * secret in a wiped SecureBuffer (no KDF). Same validation contract as [deriveSharedSecretAsync].
  */
 @Suppress("SwallowedException", "TooGenericExceptionCaught")
-internal actual suspend fun dhRawSecret(
+internal actual suspend fun dhRawSecretInMemory(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,
 ): PlatformBuffer {

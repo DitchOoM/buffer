@@ -339,6 +339,17 @@ internal typealias HardwareSign =
     suspend (message: ReadBuffer, factory: BufferFactory) -> ReadBuffer
 
 /**
+ * A gated raw Diffie–Hellman: computes `DH(sk, peer)` inside the non-exportable backend and yields
+ * the **raw** shared secret in a wiped [SecureBuffer] (read-ready, `curve.sharedSecretBytes` bytes),
+ * or throws [AuthorizationFailed] / [InvalidPublicKey]. This is exactly the KEM's `DH(sk, enc)`
+ * primitive: the caller (the common key-agreement / DHKEM seam) runs the HKDF / all-zero rejection
+ * above it, so the whole `keyAgreement()` / `hpke()` machinery composes with a non-exportable
+ * private key whose scalar never enters process memory.
+ */
+internal typealias HardwareDh =
+    suspend (peer: KeyAgreementPublicKey) -> PlatformBuffer
+
+/**
  * Non-exportable [AesGcmKey]: an opaque handle with no exportable material. Seal/open route through
  * the provider-supplied gated closures; the blocking witness path is unreachable because
  * [requireInMemoryMaterial] throws for this type. The [custody] param type [KeyCustody.NonExportable]
