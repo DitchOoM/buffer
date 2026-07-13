@@ -38,7 +38,9 @@ class LocalAuthAuthenticatorTest {
 
     @Test
     fun userAuthenticatedRefusesAClosedAuthenticator() {
-        val provider = platformProtectedKeyProvider() ?: return // no Enclave provider on this runner
+        // The seam now returns the broad ProtectedKeyProvider; userAuthenticated is a HardwareKeyProvider
+        // extension, so narrow to it (the Apple Enclave provider is one). No Enclave provider ⇒ skip.
+        val provider = platformProtectedKeyProvider() as? HardwareKeyProvider ?: return
         val auth = LocalAuthAuthenticator(reason = "unit test")
         if (!auth.available) return
         auth.close()
