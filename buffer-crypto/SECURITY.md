@@ -256,7 +256,10 @@ tiers and `custodyFor` / `requireTier` assertions above apply to a persisted key
 
 Coverage: `KeyStoreConformanceTest` (commonMain, every platform) exercises idempotency, load-after-
 reload, delete, alias mismatch, custody equals `custodyFor`, and the persist-survives-`close`
-invariant; `FileKeyStoreTest` (JVM) exercises a real on-disk round-trip across store instances.
+invariant; `FileKeyStoreTest` (JVM) and `PosixFileKeyStoreTest` (Linux) exercise a real on-disk
+round-trip across store instances; `KeyStoreInstrumentedTest` (`connectedCheck`) pins the Android
+Keystore hardware store on a device — reload across a simulated restart, hardware custody, and that a
+persistent key's `close()` does not delete the entry.
 
 ## 5. Known limitations & tracked follow-ups
 
@@ -274,16 +277,20 @@ tracked to completion:
 - **Android X25519/Ed25519 below API 34** — Conscrypt added these in Android 14; on API 28–33
   the capability flag is `false` and the call throws. This is a runtime (`SDK_INT`) gate, not a
   compile-time one.
-- **Linux** — no native crypto target is registered yet; deferred. When added it will wrap
-  BoringSSL (not OpenSSL), consistent with the sibling networking module.
-- **`KeyStore` durable backends per platform** — the persistent `KeyStore` (see §4) ships now with a
-  durable on-disk `ExportableSoftware` medium on JVM / Android and a durable **`NonExportable.Software`**
-  medium on **web** (a non-extractable WebCrypto `CryptoKey` held in IndexedDB). Two OS-backed stores
-  remain staged follow-ups: an AndroidKeyStore alias and an Apple Keychain / Secure Enclave tag (both
-  `NonExportable.Hardware`), plus a POSIX file medium on Linux. Until each lands, that platform's
-  `KeyStore` reports its true (weaker) custody, so a `requireTier(Hardware)` caller is correctly
-  refused rather than silently downgraded. (The web store requires both `crypto.subtle` and
-  IndexedDB; an engine lacking either — e.g. bare Node — falls back to the in-process software tier.)
+- **Linux** — the native target wraps BoringSSL (not OpenSSL), consistent with the sibling
+  networking module, at the `ExportableSoftware` tier (no portable non-exportable store exists there).
+- **`KeyStore` durable backends per platform** — the persistent `KeyStore` (see §4) now ships a
+  durable backend on **every** target: a durable on-disk `ExportableSoftware` medium on JVM (one
+  PKCS#8 DER file per alias) and Linux (the same, over POSIX stdio); a **`NonExportable.Hardware`**
+  store on **Android** (an `AndroidKeyStore` entry keyed `<name>:<alias>` — StrongBox where present,
+  else TEE) and **Apple** (a Secure Enclave P-256 key whose restore record is held in a Keychain
+  generic-password item keyed by `kSecAttrService`/`kSecAttrAccount`); and a **`NonExportable.Software`**
+  store on **web** (a non-extractable WebCrypto `CryptoKey` held in IndexedDB). Each store reports its
+  true custody, so a `requireTier(Hardware)` caller is refused rather than silently downgraded on a
+  weaker platform. Availability is probed, not assumed: the web store requires both `crypto.subtle`
+  and IndexedDB, Android needs an `AndroidKeyStore` provider (absent in a host-JVM unit run), and
+  Apple needs a usable Enclave (absent on the simulator / an unentitled CLI runner) — where the probe
+  fails, that platform falls back to its software store and reports the weaker tier honestly.
 - **Desktop JVM / Linux non-exportable custody** — desktop JVM / Linux expose no portable
   non-exportable store (DPAPI / Keychain / Secret Service are platform-native, none reachable from
   pure KMP), so both `keyProvider()` and `keyStore()` resolve to the exportable software tier (see
