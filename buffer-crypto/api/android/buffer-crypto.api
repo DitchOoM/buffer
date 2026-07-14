@@ -869,6 +869,8 @@ public final class com/ditchoom/buffer/crypto/KeyAgreementPrivateKey$DefaultImpl
 
 public abstract interface class com/ditchoom/buffer/crypto/KeyAgreementPublicKey {
 	public static final field Companion Lcom/ditchoom/buffer/crypto/KeyAgreementPublicKey$Companion;
+	public abstract fun exportSpki (Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun exportSpki$default (Lcom/ditchoom/buffer/crypto/KeyAgreementPublicKey;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 	public abstract fun getCurve ()Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;
 	public abstract fun getEncoded ()Lcom/ditchoom/buffer/ReadBuffer;
 	public abstract fun getProvenance ()Lcom/ditchoom/buffer/crypto/KeyProvenance;
@@ -876,6 +878,10 @@ public abstract interface class com/ditchoom/buffer/crypto/KeyAgreementPublicKey
 
 public final class com/ditchoom/buffer/crypto/KeyAgreementPublicKey$Companion {
 	public final fun of (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/KeyAgreementPublicKey;
+}
+
+public final class com/ditchoom/buffer/crypto/KeyAgreementPublicKey$DefaultImpls {
+	public static synthetic fun exportSpki$default (Lcom/ditchoom/buffer/crypto/KeyAgreementPublicKey;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 }
 
 public abstract interface class com/ditchoom/buffer/crypto/KeyAgreementSupport {
@@ -1500,6 +1506,10 @@ public final class com/ditchoom/buffer/crypto/VerificationFailed : com/ditchoom/
 
 public abstract interface class com/ditchoom/buffer/crypto/VerifyKey {
 	public static final field Companion Lcom/ditchoom/buffer/crypto/VerifyKey$Companion;
+	public abstract fun exportEncoded (Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun exportEncoded$default (Lcom/ditchoom/buffer/crypto/VerifyKey;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+	public abstract fun exportSpki (Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun exportSpki$default (Lcom/ditchoom/buffer/crypto/VerifyKey;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 	public abstract fun getProvenance ()Lcom/ditchoom/buffer/crypto/KeyProvenance;
 	public abstract fun getScheme ()Lcom/ditchoom/buffer/crypto/SignatureScheme;
 }
@@ -1509,5 +1519,10 @@ public final class com/ditchoom/buffer/crypto/VerifyKey$Companion {
 	public final fun ecdsaP384 (Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/VerifyKey;
 	public final fun ecdsaP521 (Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/VerifyKey;
 	public final fun ed25519 (Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/VerifyKey;
+}
+
+public final class com/ditchoom/buffer/crypto/VerifyKey$DefaultImpls {
+	public static synthetic fun exportEncoded$default (Lcom/ditchoom/buffer/crypto/VerifyKey;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun exportSpki$default (Lcom/ditchoom/buffer/crypto/VerifyKey;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 }
 

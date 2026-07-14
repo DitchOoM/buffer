@@ -245,6 +245,22 @@ sealed interface VerifyKey {
     /** Whether the key material is in software memory or hardware-backed. */
     val provenance: KeyProvenance
 
+    /**
+     * The public key in its **standard raw import encoding**, freshly allocated from [factory] and
+     * read-ready: the 32-byte raw key for Ed25519 (RFC 8032 §5.1.5), the uncompressed SEC1 point
+     * `0x04 ‖ X ‖ Y` for ECDSA. This is exactly the encoding the [ed25519] / [ecdsaP256] / … factories
+     * consume, so `VerifyKey.of(scheme, key.exportEncoded())` round-trips. Public keys are not secret.
+     */
+    fun exportEncoded(factory: BufferFactory = BufferFactory.Default): ReadBuffer
+
+    /**
+     * The public key as **X.509 SubjectPublicKeyInfo DER** — RFC 5280 (`id-ecPublicKey` + namedCurve
+     * + BIT STRING of the uncompressed point) for ECDSA, RFC 8410 (`id-Ed25519` + BIT STRING of the
+     * raw key) for Ed25519. Freshly allocated from [factory], read-ready. This is the form X.509
+     * certificates, JWK-to-DER, `openssl`, and public-key registration endpoints consume.
+     */
+    fun exportSpki(factory: BufferFactory = BufferFactory.Default): ReadBuffer
+
     companion object {
         /** An Ed25519 verify key from its 32-byte raw public key (RFC 8032 §5.1.5). */
         fun ed25519(publicKey: ReadBuffer): VerifyKey = of(SignatureScheme.Ed25519, publicKey)
@@ -271,6 +287,16 @@ internal class InMemoryVerifyKey(
     val material: ReadBuffer,
 ) : VerifyKey {
     override val provenance: KeyProvenance get() = KeyProvenance.Software
+
+    override fun exportEncoded(factory: BufferFactory): ReadBuffer = copyBuffer(material, factory)
+
+    override fun exportSpki(factory: BufferFactory): ReadBuffer =
+        when (scheme) {
+            SignatureScheme.Ed25519 -> ed25519PublicKeyToSpki(material, factory)
+            SignatureScheme.EcdsaP256 -> ecPublicKeyToSpki(KeyAgreementCurve.P256, material, factory)
+            SignatureScheme.EcdsaP384 -> ecPublicKeyToSpki(KeyAgreementCurve.P384, material, factory)
+            SignatureScheme.EcdsaP521 -> ecPublicKeyToSpki(KeyAgreementCurve.P521, material, factory)
+        }
 }
 
 /**
