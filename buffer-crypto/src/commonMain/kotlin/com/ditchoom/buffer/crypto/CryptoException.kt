@@ -139,3 +139,35 @@ sealed class HardwareKeyException protected constructor(
      */
     class AlgorithmNotEligible internal constructor() : HardwareKeyException("algorithm not hardware-eligible")
 }
+
+/**
+ * A persistent [KeyStore] operation failed for a public, non-secret reason. `sealed` so callers
+ * handle each outcome exhaustively without parsing a message. No field carries key material — an
+ * alias is a caller-chosen public name.
+ */
+sealed class KeyStoreException protected constructor(
+    message: String,
+) : CryptoMisuseException(message) {
+    /**
+     * A `getOrGenerate*` call named an [alias] that already holds a key of a different algorithm than
+     * [requested] — the store never silently replaces a stored key, so a device-identity key cannot
+     * be clobbered by a mistyped call. Regenerate deliberately with [KeyStore.delete] first.
+     */
+    class AliasMismatch internal constructor(
+        val alias: String,
+        val stored: ProtectedKeyAlgorithm,
+        val requested: ProtectedKeyAlgorithm,
+    ) : KeyStoreException("alias '$alias' holds $stored, not the requested $requested")
+
+    /**
+     * The backing store could not be reached (disk IO, keystore/Keychain access). [retryable]
+     * mirrors the platform's guidance where it provides one; a raw platform IO exception is
+     * normalized into this rather than leaking through.
+     */
+    class StorageFailure internal constructor(
+        val retryable: Boolean,
+    ) : KeyStoreException("key store backend unavailable")
+
+    /** A stored entry could not be decoded — its bytes are truncated, corrupt, or a newer format. */
+    class CorruptEntry internal constructor() : KeyStoreException("stored key entry is corrupt or unreadable")
+}
