@@ -1,4 +1,5 @@
 @file:OptIn(ExperimentalForeignApi::class)
+@file:Suppress("MatchingDeclarationName") // MPP platform-suffixed file (PosixFileKeyStorage.linux.kt)
 
 package com.ditchoom.buffer.crypto
 
