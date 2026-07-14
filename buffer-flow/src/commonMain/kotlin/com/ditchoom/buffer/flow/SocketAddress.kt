@@ -160,116 +160,169 @@ internal class LiteralSocketAddress private constructor(
             ip: String,
             port: Int,
         ): SocketAddress? {
-            if (port < 0 || port > 65535) throw IllegalArgumentException("port out of range: $port")
-            parseIpv4(ip)?.let { return LiteralSocketAddress(ip, port, AddressFamily.IPv4, 0L, packLo(it, 0)) }
-            parseIpv6(ip)?.let {
-                return LiteralSocketAddress(ip, port, AddressFamily.IPv6, packLo(it, 0), packLo(it, 8))
+            require(port in 0..PORT_MAX) { "port out of range: $port" }
+            parseIpv4(ip)?.let { return LiteralSocketAddress(ip, port, AddressFamily.IPv4, 0L, packBytes(it, 0)) }
+            return parseIpv6(ip)?.let {
+                val hi = packBytes(it, 0)
+                val lo = packBytes(it, IPV6_LOW_HALF_OFFSET)
+                LiteralSocketAddress(ip, port, AddressFamily.IPv6, hi, lo)
             }
-            return null
-        }
-
-        /** Pack 8 bytes starting at [offset] (big-endian) into a long; IPv4 uses only 4 bytes. */
-        private fun packLo(
-            bytes: ByteArray,
-            offset: Int,
-        ): Long {
-            var v = 0L
-            val n = if (bytes.size == 4) 4 else 8
-            for (i in 0 until n) v = (v shl 8) or (bytes[offset + i].toLong() and 0xff)
-            return v
-        }
-
-        /** Parse dotted-quad IPv4 into 4 bytes, or null if not a valid IPv4 literal. */
-        private fun parseIpv4(s: String): ByteArray? {
-            val parts = s.split('.')
-            if (parts.size != 4) return null
-            val out = ByteArray(4)
-            for (i in 0 until 4) {
-                val p = parts[i]
-                if (p.isEmpty() || p.length > 3) return null
-                if (!p.all { it in '0'..'9' }) return null
-                val v = p.toIntOrNull() ?: return null
-                if (v > 255) return null
-                out[i] = v.toByte()
-            }
-            return out
-        }
-
-        /**
-         * Parse an IPv6 literal (with `::` compression and optional embedded IPv4 tail) into 16
-         * bytes, or null if not a valid IPv6 literal. Zone ids (`%eth0`) are stripped.
-         */
-        private fun parseIpv6(raw: String): ByteArray? {
-            val s = raw.substringBefore('%')
-            if (!s.contains(':')) return null
-            val doubleColon = s.indexOf("::")
-            if (s.indexOf("::", doubleColon + 1) >= 0) return null // at most one "::"
-
-            val head: String
-            val tail: String
-            if (doubleColon >= 0) {
-                head = s.substring(0, doubleColon)
-                tail = s.substring(doubleColon + 2)
-            } else {
-                head = s
-                tail = ""
-            }
-
-            fun groups(part: String): List<String>? {
-                if (part.isEmpty()) return emptyList()
-                val g = part.split(':')
-                return if (g.any { it.isEmpty() }) null else g
-            }
-
-            val headGroups = groups(head) ?: return null
-            val tailGroupsRaw = groups(tail) ?: return null
-
-            // An embedded IPv4 tail (e.g. ::ffff:1.2.3.4) counts as two 16-bit groups.
-            val out = ByteArray(16)
-            val words = ArrayList<Int>()
-
-            fun appendGroups(gs: List<String>): Boolean {
-                for ((idx, g) in gs.withIndex()) {
-                    val isLast = idx == gs.size - 1
-                    if (isLast && g.contains('.')) {
-                        val v4 = parseIpv4(g) ?: return false
-                        words.add(((v4[0].toInt() and 0xff) shl 8) or (v4[1].toInt() and 0xff))
-                        words.add(((v4[2].toInt() and 0xff) shl 8) or (v4[3].toInt() and 0xff))
-                    } else {
-                        if (g.length > 4 || !g.all { it in "0123456789abcdefABCDEF" }) return false
-                        words.add(g.toInt(16))
-                    }
-                }
-                return true
-            }
-
-            val headWordsStart = words.size
-            if (!appendGroups(headGroups)) return null
-            val headWordCount = words.size - headWordsStart
-            if (!appendGroups(tailGroupsRaw)) return null
-            val tailWordCount = words.size - headWordsStart - headWordCount
-
-            if (doubleColon >= 0) {
-                val zeros = 8 - (headWordCount + tailWordCount)
-                if (zeros < 0) return null
-                // words currently = head... tail...; splice `zeros` zero-words between them.
-                val final = ArrayList<Int>(8)
-                for (i in 0 until headWordCount) final.add(words[i])
-                repeat(zeros) { final.add(0) }
-                for (i in 0 until tailWordCount) final.add(words[headWordCount + i])
-                if (final.size != 8) return null
-                for (i in 0 until 8) {
-                    out[i * 2] = (final[i] ushr 8).toByte()
-                    out[i * 2 + 1] = final[i].toByte()
-                }
-            } else {
-                if (words.size != 8) return null
-                for (i in 0 until 8) {
-                    out[i * 2] = (words[i] ushr 8).toByte()
-                    out[i * 2 + 1] = words[i].toByte()
-                }
-            }
-            return out
         }
     }
+}
+
+// ── IP-literal parsing (file-private) ─────────────────────────────────────────────────────────────
+// Pure String→bytes helpers, kept at file scope so each is its own small, independently analyzable
+// function (the parser was one 26-branch method before). No I/O, no experimental types.
+
+/** Highest valid UDP port. */
+private const val PORT_MAX = 65535
+
+/** Bytes in an IPv4 address / a dotted-quad's group count. */
+private const val IPV4_BYTE_COUNT = 4
+
+/** Bytes in an IPv6 address. */
+private const val IPV6_BYTE_COUNT = 16
+
+/** 16-bit groups (hextets) in an IPv6 address. */
+private const val IPV6_WORD_COUNT = 8
+
+/** Byte offset of an IPv6 address's low 8 bytes (packed into the `lo` long). */
+private const val IPV6_LOW_HALF_OFFSET = 8
+
+/** Bytes packed into a single long by [packBytes]. */
+private const val LONG_PACK_BYTES = 8
+
+/** Bits in a byte — the shift between a byte and its place in a word/long. */
+private const val BITS_PER_BYTE = 8
+
+/** Bytes per 16-bit IPv6 word. */
+private const val BYTES_PER_WORD = 2
+
+/** Low-8-bits mask. */
+private const val BYTE_MASK = 0xff
+
+/** Largest value of an IPv4 octet. */
+private const val OCTET_MAX = 255
+
+/** Maximum decimal digits in an IPv4 octet. */
+private const val MAX_OCTET_DIGITS = 3
+
+/** Maximum hex digits in an IPv6 group. */
+private const val MAX_HEX_GROUP_DIGITS = 4
+
+/** Radix of an IPv6 hex group. */
+private const val HEX_RADIX = 16
+
+/** The valid characters of an IPv6 hex group. */
+private const val HEX_DIGITS = "0123456789abcdefABCDEF"
+
+/** Pack up to [LONG_PACK_BYTES] bytes starting at [offset] (big-endian) into a long; IPv4 uses 4. */
+private fun packBytes(
+    bytes: ByteArray,
+    offset: Int,
+): Long {
+    val n = if (bytes.size == IPV4_BYTE_COUNT) IPV4_BYTE_COUNT else LONG_PACK_BYTES
+    var v = 0L
+    for (i in 0 until n) {
+        v = (v shl BITS_PER_BYTE) or (bytes[offset + i].toLong() and BYTE_MASK.toLong())
+    }
+    return v
+}
+
+/** Parse dotted-quad IPv4 into 4 bytes, or null if not a valid IPv4 literal. */
+private fun parseIpv4(s: String): ByteArray? {
+    val parts = s.split('.')
+    if (parts.size != IPV4_BYTE_COUNT) return null
+    val octets = parts.mapNotNull { parseOctet(it) }
+    return if (octets.size == IPV4_BYTE_COUNT) ByteArray(IPV4_BYTE_COUNT) { octets[it].toByte() } else null
+}
+
+/** Parse a single decimal IPv4 octet (0..255, no more than 3 digits), or null if invalid. */
+private fun parseOctet(p: String): Int? {
+    if (p.isEmpty() || p.length > MAX_OCTET_DIGITS || p.any { it !in '0'..'9' }) return null
+    val v = p.toIntOrNull()
+    return if (v == null || v > OCTET_MAX) null else v
+}
+
+/**
+ * Parse an IPv6 literal (with `::` compression and optional embedded IPv4 tail) into 16 bytes, or
+ * null if not a valid IPv6 literal. Zone ids (`%eth0`) are stripped.
+ */
+private fun parseIpv6(raw: String): ByteArray? {
+    val s = raw.substringBefore('%')
+    val doubleColon = s.indexOf("::")
+    // Must contain ':' and at most one "::".
+    val malformed = !s.contains(':') || (doubleColon >= 0 && s.indexOf("::", doubleColon + 1) >= 0)
+    if (malformed) return null
+    val head = if (doubleColon >= 0) s.substring(0, doubleColon) else s
+    val tail = if (doubleColon >= 0) s.substring(doubleColon + BYTES_PER_WORD) else ""
+    val words =
+        parseHexGroups(head)?.let { headWords ->
+            parseHexGroups(tail)?.let { tailWords -> combineIpv6Words(headWords, tailWords, doubleColon >= 0) }
+        }
+    return words?.toIpv6Bytes()
+}
+
+/**
+ * Parse the colon-separated groups of one IPv6 half (before/after `::`) into 16-bit words. An empty
+ * part yields no words; an empty group (e.g. a stray `:`) or any invalid group yields null.
+ */
+private fun parseHexGroups(part: String): List<Int>? {
+    if (part.isEmpty()) return emptyList()
+    val groups = part.split(':')
+    return if (groups.any { it.isEmpty() }) {
+        null
+    } else {
+        val parsed = groups.mapIndexed { idx, g -> parseIpv6Group(g, isLast = idx == groups.size - 1) }
+        if (parsed.any { it == null }) null else parsed.filterNotNull().flatten()
+    }
+}
+
+/**
+ * Parse one IPv6 group into its 16-bit word(s): a hex group is one word; a dotted-quad in the last
+ * group (e.g. `::ffff:1.2.3.4`) is two words. Null if the group is invalid.
+ */
+private fun parseIpv6Group(
+    g: String,
+    isLast: Boolean,
+): List<Int>? =
+    when {
+        isLast && g.contains('.') ->
+            parseIpv4(g)?.toList()?.chunked(BYTES_PER_WORD)?.map { bytesToWord(it[0], it[1]) }
+        g.length > MAX_HEX_GROUP_DIGITS || g.any { it !in HEX_DIGITS } -> null
+        else -> listOf(g.toInt(HEX_RADIX))
+    }
+
+/** Combine a big-endian byte pair into a 16-bit word. */
+private fun bytesToWord(
+    hi: Byte,
+    lo: Byte,
+): Int = ((hi.toInt() and BYTE_MASK) shl BITS_PER_BYTE) or (lo.toInt() and BYTE_MASK)
+
+/**
+ * Assemble the final 8 IPv6 words from the head/tail halves. When [compressed] (a `::` was present),
+ * splice the missing zero-words between them; otherwise require exactly 8 words and no tail. Null if
+ * the group count can't form a valid address.
+ */
+private fun combineIpv6Words(
+    head: List<Int>,
+    tail: List<Int>,
+    compressed: Boolean,
+): List<Int>? {
+    if (!compressed) {
+        return if (head.size == IPV6_WORD_COUNT && tail.isEmpty()) head else null
+    }
+    val zeros = IPV6_WORD_COUNT - head.size - tail.size
+    return if (zeros < 0) null else head + List(zeros) { 0 } + tail
+}
+
+/** Serialize exactly [IPV6_WORD_COUNT] words (big-endian) into 16 bytes. */
+private fun List<Int>.toIpv6Bytes(): ByteArray {
+    val out = ByteArray(IPV6_BYTE_COUNT)
+    for (i in indices) {
+        out[i * BYTES_PER_WORD] = (this[i] ushr BITS_PER_BYTE).toByte()
+        out[i * BYTES_PER_WORD + 1] = this[i].toByte()
+    }
+    return out
 }

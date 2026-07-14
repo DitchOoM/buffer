@@ -3,6 +3,18 @@ package com.ditchoom.buffer.flow
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 
+// File-level so the [Ecn] entry constructors can reference them (an enum's entries are initialized
+// before its companion object, so companion consts are off-limits in entry arguments).
+
+/** Congestion Experienced (11) — the only in-range ECN codepoint above the ignore-listed 0/1/2. */
+private const val CE_CODEPOINT = 3
+
+/** Read-side sentinel codepoint for an unreported ECN value. */
+private const val UNKNOWN_CODEPOINT = -1
+
+/** Mask selecting the ECN field — the low 2 bits — of a TOS / Traffic-Class octet. */
+private const val ECN_FIELD_MASK = 0x3
+
 /**
  * The ECN (Explicit Congestion Notification) codepoint of a datagram — RFC 3168 / RFC 9331 (L4S).
  *
@@ -24,23 +36,19 @@ enum class Ecn(
     Ect0(2),
 
     /** Congestion Experienced (11). */
-    Ce(3),
+    Ce(CE_CODEPOINT),
 
     /** The received codepoint is unavailable on this platform (read-side sentinel only). */
-    Unknown(-1),
+    Unknown(UNKNOWN_CODEPOINT),
     ;
 
     @ExperimentalDatagramApi
     companion object {
         /** Map the low 2 bits of a TOS/TClass octet to an [Ecn]; [Unknown] for out-of-range input. */
-        fun fromCodepoint(value: Int): Ecn =
-            when (value and 0x3) {
-                0 -> NotEct
-                1 -> Ect1
-                2 -> Ect0
-                3 -> Ce
-                else -> Unknown
-            }
+        fun fromCodepoint(value: Int): Ecn {
+            val field = value and ECN_FIELD_MASK
+            return entries.firstOrNull { it.codepoint == field } ?: Unknown
+        }
     }
 }
 
