@@ -79,6 +79,9 @@ public abstract interface class com/ditchoom/buffer/flow/Connection : com/ditcho
 	public abstract fun getId ()J
 }
 
+public abstract interface annotation class com/ditchoom/buffer/flow/ExperimentalDatagramApi : java/lang/annotation/Annotation {
+}
+
 public final class com/ditchoom/buffer/flow/FlowExtensionsKt {
 	public static final fun asStringFlow (Lkotlinx/coroutines/flow/Flow;Lcom/ditchoom/buffer/Charset;)Lkotlinx/coroutines/flow/Flow;
 	public static synthetic fun asStringFlow$default (Lkotlinx/coroutines/flow/Flow;Lcom/ditchoom/buffer/Charset;ILjava/lang/Object;)Lkotlinx/coroutines/flow/Flow;
