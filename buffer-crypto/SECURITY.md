@@ -277,12 +277,13 @@ tracked to completion:
 - **Linux** — no native crypto target is registered yet; deferred. When added it will wrap
   BoringSSL (not OpenSSL), consistent with the sibling networking module.
 - **`KeyStore` durable backends per platform** — the persistent `KeyStore` (see §4) ships now with a
-  durable on-disk `ExportableSoftware` medium on JVM / Android and an in-process medium elsewhere.
-  The OS-backed durable stores are staged follow-ups: a non-extractable WebCrypto `CryptoKey` in
-  IndexedDB (`NonExportable.Software`) on web, an AndroidKeyStore alias and an Apple Keychain / Secure
-  Enclave tag (`NonExportable.Hardware`) on device, and a POSIX file medium on Linux. Until each
-  lands, that platform's `KeyStore` reports its true (weaker) custody, so a `requireTier(Hardware)`
-  caller is correctly refused rather than silently downgraded.
+  durable on-disk `ExportableSoftware` medium on JVM / Android and a durable **`NonExportable.Software`**
+  medium on **web** (a non-extractable WebCrypto `CryptoKey` held in IndexedDB). Two OS-backed stores
+  remain staged follow-ups: an AndroidKeyStore alias and an Apple Keychain / Secure Enclave tag (both
+  `NonExportable.Hardware`), plus a POSIX file medium on Linux. Until each lands, that platform's
+  `KeyStore` reports its true (weaker) custody, so a `requireTier(Hardware)` caller is correctly
+  refused rather than silently downgraded. (The web store requires both `crypto.subtle` and
+  IndexedDB; an engine lacking either — e.g. bare Node — falls back to the in-process software tier.)
 - **Desktop JVM / Linux non-exportable custody** — desktop JVM / Linux expose no portable
   non-exportable store (DPAPI / Keychain / Secret Service are platform-native, none reachable from
   pure KMP), so both `keyProvider()` and `keyStore()` resolve to the exportable software tier (see
