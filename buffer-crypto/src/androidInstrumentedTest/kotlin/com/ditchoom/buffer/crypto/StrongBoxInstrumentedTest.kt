@@ -39,7 +39,7 @@ class StrongBoxInstrumentedTest {
     fun dedicatedSecureElementMatchesDeviceStrongBox() =
         runTest {
             val provider = provider()
-            val signing = provider.generateSigning(SignatureScheme.EcdsaP256, HardwareKeySpec())
+            val signing = provider.generateSigning(SignatureScheme.EcdsaP256, ProtectedKeySpec())
             try {
                 assertEquals(KeyProvenance.Hardware, signing.provenance)
                 // The dedicated-secure-element claim must equal the device's StrongBox capability.
@@ -65,7 +65,7 @@ class StrongBoxInstrumentedTest {
     fun aesGcmRoundTripsOnDevice() =
         runTest {
             val provider = provider()
-            val key = provider.generateAesGcm(HardwareKeySpec())
+            val key = provider.generateAesGcm(ProtectedKeySpec())
             try {
                 assertEquals(KeyProvenance.Hardware, key.provenance)
                 val ops = aesGcmAsyncOps()

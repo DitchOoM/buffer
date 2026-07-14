@@ -14,20 +14,25 @@
     <ID>MagicNumber:EcInterop.kt:48</ID>
     <ID>MagicNumber:EcInterop.kt:65</ID>
     <ID>MagicNumber:EcInterop.kt:66</ID>
+    <ID>MagicNumber:HardwareKeys.jsAndWasmJs.kt:256</ID>
+    <ID>MagicNumber:HardwareKeys.jsAndWasmJs.kt:384</ID>
+    <ID>MagicNumber:HardwareKeys.jsAndWasmJs.kt:528</ID>
     <ID>MagicNumber:Signatures.apple.kt:32</ID>
     <ID>MagicNumber:Signatures.apple.kt:48</ID>
     <ID>MagicNumber:Signatures.apple.kt:66</ID>
+    <ID>MagicNumber:WebCryptoProtectedKeyProviderTest.kt:WebCryptoProtectedKeyProviderTest$64</ID>
+    <ID>MatchingDeclarationName:HardwareKeys.jsAndWasmJs.kt:WebCryptoProtectedKeyProvider : ProtectedKeyProvider</ID>
     <ID>MatchingDeclarationName:NativeCryptoException.apple.kt:NativeCryptoException : Exception</ID>
     <ID>MatchingDeclarationName:NativeCryptoException.jsAndWasmJs.kt:NativeCryptoException : Exception</ID>
     <ID>MatchingDeclarationName:NativeCryptoException.linux.kt:NativeCryptoException : Exception</ID>
-    <ID>MaxLineLength:AeadKeyCloseTest.kt:AeadKeyCloseTest$for (i in 0 until key.requireInMemoryMaterial().limit()) assertEquals(0, key.requireInMemoryMaterial().get(i).toInt())</ID>
     <ID>MaxLineLength:AeadTamperTest.kt:AeadTamperTest$assertFailsWith&lt;VerificationFailed> { ops.open(sealed, wrongKey, Aad.Of(ascii(aad)), BufferFactory.Default) }</ID>
     <ID>MaxLineLength:EcInteropTest.kt:EcInteropTest$assertEquals(1 + curve.privateKeyBytes, compressed.remaining(), "${curve.curveName} compressed width")</ID>
     <ID>MaxLineLength:EcInteropTest.kt:EcInteropTest$private fun ByteArray.toHexString: String</ID>
     <ID>MaxLineLength:EcInteropTest.kt:EcInteropTest$val e = assertFailsWith&lt;EcEncodingException> { ecPublicKeyDecompress(KeyAgreementCurve.P256, hexBuffer("02$pHex")) }</ID>
     <ID>MaxLineLength:EcInteropTest.kt:EcInteropTest$val e = assertFailsWith&lt;EcEncodingException> { ecdsaSignatureToP1363(SignatureScheme.EcdsaP256, hexBuffer(der)) }</ID>
-    <ID>MaxLineLength:FakeHardware.kt:FakeHardware$override fun eligible: Boolean</ID>
-    <ID>MaxLineLength:FakeHardware.kt:FakeHardware$require</ID>
+    <ID>MaxLineLength:HardwareKeys.js.kt:internal actual suspend fun webCryptoGenerateNonExportableAesGcm: String</ID>
+    <ID>MaxLineLength:HardwareKeys.js.kt:internal actual suspend fun webCryptoGenerateNonExportableEcdh: String</ID>
+    <ID>MaxLineLength:HardwareKeys.js.kt:internal actual suspend fun webCryptoGenerateNonExportableEcdsa: String</ID>
     <ID>MaxLineLength:HardwareKeys.kt:suspend (nonce: ReadBuffer, aad: ReadBuffer?, ciphertextAndTag: ReadBuffer, factory: BufferFactory) -> PlatformBuffer</ID>
     <ID>MaxLineLength:HkdfSha384Sha512Test.kt:HkdfSha384Sha512Test$assertEquals(max384, HkdfSha384.derive(Salt.Of(salt), ikm, Info.Of(info), max384, BufferFactory.Default).remaining())</ID>
     <ID>MaxLineLength:HkdfSha384Sha512Test.kt:HkdfSha384Sha512Test$assertEquals(max512, HkdfSha512.derive(Salt.Of(salt), ikm, Info.Of(info), max512, BufferFactory.Default).remaining())</ID>
@@ -39,12 +44,14 @@
     <ID>MaxLineLength:HpkeContext.kt:dhkemAuthEncapWithEphemeral(suite.kem, recipientPublicKey.keyAgreementKey(), senderPrivateKey, ephemeral)</ID>
     <ID>MaxLineLength:KeyAgreement.apple.kt:internal actual suspend fun generateKeyPairAsyncPlatform: KeyAgreementKeyPair</ID>
     <ID>MaxLineLength:KeyAgreement.jvmCommon.kt:internal actual suspend fun generateKeyPairAsyncPlatform: KeyAgreementKeyPair</ID>
-    <ID>MaxLineLength:KeyAgreement.kt:KeyAgreementAsyncOpsImpl$)</ID>
+    <ID>MaxLineLength:KeyAgreement.kt:KeyAgreementAsyncOpsImpl$deriveSharedSecretAsyncPlatform(privateKey, peerPublicKey, info.bytesOrNull, length, salt.bytesOrNull, factory)</ID>
     <ID>MaxLineLength:KeyAgreement.kt:KeyAgreementBlockingOpsImpl$)</ID>
     <ID>MaxLineLength:KeyAgreement.linux.kt:internal actual suspend fun generateKeyPairAsyncPlatform: KeyAgreementKeyPair</ID>
     <ID>MaxLineLength:KeyAgreementTest.kt:KeyAgreementTest$assertEquals(viaOriginal, viaReimport, "${curve.curveName} re-imported private key must derive the same secret")</ID>
     <ID>MaxLineLength:KeyAgreementWitnessSupport.kt:?:</ID>
     <ID>MaxLineLength:KeyAgreementWitnessSupport.kt:internal</ID>
+    <ID>MaxLineLength:KeyProviderResolution.kt:ResolvingKeyProvider$override suspend fun generateAesGcm: AesGcmKey</ID>
+    <ID>MaxLineLength:KeyProviderResolution.kt:ResolvingKeyProvider$private fun pick: ConcreteKeyProvider</ID>
     <ID>MaxLineLength:SignatureBackingTest.kt:SignatureBackingTest$val sig = SigningKey.ecdsaP256(scalar, VerifyKey.ecdsaP256(hexBuffer(p256Point))).use { signAsync(it, message) }</ID>
     <ID>MaxLineLength:SignatureBackingTest.kt:SignatureBackingTest$val sig = SigningKey.ed25519(seed, VerifyKey.ed25519(hexBuffer(edPub))).use { signAsync(it, message) }</ID>
     <ID>MaxLineLength:SignatureGenerateTest.kt:SignatureGenerateTest$assertTrue(ops.verify(sk.verifyKey, message, sig), "$scheme generated key verifies its own signature")</ID>
@@ -52,7 +59,14 @@
     <ID>MaxLineLength:Signatures.jsAndWasmJs.kt:)</ID>
     <ID>MaxLineLength:Signatures.kt:SignatureBlockingOpsImpl$override fun generateSigningKeyBlocking: SyncCapableSigningKey</ID>
     <ID>MaxLineLength:Signatures.kt:SignatureBlockingOpsImpl$override suspend fun generateSigningKey: SyncCapableSigningKey</ID>
-    <ID>NestedBlockDepth:HkdfCore.kt:HkdfEngine$fun expandInto</ID>
+    <ID>MaxLineLength:WebCryptoProtectedKeyProviderTest.kt:WebCryptoProtectedKeyProviderTest$assertEquals(KeyProvenance.Software, p.custody.provenance, "WebCrypto is software-backed, not a secure element")</ID>
+    <ID>MaxLineLength:WebCryptoProtectedKeyProviderTest.kt:WebCryptoProtectedKeyProviderTest$assertEquals(keyToWrap.toHex(), recovered.toHex(), "HPKE openBase composes with a non-exportable recipient key")</ID>
+    <ID>MaxLineLength:WebCryptoProtectedKeyProviderTest.kt:WebCryptoProtectedKeyProviderTest$assertEquals(plaintext.toHex(), opened.toHex(), "AES-256-GCM round-trips through the non-exportable key")</ID>
+    <ID>MaxLineLength:WebCryptoProtectedKeyProviderTest.kt:WebCryptoProtectedKeyProviderTest$assertFalse(verifyAsync(sk.verifyKey, ascii("a different message"), signature), "a tampered message is rejected")</ID>
+    <ID>MaxLineLength:WebCryptoProtectedKeyProviderTest.kt:WebCryptoProtectedKeyProviderTest$assertTrue(protectedPair.privateKey is ProtectedKeyAgreementPrivateKey, "the KA private key is non-exportable")</ID>
+    <ID>MaxLineLength:WebCryptoProtectedKeyProviderTest.kt:WebCryptoProtectedKeyProviderTest$val fromProtected = deriveSharedSecretAsync(protectedPair.privateKey, softwarePeer.publicKey, info, 32, salt)</ID>
+    <ID>MaxLineLength:WebCryptoProtectedKeyProviderTest.kt:WebCryptoProtectedKeyProviderTest$val fromSoftware = deriveSharedSecretAsync(softwarePeer.privateKey, protectedPair.publicKey, info, 32, salt)</ID>
+    <ID>MaxLineLength:WebCryptoProtectedKeyProviderTest.kt:WebCryptoProtectedKeyProviderTest$val recovered = ops.openBase(recipientPrivate, sealed.enc, Info.Of(info), sealed.ciphertext, Aad.Of(aad))</ID>
     <ID>ReturnCount:EcInterop.kt:DerCursor$fun matchOid: Boolean</ID>
     <ID>ReturnCount:HpkeKatTest.kt:HpkeKatTest$private suspend fun runVector: Int</ID>
     <ID>ReturnCount:Signatures.apple.kt:private fun appleEcdsaVerify: Boolean</ID>
@@ -65,9 +79,15 @@
     <ID>ReturnCount:Signatures.linux.kt:private fun ed25519Verify: Boolean</ID>
     <ID>ReturnCount:Signatures.linux.kt:private fun inRangeOneToOrder: Boolean</ID>
     <ID>ReturnCount:Signatures.linux.kt:private fun isCanonicalEcdsaDer: Boolean</ID>
+    <ID>ThrowsCount:HardwareKeys.jsAndWasmJs.kt:WebCryptoProtectedKeyProvider$override suspend fun generateAesGcm: AesGcmKey</ID>
+    <ID>ThrowsCount:HardwareKeys.jsAndWasmJs.kt:WebCryptoProtectedKeyProvider$override suspend fun generateKeyAgreement: KeyAgreementKeyPair</ID>
     <ID>TooManyFunctions:Aead.jvmCommon.kt:com.ditchoom.buffer.crypto.Aead.jvmCommon.kt</ID>
     <ID>TooManyFunctions:Aead.kt:com.ditchoom.buffer.crypto.Aead.kt</ID>
     <ID>TooManyFunctions:EcInterop.kt:com.ditchoom.buffer.crypto.EcInterop.kt</ID>
+    <ID>TooManyFunctions:HardwareKeys.android.kt:AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider</ID>
+    <ID>TooManyFunctions:HardwareKeys.js.kt:com.ditchoom.buffer.crypto.HardwareKeys.js.kt</ID>
+    <ID>TooManyFunctions:HardwareKeys.jsAndWasmJs.kt:com.ditchoom.buffer.crypto.HardwareKeys.jsAndWasmJs.kt</ID>
+    <ID>TooManyFunctions:HardwareKeys.wasmJs.kt:com.ditchoom.buffer.crypto.HardwareKeys.wasmJs.kt</ID>
     <ID>TooManyFunctions:Hpke.kt:com.ditchoom.buffer.crypto.Hpke.kt</ID>
     <ID>TooManyFunctions:HpkeContext.kt:com.ditchoom.buffer.crypto.HpkeContext.kt</ID>
     <ID>TooManyFunctions:KeyAgreement.apple.kt:com.ditchoom.buffer.crypto.KeyAgreement.apple.kt</ID>

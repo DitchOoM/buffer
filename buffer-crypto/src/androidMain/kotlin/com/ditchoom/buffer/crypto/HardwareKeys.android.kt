@@ -105,19 +105,26 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
      */
     override val dedicatedSecureElement: Boolean by lazy { probeStrongBox() }
 
-    override fun eligible(alg: HardwareAlgorithm): Boolean =
+    override fun eligible(alg: ProtectedKeyAlgorithm): Boolean =
         when (alg) {
-            HardwareAlgorithm.AesGcm, HardwareAlgorithm.EcdsaP256 -> true
+            ProtectedKeyAlgorithm.AesGcm, ProtectedKeyAlgorithm.EcdsaP256 -> true
             else -> false
         }
 
-    override suspend fun generateAesGcm(spec: HardwareKeySpec): AesGcmKey =
+    override suspend fun generateAesGcm(spec: ProtectedKeySpec): AesGcmKey =
         generateAesGcmBound(ResolvedAndroidPolicy.Advisory(spec.authorization), spec.aesKeySizeBits)
 
     override suspend fun generateSigning(
         scheme: SignatureScheme,
-        spec: HardwareKeySpec,
+        spec: ProtectedKeySpec,
     ): SigningKey = generateSigningBound(ResolvedAndroidPolicy.Advisory(spec.authorization), scheme)
+
+    override suspend fun generateKeyAgreement(
+        curve: KeyAgreementCurve,
+        spec: ProtectedKeySpec,
+    ): KeyAgreementKeyPair =
+        // Android Keystore backs no app-controlled ECDH/X25519 agreement key here; not eligible.
+        throw HardwareKeyException.AlgorithmNotEligible()
 
     /** Generates an AES-GCM keystore key under [policy] — the shared path for unbound and OS-bound keys. */
     internal suspend fun generateAesGcmBound(
@@ -130,8 +137,9 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
         if (!validSize) throw HardwareKeyException.UnsupportedHardwareKey()
         val alias = newAlias("aes")
         val key = keystoreOp { generateAesKey(alias, aesKeySizeBits, policy) }
-        return HardwareAesGcmKey(
+        return ProtectedAesGcmKey(
             sizeBits = aesKeySizeBits,
+            custody = custody,
             gatedSeal = { aad, plaintext, factory ->
                 gatedOp(
                     policy = policy,
@@ -186,13 +194,14 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
         policy: ResolvedAndroidPolicy,
         scheme: SignatureScheme,
     ): SigningKey {
-        if (!eligible(scheme.toHardwareAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
+        if (!eligible(scheme.toProtectedKeyAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
         val alias = newAlias("ec")
         val keyPair = keystoreOp { generateEcKeyPair(alias, policy) }
         val privateKey = keyPair.private
         val verifyKey = VerifyKey.ecdsaP256(uncompressedPoint(keyPair.public as ECPublicKey))
-        return HardwareSigningKey(
+        return ProtectedSigningKey(
             scheme = SignatureScheme.EcdsaP256,
+            custody = custody,
             gatedSign = { message, factory ->
                 gatedOp(
                     policy = policy,
@@ -383,7 +392,7 @@ private fun aesSpec(
         .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
         .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
         // Randomized encryption stays *required* (the default): the keystore picks a fresh GCM IV
-        // per seal, which the witness reads back and frames (see HardwareAesGcmKey.gatedSeal). The
+        // per seal, which the witness reads back and frames (see ProtectedAesGcmKey.gatedSeal). The
         // library never supplies a seal nonce — one reused GCM (key, nonce) pair is catastrophic.
         .setIsStrongBoxBacked(strongBox)
         .apply { applyUserAuth(policy) }
@@ -496,4 +505,4 @@ private val androidProvider: HardwareKeyProvider? by lazy {
     }
 }
 
-internal actual fun platformHardwareKeyProvider(): HardwareKeyProvider? = androidProvider
+internal actual fun platformProtectedKeyProvider(): ProtectedKeyProvider? = androidProvider

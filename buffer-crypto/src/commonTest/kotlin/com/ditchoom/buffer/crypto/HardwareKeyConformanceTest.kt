@@ -32,8 +32,8 @@ import kotlin.time.TestTimeSource
  */
 class HardwareKeyConformanceTest {
     private val provider = FakeHardware()
-    private val grant = HardwareKeySpec()
-    private val deny = HardwareKeySpec(authorization = HardwareAuthorization { false })
+    private val grant = ProtectedKeySpec()
+    private val deny = ProtectedKeySpec(authorization = HardwareAuthorization { false })
 
     @Test
     fun hardwareCapabilityReflectsThePlatformBackend() =
@@ -52,10 +52,15 @@ class HardwareKeyConformanceTest {
     /** A real (non-fake) provider must round-trip its eligible primitives and expose the verify key. */
     private suspend fun assertRealProviderWorks(provider: HardwareKeyProvider) {
         // Every shipping secure element backs ECDSA P-256; prove a real sign → verify-under-public-key.
-        assertTrue(provider.eligible(HardwareAlgorithm.EcdsaP256), "a real provider backs ECDSA P-256")
+        assertTrue(provider.eligible(ProtectedKeyAlgorithm.EcdsaP256), "a real provider backs ECDSA P-256")
         val signing = provider.generateSigning(SignatureScheme.EcdsaP256, grant)
         try {
             assertEquals(KeyProvenance.Hardware, signing.provenance)
+            // A real hardware key self-describes as non-exportable hardware custody, and its 6.0
+            // provenance is exactly the derivation off that single value.
+            assertTrue(signing.custody is KeyCustody.NonExportable.Hardware, "real hw signing key is hardware custody")
+            assertFalse(signing.custody.exportable, "a hardware key is never exportable")
+            assertEquals(signing.custody.provenance, signing.provenance)
             val vk = signing.verifyKey
             val ops = signatureAsyncOrNull(SignatureScheme.EcdsaP256)
             if (ops != null) {
@@ -68,7 +73,7 @@ class HardwareKeyConformanceTest {
         }
 
         // AES-GCM is backed by StrongBox/TEE (Android) but not the Enclave (Apple) — gate on eligibility.
-        if (provider.eligible(HardwareAlgorithm.AesGcm)) {
+        if (provider.eligible(ProtectedKeyAlgorithm.AesGcm)) {
             val aes = provider.generateAesGcm(grant)
             try {
                 assertEquals(KeyProvenance.Hardware, aes.provenance)
@@ -85,12 +90,12 @@ class HardwareKeyConformanceTest {
 
     @Test
     fun eligibilityIsARealisticSubset() {
-        assertTrue(provider.eligible(HardwareAlgorithm.AesGcm), "AES-GCM is eligible")
-        assertTrue(provider.eligible(HardwareAlgorithm.EcdsaP256), "ECDSA P-256 is eligible")
+        assertTrue(provider.eligible(ProtectedKeyAlgorithm.AesGcm), "AES-GCM is eligible")
+        assertTrue(provider.eligible(ProtectedKeyAlgorithm.EcdsaP256), "ECDSA P-256 is eligible")
         // A secure element backs neither ChaCha20-Poly1305 nor Ed25519 (nor P-384/P-521 here).
-        assertTrue(!provider.eligible(HardwareAlgorithm.Ed25519), "Ed25519 not eligible")
-        assertTrue(!provider.eligible(HardwareAlgorithm.EcdsaP384), "P-384 not eligible")
-        assertTrue(!provider.eligible(HardwareAlgorithm.EcdsaP521), "P-521 not eligible")
+        assertTrue(!provider.eligible(ProtectedKeyAlgorithm.Ed25519), "Ed25519 not eligible")
+        assertTrue(!provider.eligible(ProtectedKeyAlgorithm.EcdsaP384), "P-384 not eligible")
+        assertTrue(!provider.eligible(ProtectedKeyAlgorithm.EcdsaP521), "P-521 not eligible")
     }
 
     @Test
@@ -98,6 +103,91 @@ class HardwareKeyConformanceTest {
         runTest {
             assertEquals(KeyProvenance.Hardware, provider.generateAesGcm(grant).provenance)
             assertEquals(KeyProvenance.Hardware, provider.generateSigning(SignatureScheme.EcdsaP256, grant).provenance)
+        }
+
+    @Test
+    fun generatedKeysCarrySelfDescribingHardwareCustody() =
+        runTest {
+            val aes = provider.generateAesGcm(grant)
+            val signing = provider.generateSigning(SignatureScheme.EcdsaP256, grant)
+            try {
+                for (key in listOf<Any>(aes, signing)) {
+                    val custody = if (key is AesGcmKey) key.custody else (key as SigningKey).custody
+                    // One canonical value; every other custody fact is derived from it, so they can
+                    // never disagree.
+                    assertTrue(custody is KeyCustody.NonExportable.Hardware, "hw key custody is NonExportable.Hardware")
+                    assertFalse(custody.exportable, "a hardware key is never exportable")
+                    assertEquals(KeyProvenance.Hardware, custody.provenance)
+                    assertEquals(CustodyTier.Hardware, custody.tier)
+                    assertTrue(custody.dedicatedSecureElement, "the fake models a dedicated secure element")
+                }
+                // Custody is an exhaustive sealed value — this `when` compiles without an `else`.
+                val label =
+                    when (signing.custody) {
+                        KeyCustody.ExportableSoftware -> "exportable-software"
+                        KeyCustody.NonExportable.Software -> "non-exportable-software"
+                        is KeyCustody.NonExportable.Hardware -> "hardware"
+                    }
+                assertEquals("hardware", label)
+            } finally {
+                aes.close()
+                signing.close()
+            }
+        }
+
+    @Test
+    fun custodyReflectsDedicatedSecureElementFlag() =
+        runTest {
+            // A TEE-only provider (no dedicated element) must yield keys whose custody says so — the
+            // one field flows all the way into the minted key, unforgeable at the call site.
+            val teeOnly = FakeHardware(dedicatedSecureElement = false)
+            val key = teeOnly.generateSigning(SignatureScheme.EcdsaP256, grant)
+            try {
+                val custody = key.custody
+                assertTrue(custody is KeyCustody.NonExportable.Hardware, "still hardware custody")
+                assertFalse(custody.dedicatedSecureElement, "a TEE-only key must not claim a dedicated element")
+                assertEquals(CustodyTier.Hardware, custody.tier)
+            } finally {
+                key.close()
+            }
+        }
+
+    @Test
+    fun providerAdvertisesItsCustodyPerAlgorithm() {
+        // A single-tier provider reports the same custody for every eligible algorithm, and a hardware
+        // provider is (by type) also a non-exportable ProtectedKeyProvider.
+        assertEquals(KeyCustody.NonExportable.Hardware(dedicatedSecureElement = true), provider.custody)
+        assertEquals(provider.custody, provider.custodyFor(ProtectedKeyAlgorithm.EcdsaP256))
+        assertEquals(provider.custody, provider.custodyFor(ProtectedKeyAlgorithm.AesGcm))
+        // The tier relationship is compile-time: this assignment only type-checks because a
+        // HardwareKeyProvider IS a (non-exportable) ProtectedKeyProvider, and its custody narrows to
+        // NonExportable — an exportable hardware provider would not compile.
+        val protected: ProtectedKeyProvider = provider
+        val nonExportable: KeyCustody.NonExportable = protected.custody
+        assertEquals(provider.custody, nonExportable)
+    }
+
+    @Test
+    fun inMemoryKeysReportExportableSoftwareCustody() {
+        // The software floor: an in-memory key self-describes as exportable software — the counter-tier
+        // that the hardware assertions above are distinguished from.
+        AesGcmKey.of(ascii("0123456789abcdef")).use { aes ->
+            assertEquals(KeyCustody.ExportableSoftware, aes.custody)
+            assertTrue(aes.custody.exportable, "an in-memory key is exportable")
+            assertEquals(KeyProvenance.Software, aes.provenance)
+            assertEquals(CustodyTier.ExportableSoftware, aes.custody.tier)
+            assertFalse(aes.custody.dedicatedSecureElement, "software custody is not a dedicated element")
+        }
+    }
+
+    @Test
+    fun generateKeyAgreementIsNotEligibleOnHardware() =
+        runTest {
+            // The hardware providers back no app-controlled agreement key; the request is refused with
+            // the same typed error as any ineligible algorithm.
+            assertFailsWith<HardwareKeyException.AlgorithmNotEligible> {
+                provider.generateKeyAgreement(KeyAgreementCurve.P256, grant)
+            }
         }
 
     @Test
@@ -114,7 +204,7 @@ class HardwareKeyConformanceTest {
     fun generateAesGcmRejectsUnsupportedKeySizeTyped() =
         runTest {
             assertFailsWith<HardwareKeyException.UnsupportedHardwareKey> {
-                provider.generateAesGcm(HardwareKeySpec(aesKeySizeBits = 192))
+                provider.generateAesGcm(ProtectedKeySpec(aesKeySizeBits = 192))
             }
         }
 

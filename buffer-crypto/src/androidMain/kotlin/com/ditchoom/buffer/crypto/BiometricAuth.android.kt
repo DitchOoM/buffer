@@ -140,7 +140,7 @@ class BiometricPromptAuthenticator(
  * no nullable downstream, no runtime validation state).
  */
 internal sealed interface ResolvedAndroidPolicy {
-    /** No OS binding; [gate] is the advisory [HardwareKeySpec.authorization]. */
+    /** No OS binding; [gate] is the advisory [ProtectedKeySpec.authorization]. */
     class Advisory(
         val gate: HardwareAuthorization,
     ) : ResolvedAndroidPolicy
@@ -168,7 +168,7 @@ internal class AndroidUserAuthenticatedKeyProvider(
     private val base: AndroidKeystoreHardwareKeyProvider,
     private val prompt: BiometricAuthorization,
 ) : UserAuthenticatedKeyProvider {
-    override fun eligible(alg: HardwareAlgorithm): Boolean = base.eligible(alg)
+    override fun eligible(alg: ProtectedKeyAlgorithm): Boolean = base.eligible(alg)
 
     override suspend fun generateAesGcm(
         policy: UserAuthenticationPolicy,

@@ -122,8 +122,15 @@ sealed interface SigningKey : AutoCloseable {
     /** The scheme this key signs under. */
     val scheme: SignatureScheme
 
-    /** Whether the key material is in software memory or hardware-backed. */
-    val provenance: KeyProvenance
+    /**
+     * This key's custody — where its secret lives and whether the process can read it. A key is
+     * self-describing: it carries its own [KeyCustody] so it stays honest across module boundaries,
+     * independent of the provider that minted it.
+     */
+    val custody: KeyCustody
+
+    /** Whether the key material is in software memory or hardware-backed. Derived from [custody]. */
+    val provenance: KeyProvenance get() = custody.provenance
 
     /**
      * The public [VerifyKey] matching this signing key. Every signing key knows its verifier:
@@ -204,7 +211,7 @@ internal class InMemorySigningKey(
     private val material: PlatformBuffer,
     override val verifyKey: VerifyKey,
 ) : SyncCapableSigningKey {
-    override val provenance: KeyProvenance get() = KeyProvenance.Software
+    override val custody: KeyCustody get() = KeyCustody.ExportableSoftware
     private var closed = false
 
     /** Zeroes and frees the key material. Idempotent. */
@@ -276,8 +283,8 @@ internal fun SigningKey.requireInMemoryMaterial(): PlatformBuffer =
         is InMemorySigningKey -> requireOpen()
         // A hardware signing key holds no exportable material; it signs only through the async
         // witness op (the gated closure) and never reaches here. This throw is the safety net if a
-        // caller routes a hardware key into the blocking sign path. See [HardwareSigningKey].
-        is HardwareSigningKey -> throw UnsupportedOperationException("hardware signing key has no synchronous path")
+        // caller routes a hardware key into the blocking sign path. See [ProtectedSigningKey].
+        is ProtectedSigningKey -> throw UnsupportedOperationException("hardware signing key has no synchronous path")
     }
 
 /** See [SigningKey.requireInMemoryMaterial]. */
@@ -496,7 +503,7 @@ internal class SignatureBlockingOpsImpl(
     ): ReadBuffer =
         when (key) {
             is InMemorySigningKey -> signBlocking(key, message, factory)
-            is HardwareSigningKey -> key.gatedSign(message, factory)
+            is ProtectedSigningKey -> key.gatedSign(message, factory)
         }
 
     override suspend fun verify(
@@ -522,10 +529,10 @@ internal class SignatureAsyncOpsImpl(
         factory: BufferFactory,
     ): ReadBuffer =
         // A hardware key signs through its gated closure (no in-process material); an in-memory key
-        // goes through the platform primitive. Adding HardwareSigningKey forces this branch.
+        // goes through the platform primitive. Adding ProtectedSigningKey forces this branch.
         when (key) {
             is InMemorySigningKey -> signAsyncPlatform(key, message, factory)
-            is HardwareSigningKey -> key.gatedSign(message, factory)
+            is ProtectedSigningKey -> key.gatedSign(message, factory)
         }
 
     override suspend fun verify(

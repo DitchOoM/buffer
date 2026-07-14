@@ -431,7 +431,7 @@ private fun rawAgree(
  * is caught on purpose so no provider exception type/cause leaks a public-point oracle.
  */
 @Suppress("SwallowedException", "TooGenericExceptionCaught", "ThrowsCount")
-internal actual suspend fun dhRawSecret(
+internal actual suspend fun dhRawSecretInMemory(
     privateKey: KeyAgreementPrivateKey,
     peerPublicKey: KeyAgreementPublicKey,
 ): PlatformBuffer {

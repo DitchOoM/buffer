@@ -11,7 +11,7 @@ import kotlin.time.Duration.Companion.seconds
  * keystore backend can land later as a non-breaking minor.
  *
  * The whole family is built so that "hardware key" is never a special case a consumer must remember
- * to handle: a [HardwareAesGcmKey] is an [AesGcmKey] and a [HardwareSigningKey] is a [SigningKey], so
+ * to handle: a [ProtectedAesGcmKey] is an [AesGcmKey] and a [ProtectedSigningKey] is a [SigningKey], so
  * they flow through the exact same capability witnesses ([CryptoCapabilities.aesGcm],
  * [CryptoCapabilities.signatures]). What differs is reified in the type system, not in runtime
  * branching the caller writes:
@@ -35,10 +35,10 @@ import kotlin.time.Duration.Companion.seconds
 
 /**
  * The algorithms a [HardwareKeyProvider] may be asked to generate keys for. A flat, closed enum (not
- * free-text identifiers) so eligibility checks and dispatch are exhaustive and typo-proof. Only the
- * families a secure element actually backs appear here.
+ * free-text identifiers) so eligibility checks and dispatch are exhaustive and typo-proof. Covers the
+ * families a non-exportable key backend (secure element or non-exportable software) actually mints.
  */
-enum class HardwareAlgorithm {
+enum class ProtectedKeyAlgorithm {
     /** AES-256-GCM (symmetric AEAD). */
     AesGcm,
 
@@ -53,15 +53,31 @@ enum class HardwareAlgorithm {
 
     /** ECDSA over NIST P-521 with SHA-512. */
     EcdsaP521,
+
+    /** X25519 key agreement (RFC 7748). */
+    X25519,
+
+    /** ECDH key agreement over NIST P-256. */
+    EcdhP256,
+
+    /** ECDH key agreement over NIST P-384. */
+    EcdhP384,
+
+    /** ECDH key agreement over NIST P-521. */
+    EcdhP521,
 }
 
-/** The [HardwareAlgorithm] a signature [scheme] maps to, for eligibility checks. */
-internal fun SignatureScheme.toHardwareAlgorithm(): HardwareAlgorithm =
+/** Renamed to [ProtectedKeyAlgorithm]. */
+@Deprecated("Renamed to ProtectedKeyAlgorithm", ReplaceWith("ProtectedKeyAlgorithm"))
+typealias HardwareAlgorithm = ProtectedKeyAlgorithm
+
+/** The [ProtectedKeyAlgorithm] a signature [scheme] maps to, for eligibility checks. */
+internal fun SignatureScheme.toProtectedKeyAlgorithm(): ProtectedKeyAlgorithm =
     when (this) {
-        SignatureScheme.Ed25519 -> HardwareAlgorithm.Ed25519
-        SignatureScheme.EcdsaP256 -> HardwareAlgorithm.EcdsaP256
-        SignatureScheme.EcdsaP384 -> HardwareAlgorithm.EcdsaP384
-        SignatureScheme.EcdsaP521 -> HardwareAlgorithm.EcdsaP521
+        SignatureScheme.Ed25519 -> ProtectedKeyAlgorithm.Ed25519
+        SignatureScheme.EcdsaP256 -> ProtectedKeyAlgorithm.EcdsaP256
+        SignatureScheme.EcdsaP384 -> ProtectedKeyAlgorithm.EcdsaP384
+        SignatureScheme.EcdsaP521 -> ProtectedKeyAlgorithm.EcdsaP521
     }
 
 /**
@@ -138,7 +154,7 @@ sealed interface UserAuthenticationPolicy {
 /**
  * Mints hardware keys that are **bound to user authentication inside the secure element** — an op
  * on an unauthenticated key fails in hardware no matter what the process does, unlike the advisory
- * [HardwareKeySpec.authorization] gate on [HardwareKeyProvider]'s unbound keys.
+ * [ProtectedKeySpec.authorization] gate on [HardwareKeyProvider]'s unbound keys.
  *
  * Obtained from a [HardwareKeyProvider] through a **platform** `userAuthenticated(...)` extension
  * (androidMain takes a `BiometricAuthorization` prompt host, appleMain a `LocalAuthAuthenticator`),
@@ -156,7 +172,7 @@ sealed interface UserAuthenticationPolicy {
  */
 interface UserAuthenticatedKeyProvider {
     /** Whether the underlying secure element can generate a key for [alg] (same subset as the base provider). */
-    fun eligible(alg: HardwareAlgorithm): Boolean
+    fun eligible(alg: ProtectedKeyAlgorithm): Boolean
 
     /**
      * Generates a fresh AES-GCM key inside the secure element, OS-bound to [policy].
@@ -176,10 +192,10 @@ interface UserAuthenticatedKeyProvider {
 }
 
 /**
- * Generation parameters for a hardware-backed key. Carried by value (no platform handles) so the
- * shape is identical on every target.
+ * Generation parameters for a protected (non-exportable) key. Carried by value (no platform handles)
+ * so the shape is identical on every target.
  */
-class HardwareKeySpec(
+class ProtectedKeySpec(
     /**
      * The advisory gate evaluated before each use of the generated key. The default authorizes
      * unconditionally. Library code deciding whether to proceed — *not* an OS binding; for keys
@@ -194,6 +210,10 @@ class HardwareKeySpec(
     val aesKeySizeBits: Int = AES_256_KEY_BYTES * Byte.SIZE_BITS,
 )
 
+/** Renamed to [ProtectedKeySpec]. */
+@Deprecated("Renamed to ProtectedKeySpec", ReplaceWith("ProtectedKeySpec"))
+typealias HardwareKeySpec = ProtectedKeySpec
+
 /**
  * Service-provider interface a platform implements to mint hardware-backed keys from a secure
  * element / keystore. No platform ships one in 6.0; the type is the integration seam a later minor
@@ -206,7 +226,7 @@ class HardwareKeySpec(
  * closures a provider builds into each key, but the *gate itself is the provider's responsibility* —
  * the common code holds no authorization to evaluate. Therefore an implementation **MUST**, for every
  * key it generates:
- *  1. evaluate [HardwareKeySpec.authorization] (`authorize()`) before each use of the key, and throw
+ *  1. evaluate [ProtectedKeySpec.authorization] (`authorize()`) before each use of the key, and throw
  *     [AuthorizationFailed] when it returns `false` or throws — never proceed with the crypto op;
  *  2. keep secret key material inside the secure element — never expose it through any returned type
  *     (the [KeyProvenance.Hardware] key types carry no exportable material by construction);
@@ -221,31 +241,39 @@ class HardwareKeySpec(
  * the op exactly once; [UserAuthenticationPolicy.PerUse]: for every op, bound to the exact crypto
  * operation where the platform supports binding.
  */
-interface HardwareKeyProvider {
+interface HardwareKeyProvider : ProtectedKeyProvider {
     /**
      * `true` if keys live in a dedicated secure element (StrongBox / Secure Enclave), `false` for a
      * software-isolated keystore (TEE-only). Informational; does not change the op contract.
      */
     val dedicatedSecureElement: Boolean
 
+    /**
+     * A hardware provider's keys are always [KeyCustody.NonExportable.Hardware]; the narrowed return
+     * type re-states, at the type level, that a hardware key can never be exportable or
+     * software-backed. Derived from [dedicatedSecureElement] so the two can never disagree.
+     */
+    override val custody: KeyCustody.NonExportable.Hardware
+        get() = KeyCustody.NonExportable.Hardware(dedicatedSecureElement)
+
     /** Whether this provider can generate a key for [alg] (a secure element backs only a subset). */
-    fun eligible(alg: HardwareAlgorithm): Boolean
+    override fun eligible(alg: ProtectedKeyAlgorithm): Boolean
 
     /**
      * Generates a fresh AES-GCM key inside the secure element. The returned [AesGcmKey] has
      * [KeyProvenance.Hardware] and no exportable material; it operates only through the async AEAD
-     * witness ops, gated by [spec]'s [HardwareKeySpec.authorization].
+     * witness ops, gated by [spec]'s [ProtectedKeySpec.authorization].
      */
-    suspend fun generateAesGcm(spec: HardwareKeySpec): AesGcmKey
+    override suspend fun generateAesGcm(spec: ProtectedKeySpec): AesGcmKey
 
     /**
      * Generates a fresh signing key for [scheme] inside the secure element. The returned [SigningKey]
      * has [KeyProvenance.Hardware] and no exportable material; it signs only through the async
-     * signature witness ops, gated by [spec]'s [HardwareKeySpec.authorization].
+     * signature witness ops, gated by [spec]'s [ProtectedKeySpec.authorization].
      */
-    suspend fun generateSigning(
+    override suspend fun generateSigning(
         scheme: SignatureScheme,
-        spec: HardwareKeySpec,
+        spec: ProtectedKeySpec,
     ): SigningKey
 }
 
@@ -271,22 +299,17 @@ sealed interface HardwareSupport {
  * [HardwareSupport.Unavailable] elsewhere (JVM, JS/WASM, Linux).
  *
  * A plain `val` (not `expect`/`actual`) by design: the *public* signature is frozen, and a backend
- * resolves through the **internal** [platformHardwareKeyProvider] seam, so a later platform can wire
+ * resolves through the **internal** [platformProtectedKeyProvider] seam, so a later platform can wire
  * a provider without changing this declaration. The seam is `internal`, so it never enters the
- * public ABI.
+ * public ABI. This is the secure-element-only refinement of [CryptoCapabilities.protectedKeys]: it
+ * reports [HardwareSupport.Available] only when the platform's non-exportable provider is a
+ * [HardwareKeyProvider], so a non-exportable *software* provider (WebCrypto) is deliberately not
+ * surfaced here.
  */
 val CryptoCapabilities.hardware: HardwareSupport get() =
-    platformHardwareKeyProvider()
+    (platformProtectedKeyProvider() as? HardwareKeyProvider)
         ?.let { HardwareSupport.Available(it) }
         ?: HardwareSupport.Unavailable
-
-/**
- * The platform's hardware-backed key provider, or `null` when this platform wires none (or the
- * secure element is present but not actually usable — e.g. an unentitled test binary). `internal`
- * and `expect`/`actual` so it stays out of the public ABI while [CryptoCapabilities.hardware]'s
- * signature remains frozen. Implementations resolve a cheap, cached singleton.
- */
-internal expect fun platformHardwareKeyProvider(): HardwareKeyProvider?
 
 // =============================================================================
 // Internal hardware-backed key impls — gated async closures, never exportable material
@@ -316,18 +339,30 @@ internal typealias HardwareSign =
     suspend (message: ReadBuffer, factory: BufferFactory) -> ReadBuffer
 
 /**
- * Hardware-backed [AesGcmKey]: an opaque handle with no exportable material. Seal/open route through
- * the provider-supplied gated closures; the blocking witness path is unreachable because
- * [requireInMemoryMaterial] throws for this type.
+ * A gated raw Diffie–Hellman: computes `DH(sk, peer)` inside the non-exportable backend and yields
+ * the **raw** shared secret in a wiped [SecureBuffer] (read-ready, `curve.sharedSecretBytes` bytes),
+ * or throws [AuthorizationFailed] / [InvalidPublicKey]. This is exactly the KEM's `DH(sk, enc)`
+ * primitive: the caller (the common key-agreement / DHKEM seam) runs the HKDF / all-zero rejection
+ * above it, so the whole `keyAgreement()` / `hpke()` machinery composes with a non-exportable
+ * private key whose scalar never enters process memory.
  */
-internal class HardwareAesGcmKey(
+internal typealias HardwareDh =
+    suspend (peer: KeyAgreementPublicKey) -> PlatformBuffer
+
+/**
+ * Non-exportable [AesGcmKey]: an opaque handle with no exportable material. Seal/open route through
+ * the provider-supplied gated closures; the blocking witness path is unreachable because
+ * [requireInMemoryMaterial] throws for this type. The [custody] param type [KeyCustody.NonExportable]
+ * makes an *exportable* protected key unconstructable — it is either non-exportable software
+ * (WebCrypto) or hardware. [provenance] is derived from it and can never disagree.
+ */
+internal class ProtectedAesGcmKey(
     override val sizeBits: Int,
+    override val custody: KeyCustody.NonExportable,
     val gatedSeal: HardwareAesGcmSeal,
     val gatedOpen: HardwareAesGcmOpen,
     private val onClose: () -> Unit = {},
 ) : AesGcmKey {
-    override val provenance: KeyProvenance get() = KeyProvenance.Hardware
-
     /**
      * Opaque handle; there is no process-memory material to wipe. [onClose] lets a provider release
      * an out-of-process resource (e.g. delete the keystore alias). Defaults to a no-op.
@@ -336,19 +371,19 @@ internal class HardwareAesGcmKey(
 }
 
 /**
- * Hardware-backed [SigningKey]: an opaque handle with no exportable material. Signing routes through
+ * Non-exportable [SigningKey]: an opaque handle with no exportable material. Signing routes through
  * the provider-supplied gated closure; the blocking witness path is unreachable because
- * [requireInMemoryMaterial] throws for this type.
+ * [requireInMemoryMaterial] throws for this type. The [custody] param type [KeyCustody.NonExportable]
+ * makes an *exportable* protected key unconstructable; [provenance] is derived from it.
  */
-internal class HardwareSigningKey(
+internal class ProtectedSigningKey(
     override val scheme: SignatureScheme,
+    override val custody: KeyCustody.NonExportable,
     val gatedSign: HardwareSign,
     /** The public key matching this signing key, captured by the provider at generation. */
     override val verifyKey: VerifyKey,
     private val onClose: () -> Unit = {},
 ) : SigningKey {
-    override val provenance: KeyProvenance get() = KeyProvenance.Hardware
-
     /**
      * Opaque handle; there is no process-memory material to wipe. [onClose] lets a provider release
      * an out-of-process resource (e.g. delete the keystore alias). Defaults to a no-op.

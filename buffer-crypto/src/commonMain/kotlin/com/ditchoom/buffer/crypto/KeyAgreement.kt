@@ -214,6 +214,34 @@ sealed interface KeyAgreementKeyPair : AutoCloseable {
     }
 }
 
+/**
+ * A **non-exportable** [KeyAgreementPrivateKey]: an opaque handle whose private scalar never enters
+ * process memory (WebCrypto `extractable:false`, or a secure element). It carries no exportable
+ * material — [exportEncoded] throws — and its Diffie–Hellman routes through the provider-supplied
+ * [gatedDh] closure, so it flows through the ordinary `keyAgreement()` / `hpke()` witnesses unchanged
+ * (see [dhRawSecret] and the witness `deriveSharedSecret` dispatch). The [custody] param type
+ * [KeyCustody.NonExportable] makes an *exportable* protected agreement key unconstructable;
+ * [provenance] is derived from it and can never disagree.
+ */
+internal class ProtectedKeyAgreementPrivateKey(
+    override val curve: KeyAgreementCurve,
+    val custody: KeyCustody.NonExportable,
+    val gatedDh: HardwareDh,
+    private val onClose: () -> Unit = {},
+) : KeyAgreementPrivateKey {
+    override val provenance: KeyProvenance get() = custody.provenance
+
+    /**
+     * Opaque handle; there is no process-memory scalar to wipe. [onClose] lets a provider release an
+     * out-of-process resource (e.g. drop the WebCrypto key handle). Defaults to a no-op.
+     */
+    override fun close() = onClose()
+
+    /** A non-exportable key holds no exportable material; export is unsupported by construction. */
+    override fun exportEncoded(factory: BufferFactory): ReadBuffer =
+        throw UnsupportedOperationException("non-exportable key-agreement key has no exportable material")
+}
+
 /** In-memory [KeyAgreementKeyPair] produced by the platform glue / imports. */
 internal class InMemoryKeyAgreementKeyPair(
     override val curve: KeyAgreementCurve,
@@ -229,7 +257,29 @@ internal class InMemoryKeyAgreementKeyPair(
 internal fun KeyAgreementPrivateKey.requireInMemoryMaterial(): PlatformBuffer =
     when (this) {
         is InMemoryKeyAgreementPrivateKey -> requireOpen()
+        // A non-exportable key holds no in-process scalar; its DH routes through the gated closure and
+        // never reaches here. This throw is the safety net if a caller routes one into a path that
+        // reads raw material. See [ProtectedKeyAgreementPrivateKey].
+        is ProtectedKeyAgreementPrivateKey ->
+            throw UnsupportedOperationException("non-exportable key-agreement key has no synchronous material")
     }
+
+/**
+ * Derives shared key material from a **non-exportable** private key by running its [gatedDh] closure
+ * (the raw `DH(sk, peer)`) through the single audited [deriveFromRawSecret] KDF path — the same
+ * all-zero rejection + HKDF the in-memory path uses. Shared by both key-agreement witness impls so a
+ * non-exportable key behaves identically regardless of which witness resolved.
+ */
+internal suspend fun ProtectedKeyAgreementPrivateKey.deriveShared(
+    peerPublicKey: KeyAgreementPublicKey,
+    info: ReadBuffer?,
+    length: Int,
+    salt: ReadBuffer?,
+    factory: BufferFactory,
+): ReadBuffer {
+    require(curve == peerPublicKey.curve) { "private/public key curve mismatch" }
+    return deriveFromRawSecret(curve, gatedDh(peerPublicKey), info, length, salt, factory)
+}
 
 /** Builds an in-memory private key wrapping [material] (a wiped [SecureBuffer], read-ready). */
 internal fun keyAgreementPrivateKeyOf(
@@ -389,7 +439,14 @@ internal class KeyAgreementBlockingOpsImpl(
         length: Int,
         salt: Salt,
         factory: BufferFactory,
-    ): ReadBuffer = deriveSharedSecretBlocking(privateKey, peerPublicKey, info, length, salt, factory)
+    ): ReadBuffer =
+        // A non-exportable key has no in-process scalar for the blocking primitive, so even on a
+        // Blocking platform it derives through its gated closure.
+        if (privateKey is ProtectedKeyAgreementPrivateKey) {
+            privateKey.deriveShared(peerPublicKey, info.bytesOrNull, length, salt.bytesOrNull, factory)
+        } else {
+            deriveSharedSecretBlocking(privateKey, peerPublicKey, info, length, salt, factory)
+        }
 }
 
 /** Key-agreement ops over the async-only primitives (WebCrypto on JS/WASM). */
@@ -405,7 +462,14 @@ internal class KeyAgreementAsyncOpsImpl(
         length: Int,
         salt: Salt,
         factory: BufferFactory,
-    ): ReadBuffer = deriveSharedSecretAsyncPlatform(privateKey, peerPublicKey, info.bytesOrNull, length, salt.bytesOrNull, factory)
+    ): ReadBuffer =
+        // A non-exportable key derives through its gated closure (no in-process scalar to marshal to
+        // WebCrypto); an in-memory key goes through the platform primitive.
+        if (privateKey is ProtectedKeyAgreementPrivateKey) {
+            privateKey.deriveShared(peerPublicKey, info.bytesOrNull, length, salt.bytesOrNull, factory)
+        } else {
+            deriveSharedSecretAsyncPlatform(privateKey, peerPublicKey, info.bytesOrNull, length, salt.bytesOrNull, factory)
+        }
 }
 
 // =============================================================================
