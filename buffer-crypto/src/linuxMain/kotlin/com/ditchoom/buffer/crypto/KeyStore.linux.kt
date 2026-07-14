@@ -1,8 +1,9 @@
 package com.ditchoom.buffer.crypto
 
 /**
- * Linux: an in-process software key store ([KeyCustody.ExportableSoftware]) by default — not durable
- * across restarts yet. A follow-up wires a POSIX on-disk medium; a consumer needing durability now
- * can supply its own [KeyStoreConfig.storage].
+ * Linux: a durable on-disk software key store ([KeyCustody.ExportableSoftware]). The medium is
+ * pluggable via [KeyStoreConfig.storage]; the default is one file per alias under
+ * `<HOME>/.buffer-crypto/<name>` (or [KeyStoreConfig.location]), written through POSIX stdio.
  */
-internal actual fun platformKeyStore(config: KeyStoreConfig): KeyStore = SoftwareKeyStore(config.storage ?: InMemoryKeyStorage())
+internal actual fun platformKeyStore(config: KeyStoreConfig): KeyStore =
+    SoftwareKeyStore(config.storage ?: PosixFileKeyStorage(config.name, config.location))
