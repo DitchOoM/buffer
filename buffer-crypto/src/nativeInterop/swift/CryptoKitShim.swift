@@ -544,3 +544,85 @@ public func bcks_secure_enclave_p256_sign_ctx(
         return classifySignFailure(error)
     }
 }
+
+// =============================================================================
+// Keychain persistence — durable generic-password items for the alias-addressable key store
+// =============================================================================
+//
+// The durable AppleKeychainKeyStore holds each key's framed (public point + Enclave restore blob) in
+// a generic-password Keychain item keyed by (service = store name, account = alias). The stored value
+// is NOT a private key — the Secure Enclave holds the private scalar; the blob is an encrypted
+// representation only the same Enclave can restore (see the Secure Enclave section). Items are
+// kSecAttrAccessibleWhenUnlockedThisDeviceOnly, so they never sync off-device and are unreadable
+// while the device is locked. Only strings/bytes cross the C-ABI boundary; no CFType is exposed.
+
+private func keychainBaseQuery(_ service: UnsafePointer<CChar>?, _ account: UnsafePointer<CChar>?) -> [String: Any] {
+    var query: [String: Any] = [kSecClass as String: kSecClassGenericPassword]
+    if let service = service { query[kSecAttrService as String] = String(cString: service) }
+    if let account = account { query[kSecAttrAccount as String] = String(cString: account) }
+    return query
+}
+
+@_cdecl("bcks_keychain_put")
+public func bcks_keychain_put(
+    _ service: UnsafePointer<CChar>?, _ account: UnsafePointer<CChar>?,
+    _ dataPtr: UnsafePointer<UInt8>?, _ dataLen: Int
+) -> Int32 {
+    var query = keychainBaseQuery(service, account)
+    // Replace-any-existing: delete then add, so a re-put under the same alias is idempotent.
+    SecItemDelete(query as CFDictionary)
+    query[kSecValueData as String] = bytes(dataPtr, dataLen)
+    query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+    return SecItemAdd(query as CFDictionary, nil) == errSecSuccess ? BCKS_OK : BCKS_ERR_INTERNAL
+}
+
+@_cdecl("bcks_keychain_get")
+public func bcks_keychain_get(
+    _ service: UnsafePointer<CChar>?, _ account: UnsafePointer<CChar>?,
+    _ out: UnsafeMutablePointer<UInt8>?, _ outCap: Int, _ outLenOut: UnsafeMutablePointer<Int>?
+) -> Int32 {
+    var query = keychainBaseQuery(service, account)
+    query[kSecReturnData as String] = true
+    query[kSecMatchLimit as String] = kSecMatchLimitOne
+    var item: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &item)
+    if status == errSecItemNotFound { return BCKS_ERR_INPUT }
+    guard status == errSecSuccess, let data = item as? Data else { return BCKS_ERR_INTERNAL }
+    return emit(data, out, outCap, outLenOut)
+}
+
+@_cdecl("bcks_keychain_contains")
+public func bcks_keychain_contains(_ service: UnsafePointer<CChar>?, _ account: UnsafePointer<CChar>?) -> Int32 {
+    var query = keychainBaseQuery(service, account)
+    query[kSecMatchLimit as String] = kSecMatchLimitOne
+    switch SecItemCopyMatching(query as CFDictionary, nil) {
+    case errSecSuccess: return 1
+    case errSecItemNotFound: return 0
+    default: return BCKS_ERR_INTERNAL
+    }
+}
+
+@_cdecl("bcks_keychain_delete")
+public func bcks_keychain_delete(_ service: UnsafePointer<CChar>?, _ account: UnsafePointer<CChar>?) -> Int32 {
+    switch SecItemDelete(keychainBaseQuery(service, account) as CFDictionary) {
+    case errSecSuccess: return BCKS_OK
+    case errSecItemNotFound: return BCKS_ERR_INPUT
+    default: return BCKS_ERR_INTERNAL
+    }
+}
+
+@_cdecl("bcks_keychain_aliases")
+public func bcks_keychain_aliases(
+    _ service: UnsafePointer<CChar>?,
+    _ out: UnsafeMutablePointer<UInt8>?, _ outCap: Int, _ outLenOut: UnsafeMutablePointer<Int>?
+) -> Int32 {
+    var query = keychainBaseQuery(service, nil)
+    query[kSecMatchLimit as String] = kSecMatchLimitAll
+    query[kSecReturnAttributes as String] = true
+    var items: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &items)
+    if status == errSecItemNotFound { outLenOut?.pointee = 0; return BCKS_OK }
+    guard status == errSecSuccess, let array = items as? [[String: Any]] else { return BCKS_ERR_INTERNAL }
+    let names = array.compactMap { $0[kSecAttrAccount as String] as? String }
+    return emit(Data(names.joined(separator: "\n").utf8), out, outCap, outLenOut)
+}

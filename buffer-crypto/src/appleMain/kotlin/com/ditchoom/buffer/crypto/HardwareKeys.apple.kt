@@ -182,6 +182,48 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
                 releaseContextHandle(fresh)
             }
         }
+
+    // --- persistent alias lifecycle (drives AppleKeychainKeyStore) ---------------------------------
+    //
+    // A persistent Enclave key's private scalar never leaves the element; what the Keychain durably
+    // holds is the framed (public point + restore blob), an opaque store record — never a private
+    // key. The store owns Keychain IO; this provider owns generation, framing, and re-attachment, so
+    // the record layout stays in one place. A persistent key's advisory gate is [spec]'s
+    // authorization; its onClose is a no-op (the Keychain item survives close, and the Enclave key is
+    // deleted only when the item is).
+
+    /**
+     * Generates a persistent Enclave P-256 signing key. Returns the [SigningKey] plus its durable
+     * [PlatformBuffer] record (public point + restore blob) for the store to persist under an alias.
+     */
+    internal fun generatePersistentSigning(spec: ProtectedKeySpec): Pair<SigningKey, PlatformBuffer> {
+        val generated = enclaveGenerateP256()
+        val record = frameEnclaveRecord(generated.point, generated.blob)
+        val key = buildPersistentSigning(generated.blob, generated.point, spec)
+        return key to record
+    }
+
+    /** Re-attaches a persistent Enclave signing key from a durable [record] (see [frameEnclaveRecord]). */
+    internal fun signingFromRecord(
+        record: ReadBuffer,
+        spec: ProtectedKeySpec,
+    ): SigningKey {
+        val (blob, point) = parseEnclaveRecord(record)
+        return buildPersistentSigning(blob, point, spec)
+    }
+
+    /** Wraps an Enclave restore [blob] + public [point] as an advisory-gated persistent [SigningKey]. */
+    private fun buildPersistentSigning(
+        blob: PlatformBuffer,
+        point: ReadBuffer,
+        spec: ProtectedKeySpec,
+    ): SigningKey =
+        ProtectedSigningKey(
+            scheme = SignatureScheme.EcdsaP256,
+            custody = custody,
+            gatedSign = advisorySign(spec.authorization, blob),
+            verifyKey = VerifyKey.ecdsaP256(point),
+        )
 }
 
 /**
@@ -432,3 +474,53 @@ private val appleProvider: HardwareKeyProvider? by lazy {
 }
 
 internal actual fun platformProtectedKeyProvider(): ProtectedKeyProvider? = appleProvider
+
+/**
+ * The Secure Enclave provider narrowed to its concrete type, or `null` where the Enclave is
+ * unavailable (simulator, an unentitled CLI runner). [platformKeyStore] uses it to back a durable
+ * Keychain-backed [AppleKeychainKeyStore], falling back to a software store otherwise.
+ */
+internal fun appleEnclaveProviderOrNull(): SecureEnclaveHardwareKeyProvider? = appleProvider as? SecureEnclaveHardwareKeyProvider
+
+// =============================================================================
+// Durable Enclave key record — `u16 pointLen | point | blob`
+// =============================================================================
+//
+// The public point and the Enclave restore blob together fully describe a persistent signing key
+// (the point builds the VerifyKey; the blob reconstructs the signer inside the Enclave). They are
+// framed into one opaque buffer the store persists verbatim in a Keychain item.
+
+private const val RECORD_POINT_LEN_BYTES = 2
+
+/** Frames [point] + [blob] into a durable record, without disturbing either source's position. */
+private fun frameEnclaveRecord(
+    point: ReadBuffer,
+    blob: ReadBuffer,
+): PlatformBuffer {
+    val pointLen = point.remaining()
+    val out = BufferFactory.Default.allocate(RECORD_POINT_LEN_BYTES + pointLen + blob.remaining())
+    out.writeShort(pointLen.toShort())
+    appendPreservingPosition(out, point)
+    appendPreservingPosition(out, blob)
+    out.resetForRead()
+    return out
+}
+
+/** Splits a durable record back into freshly-owned (blob, point) buffers. */
+private fun parseEnclaveRecord(record: ReadBuffer): Pair<PlatformBuffer, PlatformBuffer> {
+    val pointLen = record.readShort().toInt() and 0xFFFF
+    val point = copyBuffer(record.readBytes(pointLen), BufferFactory.Default)
+    val blob = copyBuffer(record.readBytes(record.remaining()), BufferFactory.Default)
+    return blob to point
+}
+
+/** Appends [src]'s remaining bytes to [dst] without advancing [src]'s position (it may be a live key buffer). */
+private fun appendPreservingPosition(
+    dst: PlatformBuffer,
+    src: ReadBuffer,
+) {
+    if (src.remaining() == 0) return
+    val mark = src.position()
+    dst.write(src)
+    src.position(mark)
+}

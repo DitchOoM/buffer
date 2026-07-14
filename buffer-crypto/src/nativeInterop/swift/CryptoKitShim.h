@@ -145,4 +145,37 @@ int32_t bcks_secure_enclave_p256_sign_ctx(
     uint8_t *sigOut, size_t sigCap,
     size_t *sigLenOut);
 
+// Keychain persistence — durable generic-password items for the alias-addressable key store.
+// `service` and `account` are NUL-terminated UTF-8 C strings (account == the caller's alias). The
+// stored value is opaque store-owned bytes (the framed public point + Enclave restore blob) — never
+// a private key: the Secure Enclave holds the private scalar, and the blob is an encrypted
+// representation only that same Enclave can restore. Items are ThisDeviceOnly + WhenUnlocked, so
+// they never sync off-device and are unreadable while the device is locked.
+
+// Stores dataPtr/dataLen under (service, account), replacing any existing item. BCKS_OK, or
+// BCKS_ERR_INTERNAL on a keychain failure.
+int32_t bcks_keychain_put(
+    const char *service, const char *account,
+    const uint8_t *dataPtr, size_t dataLen);
+
+// Reads the item under (service, account) into out/outCap, writing its length to outLenOut. BCKS_OK
+// when found, BCKS_ERR_INPUT when no such item exists, BCKS_ERR_BUFFER when out is too small.
+int32_t bcks_keychain_get(
+    const char *service, const char *account,
+    uint8_t *out, size_t outCap, size_t *outLenOut);
+
+// 1 if an item exists under (service, account), 0 if not, negative on a keychain failure.
+int32_t bcks_keychain_contains(const char *service, const char *account);
+
+// Deletes the item under (service, account). BCKS_OK if one was removed, BCKS_ERR_INPUT if none
+// existed, negative on a keychain failure.
+int32_t bcks_keychain_delete(const char *service, const char *account);
+
+// Writes every account name under `service`, newline-separated UTF-8 (accounts are validated to a
+// charset without '\n'), into out/outCap with the byte count in outLenOut. BCKS_OK (0 length when
+// none), BCKS_ERR_BUFFER when out is too small.
+int32_t bcks_keychain_aliases(
+    const char *service,
+    uint8_t *out, size_t outCap, size_t *outLenOut);
+
 #endif // BUFFER_CRYPTO_CRYPTOKIT_SHIM_H
