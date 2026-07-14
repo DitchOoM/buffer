@@ -1,10 +1,16 @@
 package com.ditchoom.buffer.crypto
 
 /**
- * JS / WASM: an in-process software key store ([KeyCustody.ExportableSoftware]) by default — not
- * durable across page loads yet. A follow-up wires an IndexedDB store holding a non-extractable
- * WebCrypto `CryptoKey` ([KeyCustody.NonExportable.Software]); until then a caller that requires
- * non-exportable custody is correctly refused by [KeyProvider.requireTier]. A consumer needing
- * durability now can supply its own [KeyStoreConfig.storage].
+ * JS / WASM: a durable [WebCryptoKeyStore] when both `crypto.subtle.generateKey` and IndexedDB are
+ * present ([KeyCustody.NonExportable.Software] — a non-extractable `CryptoKey` held in IndexedDB). In
+ * an engine without IndexedDB (bare Node) or WebCrypto, it falls back to an in-process software store
+ * ([KeyCustody.ExportableSoftware]) — honest about the weaker custody, so a `requireTier` caller is
+ * refused rather than silently upgraded. A caller may still force a software medium via
+ * [KeyStoreConfig.storage].
  */
-internal actual fun platformKeyStore(config: KeyStoreConfig): KeyStore = SoftwareKeyStore(config.storage ?: InMemoryKeyStorage())
+internal actual fun platformKeyStore(config: KeyStoreConfig): KeyStore =
+    when {
+        config.storage != null -> SoftwareKeyStore(config.storage)
+        subtleGenerateKeyAvailable && webCryptoIndexedDbAvailable -> WebCryptoKeyStore(config.name)
+        else -> SoftwareKeyStore(InMemoryKeyStorage())
+    }

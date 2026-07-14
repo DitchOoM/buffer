@@ -12,14 +12,17 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * Platform-agnostic conformance for the persistent [KeyStore], driven over an [InMemoryKeyStorage]
- * medium so it runs identically on every target. "Reload across launches" is simulated by opening a
- * *fresh* store over the *same* storage instance ([SoftwareKeyStore] is stateless over its medium).
- * Uses only ECDSA-P256 / AES-256-GCM / ECDH-P256 — available on every platform — so the suite never
- * skips.
+ * Platform-agnostic conformance for the [SoftwareKeyStore] (the `ExportableSoftware` tier), driven
+ * over an [InMemoryKeyStorage] medium so it runs identically on every target. It exercises
+ * [SoftwareKeyStore] directly rather than `CryptoCapabilities.keyStore()`, because the platform store
+ * varies by tier (web resolves to the non-exportable WebCrypto/IndexedDB store); the per-platform
+ * `keyStore()` wiring is covered by the platform suites (`FileKeyStoreTest`, `WebCryptoKeyStoreTest`).
+ * "Reload across launches" is simulated by opening a *fresh* store over the *same* storage instance
+ * ([SoftwareKeyStore] is stateless over its medium). Uses only ECDSA-P256 / AES-256-GCM / ECDH-P256 —
+ * available on every platform — so the suite never skips.
  */
 class KeyStoreConformanceTest {
-    private fun store(storage: KeyStorage): KeyStore = CryptoCapabilities.keyStore(KeyStoreConfig(storage = storage))
+    private fun store(storage: KeyStorage): KeyStore = SoftwareKeyStore(storage)
 
     private fun aesOps() =
         when (val w = CryptoCapabilities.aesGcm) {

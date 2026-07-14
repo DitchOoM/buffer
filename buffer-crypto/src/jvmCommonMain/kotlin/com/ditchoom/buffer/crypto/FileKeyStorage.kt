@@ -58,7 +58,9 @@ internal class FileKeyStorage(
             val out = BufferFactory.Default.allocate(size)
             val dst = out.toMutableNativeData().byteBuffer
             Files.newByteChannel(path, StandardOpenOption.READ).use { channel ->
-                while (dst.hasRemaining() && channel.read(dst) >= 0) Unit
+                while (dst.hasRemaining() && channel.read(dst) >= 0) {
+                    // read until the buffer is full or EOF
+                }
             }
             // Bytes were written straight into the backing ByteBuffer, which does not advance the
             // PlatformBuffer's own cursor — set it to the byte count so resetForRead() yields 0..size.

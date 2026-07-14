@@ -197,13 +197,14 @@ internal fun requireValidKeyStoreName(name: String) =
 // through the pluggable KeyStorage medium under a self-describing blob, and reconstructs the sealed
 // key type on load. Custody is ExportableSoftware — the DER blob is, by definition, exportable.
 
-/** Persisted-key kinds, tagged in the on-blob header so a lookup of the wrong kind is detectable. */
-private const val KIND_SIGNING = 0
-private const val KIND_AES_GCM = 1
-private const val KIND_AGREEMENT = 2
+// Persisted-key kind + scheme/curve tags, shared by every KeyStore backend (the software blob header
+// and the WebCrypto IndexedDB record) so the on-disk / on-store encoding is defined in one place.
+internal const val KIND_SIGNING = 0
+internal const val KIND_AES_GCM = 1
+internal const val KIND_AGREEMENT = 2
 private const val BLOB_VERSION = 1
 
-private fun signingTag(scheme: SignatureScheme): Int =
+internal fun signingTag(scheme: SignatureScheme): Int =
     when (scheme) {
         SignatureScheme.Ed25519 -> 0
         SignatureScheme.EcdsaP256 -> 1
@@ -211,7 +212,7 @@ private fun signingTag(scheme: SignatureScheme): Int =
         SignatureScheme.EcdsaP521 -> 3
     }
 
-private fun signingScheme(tag: Int): SignatureScheme =
+internal fun signingScheme(tag: Int): SignatureScheme =
     when (tag) {
         0 -> SignatureScheme.Ed25519
         1 -> SignatureScheme.EcdsaP256
@@ -220,7 +221,7 @@ private fun signingScheme(tag: Int): SignatureScheme =
         else -> throw KeyStoreException.CorruptEntry()
     }
 
-private fun agreementTag(curve: KeyAgreementCurve): Int =
+internal fun agreementTag(curve: KeyAgreementCurve): Int =
     when (curve) {
         KeyAgreementCurve.X25519 -> 0
         KeyAgreementCurve.P256 -> 1
@@ -228,7 +229,7 @@ private fun agreementTag(curve: KeyAgreementCurve): Int =
         KeyAgreementCurve.P521 -> 3
     }
 
-private fun agreementCurve(tag: Int): KeyAgreementCurve =
+internal fun agreementCurve(tag: Int): KeyAgreementCurve =
     when (tag) {
         0 -> KeyAgreementCurve.X25519
         1 -> KeyAgreementCurve.P256
@@ -238,7 +239,7 @@ private fun agreementCurve(tag: Int): KeyAgreementCurve =
     }
 
 /** The [ProtectedKeyAlgorithm] a stored (kind, tag) header describes — for [KeyStoreException.AliasMismatch]. */
-private fun storedAlgorithm(
+internal fun storedAlgorithm(
     kind: Int,
     tag: Int,
 ): ProtectedKeyAlgorithm =
