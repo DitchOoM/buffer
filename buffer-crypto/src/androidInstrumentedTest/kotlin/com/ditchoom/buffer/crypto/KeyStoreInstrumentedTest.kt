@@ -48,6 +48,11 @@ class KeyStoreInstrumentedTest {
             assertEquals(CustodyTier.Hardware, s.custodyFor(ProtectedKeyAlgorithm.EcdsaP256).tier)
             // The whole PR-289 custody machinery applies to a hardware KeyStore verbatim.
             assertEquals(s, s.requireTier(ProtectedKeyAlgorithm.EcdsaP256, CustodyTier.Hardware))
+            // requireTier refuses an algorithm the store cannot hold rather than over-promising
+            // hardware custody for it (the store backs only AES-GCM + ECDSA P-256).
+            assertFailsWith<HardwareKeyException.AlgorithmNotEligible> {
+                s.requireTier(ProtectedKeyAlgorithm.Ed25519, CustodyTier.Hardware)
+            }
         }
 
     @Test
