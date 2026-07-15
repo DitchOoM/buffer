@@ -4,7 +4,12 @@ package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.WriteBuffer
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.IntVar
+import kotlinx.cinterop.alloc
 import kotlinx.cinterop.convert
+import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.ptr
+import kotlinx.cinterop.value
 import platform.Security.SecRandomCopyBytes
 import platform.Security.errSecSuccess
 import platform.Security.kSecRandomDefault
@@ -20,3 +25,12 @@ actual fun cryptoRandomInto(dest: WriteBuffer) {
         check(status == errSecSuccess) { "SecRandomCopyBytes failed (OSStatus=$status)" }
     }
 }
+
+/** Allocation-free secure [Int]: `SecRandomCopyBytes` into a stack-scoped `Int`. */
+internal actual fun cryptoRandomInt(): Int =
+    memScoped {
+        val holder = alloc<IntVar>()
+        val status = SecRandomCopyBytes(kSecRandomDefault, Int.SIZE_BYTES.convert(), holder.ptr)
+        check(status == errSecSuccess) { "SecRandomCopyBytes failed (OSStatus=$status)" }
+        holder.value
+    }

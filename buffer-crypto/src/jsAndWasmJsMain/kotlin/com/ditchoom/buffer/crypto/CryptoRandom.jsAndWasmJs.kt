@@ -20,3 +20,10 @@ actual fun cryptoRandomInto(dest: WriteBuffer) {
 }
 
 private fun secureRandomByte(): Int = js("(globalThis.crypto).getRandomValues(new Uint8Array(1))[0]")
+
+/**
+ * One secure [Int] from `crypto.getRandomValues`. WebCrypto requires a typed-array destination,
+ * so a single-element `Int32Array` is unavoidable at the platform boundary — but there is no
+ * `PlatformBuffer` allocation. Compiles for both the JS and Wasm backends via `js(...)`.
+ */
+internal actual fun cryptoRandomInt(): Int = js("(globalThis.crypto).getRandomValues(new Int32Array(1))[0]")
