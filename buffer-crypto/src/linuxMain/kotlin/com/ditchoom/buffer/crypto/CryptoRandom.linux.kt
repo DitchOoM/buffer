@@ -6,8 +6,13 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.crypto.cinterop.boringssl.BCL_OK
 import com.ditchoom.buffer.crypto.cinterop.boringssl.bcl_rand_bytes
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.IntVar
+import kotlinx.cinterop.alloc
 import kotlinx.cinterop.convert
+import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.ptr
 import kotlinx.cinterop.reinterpret
+import kotlinx.cinterop.value
 
 /** Linux CSPRNG backed by BoringSSL `RAND_bytes`, written straight into the buffer. */
 actual fun cryptoRandomInto(dest: WriteBuffer) {
@@ -20,3 +25,12 @@ actual fun cryptoRandomInto(dest: WriteBuffer) {
         check(status == BCL_OK) { "RAND_bytes failed (status=$status)" }
     }
 }
+
+/** Allocation-free secure [Int]: `RAND_bytes` into a stack-scoped `Int`. */
+internal actual fun cryptoRandomInt(): Int =
+    memScoped {
+        val holder = alloc<IntVar>()
+        val status = bcl_rand_bytes(holder.ptr.reinterpret(), Int.SIZE_BYTES.convert())
+        check(status == BCL_OK) { "RAND_bytes failed (status=$status)" }
+        holder.value
+    }

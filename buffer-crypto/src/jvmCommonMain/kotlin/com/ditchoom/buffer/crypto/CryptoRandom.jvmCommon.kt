@@ -3,7 +3,7 @@ package com.ditchoom.buffer.crypto
 import com.ditchoom.buffer.WriteBuffer
 import java.security.SecureRandom
 
-private val secureRandom = SecureRandom()
+private val jvmSecureRandom = SecureRandom()
 
 /**
  * JVM/Android CSPRNG backed by [java.security.SecureRandom]. Fills the buffer eight bytes at
@@ -13,14 +13,17 @@ private val secureRandom = SecureRandom()
 actual fun cryptoRandomInto(dest: WriteBuffer) {
     var remaining = dest.remaining()
     while (remaining >= Long.SIZE_BYTES) {
-        dest.writeLong(secureRandom.nextLong())
+        dest.writeLong(jvmSecureRandom.nextLong())
         remaining -= Long.SIZE_BYTES
     }
     if (remaining > 0) {
-        var bits = secureRandom.nextLong()
+        var bits = jvmSecureRandom.nextLong()
         repeat(remaining) {
             dest.writeByte(bits.toByte())
             bits = bits ushr Byte.SIZE_BITS
         }
     }
 }
+
+/** Allocation-free secure [Int] straight from the shared [SecureRandom]. */
+internal actual fun cryptoRandomInt(): Int = jvmSecureRandom.nextInt()
