@@ -538,6 +538,11 @@ kotlin {
         }
         jsTest {
             dependsOn(jsAndWasmJsTest)
+            dependencies {
+                // Node has no IndexedDB; this shim installs a spec-compliant one on globalThis so the
+                // WebCrypto/IndexedDB key store (WebCryptoKeyStoreTest) can run under jsNodeTest.
+                implementation(npm("fake-indexeddb", "6.0.0"))
+            }
         }
         wasmJsTest {
             dependsOn(jsAndWasmJsTest)

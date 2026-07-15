@@ -226,6 +226,41 @@ portable non-exportable store (DPAPI / Keychain / Secret Service are all platfor
 reachable from pure KMP), so they stay at the exportable software floor — a key-on-disk is
 exportable and is never surfaced behind `protectedKeys` / `hardware`.
 
+### Key persistence (`KeyStore`)
+
+`CryptoCapabilities.keyStore(config)` adds an alias-addressable *persistent* lifecycle on top of the
+ephemeral `KeyProvider`: get-or-generate-by-alias (idempotent), load-by-alias across launches, and
+delete, for signing / AES-GCM / key-agreement keys. `KeyStore : KeyProvider`, so the same custody
+tiers and `custodyFor` / `requireTier` assertions above apply to a persisted key — the custody a
+`KeyStore` reports is the custody the *stored* key actually has.
+
+- **Persistence never fabricates custody.** A persisted key reports its true tier. A device-identity
+  consumer that requires hardware asserts `requireTier(alg, CustodyTier.Hardware)` and is refused
+  (structured `InsufficientKeyCustody`) on any platform whose store is weaker — it never silently
+  persists a downgraded key.
+- **Persistence fuses with custody on non-exportable tiers.** On a secure element / non-extractable
+  WebCrypto tier the key never becomes an exportable blob, so *where* it persists is inseparable from
+  *who holds it* — it is the OS store itself, not a pluggable medium. Only the `ExportableSoftware`
+  tier separates the two: there the key is a PKCS#8 DER blob whose medium is pluggable via
+  `KeyStoreConfig.storage` (a `KeyStorage` blob SPI). The SPI is **ignored** on OS-backed tiers,
+  precisely because there is no exportable blob to relocate.
+- **`ExportableSoftware` persistence is exportable at rest — by definition.** The default JVM / Android
+  medium writes one PKCS#8 DER file per alias under an owner-only directory. Those bytes are the
+  private key; this is the `ExportableSoftware` tier and is labelled as such. Pointing
+  `KeyStoreConfig.storage` at an encrypted store hardens it, and is the intended path where at-rest
+  protection is required without a hardware tier.
+- **No silent replace.** `getOrGenerate*` over an alias already holding a different algorithm throws
+  `KeyStoreException.AliasMismatch` (a device-identity key cannot be clobbered by a mistyped call);
+  regeneration is an explicit `delete` + `getOrGenerate`. A persisted key's `close()` releases only
+  the in-process handle — the stored key survives until `delete`.
+
+Coverage: `KeyStoreConformanceTest` (commonMain, every platform) exercises idempotency, load-after-
+reload, delete, alias mismatch, custody equals `custodyFor`, and the persist-survives-`close`
+invariant; `FileKeyStoreTest` (JVM) and `PosixFileKeyStoreTest` (Linux) exercise a real on-disk
+round-trip across store instances; `KeyStoreInstrumentedTest` (`connectedCheck`) pins the Android
+Keystore hardware store on a device — reload across a simulated restart, hardware custody, and that a
+persistent key's `close()` does not delete the entry.
+
 ## 5. Known limitations & tracked follow-ups
 
 These are **not vulnerabilities** — every case below is gated by a capability flag that is
@@ -242,14 +277,30 @@ tracked to completion:
 - **Android X25519/Ed25519 below API 34** — Conscrypt added these in Android 14; on API 28–33
   the capability flag is `false` and the call throws. This is a runtime (`SDK_INT`) gate, not a
   compile-time one.
-- **Linux** — no native crypto target is registered yet; deferred. When added it will wrap
-  BoringSSL (not OpenSSL), consistent with the sibling networking module.
-- **Non-exportable key persistence & desktop custody** — the provider mints an in-process
-  non-exportable *handle* and returns a key; persisting it across sessions (IndexedDB on web, a
-  keystore alias on a device) is application policy and out of scope here. Desktop JVM / Linux
-  expose no portable non-exportable store, so `keyProvider()` resolves them to the exportable
-  software floor (see §4) — this is by design, not a capability that throws; a key-on-disk is
-  exportable and is deliberately never surfaced behind `protectedKeys` / `hardware`.
+- **Linux** — the native target wraps BoringSSL (not OpenSSL), consistent with the sibling
+  networking module, at the `ExportableSoftware` tier (no portable non-exportable store exists there).
+- **`KeyStore` durable backends per platform** — the persistent `KeyStore` (see §4) now ships a
+  durable backend on **every** target: a durable on-disk `ExportableSoftware` medium on JVM (one
+  PKCS#8 DER file per alias) and Linux (the same, over POSIX stdio); a **`NonExportable.Hardware`**
+  store on **Android** (an `AndroidKeyStore` entry keyed `<name>:<alias>` — StrongBox where present,
+  else TEE) and **Apple** (a Secure Enclave P-256 key whose restore record is held in a Keychain
+  generic-password item keyed by `kSecAttrService`/`kSecAttrAccount`); and a **`NonExportable.Software`**
+  store on **web** (a non-extractable WebCrypto `CryptoKey` held in IndexedDB). Each store reports its
+  true custody, so a `requireTier(Hardware)` caller is refused rather than silently downgraded on a
+  weaker platform. Availability is probed, not assumed: the web store requires both `crypto.subtle`
+  and IndexedDB, Android needs an `AndroidKeyStore` provider (absent in a host-JVM unit run), and
+  Apple needs a usable Enclave (absent on the simulator / an unentitled CLI runner). A production
+  browser and a signed, entitled Apple app always take the durable path. Where the probe fails —
+  a dev/test environment (bare Node without IndexedDB, the iOS simulator, an unentitled runner) — the
+  store falls back to an **in-process, non-durable** medium and reports the weaker `ExportableSoftware`
+  tier honestly; keys there do **not** survive a process restart. A consumer that needs durability in
+  such an environment supplies its own `KeyStoreConfig.storage`. (JVM and Linux always use their
+  durable on-disk store — no probe, no in-memory fallback.)
+- **Desktop JVM / Linux non-exportable custody** — desktop JVM / Linux expose no portable
+  non-exportable store (DPAPI / Keychain / Secret Service are platform-native, none reachable from
+  pure KMP), so both `keyProvider()` and `keyStore()` resolve to the exportable software tier (see
+  §4). This is by design, not a capability that throws; a key-on-disk is exportable and is
+  deliberately never surfaced behind `protectedKeys` / `hardware`.
 
 Open tracking issues are linked from the pull request that introduces this module.
 

@@ -86,4 +86,22 @@ class KeyProviderResolverTest {
             resolver.requireTier(ProtectedKeyAlgorithm.EcdsaP521, CustodyTier.Hardware)
         }
     }
+
+    @Test
+    fun requireTierRejectsAnIneligibleAlgorithmOnASingleBackendProvider() {
+        // A single-backend provider (the shape of a hardware / WebCrypto KeyStore) reports a constant
+        // custody but serves only a subset of algorithms. FakeHardware backs AES-GCM + ECDSA P-256.
+        val hw = FakeHardware()
+        // An eligible algorithm at its tier still passes and chains.
+        assertSame(hw, hw.requireTier(ProtectedKeyAlgorithm.EcdsaP256, CustodyTier.Hardware))
+        // An ineligible algorithm is rejected outright — requireTier must not green-light a key the
+        // provider cannot create, even though custodyFor would (by default) report its constant
+        // Hardware custody. The signal matches what a subsequent generate* raises.
+        assertFailsWith<HardwareKeyException.AlgorithmNotEligible> {
+            hw.requireTier(ProtectedKeyAlgorithm.Ed25519, CustodyTier.Hardware)
+        }
+        assertFailsWith<HardwareKeyException.AlgorithmNotEligible> {
+            hw.requireTier(ProtectedKeyAlgorithm.Ed25519, CustodyTier.ExportableSoftware)
+        }
+    }
 }

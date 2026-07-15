@@ -117,6 +117,14 @@ sealed interface KeyAgreementPublicKey {
     /** The encoded public key bytes, kept read-ready (position 0 .. limit). Not secret. */
     val encoded: ReadBuffer
 
+    /**
+     * The public key as **X.509 SubjectPublicKeyInfo DER** — RFC 5280 (`id-ecPublicKey` + namedCurve
+     * + BIT STRING of the uncompressed point) for the NIST curves, RFC 8410 (`id-X25519` + BIT STRING
+     * of the raw key) for X25519. Freshly allocated from [factory], read-ready. The form X.509 and
+     * `openssl` consume; mirrors [VerifyKey.exportSpki].
+     */
+    fun exportSpki(factory: BufferFactory = BufferFactory.Default): ReadBuffer
+
     companion object {
         /**
          * A public key for [curve] from its [encoded] bytes (the [KeyAgreementCurve] public-key
@@ -141,6 +149,13 @@ internal class InMemoryKeyAgreementPublicKey(
     override val encoded: ReadBuffer,
 ) : KeyAgreementPublicKey {
     override val provenance: KeyProvenance get() = KeyProvenance.Software
+
+    override fun exportSpki(factory: BufferFactory): ReadBuffer =
+        when (curve) {
+            KeyAgreementCurve.X25519 -> x25519PublicKeyToSpki(encoded, factory)
+            KeyAgreementCurve.P256, KeyAgreementCurve.P384, KeyAgreementCurve.P521 ->
+                ecPublicKeyToSpki(curve, encoded, factory)
+        }
 }
 
 /**

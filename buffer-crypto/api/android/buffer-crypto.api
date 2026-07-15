@@ -730,6 +730,14 @@ public final class com/ditchoom/buffer/crypto/HpkeSupport$Unsupported : com/ditc
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class com/ditchoom/buffer/crypto/InMemoryKeyStorage : com/ditchoom/buffer/crypto/KeyStorage {
+	public fun <init> ()V
+	public fun aliases (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun delete (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun get (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun put (Ljava/lang/String;Lcom/ditchoom/buffer/ReadBuffer;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
 public abstract interface class com/ditchoom/buffer/crypto/Info {
 }
 
@@ -869,6 +877,8 @@ public final class com/ditchoom/buffer/crypto/KeyAgreementPrivateKey$DefaultImpl
 
 public abstract interface class com/ditchoom/buffer/crypto/KeyAgreementPublicKey {
 	public static final field Companion Lcom/ditchoom/buffer/crypto/KeyAgreementPublicKey$Companion;
+	public abstract fun exportSpki (Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun exportSpki$default (Lcom/ditchoom/buffer/crypto/KeyAgreementPublicKey;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 	public abstract fun getCurve ()Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;
 	public abstract fun getEncoded ()Lcom/ditchoom/buffer/ReadBuffer;
 	public abstract fun getProvenance ()Lcom/ditchoom/buffer/crypto/KeyProvenance;
@@ -876,6 +886,10 @@ public abstract interface class com/ditchoom/buffer/crypto/KeyAgreementPublicKey
 
 public final class com/ditchoom/buffer/crypto/KeyAgreementPublicKey$Companion {
 	public final fun of (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/KeyAgreementPublicKey;
+}
+
+public final class com/ditchoom/buffer/crypto/KeyAgreementPublicKey$DefaultImpls {
+	public static synthetic fun exportSpki$default (Lcom/ditchoom/buffer/crypto/KeyAgreementPublicKey;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 }
 
 public abstract interface class com/ditchoom/buffer/crypto/KeyAgreementSupport {
@@ -978,6 +992,65 @@ public final class com/ditchoom/buffer/crypto/KeyProviderKt {
 public final class com/ditchoom/buffer/crypto/KeyProviderResolutionKt {
 	public static final fun keyProvider (Lcom/ditchoom/buffer/crypto/CryptoCapabilities;)Lcom/ditchoom/buffer/crypto/KeyProvider;
 	public static final fun requireTier (Lcom/ditchoom/buffer/crypto/KeyProvider;Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;Lcom/ditchoom/buffer/crypto/CustodyTier;)Lcom/ditchoom/buffer/crypto/KeyProvider;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/KeyStorage {
+	public abstract fun aliases (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun delete (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun get (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun put (Ljava/lang/String;Lcom/ditchoom/buffer/ReadBuffer;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/KeyStore : com/ditchoom/buffer/crypto/KeyProvider, java/lang/AutoCloseable {
+	public abstract fun aliases (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun contains (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun delete (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getOrGenerateAesGcm (Ljava/lang/String;Lcom/ditchoom/buffer/crypto/ProtectedKeySpec;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getOrGenerateAesGcm$default (Lcom/ditchoom/buffer/crypto/KeyStore;Ljava/lang/String;Lcom/ditchoom/buffer/crypto/ProtectedKeySpec;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getOrGenerateKeyAgreement (Ljava/lang/String;Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/crypto/ProtectedKeySpec;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getOrGenerateKeyAgreement$default (Lcom/ditchoom/buffer/crypto/KeyStore;Ljava/lang/String;Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/crypto/ProtectedKeySpec;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getOrGenerateSigning (Ljava/lang/String;Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/crypto/ProtectedKeySpec;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getOrGenerateSigning$default (Lcom/ditchoom/buffer/crypto/KeyStore;Ljava/lang/String;Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/crypto/ProtectedKeySpec;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun loadAesGcm (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun loadKeyAgreement (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun loadSigning (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class com/ditchoom/buffer/crypto/KeyStore$DefaultImpls {
+	public static synthetic fun getOrGenerateAesGcm$default (Lcom/ditchoom/buffer/crypto/KeyStore;Ljava/lang/String;Lcom/ditchoom/buffer/crypto/ProtectedKeySpec;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getOrGenerateKeyAgreement$default (Lcom/ditchoom/buffer/crypto/KeyStore;Ljava/lang/String;Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/crypto/ProtectedKeySpec;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getOrGenerateSigning$default (Lcom/ditchoom/buffer/crypto/KeyStore;Ljava/lang/String;Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/crypto/ProtectedKeySpec;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+}
+
+public final class com/ditchoom/buffer/crypto/KeyStoreConfig {
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Lcom/ditchoom/buffer/crypto/KeyStorage;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Lcom/ditchoom/buffer/crypto/KeyStorage;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getLocation ()Ljava/lang/String;
+	public final fun getName ()Ljava/lang/String;
+	public final fun getStorage ()Lcom/ditchoom/buffer/crypto/KeyStorage;
+}
+
+public abstract class com/ditchoom/buffer/crypto/KeyStoreException : com/ditchoom/buffer/crypto/CryptoMisuseException {
+	public synthetic fun <init> (Ljava/lang/String;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+}
+
+public final class com/ditchoom/buffer/crypto/KeyStoreException$AliasMismatch : com/ditchoom/buffer/crypto/KeyStoreException {
+	public final fun getAlias ()Ljava/lang/String;
+	public final fun getRequested ()Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
+	public final fun getStored ()Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
+}
+
+public final class com/ditchoom/buffer/crypto/KeyStoreException$CorruptEntry : com/ditchoom/buffer/crypto/KeyStoreException {
+}
+
+public final class com/ditchoom/buffer/crypto/KeyStoreException$StorageFailure : com/ditchoom/buffer/crypto/KeyStoreException {
+	public final fun getRetryable ()Z
+}
+
+public final class com/ditchoom/buffer/crypto/KeyStoreKt {
+	public static final fun keyStore (Lcom/ditchoom/buffer/crypto/CryptoCapabilities;Lcom/ditchoom/buffer/crypto/KeyStoreConfig;)Lcom/ditchoom/buffer/crypto/KeyStore;
+	public static synthetic fun keyStore$default (Lcom/ditchoom/buffer/crypto/CryptoCapabilities;Lcom/ditchoom/buffer/crypto/KeyStoreConfig;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/KeyStore;
 }
 
 public final class com/ditchoom/buffer/crypto/MessageLimitReached : com/ditchoom/buffer/crypto/CryptoMisuseException {
@@ -1500,6 +1573,10 @@ public final class com/ditchoom/buffer/crypto/VerificationFailed : com/ditchoom/
 
 public abstract interface class com/ditchoom/buffer/crypto/VerifyKey {
 	public static final field Companion Lcom/ditchoom/buffer/crypto/VerifyKey$Companion;
+	public abstract fun exportEncoded (Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun exportEncoded$default (Lcom/ditchoom/buffer/crypto/VerifyKey;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+	public abstract fun exportSpki (Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun exportSpki$default (Lcom/ditchoom/buffer/crypto/VerifyKey;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 	public abstract fun getProvenance ()Lcom/ditchoom/buffer/crypto/KeyProvenance;
 	public abstract fun getScheme ()Lcom/ditchoom/buffer/crypto/SignatureScheme;
 }
@@ -1509,5 +1586,10 @@ public final class com/ditchoom/buffer/crypto/VerifyKey$Companion {
 	public final fun ecdsaP384 (Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/VerifyKey;
 	public final fun ecdsaP521 (Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/VerifyKey;
 	public final fun ed25519 (Lcom/ditchoom/buffer/ReadBuffer;)Lcom/ditchoom/buffer/crypto/VerifyKey;
+}
+
+public final class com/ditchoom/buffer/crypto/VerifyKey$DefaultImpls {
+	public static synthetic fun exportEncoded$default (Lcom/ditchoom/buffer/crypto/VerifyKey;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun exportSpki$default (Lcom/ditchoom/buffer/crypto/VerifyKey;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
 }
 

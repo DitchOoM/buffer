@@ -33,6 +33,7 @@ import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
+import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 
 /*
@@ -131,14 +132,28 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
         policy: ResolvedAndroidPolicy,
         aesKeySizeBits: Int,
     ): AesGcmKey {
-        val validSize =
-            aesKeySizeBits == AES_128_KEY_BYTES * Byte.SIZE_BITS ||
-                aesKeySizeBits == AES_256_KEY_BYTES * Byte.SIZE_BITS
-        if (!validSize) throw HardwareKeyException.UnsupportedHardwareKey()
+        requireValidAesSize(aesKeySizeBits)
         val alias = newAlias("aes")
         val key = keystoreOp { generateAesKey(alias, aesKeySizeBits, policy) }
-        return ProtectedAesGcmKey(
-            sizeBits = aesKeySizeBits,
+        // Ephemeral: the scratch alias is deleted when the returned key is closed.
+        return buildAesGcmKey(key, aesKeySizeBits, policy, onClose = { runCatching { keyStore.deleteEntry(alias) } })
+    }
+
+    /**
+     * Wraps an AndroidKeystore AES-GCM [key] handle as an [AesGcmKey]. Shared by the ephemeral
+     * provider ([generateAesGcmBound], a scratch alias deleted on close) and the persistent
+     * [AndroidKeystoreKeyStore] (a named alias whose [onClose] is a no-op, so the stored key survives
+     * close). The seal/open closures drive a JCA `Cipher` over the keystore handle exactly as before —
+     * the only difference between the two callers is the [onClose] lifecycle.
+     */
+    internal fun buildAesGcmKey(
+        key: SecretKey,
+        sizeBits: Int,
+        policy: ResolvedAndroidPolicy,
+        onClose: () -> Unit,
+    ): AesGcmKey =
+        ProtectedAesGcmKey(
+            sizeBits = sizeBits,
             custody = custody,
             gatedSeal = { aad, plaintext, factory ->
                 gatedOp(
@@ -185,9 +200,8 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
                     },
                 )
             },
-            onClose = { runCatching { keyStore.deleteEntry(alias) } },
+            onClose = onClose,
         )
-    }
 
     /** Generates an ECDSA-P256 keystore key under [policy] — the shared path for unbound and OS-bound keys. */
     internal suspend fun generateSigningBound(
@@ -197,9 +211,24 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
         if (!eligible(scheme.toProtectedKeyAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
         val alias = newAlias("ec")
         val keyPair = keystoreOp { generateEcKeyPair(alias, policy) }
-        val privateKey = keyPair.private
         val verifyKey = VerifyKey.ecdsaP256(uncompressedPoint(keyPair.public as ECPublicKey))
-        return ProtectedSigningKey(
+        // Ephemeral: the scratch alias is deleted when the returned key is closed.
+        return buildSigningKey(keyPair.private, verifyKey, policy, onClose = { runCatching { keyStore.deleteEntry(alias) } })
+    }
+
+    /**
+     * Wraps an AndroidKeystore EC private-key handle ([privateKey], with its captured [verifyKey]) as
+     * a [SigningKey]. Shared by the ephemeral provider ([generateSigningBound]) and the persistent
+     * [AndroidKeystoreKeyStore]; the sign closure drives a JCA `Signature` over the keystore handle,
+     * and only [onClose] differs (scratch-alias delete vs. a no-op that keeps the stored key).
+     */
+    internal fun buildSigningKey(
+        privateKey: PrivateKey,
+        verifyKey: VerifyKey,
+        policy: ResolvedAndroidPolicy,
+        onClose: () -> Unit,
+    ): SigningKey =
+        ProtectedSigningKey(
             scheme = SignatureScheme.EcdsaP256,
             custody = custody,
             gatedSign = { message, factory ->
@@ -220,8 +249,96 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
                 )
             },
             verifyKey = verifyKey,
-            onClose = { runCatching { keyStore.deleteEntry(alias) } },
+            onClose = onClose,
         )
+
+    // --- persistent alias lifecycle (drives AndroidKeystoreKeyStore) -------------------------------
+    //
+    // A persistent key lives under a caller-named keystore alias (already namespaced by the store) and
+    // is NOT deleted on close — onClose = {} — so it survives process restart until an explicit
+    // delete. Metadata (kind + public key) is intrinsic to the keystore entry, so there is no sidecar.
+
+    /** Generates a persistent ECDSA-P256 key under [alias]; onClose is a no-op (the stored key survives). */
+    internal suspend fun generatePersistentSigning(
+        alias: String,
+        spec: ProtectedKeySpec,
+    ): SigningKey {
+        val policy = ResolvedAndroidPolicy.Advisory(spec.authorization)
+        val keyPair = keystoreOp { generateEcKeyPair(alias, policy) }
+        val verifyKey = VerifyKey.ecdsaP256(uncompressedPoint(keyPair.public as ECPublicKey))
+        return buildSigningKey(keyPair.private, verifyKey, policy, onClose = {})
+    }
+
+    /** Generates a persistent AES-GCM key under [alias]; onClose is a no-op (the stored key survives). */
+    internal suspend fun generatePersistentAesGcm(
+        alias: String,
+        spec: ProtectedKeySpec,
+    ): AesGcmKey {
+        requireValidAesSize(spec.aesKeySizeBits)
+        val policy = ResolvedAndroidPolicy.Advisory(spec.authorization)
+        val key = keystoreOp { generateAesKey(alias, spec.aesKeySizeBits, policy) }
+        return buildAesGcmKey(key, spec.aesKeySizeBits, policy, onClose = {})
+    }
+
+    /**
+     * Re-attaches to a persisted signing key under [alias], or `null` if the alias is absent or holds
+     * a key of a different kind. The gate is [spec]'s advisory authorization; onClose is a no-op.
+     */
+    internal suspend fun reattachSigning(
+        alias: String,
+        spec: ProtectedKeySpec,
+    ): SigningKey? {
+        val entry = keystoreOp { keyStore.getEntry(alias, null) } as? KeyStore.PrivateKeyEntry ?: return null
+        val verifyKey = VerifyKey.ecdsaP256(uncompressedPoint(entry.certificate.publicKey as ECPublicKey))
+        return buildSigningKey(entry.privateKey, verifyKey, ResolvedAndroidPolicy.Advisory(spec.authorization), onClose = {})
+    }
+
+    /** Re-attaches to a persisted AES-GCM key under [alias], or `null` if absent / a different kind. */
+    internal suspend fun reattachAesGcm(
+        alias: String,
+        spec: ProtectedKeySpec,
+    ): AesGcmKey? {
+        val entry = keystoreOp { keyStore.getEntry(alias, null) } as? KeyStore.SecretKeyEntry ?: return null
+        val sizeBits = aesKeySizeBits(entry.secretKey)
+        return buildAesGcmKey(entry.secretKey, sizeBits, ResolvedAndroidPolicy.Advisory(spec.authorization), onClose = {})
+    }
+
+    /** The [ProtectedKeyAlgorithm] stored under [alias], or `null` if the alias is empty. */
+    internal suspend fun entryAlgorithm(alias: String): ProtectedKeyAlgorithm? =
+        keystoreOp {
+            if (!keyStore.containsAlias(alias)) {
+                null
+            } else {
+                when (keyStore.getEntry(alias, null)) {
+                    is KeyStore.PrivateKeyEntry -> ProtectedKeyAlgorithm.EcdsaP256
+                    is KeyStore.SecretKeyEntry -> ProtectedKeyAlgorithm.AesGcm
+                    else -> null
+                }
+            }
+        }
+
+    /** Whether any keystore entry exists under [alias]. */
+    internal suspend fun containsAlias(alias: String): Boolean = keystoreOp { keyStore.containsAlias(alias) }
+
+    /** Deletes [alias]; `true` if an entry was removed, `false` if none existed. */
+    internal suspend fun deleteAlias(alias: String): Boolean =
+        keystoreOp {
+            if (keyStore.containsAlias(alias)) {
+                keyStore.deleteEntry(alias)
+                true
+            } else {
+                false
+            }
+        }
+
+    /** Every keystore alias beginning with [prefix] (the store's namespace). */
+    internal suspend fun listAliases(prefix: String): Set<String> =
+        keystoreOp { keyStore.aliases().toList().filterTo(mutableSetOf()) { it.startsWith(prefix) } }
+
+    /** The bit length of an AndroidKeystore AES [key] handle, read back from its [KeyInfo]. */
+    private fun aesKeySizeBits(key: SecretKey): Int {
+        val factory = SecretKeyFactory.getInstance(key.algorithm, ANDROID_KEY_STORE)
+        return (factory.getKeySpec(key, KeyInfo::class.java) as KeyInfo).keySize
     }
 
     // --- user-authentication policy dispatch -------------------------------------------------------
@@ -365,6 +482,14 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
 
 private fun newAlias(kind: String): String = "$ALIAS_PREFIX$kind-${UUID.randomUUID()}"
 
+/** Rejects an AES key size a secure element does not back (only 128 / 256 bit). */
+private fun requireValidAesSize(sizeBits: Int) {
+    val valid =
+        sizeBits == AES_128_KEY_BYTES * Byte.SIZE_BITS ||
+            sizeBits == AES_256_KEY_BYTES * Byte.SIZE_BITS
+    if (!valid) throw HardwareKeyException.UnsupportedHardwareKey()
+}
+
 private const val ANDROID_KEY_STORE = "AndroidKeyStore"
 private const val AES_GCM_TRANSFORM = "AES/GCM/NoPadding"
 private const val ECDSA_SHA256 = "SHA256withECDSA"
@@ -506,3 +631,10 @@ private val androidProvider: HardwareKeyProvider? by lazy {
 }
 
 internal actual fun platformProtectedKeyProvider(): ProtectedKeyProvider? = androidProvider
+
+/**
+ * The AndroidKeystore provider narrowed to its concrete type, or `null` off-device (a host-JVM unit
+ * test has no `AndroidKeyStore` provider). [platformKeyStore] uses it to back a persistent
+ * [AndroidKeystoreKeyStore] on a device, falling back to the on-disk software store otherwise.
+ */
+internal fun androidKeystoreProviderOrNull(): AndroidKeystoreHardwareKeyProvider? = androidProvider as? AndroidKeystoreHardwareKeyProvider

@@ -89,9 +89,19 @@ internal class ResolvingKeyProvider(
 fun CryptoCapabilities.keyProvider(): KeyProvider = ResolvingKeyProvider(strong = platformProtectedKeyProvider())
 
 /**
- * Asserts the platform can serve [alg] at **at least** [tier], and returns the same [KeyProvider] for
- * chaining. Throws [InsufficientKeyCustody] when the strongest eligible custody is weaker — no
- * nullable, no `!!`. Custody tiers are ordered ([CustodyTier]), so "at least" is a simple comparison.
+ * Asserts this provider can serve [alg] at **at least** [tier], and returns the same [KeyProvider] for
+ * chaining. Two rejection paths, both structured (no nullable, no `!!`):
+ *  - if the provider cannot serve [alg] *at all* ([KeyProvider.eligible] is `false` — e.g. a hardware
+ *    [KeyStore] asked to hold Ed25519), it throws [HardwareKeyException.AlgorithmNotEligible] — the
+ *    same signal a subsequent `generate*` would raise, so the assertion never green-lights a key that
+ *    then fails to generate;
+ *  - otherwise, if the strongest eligible custody is weaker than [tier] it throws
+ *    [InsufficientKeyCustody]. Custody tiers are ordered ([CustodyTier]), so "at least" is a simple
+ *    comparison.
+ *
+ * On the total [keyProvider] resolver every algorithm is eligible (it routes to the software floor),
+ * so only a single-backend provider — a secure-element/WebCrypto [KeyStore] — ever takes the
+ * eligibility path.
  *
  * ```kotlin
  * val hw = CryptoCapabilities.keyProvider()
@@ -104,6 +114,7 @@ fun KeyProvider.requireTier(
     tier: CustodyTier,
 ): KeyProvider =
     also {
+        if (!eligible(alg)) throw HardwareKeyException.AlgorithmNotEligible()
         val got = custodyFor(alg).tier
         if (got < tier) throw InsufficientKeyCustody(alg = alg, required = tier, available = got)
     }
