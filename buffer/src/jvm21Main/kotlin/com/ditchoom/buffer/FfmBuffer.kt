@@ -114,8 +114,12 @@ class FfmBuffer(
         length: Int,
         charset: Charset,
     ): String {
-        if (charset == Charset.UTF8 && !isFreed) {
-            val start = position()
+        val start = position()
+        // The native decode reads raw memory with no per-byte bounds check, so an out-of-range length
+        // would read past the segment — garbage, or a SIGSEGV once it crosses an unmapped page. Only
+        // take the fast path when the whole [start, start+length) range is in bounds; otherwise fall
+        // back to the base ByteBuffer path, which throws for the over-read exactly as it always has.
+        if (charset == Charset.UTF8 && !isFreed && canReadUtf8FromNative(start, length)) {
             val decoded = decodeUtf8FromNative(segment.address(), start, start + length)
             position(start + length)
             return decoded
