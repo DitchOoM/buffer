@@ -21,9 +21,7 @@ actual fun cryptoRandomInto(dest: WriteBuffer) {
 
 private fun secureRandomByte(): Int = js("(globalThis.crypto).getRandomValues(new Uint8Array(1))[0]")
 
-/**
- * One secure [Int] from `crypto.getRandomValues`. WebCrypto requires a typed-array destination,
- * so a single-element `Int32Array` is unavoidable at the platform boundary — but there is no
- * `PlatformBuffer` allocation. Compiles for both the JS and Wasm backends via `js(...)`.
- */
-internal actual fun cryptoRandomInt(): Int = js("(globalThis.crypto).getRandomValues(new Int32Array(1))[0]")
+// cryptoRandomInt() is implemented per-leaf (jsMain / wasmJsMain) rather than here: each reuses a
+// module-level Int32Array scratch to avoid a per-call typed-array allocation, and a properly-typed
+// reused array can't be expressed in the shared jsAndWasmJs source set (the JS and Wasm typed-array
+// bindings differ).
