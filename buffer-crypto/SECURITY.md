@@ -289,8 +289,13 @@ tracked to completion:
   true custody, so a `requireTier(Hardware)` caller is refused rather than silently downgraded on a
   weaker platform. Availability is probed, not assumed: the web store requires both `crypto.subtle`
   and IndexedDB, Android needs an `AndroidKeyStore` provider (absent in a host-JVM unit run), and
-  Apple needs a usable Enclave (absent on the simulator / an unentitled CLI runner) — where the probe
-  fails, that platform falls back to its software store and reports the weaker tier honestly.
+  Apple needs a usable Enclave (absent on the simulator / an unentitled CLI runner). A production
+  browser and a signed, entitled Apple app always take the durable path. Where the probe fails —
+  a dev/test environment (bare Node without IndexedDB, the iOS simulator, an unentitled runner) — the
+  store falls back to an **in-process, non-durable** medium and reports the weaker `ExportableSoftware`
+  tier honestly; keys there do **not** survive a process restart. A consumer that needs durability in
+  such an environment supplies its own `KeyStoreConfig.storage`. (JVM and Linux always use their
+  durable on-disk store — no probe, no in-memory fallback.)
 - **Desktop JVM / Linux non-exportable custody** — desktop JVM / Linux expose no portable
   non-exportable store (DPAPI / Keychain / Secret Service are platform-native, none reachable from
   pure KMP), so both `keyProvider()` and `keyStore()` resolve to the exportable software tier (see

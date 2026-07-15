@@ -40,6 +40,7 @@
     <ID>MaxLineLength:HardwareKeys.js.kt:internal actual suspend fun webCryptoGenerateNonExportableAesGcm: String</ID>
     <ID>MaxLineLength:HardwareKeys.js.kt:internal actual suspend fun webCryptoGenerateNonExportableEcdh: String</ID>
     <ID>MaxLineLength:HardwareKeys.js.kt:internal actual suspend fun webCryptoGenerateNonExportableEcdsa: String</ID>
+    <ID>MaxLineLength:HardwareKeys.jsAndWasmJs.kt:WebCryptoKeyStore$"AES-GCM key must be ${AES_128_KEY_BYTES * Byte.SIZE_BITS} or ${AES_256_KEY_BYTES * Byte.SIZE_BITS} bits, was $sizeBits"</ID>
     <ID>MaxLineLength:HardwareKeys.jsAndWasmJs.kt:WebCryptoKeyStore$override suspend fun aliases: Set&lt;String></ID>
     <ID>MaxLineLength:HardwareKeys.jsAndWasmJs.kt:WebCryptoKeyStore$override suspend fun generateAesGcm: AesGcmKey</ID>
     <ID>MaxLineLength:HardwareKeys.jsAndWasmJs.kt:WebCryptoKeyStore$throw KeyStoreException.AliasMismatch(alias, storedAlgorithm(e.kind, e.tag), ProtectedKeyAlgorithm.AesGcm)</ID>
@@ -64,7 +65,9 @@
     <ID>MaxLineLength:KeyAgreementWitnessSupport.kt:internal</ID>
     <ID>MaxLineLength:KeyProviderResolution.kt:ResolvingKeyProvider$override suspend fun generateAesGcm: AesGcmKey</ID>
     <ID>MaxLineLength:KeyProviderResolution.kt:ResolvingKeyProvider$private fun pick: ConcreteKeyProvider</ID>
-    <ID>MaxLineLength:KeyStore.kt:SoftwareKeyStore$persist(alias, encodeBlob(KIND_SIGNING, signingTag(scheme), key.requireInMemoryMaterial(), key.verifyKey.exportEncoded()))</ID>
+    <ID>MaxLineLength:KeyStore.kt:SoftwareKeyStore$"AES-GCM key must be ${AES_128_KEY_BYTES * Byte.SIZE_BITS} or ${AES_256_KEY_BYTES * Byte.SIZE_BITS} bits, "</ID>
+    <ID>MaxLineLength:KeyStore.kt:SoftwareKeyStore$encodeBlob(KIND_SIGNING, signingTag(scheme), key.requireInMemoryMaterial(), key.verifyKey.exportEncoded(), secureFactory)</ID>
+    <ID>MaxLineLength:KeyStore.kt:SoftwareKeyStore$persist(alias, encodeBlob(KIND_AGREEMENT, agreementTag(curve), privateEncoded, pair.publicKey.encoded, secureFactory))</ID>
     <ID>MaxLineLength:KeyStore.kt:SoftwareKeyStore$return signingKeyOf(scheme, decoded.privateEncoded, verifyKeyOf(scheme, decoded.publicEncoded), secureFactory)</ID>
     <ID>MaxLineLength:KeyStore.wasmJs.kt:internal actual suspend fun webCryptoIdbAliases: String</ID>
     <ID>MaxLineLength:KeyStoreConformanceTest.kt:KeyStoreConformanceTest$assertTrue(verifyAsync(first.verifyKey, msg, sig), "original verifyKey must verify the reloaded key's signature")</ID>

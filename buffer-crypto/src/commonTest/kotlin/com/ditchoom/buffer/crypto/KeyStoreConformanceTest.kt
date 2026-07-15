@@ -152,6 +152,21 @@ class KeyStoreConformanceTest {
         }
 
     @Test
+    fun invalidAesSizeIsRejectedWithoutPoisoningTheAlias() =
+        runTest {
+            val s = InMemoryKeyStorage()
+            // An unsupported size must fail up front and persist nothing — otherwise the alias would be
+            // durably poisoned (every later get/load re-throwing from AesGcmKey.of).
+            assertFailsWith<IllegalArgumentException> {
+                store(s).getOrGenerateAesGcm("k", ProtectedKeySpec(aesKeySizeBits = 192))
+            }
+            assertFalse(store(s).contains("k"))
+            // The alias is untouched, so a subsequent valid request succeeds.
+            val key = store(s).getOrGenerateAesGcm("k")
+            assertEquals(KeyCustody.ExportableSoftware, key.custody)
+        }
+
+    @Test
     fun invalidAliasesAreRejected() =
         runTest {
             val st = store(InMemoryKeyStorage())

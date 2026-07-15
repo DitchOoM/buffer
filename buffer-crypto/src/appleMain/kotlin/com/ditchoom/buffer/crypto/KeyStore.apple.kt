@@ -33,9 +33,10 @@ import platform.posix.size_tVar
  * persistent key's private scalar lives in the Enclave ([KeyCustody.NonExportable.Hardware]) and the
  * Keychain durably holds its restore record keyed by (`kSecAttrService` = [KeyStoreConfig.name],
  * `kSecAttrAccount` = alias). Where the Enclave is unavailable (simulator, an unentitled CLI runner)
- * it falls back to an in-process software store ([KeyCustody.ExportableSoftware]) — honest about the
- * weaker custody, so a `requireTier` caller is refused rather than silently upgraded. A consumer may
- * force a software medium (e.g. an encrypted DB) via [KeyStoreConfig.storage].
+ * it falls back to an in-process, **non-durable** software store ([KeyCustody.ExportableSoftware]) —
+ * honest about the weaker custody (a `requireTier` caller is refused rather than silently upgraded),
+ * but keys there do not survive a process restart. A signed, entitled app always has the Enclave and
+ * takes the durable path; a consumer needing durability without it supplies [KeyStoreConfig.storage].
  */
 internal actual fun platformKeyStore(config: KeyStoreConfig): KeyStore =
     when {

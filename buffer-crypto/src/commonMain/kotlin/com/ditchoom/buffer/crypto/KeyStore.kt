@@ -258,16 +258,21 @@ private class DecodedBlob(
     val publicEncoded: ReadBuffer,
 )
 
-/** `version | kind | tag | u16 privLen | priv | u16 pubLen | pub`. */
+/**
+ * `version | kind | tag | u16 privLen | priv | u16 pubLen | pub`. Allocated from [factory] — callers
+ * pass a wipe-on-free secure factory because the blob carries raw private-key material, so
+ * [SoftwareKeyStore.persist]'s `freeNativeMemory()` actually zeroes it rather than merely releasing it.
+ */
 private fun encodeBlob(
     kind: Int,
     tag: Int,
     privateEncoded: ReadBuffer,
     publicEncoded: ReadBuffer,
+    factory: BufferFactory,
 ): PlatformBuffer {
     val privLen = privateEncoded.remaining()
     val pubLen = publicEncoded.remaining()
-    val out = BufferFactory.Default.allocate(BLOB_HEADER_BYTES + privLen + pubLen)
+    val out = factory.allocate(BLOB_HEADER_BYTES + privLen + pubLen)
     out.writeByte(BLOB_VERSION.toByte())
     out.writeByte(kind.toByte())
     out.writeByte(tag.toByte())
@@ -340,7 +345,10 @@ internal class SoftwareKeyStore(
             return signingKeyOf(scheme, decoded.privateEncoded, verifyKeyOf(scheme, decoded.publicEncoded), secureFactory)
         }
         val key = SoftwareKeyProvider.generateSigning(scheme, spec)
-        persist(alias, encodeBlob(KIND_SIGNING, signingTag(scheme), key.requireInMemoryMaterial(), key.verifyKey.exportEncoded()))
+        persist(
+            alias,
+            encodeBlob(KIND_SIGNING, signingTag(scheme), key.requireInMemoryMaterial(), key.verifyKey.exportEncoded(), secureFactory),
+        )
         return key
     }
 
@@ -360,11 +368,21 @@ internal class SoftwareKeyStore(
             }
             return AesGcmKey.of(decoded.privateEncoded)
         }
-        val keyBytes = cryptoRandom(spec.aesKeySizeBits / Byte.SIZE_BITS, secureFactory)
-        persist(alias, encodeBlob(KIND_AES_GCM, 0, keyBytes, emptyBuffer))
-        val key = AesGcmKey.of(keyBytes)
-        keyBytes.freeNativeMemory()
-        return key
+        // Validate the size BEFORE generating or persisting: an unsupported aesKeySizeBits must fail
+        // without durably writing a blob that would poison the alias (every later get/load would
+        // re-throw from AesGcmKey.of). Mirrors AesGcmKey.of's own require.
+        val keySizeBytes = spec.aesKeySizeBits / Byte.SIZE_BITS
+        require(keySizeBytes == AES_128_KEY_BYTES || keySizeBytes == AES_256_KEY_BYTES) {
+            "AES-GCM key must be ${AES_128_KEY_BYTES * Byte.SIZE_BITS} or ${AES_256_KEY_BYTES * Byte.SIZE_BITS} bits, " +
+                "was ${spec.aesKeySizeBits}"
+        }
+        val keyBytes = cryptoRandom(keySizeBytes, secureFactory)
+        try {
+            persist(alias, encodeBlob(KIND_AES_GCM, 0, keyBytes, emptyBuffer, secureFactory))
+            return AesGcmKey.of(keyBytes)
+        } finally {
+            keyBytes.freeNativeMemory()
+        }
     }
 
     override suspend fun getOrGenerateKeyAgreement(
@@ -385,12 +403,23 @@ internal class SoftwareKeyStore(
             return keyAgreementKeyPairOf(
                 curve,
                 importPrivateKey(curve, decoded.privateEncoded),
-                KeyAgreementPublicKey.of(curve, decoded.publicEncoded),
+                // Copy out of the transient storage blob: KeyAgreementPublicKey.of slices its input
+                // (unlike VerifyKey.of / AesGcmKey.of / importPrivateKey, which copy), so without this the
+                // returned public key would alias a blob the store no longer references.
+                KeyAgreementPublicKey.of(curve, copyBuffer(decoded.publicEncoded, BufferFactory.Default)),
             )
         }
         val pair = SoftwareKeyProvider.generateKeyAgreement(curve, spec)
+        // The staged scalar is a wipe-on-free secure buffer; free it once persisted so the raw private
+        // key does not linger un-wiped in native memory for the process lifetime.
         val privateEncoded = pair.privateKey.exportEncoded(secureFactory)
-        persist(alias, encodeBlob(KIND_AGREEMENT, agreementTag(curve), privateEncoded, pair.publicKey.encoded))
+        try {
+            persist(alias, encodeBlob(KIND_AGREEMENT, agreementTag(curve), privateEncoded, pair.publicKey.encoded, secureFactory))
+        } finally {
+            // exportEncoded is declared ReadBuffer but a secure factory yields a PlatformBuffer; free it
+            // to wipe the staged scalar. The as? is a defensive no-op if a future impl returns a view.
+            (privateEncoded as? PlatformBuffer)?.freeNativeMemory()
+        }
         return pair
     }
 
@@ -417,7 +446,10 @@ internal class SoftwareKeyStore(
         return keyAgreementKeyPairOf(
             curve,
             importPrivateKey(curve, decoded.privateEncoded),
-            KeyAgreementPublicKey.of(curve, decoded.publicEncoded),
+            // Copy out of the transient storage blob: KeyAgreementPublicKey.of slices its input
+            // (unlike VerifyKey.of / AesGcmKey.of / importPrivateKey, which copy), so without this the
+            // returned public key would alias a blob the store no longer references.
+            KeyAgreementPublicKey.of(curve, copyBuffer(decoded.publicEncoded, BufferFactory.Default)),
         )
     }
 

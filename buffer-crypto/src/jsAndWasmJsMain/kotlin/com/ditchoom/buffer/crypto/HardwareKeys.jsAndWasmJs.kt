@@ -419,6 +419,13 @@ internal class WebCryptoKeyStore(
             return buildWebCryptoAesGcmKey(e.tag, e.token, spec) // AES size is carried in the tag slot
         }
         val sizeBits = spec.aesKeySizeBits
+        // Reject an unsupported size before WebCrypto persists it — mirrors
+        // WebCryptoProtectedKeyProvider.generateAesGcm and the software/Android paths, so a bad size
+        // fails the same structured way everywhere instead of silently persisting an odd-sized key (or
+        // leaking a raw DOMException).
+        require(sizeBits == AES_128_KEY_BYTES * Byte.SIZE_BITS || sizeBits == AES_256_KEY_BYTES * Byte.SIZE_BITS) {
+            "AES-GCM key must be ${AES_128_KEY_BYTES * Byte.SIZE_BITS} or ${AES_256_KEY_BYTES * Byte.SIZE_BITS} bits, was $sizeBits"
+        }
         val token = webCryptoGenerateNonExportableAesGcm(sizeBits).toInt()
         webCryptoIdbPut(dbName, alias, token, "$KIND_AES_GCM:$sizeBits:")
         return buildWebCryptoAesGcmKey(sizeBits, token, spec)
