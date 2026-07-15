@@ -143,6 +143,19 @@ class ReadStringDirectUtf8Test {
     }
 
     @Test
+    fun `readString past the buffer throws instead of an out-of-bounds native read`() {
+        // The FFM fast path reads raw native memory with no per-byte bounds check, so a length that
+        // runs past the segment used to SIGSEGV (caught by the MQTT control-packet fuzzers on a
+        // malformed UTF-8 length prefix). It must instead throw, exactly as the CharsetDecoder path
+        // does when asked to read past capacity, and leave the read position untouched for a retry.
+        val buffer = BufferFactory.Default.allocate(4)
+        buffer.writeBytes(byteArrayOf(0x41, 0x42, 0x43, 0x44)) // "ABCD"
+        buffer.resetForRead()
+        assertFailsWith<IllegalArgumentException> { buffer.readString(64, Charset.UTF8) }
+        assertEquals(0, buffer.position(), "a rejected over-read must not advance position")
+    }
+
+    @Test
     fun `non-UTF8 charset falls back to the decoder path`() {
         val bytes = byteArrayOf(0xE9.toByte(), 0x20) // 0xE9 = U+00E9 in Latin-1
         val buffer = BufferFactory.Default.allocate(bytes.size)

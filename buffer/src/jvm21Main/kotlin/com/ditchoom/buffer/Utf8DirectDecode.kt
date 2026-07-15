@@ -110,3 +110,14 @@ internal fun decodeUtf8FromNative(
 // REPORT-mode decoders report the malformed *length* (the maximal subpart), but since we throw on
 // first error the exact length is immaterial — 1 keeps the exception shape identical to the encoder's.
 private fun malformed(): MalformedInputException = MalformedInputException(1)
+
+/**
+ * Whether [decodeUtf8FromNative] can safely decode [length] bytes starting at [start] on this buffer:
+ * the range must be non-negative and stay within [BaseJvmBuffer.limit], since the native decode reads
+ * raw memory with no per-byte bounds check. When it can't, callers fall back to the checked ByteBuffer
+ * path, which throws for the over-read. `start.toLong()` keeps a pathological [length] from overflowing.
+ */
+internal fun BaseJvmBuffer.canReadUtf8FromNative(
+    start: Int,
+    length: Int,
+): Boolean = length >= 0 && start.toLong() + length <= limit()
