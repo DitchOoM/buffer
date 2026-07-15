@@ -41,6 +41,10 @@ fun cryptoRandom(
  * Not seedable and not reproducible by design — [Random.nextBits] draws new entropy on every call, so
  * the instance carries no seed state and is safe to share across threads. It is a `Random` for its
  * algebra, not for repeatability; for deterministic test data, use a seeded [Random] instead.
+ *
+ * Each draw is one platform CSPRNG call, so this is sized for occasional secret minting, not a hot
+ * loop. Being a thread-safe shared value, it cannot buffer draws behind a lock-free path; for
+ * high-throughput secure random, fill a buffer once with [cryptoRandomInto] and consume it.
  */
 val secureRandom: Random = SecureRandomSource
 
@@ -55,9 +59,9 @@ private object SecureRandomSource : Random() {
 }
 
 /**
- * One cryptographically secure random [Int] drawn straight from the platform CSPRNG, without
- * allocating a destination buffer: JVM/Android draw from a shared [java.security.SecureRandom],
- * Apple/Linux fill a stack-scoped `Int`, and js/wasm read a single `Int32Array` element. Backs
- * [secureRandom]'s `nextBits`; for more than a few bytes prefer [cryptoRandomInto].
+ * One cryptographically secure random [Int] from the platform CSPRNG, without a [PlatformBuffer]
+ * round-trip. JVM/Android draw from a shared [java.security.SecureRandom] (no allocation); Apple/Linux
+ * fill an `Int` through a small `memScoped` arena; js/wasm read from a reused module-level `Int32Array`
+ * scratch. Backs [secureRandom]'s `nextBits`; for more than a few bytes prefer [cryptoRandomInto].
  */
 internal expect fun cryptoRandomInt(): Int
