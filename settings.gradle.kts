@@ -2,13 +2,20 @@ pluginManagement {
     repositories {
         // The com.ditchoom.boringssl.provision plugin is not on the Plugin Portal yet; it currently
         // ships only as the boringssl-kmp v0.0.1-rc.1 PRERELEASE. Both consumption paths resolve it
-        // through mavenLocal (~/.m2/repository), listed first so the staged copy wins:
+        // through mavenLocal (~/.m2/repository):
         //   * local / alien1: :boringssl-provision:publishToMavenLocal from boringssl-kmp (0.0.1-SNAPSHOT).
         //   * CI: each Gradle-invoking job unzips the release's maven-local-staging.zip into
         //     ~/.m2/repository (see .github/actions/boringssl-prerelease) and pins 0.0.1-rc.1 via
         //     -PboringsslPluginVersion.
-        // Remove mavenLocal() only once the plugin ships to the Plugin Portal / Maven Central (stable).
-        mavenLocal()
+        // The content filter scopes mavenLocal to ONLY the com.ditchoom.boringssl.* groups (the plugin
+        // marker `com.ditchoom.boringssl.provision` + the impl group `com.ditchoom.boringssl`), so an
+        // unrelated artifact sitting in a developer's ~/.m2 can never shadow a real Portal/Central
+        // dependency through this entry — a bare mavenLocal() would let it. mavenLocal (not a plain
+        // maven{} dir repo) is kept deliberately: it honors -SNAPSHOT `-local` metadata for the dev
+        // publish. Remove entirely once the plugin ships to the Plugin Portal / Maven Central (stable).
+        mavenLocal {
+            content { includeGroupByRegex("com\\.ditchoom\\.boringssl.*") }
+        }
         google()
         gradlePluginPortal()
         mavenCentral()
