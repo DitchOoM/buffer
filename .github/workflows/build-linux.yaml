@@ -78,7 +78,10 @@ jobs:
       - name: Install ARM64 dependencies
         run: |
           sudo apt-get update
-          # g++-aarch64-linux-gnu is needed to cross-compile buffer-crypto's BoringSSL (C++) for arm64.
+          # gcc/g++-aarch64-linux-gnu cross-compile :buffer's simdutf (C++) for arm64; qemu-user-static
+          # runs the arm64 test.kexe binaries. buffer-crypto no longer builds BoringSSL in-repo — its
+          # libcrypto.a comes prebuilt from the com.ditchoom.boringssl.provision bundle — so no BoringSSL
+          # toolchain is needed here; the aarch64 cross-compiler is retained solely for simdutf.
           sudo apt-get install -y qemu-user-static gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
           # ARM64 runtime libraries for QEMU
           mkdir -p /tmp/arm64-libs
@@ -122,19 +125,30 @@ jobs:
           testDebugUnitTest testBenchmarkUnitTest
           ${{ inputs.gradle-args }}
 
+      # TODO(provision-release): the com.ditchoom.boringssl.provision plugin is not on the Plugin
+      # Portal and no boringssl-kmp GitHub Release exists yet, so buffer-crypto's Linux native tasks
+      # below cannot resolve the plugin or a bundle on a stock runner. To make this lane green, stage
+      # both before the native steps and pass the coordinates through gradle-args, e.g.:
+      #   - checkout DitchOoM/boringssl-kmp at the pinned bundle tag
+      #   - ./gradlew -p boringssl-kmp :boringssl-provision:publishToMavenLocal   # -> mavenLocal plugin
+      #   - build/download the linuxX64 + linuxArm64 tarballs into <distDir>       # :boringssl-build/build/dist
+      #   - then pass: -PboringsslPluginVersion=<v> -PboringsslBundleVersion=<v> -PboringsslLocalBundle=<distDir>
+      # via this workflow's `gradle-args` input (already appended to every Gradle call below). The
+      # local/alien1 path uses the same -P properties against a locally-published plugin + dist dir.
       - name: Run Linux x64 tests
         # :buffer-crypto:linuxX64Test runs the full common crypto suite (KAT + Wycheproof +
-        # tamper/negative + capability) over the BoringSSL backend. Its first run provisions
-        # BoringSSL via the self-contained buildBoringsslX64 task (clone + cmake + make crypto),
-        # which needs the go/cmake toolchains present on the runner.
+        # tamper/negative + capability) over the BoringSSL backend. BoringSSL's libcrypto.a is now
+        # provisioned by the com.ditchoom.boringssl.provision plugin (download + sha256-verify), not
+        # built in-repo — this is also the pin-downgrade (API42 -> API21) validation gate.
         run: >-
           ./gradlew :buffer:linuxX64Test :buffer-compression:linuxX64Test :buffer-flow:linuxX64Test
           :buffer-codec:linuxX64Test :buffer-codec-test:linuxX64Test :buffer-crypto:linuxX64Test
           ${{ inputs.gradle-args }}
 
       - name: Build ARM64 test binaries
-        # buffer-crypto cross-builds its arm64 BoringSSL via buildBoringsslArm64 (uses the
-        # aarch64-linux-gnu cross toolchain installed above).
+        # buffer-crypto's arm64 BoringSSL is the prebuilt linuxArm64 tarball from the provision bundle
+        # (no in-repo cross-build); :buffer's simdutf is still cross-built with the aarch64 toolchain
+        # installed above. The linkDebugTestLinuxArm64 output is then QEMU-run below.
         run: >-
           ./gradlew :buffer:linkDebugTestLinuxArm64 :buffer-compression:linkDebugTestLinuxArm64 :buffer-flow:linkDebugTestLinuxArm64
           :buffer-codec-test:linkDebugTestLinuxArm64 :buffer-crypto:linkDebugTestLinuxArm64
