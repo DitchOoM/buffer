@@ -1,3 +1,4 @@
-# BoringSSL static libs + headers, provisioned by the buildBoringssl<Arch> Gradle task (or
-# symlinked from a prebuilt tree on a dev box). Never commit the .a binaries or vendored headers.
+# BoringSSL is provisioned by the com.ditchoom.boringssl.provision plugin into the per-user cache
+# (~/.gradle/caches/ditchoom-boringssl), not into this module. Retain the legacy ignore so any
+# stale libs/boringssl/ tree from the old in-repo build is never committed.
 /libs/boringssl/
