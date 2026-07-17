@@ -48,12 +48,17 @@ jobs:
           java-version: '21'
 
       # buffer-crypto applies com.ditchoom.boringssl.provision unconditionally, so
-      # connectedAndroidTestCompatible fails at configuration time until the plugin resolves. The
-      # Android connected-test task never executes the Linux native cinterop, so stage the plugin + BOM
-      # only (no bundle). $BORINGSSL_ARGS (exported into $GITHUB_ENV) is appended to the Gradle call in
-      # the emulator script below. Remove once the plugin is on the Plugin Portal.
-      - name: Stage boringssl-kmp prerelease (plugin only)
+      # connectedAndroidTestCompatible fails at configuration time until the plugin resolves. This job
+      # runs on ubuntu, where buffer-crypto registers the linuxX64/linuxArm64 targets and the provision
+      # plugin PROVISIONS the bundle eagerly at configuration time (boringssl.cinterop). So even though
+      # the Android connected-test task never links the Linux cinterop, configuration still needs the
+      # bundle — stage plugin + BOM AND the Linux tarballs (bundle: true), else the plugin falls back to
+      # fetching the non-existent 0.0.1-dev release. $BORINGSSL_ARGS (exported into $GITHUB_ENV) is
+      # appended to the Gradle call in the emulator script below. Remove once the plugin is on the Plugin Portal.
+      - name: Stage boringssl-kmp prerelease (plugin + Linux bundle)
         uses: ./.github/actions/boringssl-prerelease
+        with:
+          bundle: "true"
 
       - name: Enable KVM
         run: |
