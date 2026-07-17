@@ -38,8 +38,18 @@ jobs:
           java-version: '21'
           cache: gradle
 
-      - name: Setup Chrome
-        uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2
+      # GitHub-hosted ubuntu runners ship Google Chrome + Chromium preinstalled, so point Karma's
+      # jsBrowserTest / wasmJsBrowserTest at the preinstalled binary via CHROME_BIN instead of
+      # re-downloading a fresh Chrome through browser-actions/setup-chrome. That action pulls from
+      # Google's CDN on every run and intermittently fails with `read ECONNRESET` — a network flake
+      # entirely unrelated to anything under test. Resolving the on-image browser removes the
+      # download (and the flake class) while keeping the browser tests running.
+      - name: Locate preinstalled Chrome
+        run: |
+          CHROME_BIN="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium-browser || command -v chromium || true)"
+          test -n "$CHROME_BIN" || { echo "::error::No preinstalled Chrome/Chromium found on the runner"; exit 1; }
+          echo "CHROME_BIN=$CHROME_BIN" >> "$GITHUB_ENV"
+          echo "Using preinstalled browser: $CHROME_BIN ($("$CHROME_BIN" --version 2>/dev/null || echo version-unknown))"
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4

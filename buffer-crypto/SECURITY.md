@@ -319,6 +319,10 @@ tracked to completion:
   compile-time one.
 - **Linux** — the native target wraps BoringSSL (not OpenSSL), consistent with the sibling
   networking module, at the `ExportableSoftware` tier (no portable non-exportable store exists there).
+  The BoringSSL binary is **not built in this repository**: it is a checksum-pinned prebuilt bundle
+  provisioned from [`DitchOoM/boringssl-kmp`](https://github.com/DitchOoM/boringssl-kmp) (one
+  canonical, single-pinned commit shared across `buffer`/`socket`), verified by SHA-256 before use.
+  See §8 for how that external artifact's provenance folds into the build-integrity model.
 - **`KeyStore` durable backends per platform** — the persistent `KeyStore` (see §4) now ships a
   durable backend on **every** target: a durable on-disk `ExportableSoftware` medium on JVM (one
   PKCS#8 DER file per alias) and Linux (the same, over POSIX stdio); a **`NonExportable.Hardware`**
@@ -377,6 +381,14 @@ artifact was built from this repository by this CI, untampered. The controls, ma
   `gh attestation verify <artifact> --repo ditchoom/buffer`.
 - **SBOM.** A CycloneDX SBOM is generated from the exact published artifact set, attached to the
   GitHub release, and itself attested.
+- **External BoringSSL provenance (Linux).** The Linux crypto backend links a **prebuilt** BoringSSL
+  static library obtained from `DitchOoM/boringssl-kmp`, not compiled here — so its integrity is a
+  distinct trusted input, not covered by this repo's own build provenance. It is anchored two ways:
+  the `com.ditchoom.boringssl.provision` plugin carries the bundle's **SHA-256 baked in** (no
+  trust-on-first-use) and verifies the downloaded tarball against it before extraction, and the
+  upstream bundle ships its own `.sha256` + `provenance.json` (canonical commit + quiche ABI anchor)
+  and is built by that repo's CI from a single pinned commit. A tampered or substituted bundle fails
+  the checksum gate at configuration time rather than entering a build.
 - **Pinned, immutable actions.** Every third-party GitHub Action is pinned to a full commit SHA
   (with the human-readable tag in a trailing comment); Dependabot updates the pin + comment
   together. A retagged/compromised action cannot silently enter the build.
