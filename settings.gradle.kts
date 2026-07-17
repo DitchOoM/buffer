@@ -1,9 +1,13 @@
 pluginManagement {
     repositories {
-        // The com.ditchoom.boringssl.provision plugin is not on the Plugin Portal yet. For local /
-        // alien1 validation it is published to mavenLocal from boringssl-kmp (:boringssl-provision:
-        // publishToMavenLocal). Listed first so that local build wins; drop once the plugin is on the
-        // Portal. TODO(provision-release): remove mavenLocal() when the plugin is published.
+        // The com.ditchoom.boringssl.provision plugin is not on the Plugin Portal yet; it currently
+        // ships only as the boringssl-kmp v0.0.1-rc.1 PRERELEASE. Both consumption paths resolve it
+        // through mavenLocal (~/.m2/repository), listed first so the staged copy wins:
+        //   * local / alien1: :boringssl-provision:publishToMavenLocal from boringssl-kmp (0.0.1-SNAPSHOT).
+        //   * CI: each Gradle-invoking job unzips the release's maven-local-staging.zip into
+        //     ~/.m2/repository (see .github/actions/boringssl-prerelease) and pins 0.0.1-rc.1 via
+        //     -PboringsslPluginVersion.
+        // Remove mavenLocal() only once the plugin ships to the Plugin Portal / Maven Central (stable).
         mavenLocal()
         google()
         gradlePluginPortal()

@@ -51,10 +51,17 @@ jobs:
           java-version: "21"
           cache: gradle
 
+      # buffer-crypto applies com.ditchoom.boringssl.provision unconditionally, so detektAll fails at
+      # configuration time until the plugin resolves. detekt is source analysis only — it never executes
+      # the Linux native cinterop — so stage the plugin + BOM only (no bundle). $BORINGSSL_ARGS carries
+      # -PboringsslPluginVersion=0.0.1-rc.1. Remove once the plugin is on the Plugin Portal.
+      - name: Stage boringssl-kmp prerelease (plugin only)
+        uses: ./.github/actions/boringssl-prerelease
+
       - name: Run detekt across all modules and source sets
         # detektAll fans out to every module's `detekt` task; each scans its KMP
         # src/<sourceSet>/kotlin dirs (configured in the root build.gradle.kts).
-        run: ./gradlew detektAll --no-daemon --continue
+        run: ./gradlew detektAll --no-daemon --continue $BORINGSSL_ARGS
 
       - name: Merge SARIF reports
         if: always()

@@ -46,6 +46,15 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '21'
+
+      # buffer-crypto applies com.ditchoom.boringssl.provision unconditionally, so
+      # connectedAndroidTestCompatible fails at configuration time until the plugin resolves. The
+      # Android connected-test task never executes the Linux native cinterop, so stage the plugin + BOM
+      # only (no bundle). $BORINGSSL_ARGS (exported into $GITHUB_ENV) is appended to the Gradle call in
+      # the emulator script below. Remove once the plugin is on the Plugin Portal.
+      - name: Stage boringssl-kmp prerelease (plugin only)
+        uses: ./.github/actions/boringssl-prerelease
+
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -149,7 +158,7 @@ jobs:
             # skipping it, which red-failed the API-21 leg the moment a higher-minSdk
             # module (e.g. buffer-crypto, minSdk 28) was present. Passing the matrix
             # api-level lets the build drop those modules cleanly on the low-API leg.
-            ./gradlew connectedAndroidTestCompatible -PdeviceApiLevel=${{ matrix.api-level }}
+            ./gradlew connectedAndroidTestCompatible -PdeviceApiLevel=${{ matrix.api-level }} $BORINGSSL_ARGS
 
       - name: Kill emulator processes
         if: always()

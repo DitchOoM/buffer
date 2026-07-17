@@ -75,6 +75,18 @@ jobs:
           restore-keys: |
             gradle-linux-
 
+      # Stage the boringssl-kmp v0.0.1-rc.1 PRERELEASE before ANY Gradle step: buffer-crypto applies
+      # com.ditchoom.boringssl.provision unconditionally, so every Gradle call below (starting with
+      # `nextVersion`) fails at configuration time until the plugin resolves. bundle: true also drops the
+      # linuxX64/linuxArm64 tarballs into $RUNNER_TEMP/bssl because this lane actually executes the Linux
+      # native cinterop (linuxX64Test / linkDebugTestLinuxArm64 / publishToMavenLocal). The action exports
+      # $BORINGSSL_ARGS (-PboringsslPluginVersion / -PboringsslBundleVersion / -PboringsslLocalBundle),
+      # appended to each Gradle invocation. Remove once the plugin is on the Plugin Portal + a stable Release exists.
+      - name: Stage boringssl-kmp prerelease (plugin + Linux bundle)
+        uses: ./.github/actions/boringssl-prerelease
+        with:
+          bundle: "true"
+
       - name: Install ARM64 dependencies
         run: |
           sudo apt-get update
@@ -98,12 +110,12 @@ jobs:
 
       - name: Get version
         id: version
-        run: echo "version=$(./gradlew -q nextVersion ${{ inputs.gradle-args }})" >> $GITHUB_OUTPUT
+        run: echo "version=$(./gradlew -q nextVersion ${{ inputs.gradle-args }} $BORINGSSL_ARGS)" >> $GITHUB_OUTPUT
 
       - name: Run KSP processor tests
         run: >-
           ./gradlew :buffer-codec-processor:test
-          ${{ inputs.gradle-args }}
+          ${{ inputs.gradle-args }} $BORINGSSL_ARGS
 
       - name: Run JVM / JS / WASM / Android-host tests
         # The host-JVM Android unit tasks run here so contributors can reproduce
@@ -123,18 +135,15 @@ jobs:
           ./gradlew ktlintCheck
           jvmTest jsNodeTest jsBrowserTest wasmJsNodeTest wasmJsBrowserTest
           testDebugUnitTest testBenchmarkUnitTest
-          ${{ inputs.gradle-args }}
+          ${{ inputs.gradle-args }} $BORINGSSL_ARGS
 
-      # TODO(provision-release): the com.ditchoom.boringssl.provision plugin is not on the Plugin
-      # Portal and no boringssl-kmp GitHub Release exists yet, so buffer-crypto's Linux native tasks
-      # below cannot resolve the plugin or a bundle on a stock runner. To make this lane green, stage
-      # both before the native steps and pass the coordinates through gradle-args, e.g.:
-      #   - checkout DitchOoM/boringssl-kmp at the pinned bundle tag
-      #   - ./gradlew -p boringssl-kmp :boringssl-provision:publishToMavenLocal   # -> mavenLocal plugin
-      #   - build/download the linuxX64 + linuxArm64 tarballs into <distDir>       # :boringssl-build/build/dist
-      #   - then pass: -PboringsslPluginVersion=<v> -PboringsslBundleVersion=<v> -PboringsslLocalBundle=<distDir>
-      # via this workflow's `gradle-args` input (already appended to every Gradle call below). The
-      # local/alien1 path uses the same -P properties against a locally-published plugin + dist dir.
+      # BoringSSL is provisioned from the boringssl-kmp v0.0.1-rc.1 prerelease staged by the
+      # "Stage boringssl-kmp prerelease" step above: the plugin + BOM come from maven-local-staging.zip
+      # (unzipped into ~/.m2/repository) and the linuxX64/linuxArm64 tarballs from $RUNNER_TEMP/bssl,
+      # verified via their .sha256 sidecars. $BORINGSSL_ARGS carries the coordinates
+      # (-PboringsslPluginVersion=0.0.1-rc.1 -PboringsslBundleVersion=0.0.1-rc.1
+      # -PboringsslLocalBundle=$RUNNER_TEMP/bssl). Drop the staging step + $BORINGSSL_ARGS once the
+      # plugin is on the Plugin Portal and a stable Release exists (baked checksums + default baseUrl fetch).
       - name: Run Linux x64 tests
         # :buffer-crypto:linuxX64Test runs the full common crypto suite (KAT + Wycheproof +
         # tamper/negative + capability) over the BoringSSL backend. BoringSSL's libcrypto.a is now
@@ -143,7 +152,7 @@ jobs:
         run: >-
           ./gradlew :buffer:linuxX64Test :buffer-compression:linuxX64Test :buffer-flow:linuxX64Test
           :buffer-codec:linuxX64Test :buffer-codec-test:linuxX64Test :buffer-crypto:linuxX64Test
-          ${{ inputs.gradle-args }}
+          ${{ inputs.gradle-args }} $BORINGSSL_ARGS
 
       - name: Build ARM64 test binaries
         # buffer-crypto's arm64 BoringSSL is the prebuilt linuxArm64 tarball from the provision bundle
@@ -152,7 +161,7 @@ jobs:
         run: >-
           ./gradlew :buffer:linkDebugTestLinuxArm64 :buffer-compression:linkDebugTestLinuxArm64 :buffer-flow:linkDebugTestLinuxArm64
           :buffer-codec-test:linkDebugTestLinuxArm64 :buffer-crypto:linkDebugTestLinuxArm64
-          ${{ inputs.gradle-args }}
+          ${{ inputs.gradle-args }} $BORINGSSL_ARGS
 
       - name: Run buffer ARM64 tests via QEMU
         run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer/build/bin/linuxArm64/debugTest/test.kexe
@@ -172,7 +181,7 @@ jobs:
       # The release/publish-to-Central path passes clean-publish: true to force a cold,
       # cache-free rebuild of the published artifacts. PR validation reuses the build cache.
       - name: Publish to Maven Local
-        run: ./gradlew publishToMavenLocal ${{ inputs.clean-publish && '--no-build-cache' || '' }} ${{ inputs.gradle-args }}
+        run: ./gradlew publishToMavenLocal ${{ inputs.clean-publish && '--no-build-cache' || '' }} ${{ inputs.gradle-args }} $BORINGSSL_ARGS
 
       - name: Upload Maven local artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

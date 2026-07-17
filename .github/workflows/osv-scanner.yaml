@@ -60,18 +60,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
-      # TODO(provision-release): publishToMavenLocal configures :buffer-crypto's Linux native
-      # publications, which apply the com.ditchoom.boringssl.provision plugin and provision a bundle at
-      # configuration time. Until the plugin is on the Plugin Portal and a boringssl-kmp Release exists,
-      # stage them first (publish the plugin to mavenLocal + stage the linuxX64/linuxArm64 tarballs into
-      # a dist dir) and pass -PboringsslPluginVersion / -PboringsslBundleVersion / -PboringsslLocalBundle
-      # to the Gradle call below — same -P protocol as build-linux.yaml.
-      #
+      # publishToMavenLocal builds :buffer-crypto's Linux native publications, which apply
+      # com.ditchoom.boringssl.provision unconditionally AND execute the linuxX64/linuxArm64 cinterop —
+      # so this lane needs both the plugin (config-time) and the bundle tarballs (link-time). Stage the
+      # v0.0.1-rc.1 prerelease: plugin + BOM from maven-local-staging.zip into ~/.m2, and the linux
+      # tarballs into $RUNNER_TEMP/bssl (bundle: true). $BORINGSSL_ARGS carries the coordinates. Remove
+      # once the plugin is on the Plugin Portal + a stable Release exists.
+      - name: Stage boringssl-kmp prerelease (plugin + Linux bundle)
+        uses: ./.github/actions/boringssl-prerelease
+        with:
+          bundle: "true"
+
       # Materialize the artifacts so Syft resolves the full dependency set (the same input
       # the release SBOM is built from). publishToMavenLocal runs the prePublishCheck gate;
       # use a plain build of the published modules instead to keep this scan fast.
       - name: Build artifacts for SBOM
-        run: ./gradlew publishToMavenLocal -x test --no-daemon
+        run: ./gradlew publishToMavenLocal -x test --no-daemon $BORINGSSL_ARGS
 
       - name: Generate SBOM (CycloneDX)
         # Mirrors the release flow's SBOM generation (merged.yaml finalize job): Syft over the

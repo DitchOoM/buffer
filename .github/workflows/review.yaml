@@ -46,8 +46,14 @@ jobs:
           node-version: '22'
           cache: 'npm'
           cache-dependency-path: docs/package-lock.json
+      # buffer-crypto applies com.ditchoom.boringssl.provision unconditionally, so copyDokkaToDocusaurus
+      # fails at configuration time until the plugin resolves. Dokka never executes the Linux native
+      # cinterop (and this job runs on macOS, where only Apple targets register), so stage the plugin +
+      # BOM only (no bundle). Remove once the plugin is on the Plugin Portal.
+      - name: Stage boringssl-kmp prerelease (plugin only)
+        uses: ./.github/actions/boringssl-prerelease
       - name: Generate API Documentation with Dokka
-        run: ./gradlew copyDokkaToDocusaurus
+        run: ./gradlew copyDokkaToDocusaurus $BORINGSSL_ARGS
       - name: Install docs dependencies
         working-directory: docs
         run: npm ci
