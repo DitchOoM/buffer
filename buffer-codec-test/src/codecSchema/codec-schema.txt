@@ -1086,6 +1086,24 @@ message com.ditchoom.buffer.codec.test.protocols.usecodecscalar.DispatchVarintUn
 message com.ditchoom.buffer.codec.test.protocols.usecodecscalar.ZigZagFrame
   0 id scalar:Int wire=4B order=Default
   1 value codec:com.ditchoom.buffer.codec.test.protocols.usecodecscalar.ZigZagUIntCodec bounding=false variable=false
+message com.ditchoom.buffer.codec.test.protocols.valueclassstring.LengthFromValueClassId
+  0 len scalar:UByte wire=1B order=Default
+  1 flags scalar:Byte wire=1B order=Default
+  2 payload string len-from=sibling:len
+message com.ditchoom.buffer.codec.test.protocols.valueclassstring.LpByteValueClassId
+  0 id string len-prefix=1B/Default
+message com.ditchoom.buffer.codec.test.protocols.valueclassstring.LpIntValueClassId
+  0 id string len-prefix=4B/Default
+message com.ditchoom.buffer.codec.test.protocols.valueclassstring.LpPlainStringId
+  0 id string len-prefix=2B/Default
+message com.ditchoom.buffer.codec.test.protocols.valueclassstring.LpValueClassId
+  0 id string len-prefix=2B/Default
+message com.ditchoom.buffer.codec.test.protocols.valueclassstring.OptionalValueClassId
+  0 hasId scalar:Boolean wire=1B order=Default
+  1 id? when(sibling:hasId) string len-prefix=2B/Default
+message com.ditchoom.buffer.codec.test.protocols.valueclassstring.RemainingValueClassId
+  0 kind scalar:Byte wire=1B order=Default
+  1 id string remaining reserved=0B
 message com.ditchoom.buffer.codec.test.protocols.varintfield.VarintLengthFrame
   0 value codec:com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec bounding=false variable=true
   1 tag scalar:UByte wire=1B order=Default

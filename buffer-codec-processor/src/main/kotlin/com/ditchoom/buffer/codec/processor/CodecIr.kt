@@ -549,6 +549,17 @@ internal sealed interface FieldSpec {
         val ownerSimpleName: String,
         val prefixWidth: Int,
         val prefixWireOrder: Endianness,
+        /**
+         * Non-null when the field's declared type is a `@JvmInline value
+         * class` over a single `String` (e.g. `value class UserId(val
+         * value: String)`) rather than a bare `String`. The wire form is
+         * byte-identical to a plain `@LengthPrefixed String` — the wrapper
+         * is wire-insignificant. Decode wraps the decoded `String` via the
+         * value class's primary constructor; encode unwraps via
+         * [ValueClassStringWrapper.innerPropertyName]. See
+         * [ValueClassStringWrapper].
+         */
+        val valueClass: ValueClassStringWrapper? = null,
     ) : FieldSpec
 
     /**
@@ -651,6 +662,13 @@ internal sealed interface FieldSpec {
          * `buffer.limit()` so trailing bytes survive the body read.
          */
         val reservedTrailingBytes: Int = 0,
+        /**
+         * Non-null when the field's declared type is a `@JvmInline value
+         * class` over a single `String` rather than a bare `String`. Wire
+         * form is byte-identical to a plain `@RemainingBytes String`. See
+         * [ValueClassStringWrapper] / [LengthPrefixedString.valueClass].
+         */
+        val valueClass: ValueClassStringWrapper? = null,
     ) : FieldSpec
 
     /**
@@ -894,6 +912,13 @@ internal sealed interface FieldSpec {
         override val name: String,
         val ownerSimpleName: String,
         val source: LengthSource,
+        /**
+         * Non-null when the field's declared type is a `@JvmInline value
+         * class` over a single `String` rather than a bare `String`. Wire
+         * form is byte-identical to a plain `@LengthFrom String`. See
+         * [ValueClassStringWrapper] / [LengthPrefixedString.valueClass].
+         */
+        val valueClass: ValueClassStringWrapper? = null,
     ) : FieldSpec
 
     /**
@@ -948,6 +973,30 @@ internal sealed interface FieldSpec {
 }
 
 /**
+ * A `@JvmInline value class` over a single `String` constructor
+ * parameter (e.g. `value class UserId(val value: String)`) used as
+ * the declared type of a String-framed field (`@LengthPrefixed`,
+ * `@LengthFrom`, `@RemainingBytes`).
+ *
+ * The wrapper is **wire-insignificant**: the value class produces
+ * the exact same bytes on the wire as the bare `String` it wraps, so
+ * a field typed `UserId` is byte-for-byte interchangeable with one
+ * typed `String` under the same framing. Only the generated Kotlin
+ * differs — decode wraps the decoded `String` via [valueClassType]'s
+ * primary constructor, and encode unwraps the field value via
+ * [innerPropertyName].
+ *
+ * Because it changes no bytes, it is deliberately absent from the
+ * codec-schema descriptor (which tracks only wire-significant
+ * attributes): a field's schema line is identical whether it is a
+ * `String` or a value class over `String`.
+ */
+internal data class ValueClassStringWrapper(
+    val valueClassType: ClassName,
+    val innerPropertyName: String,
+)
+
+/**
  * Typed shape of a `@When` field's bound (inner)
  * type. Doctrine row 19 lists the slot's underlying type universe
  * as anything Stages A/B/C/D already emit; the emitter implements
@@ -983,6 +1032,14 @@ internal sealed interface ConditionalInner {
     data class LengthPrefixedString(
         val prefixWidth: Int,
         val prefixWireOrder: Endianness,
+        /**
+         * Non-null when the `@When @LengthPrefixed val: T?` field's inner
+         * (non-null) type is a `@JvmInline value class` over a single
+         * `String`. Presence flag + length-prefixed string of the inner;
+         * wire-identical to the bare-`String?` case. See
+         * [FieldSpec.LengthPrefixedString.valueClass].
+         */
+        val valueClass: ValueClassStringWrapper? = null,
     ) : ConditionalInner
 
     data class ValueClassScalar(
