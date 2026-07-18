@@ -47,6 +47,12 @@ if (!project.hasProperty("version") || project.version == "unspecified") {
 }
 
 repositories {
+    // Scoped mavenLocal: resolves the canonical :boringssl-canonical OWNER klib (external-mode
+    // linux BoringSSL supply) from ~/.m2. Filtered to com.ditchoom.boringssl.* so an unrelated
+    // ~/.m2 artifact can never shadow a real Central dependency (mirrors settings.gradle.kts).
+    mavenLocal {
+        content { includeGroupByRegex("com\\.ditchoom\\.boringssl.*") }
+    }
     google()
     mavenCentral()
     maven { setUrl("https://maven.pkg.jetbrains.space/kotlin/p/kotlin/kotlin-js-wrappers/") }
@@ -167,6 +173,9 @@ fun appleSwiftShim(
 // ---------------------------------------------------------------------------
 val boringsslBundleVersion = providers.gradleProperty("boringsslBundleVersion").getOrElse("0.0.1-dev")
 val boringsslLocalBundle = providers.gradleProperty("boringsslLocalBundle").orNull
+// Version of the canonical :boringssl-canonical OWNER klib whose single libcrypto.a this
+// EXTERNAL-mode consumer links against (api dep on linuxMain). Overridable via -P.
+val boringsslOwnerVersion = providers.gradleProperty("boringsslOwnerVersion").getOrElse("0.0.1-SNAPSHOT")
 
 boringssl {
     version = boringsslBundleVersion
@@ -273,6 +282,10 @@ kotlin {
             cinteropName = "boringsslcrypto",
             def = file("src/nativeInterop/cinterop/boringsslcrypto.def"),
             cryptoOnly = true,
+            // EXTERNAL mode: this consumer no longer embeds its own libcrypto.a. The single canonical
+            // archive comes from the :boringssl-canonical owner klib (api dep on linuxMain below); K/N
+            // auto-propagates it to every final Linux link, so buffer-crypto + socket co-link ONE copy.
+            embedArchive = false,
         )
     }
 
@@ -415,6 +428,18 @@ kotlin {
         }
         wasmJsTest {
             dependsOn(jsAndWasmJsTest)
+        }
+
+        // EXTERNAL-mode linux: hard-depend on the single canonical BoringSSL owner klib so its ONE
+        // libcrypto.a reaches every linux final link (buffer-crypto's own linuxX64Test AND downstream
+        // co-links like socket-quic-quiche). Guarded to a linux host where the linuxMain default-
+        // hierarchy source set actually exists (linux targets are only registered there).
+        if (HostManager.hostIsLinux || isRunningOnGithub) {
+            val linuxMain by getting {
+                dependencies {
+                    api("com.ditchoom.boringssl:boringssl-canonical:$boringsslOwnerVersion")
+                }
+            }
         }
     }
 }
