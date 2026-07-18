@@ -68,6 +68,37 @@ class ValueClassStringIdsCodecTest {
         assertTrue(fromValueClass.contentEquals(expected), "golden bytes mismatch")
     }
 
+    // ---- multi-byte UTF-8 content (byte-length, not char-length) --------
+
+    @Test
+    fun lengthPrefixedValueClassRoundTripsMultiByteUtf8() {
+        // 6 chars, 9 UTF-8 bytes: é = 2 bytes, ☕ (U+2615) = 3 bytes.
+        val text = "héllo☕"
+        val original = LpValueClassId(UserId(text))
+        val buf = encode { LpValueClassIdCodec.encode(it, original, EncodeContext.Empty) }
+        buf.resetForRead()
+        val prefix = buf.readShort().toInt()
+        assertEquals(9, prefix, "length prefix must count UTF-8 bytes")
+        assertTrue(prefix > text.length, "multi-byte content: byte length exceeds char length")
+        buf.position(0)
+        assertEquals(original, LpValueClassIdCodec.decode(buf, DecodeContext.Empty))
+    }
+
+    @Test
+    fun multiByteUtf8ValueClassIsByteIdenticalToPlainString() {
+        val text = "café-π-☕"
+        val fromValueClass =
+            encode { LpValueClassIdCodec.encode(it, LpValueClassId(UserId(text)), EncodeContext.Empty) }
+                .also { it.resetForRead() }
+        val fromPlainString =
+            encode { LpPlainStringIdCodec.encode(it, LpPlainStringId(text), EncodeContext.Empty) }
+                .also { it.resetForRead() }
+        assertTrue(
+            fromValueClass.contentEquals(fromPlainString),
+            "multi-byte UTF-8 must be byte-identical between value-class and plain-String fields",
+        )
+    }
+
     @Test
     fun lengthPrefixedValueClassWireSizeIsBackPatch() {
         assertEquals(
@@ -161,6 +192,30 @@ class ValueClassStringIdsCodecTest {
         assertEquals(1, buf.position())
         buf.resetForRead()
         assertEquals(original, RemainingValueClassIdCodec.decode(buf, DecodeContext.Empty))
+    }
+
+    // ---- non-terminal @RemainingBytes value class (reserved trailer) ----
+
+    @Test
+    fun remainingBytesValueClassWithTrailerRoundTrips() {
+        val text = "trailing-id"
+        val original = RemainingValueClassWithTrailer(kind = 0x09, id = SessionId(text), crc = 0xDEADBEEFu)
+        val buf = encode { RemainingValueClassWithTrailerCodec.encode(it, original, EncodeContext.Empty) }
+        // kind (1) + body bounded to limit()-4 + crc (4).
+        assertEquals(1 + text.length + 4, buf.position())
+        buf.resetForRead()
+        val decoded = RemainingValueClassWithTrailerCodec.decode(buf, DecodeContext.Empty)
+        assertEquals(original, decoded)
+        assertEquals(0xDEADBEEFu, decoded.crc, "trailing fixed field survives the bounded body read")
+    }
+
+    @Test
+    fun remainingBytesValueClassWithTrailerEmptyBodyRoundTrips() {
+        val original = RemainingValueClassWithTrailer(kind = 0x01, id = SessionId(""), crc = 0x01020304u)
+        val buf = encode { RemainingValueClassWithTrailerCodec.encode(it, original, EncodeContext.Empty) }
+        assertEquals(1 + 0 + 4, buf.position())
+        buf.resetForRead()
+        assertEquals(original, RemainingValueClassWithTrailerCodec.decode(buf, DecodeContext.Empty))
     }
 
     // ---- helpers --------------------------------------------------------

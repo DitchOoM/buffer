@@ -102,3 +102,16 @@ data class RemainingValueClassId(
     val kind: Byte,
     @RemainingBytes val id: SessionId,
 )
+
+/**
+ * Non-terminal `@RemainingBytes` value class: the body is bounded to
+ * `limit() - 4` so the trailing fixed-size `crc` survives. Exercises the
+ * `reservedTrailingBytes > 0` path in combination with the value-class
+ * wrapper (the terminal [RemainingValueClassId] leaves `reserved = 0`).
+ */
+@ProtocolMessage
+data class RemainingValueClassWithTrailer(
+    val kind: Byte,
+    @RemainingBytes val id: SessionId,
+    val crc: UInt,
+)

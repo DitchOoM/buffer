@@ -1104,6 +1104,10 @@ message com.ditchoom.buffer.codec.test.protocols.valueclassstring.OptionalValueC
 message com.ditchoom.buffer.codec.test.protocols.valueclassstring.RemainingValueClassId
   0 kind scalar:Byte wire=1B order=Default
   1 id string remaining reserved=0B
+message com.ditchoom.buffer.codec.test.protocols.valueclassstring.RemainingValueClassWithTrailer
+  0 kind scalar:Byte wire=1B order=Default
+  1 id string remaining reserved=4B
+  2 crc scalar:UInt wire=4B order=Default
 message com.ditchoom.buffer.codec.test.protocols.varintfield.VarintLengthFrame
   0 value codec:com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec bounding=false variable=true
   1 tag scalar:UByte wire=1B order=Default
