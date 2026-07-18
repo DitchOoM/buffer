@@ -508,7 +508,16 @@ internal fun appendDecodeConditional(
                     prefixWidth = inner.prefixWidth,
                     prefixWireOrder = inner.prefixWireOrder,
                 )
-            body.addStatement("buffer.readString(%L, %T.UTF8)", lengthVar, CHARSET_CN)
+            if (inner.valueClass != null) {
+                body.addStatement(
+                    "%T(buffer.readString(%L, %T.UTF8))",
+                    inner.valueClass.valueClassType,
+                    lengthVar,
+                    CHARSET_CN,
+                )
+            } else {
+                body.addStatement("buffer.readString(%L, %T.UTF8)", lengthVar, CHARSET_CN)
+            }
             body.nextControlFlow("else")
             body.addStatement("null")
             body.endControlFlow()
@@ -678,7 +687,14 @@ internal fun appendEncodeConditional(
                 ownerSimpleName = field.ownerSimpleName,
                 prefixWidth = inner.prefixWidth,
                 prefixWireOrder = inner.prefixWireOrder,
-                accessor = localName,
+                // `localName` is the null-checked non-null value; unwrap the
+                // value class via its inner property when present.
+                accessor =
+                    if (inner.valueClass != null) {
+                        "$localName.${inner.valueClass.innerPropertyName}"
+                    } else {
+                        localName
+                    },
             )
         is ConditionalInner.ValueClassScalar ->
             // Unwrap the value class via the
@@ -1091,12 +1107,14 @@ internal fun appendDecodeLengthPrefixedString(
             prefixWidth = field.prefixWidth,
             prefixWireOrder = field.prefixWireOrder,
         )
-    body.addStatement(
-        "val %L = buffer.readString(%L, %T.UTF8)",
-        field.name,
-        lengthVar,
-        CHARSET_CN,
-    )
+    val read = CodeBlock.of("buffer.readString(%L, %T.UTF8)", lengthVar, CHARSET_CN)
+    // Wrap the decoded String in the value class's primary constructor when
+    // the field is a value class over String (wire-identical to bare String).
+    if (field.valueClass != null) {
+        body.addStatement("val %L = %T(%L)", field.name, field.valueClass.valueClassType, read)
+    } else {
+        body.addStatement("val %L = %L", field.name, read)
+    }
 }
 
 /**
@@ -1139,7 +1157,14 @@ internal fun appendEncodeLengthPrefixedString(
         ownerSimpleName = field.ownerSimpleName,
         prefixWidth = field.prefixWidth,
         prefixWireOrder = field.prefixWireOrder,
-        accessor = "value.${field.name}",
+        // Unwrap the value class via its inner property when present
+        // (`value.id.value`); plain String fields use `value.id`.
+        accessor =
+            if (field.valueClass != null) {
+                "value.${field.name}.${field.valueClass.innerPropertyName}"
+            } else {
+                "value.${field.name}"
+            },
     )
 }
 
@@ -1250,12 +1275,13 @@ internal fun appendDecodeLengthFromString(
     // shadow the sibling local when the user names the carrier
     // `<bound>Length` — a natural Kotlin convention that the
     // generated code must not break.
-    body.addStatement(
-        "val %L = buffer.readString(%L, %T.UTF8)",
-        field.name,
-        field.source.decodeAccessor(),
-        CHARSET_CN,
-    )
+    val read =
+        CodeBlock.of("buffer.readString(%L, %T.UTF8)", field.source.decodeAccessor(), CHARSET_CN)
+    if (field.valueClass != null) {
+        body.addStatement("val %L = %T(%L)", field.name, field.valueClass.valueClassType, read)
+    } else {
+        body.addStatement("val %L = %L", field.name, read)
+    }
 }
 
 /**
@@ -1271,9 +1297,15 @@ internal fun appendEncodeLengthFromString(
     body: CodeBlock.Builder,
     field: FieldSpec.LengthFromString,
 ) {
+    val accessor =
+        if (field.valueClass != null) {
+            "value.${field.name}.${field.valueClass.innerPropertyName}"
+        } else {
+            "value.${field.name}"
+        }
     body.addStatement(
-        "buffer.writeString(value.%L, %T.UTF8)",
-        field.name,
+        "buffer.writeString(%L, %T.UTF8)",
+        accessor,
         CHARSET_CN,
     )
 }
@@ -1479,22 +1511,23 @@ internal fun appendDecodeRemainingBytesString(
     body: CodeBlock.Builder,
     field: FieldSpec.RemainingBytesString,
 ) {
-    if (field.reservedTrailingBytes == 0) {
-        body.addStatement(
-            "val %L = buffer.readString(buffer.remaining(), %T.UTF8)",
-            field.name,
-            CHARSET_CN,
-        )
-        return
+    val read =
+        if (field.reservedTrailingBytes == 0) {
+            CodeBlock.of("buffer.readString(buffer.remaining(), %T.UTF8)", CHARSET_CN)
+        } else {
+            // Read the body byte count minus the reserved trailing
+            // FixedSize bytes; the trailing field emits run normally after.
+            CodeBlock.of(
+                "buffer.readString(buffer.remaining() - %L, %T.UTF8)",
+                field.reservedTrailingBytes,
+                CHARSET_CN,
+            )
+        }
+    if (field.valueClass != null) {
+        body.addStatement("val %L = %T(%L)", field.name, field.valueClass.valueClassType, read)
+    } else {
+        body.addStatement("val %L = %L", field.name, read)
     }
-    // Read the body byte count minus the reserved trailing
-    // FixedSize bytes; the trailing field emits run normally after.
-    body.addStatement(
-        "val %L = buffer.readString(buffer.remaining() - %L, %T.UTF8)",
-        field.name,
-        field.reservedTrailingBytes,
-        CHARSET_CN,
-    )
 }
 
 /**
@@ -1508,9 +1541,15 @@ internal fun appendEncodeRemainingBytesString(
     body: CodeBlock.Builder,
     field: FieldSpec.RemainingBytesString,
 ) {
+    val accessor =
+        if (field.valueClass != null) {
+            "value.${field.name}.${field.valueClass.innerPropertyName}"
+        } else {
+            "value.${field.name}"
+        }
     body.addStatement(
-        "buffer.writeString(value.%L, %T.UTF8)",
-        field.name,
+        "buffer.writeString(%L, %T.UTF8)",
+        accessor,
         CHARSET_CN,
     )
 }

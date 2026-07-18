@@ -346,6 +346,23 @@ data class MyMessage(
 // MyMessageCodec.encode(buffer, msg) — generated, type-safe, batch-optimized
 ```
 
+#### Value-class (`newtype`) id fields over String
+
+A field typed as a `@JvmInline value class` over a single `String` is a valid codec field under any of the String framings (`@LengthPrefixed`, `@LengthFrom`, `@RemainingBytes`). It encodes **byte-for-byte identically** to the same field typed as a bare `String` — the generated codec just wraps on decode (via the value class constructor) and unwraps on encode (via the inner property). Use this for typed identifiers instead of hand-writing inline-string codecs:
+
+```kotlin
+@JvmInline value class UserId(val value: String)
+@JvmInline value class SessionId(val value: String)
+
+@ProtocolMessage
+data class Session(
+    @LengthPrefixed val user: UserId,          // wire-identical to @LengthPrefixed String
+    @When("resumed") @LengthPrefixed val prior: SessionId? = null,  // composes with @When
+)
+```
+
+The wrapper is wire-insignificant (invisible in the codec schema; a field is interchangeable between `String` and a value class over `String` with no wire change). The value class must **not** itself be `@ProtocolMessage`, and `@WireBytes` / `@WireOrder` on its inner property are unsupported.
+
 ### Sealed Interface Dispatch with `@PacketType` and `@DispatchOn`
 
 For protocols with a type discriminator, use sealed interfaces with `@PacketType`:

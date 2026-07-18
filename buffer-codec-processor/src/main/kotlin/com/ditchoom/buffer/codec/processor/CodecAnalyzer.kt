@@ -614,10 +614,23 @@ internal fun analyzeField(
                 FieldSpec.RemainingBytesString(name = name, ownerSimpleName = ownerSimpleName),
             )
         }
+        // `@RemainingBytes val: <value class over String>` — wire-identical
+        // to `@RemainingBytes String`, wrapping the trailing UTF-8 bytes in
+        // the value class. Detect before the List gate below.
+        valueClassOverStringWrapperOrNull(type)?.let { wrapper ->
+            return FieldAnalysis.Ok(
+                FieldSpec.RemainingBytesString(
+                    name = name,
+                    ownerSimpleName = ownerSimpleName,
+                    valueClass = wrapper,
+                ),
+            )
+        }
         if (typeQname != "kotlin.collections.List") {
             return FieldAnalysis.Err(
                 Diagnostic(
-                    "@RemainingBytes supports only String, List<@ProtocolMessage>, or @UseCodec val: Payload",
+                    "@RemainingBytes supports only String, a @JvmInline value class over String, " +
+                        "List<@ProtocolMessage>, or @UseCodec val: Payload",
                     param,
                 ),
             )
@@ -668,15 +681,32 @@ internal fun analyzeField(
                     params = params,
                     index = index,
                 )
-            else ->
-                analyzeLengthFromMessageField(
-                    param = param,
-                    type = type,
-                    lengthFromAnn = lengthFromAnn,
-                    ownerSimpleName = ownerSimpleName,
-                    params = params,
-                    index = index,
-                )
+            else -> {
+                // `@LengthFrom("ref") val: <value class over String>` —
+                // wire-identical to `@LengthFrom String`. Detect before the
+                // nested-@ProtocolMessage fallback (value classes over
+                // String are neither String, List, nor @ProtocolMessage).
+                val stringWrapper = valueClassOverStringWrapperOrNull(type)
+                if (stringWrapper != null) {
+                    analyzeLengthFromStringField(
+                        param = param,
+                        lengthFromAnn = lengthFromAnn,
+                        ownerSimpleName = ownerSimpleName,
+                        params = params,
+                        index = index,
+                        valueClass = stringWrapper,
+                    )
+                } else {
+                    analyzeLengthFromMessageField(
+                        param = param,
+                        type = type,
+                        lengthFromAnn = lengthFromAnn,
+                        ownerSimpleName = ownerSimpleName,
+                        params = params,
+                        index = index,
+                    )
+                }
+            }
         }
     }
 
@@ -732,6 +762,23 @@ internal fun analyzeField(
                     ownerSimpleName = ownerSimpleName,
                     prefixWidth = prefixWidth,
                     prefixWireOrder = messageWireOrder,
+                ),
+            )
+        }
+        // `@LengthPrefixed val: <value class over String>` — a
+        // `@JvmInline value class UserId(val value: String)` typed field.
+        // Wire form is byte-identical to `@LengthPrefixed String`; only
+        // the generated wrap/unwrap differs. Not terminal-only (same as
+        // the bare-String case), so detect it ahead of the terminal
+        // `@ProtocolMessage` gate below.
+        valueClassOverStringWrapperOrNull(type)?.let { wrapper ->
+            return FieldAnalysis.Ok(
+                FieldSpec.LengthPrefixedString(
+                    name = name,
+                    ownerSimpleName = ownerSimpleName,
+                    prefixWidth = prefixWidth,
+                    prefixWireOrder = messageWireOrder,
+                    valueClass = wrapper,
                 ),
             )
         }
@@ -1012,6 +1059,63 @@ internal fun analyzeValueClassScalarField(
 }
 
 /**
+ * Detect a `@JvmInline value class` over a single `String`
+ * constructor parameter (e.g. `value class UserId(val value:
+ * String)`). Returns the wire-insignificant [ValueClassStringWrapper]
+ * when [type] matches, or `null` otherwise so callers fall through to
+ * their existing bare-`String` / message handling.
+ *
+ * Mirrors the validity checks applied to [analyzeValueClassScalarField]'s
+ * scalar path: exactly one primary-constructor parameter, over a
+ * non-nullable inner, with no `@WireBytes` / `@WireOrder` on the inner
+ * property (out of scope, same narrowing as the scalar shape). The
+ * only difference is the inner type is `kotlin.String` rather than a
+ * numeric scalar — so a String value class routes to the length-framed
+ * String field logic instead of the inline-scalar logic.
+ */
+@Suppress("ReturnCount") // guard-clause validity checks, consistent with the analyze* family
+internal fun valueClassOverStringWrapperOrNull(type: KSType): ValueClassStringWrapper? {
+    val decl = type.declaration as? KSClassDeclaration ?: return null
+    if (!decl.isValueClassDecl()) return null
+    // A value class that is itself `@ProtocolMessage` has its own generated
+    // codec and keeps routing to the nested-message paths — it is not
+    // treated as a transparent String wrapper. The target of this shape is
+    // the plain id wrapper (`value class UserId(val value: String)`) with no
+    // `@ProtocolMessage`.
+    if (decl.annotations.any { ann ->
+            ann.shortName.asString() == "ProtocolMessage" &&
+                ann.annotationType
+                    .resolve()
+                    .declaration.qualifiedName
+                    ?.asString() == PROTOCOL_MESSAGE_QNAME
+        }
+    ) {
+        return null
+    }
+    val ctor = decl.primaryConstructor ?: return null
+    if (ctor.parameters.size != 1) return null
+    val innerParam = ctor.parameters[0]
+    val innerName = innerParam.name?.asString() ?: return null
+    val innerType = innerParam.type.resolve()
+    if (innerType.isError || innerType.isMarkedNullable) return null
+    if (innerType.declaration.qualifiedName?.asString() != "kotlin.String") return null
+    // @WireBytes / @WireOrder on the inner property widen the wire
+    // shape and are deferred — same narrowing the inline-scalar value
+    // class path applies.
+    if (innerParam.annotations.any { ann ->
+            val n = ann.shortName.asString()
+            n == "WireBytes" || n == "WireOrder"
+        }
+    ) {
+        return null
+    }
+    return ValueClassStringWrapper(
+        valueClassType = classNameOf(decl),
+        innerPropertyName = innerName,
+    )
+}
+
+/**
  * `@LengthFrom("ref") val: String`. Two source-expression forms:
  *   - Simple-name `"sibling"`: sibling is a numeric `Scalar`; body
  *     byte count = `sibling.toInt()`.
@@ -1028,6 +1132,7 @@ internal fun analyzeLengthFromStringField(
     ownerSimpleName: String,
     params: List<KSValueParameter>,
     index: Int,
+    valueClass: ValueClassStringWrapper? = null,
 ): FieldAnalysis {
     val name =
         param.name?.asString() ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
@@ -1036,7 +1141,10 @@ internal fun analyzeLengthFromStringField(
     if (type.isMarkedNullable) {
         return FieldAnalysis.Err(Diagnostic("@LengthFrom val: String must be non-nullable", param))
     }
-    if (type.declaration.qualifiedName?.asString() != "kotlin.String") {
+    // A non-null [valueClass] means the caller already matched a value
+    // class over `String` (wire-identical to a bare `String`); skip the
+    // bare-`String` type check in that case.
+    if (valueClass == null && type.declaration.qualifiedName?.asString() != "kotlin.String") {
         return FieldAnalysis.Err(Diagnostic("@LengthFrom String analyzer requires a String field", param))
     }
 
@@ -1055,6 +1163,7 @@ internal fun analyzeLengthFromStringField(
             name = name,
             ownerSimpleName = ownerSimpleName,
             source = source,
+            valueClass = valueClass,
         ),
     )
 }
@@ -2250,13 +2359,21 @@ internal fun analyzeConditionalInner(
     }
     if (lengthPrefixedAnn != null) {
         // Widens the inner universe to LengthPrefixed
-        // String only. LengthPrefixed @ProtocolMessage bodies are
-        // doctrine-row-19 valid but defer until a vector requires
-        // them.
-        if (qualified != "kotlin.String") return null
+        // String — either a bare `String?` or a `@JvmInline value class`
+        // over `String` (wire-identical, wraps/unwraps at the boundary).
+        // LengthPrefixed @ProtocolMessage bodies are doctrine-row-19 valid
+        // but defer until a vector requires them.
+        if (qualified == "kotlin.String") {
+            return ConditionalInner.LengthPrefixedString(
+                prefixWidth = readLengthPrefix(lengthPrefixedAnn),
+                prefixWireOrder = messageWireOrder,
+            )
+        }
+        val stringWrapper = valueClassOverStringWrapperOrNull(innerType) ?: return null
         return ConditionalInner.LengthPrefixedString(
             prefixWidth = readLengthPrefix(lengthPrefixedAnn),
             prefixWireOrder = messageWireOrder,
+            valueClass = stringWrapper,
         )
     }
     // Bare `@When val: T?` where T is a
@@ -2462,7 +2579,8 @@ internal fun analyzeConditionalValueClassInner(innerType: KSType): ConditionalIn
 internal fun conditionalInnerNullableTypeName(inner: ConditionalInner): TypeName =
     when (inner) {
         is ConditionalInner.Scalar -> scalarTypeName(inner.kind).copy(nullable = true)
-        is ConditionalInner.LengthPrefixedString -> STRING_NULLABLE_TN
+        is ConditionalInner.LengthPrefixedString ->
+            inner.valueClass?.valueClassType?.copy(nullable = true) ?: STRING_NULLABLE_TN
         is ConditionalInner.ValueClassScalar -> inner.valueClassType.copy(nullable = true)
         is ConditionalInner.LengthPrefixedUseCodecList ->
             ClassName("kotlin.collections", "List")

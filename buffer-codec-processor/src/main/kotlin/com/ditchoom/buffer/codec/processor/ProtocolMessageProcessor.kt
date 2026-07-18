@@ -1069,7 +1069,12 @@ class ProtocolMessageProcessor(
 
             val type = param.type.resolve()
             val typeQname = type.declaration.qualifiedName?.asString()
-            val isStringType = typeQname == STRING_QNAME && !type.isMarkedNullable
+            // A `@JvmInline value class` over `String` is wire-identical to
+            // a bare `String` and accepted the same way (wraps/unwraps at
+            // the decode/encode boundary).
+            val isStringType =
+                !type.isMarkedNullable &&
+                    (typeQname == STRING_QNAME || valueClassOverStringWrapperOrNull(type) != null)
             val isListOfProtocolMessage =
                 !type.isMarkedNullable &&
                     typeQname == LIST_QNAME &&

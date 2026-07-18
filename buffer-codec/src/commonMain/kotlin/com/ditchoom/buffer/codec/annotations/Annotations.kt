@@ -93,9 +93,40 @@ enum class LengthPrefix {
  *
  * Accepted on:
  *   - `String` fields — the value is the field's UTF-8 bytes.
+ *   - A `@JvmInline value class` over a single `String` (e.g.
+ *     `value class UserId(val value: String)`) — encoded exactly like the
+ *     `String` it wraps (see "Value class over String" below).
  *   - `@ProtocolMessage` data class fields — the value is the message body's
  *     wire bytes; encode emits the prefix carrying the body's `wireSize`,
  *     decode reads the prefix, bounds inner decode, restores the outer limit.
+ *
+ * ## Value class over String
+ *
+ * A field typed as a `@JvmInline value class` whose single constructor
+ * parameter is a `String` encodes **byte-for-byte identically** to the same
+ * field typed as a bare `String` — the generated codec wraps the decoded
+ * `String` via the value class's primary constructor and unwraps it via that
+ * property on encode. This lets id/newtype wrappers appear directly as codec
+ * fields instead of forcing hand-written codecs:
+ *
+ * ```kotlin
+ * @JvmInline value class UserId(val value: String)
+ *
+ * @ProtocolMessage
+ * data class Session(
+ *     @LengthPrefixed val user: UserId,   // wire-identical to @LengthPrefixed String
+ * )
+ * ```
+ *
+ * The wrapper is wire-insignificant: it is invisible in the codec schema, and
+ * a field is freely interchangeable between `String` and a value class over
+ * `String` without any wire change. All prefix widths and the `@When`-nullable
+ * combination (`@When("flag") @LengthPrefixed val user: UserId?`) are
+ * supported. The value class must **not** itself be `@ProtocolMessage` (such a
+ * type has its own codec and routes to the nested-message path instead), and
+ * `@WireBytes` / `@WireOrder` on its inner property are out of scope. The same
+ * value-class-over-`String` support applies to [LengthFrom] and
+ * [RemainingBytes] fields.
  *
  * For adjacent length carriers, prefer `@LengthPrefixed` over modeling the
  * length as a separate constructor parameter and a `@LengthFrom` reference —
@@ -133,6 +164,9 @@ annotation class LengthPrefixed(
  *
  * Accepted on:
  *   - `String` — UTF-8 body consuming the rest of the buffer.
+ *   - A `@JvmInline value class` over a single `String` — wire-identical to
+ *     the `String` case, wrapping the trailing bytes in the value class. See
+ *     the "Value class over String" section on [LengthPrefixed].
  *   - `List<T>` where `T` is a `@ProtocolMessage` data class — loop
  *     reads nested-message bodies until the bound is reached.
  *   - Typed binary payload via `@RemainingBytes @UseCodec(C::class) val: P`
@@ -206,6 +240,9 @@ annotation class RemainingBytes
  *
  * Accepted on:
  *   - `String` fields — body is a single UTF-8 string sized by the sibling.
+ *   - A `@JvmInline value class` over a single `String` — wire-identical to
+ *     the `String` case. See the "Value class over String" section on
+ *     [LengthPrefixed].
  *   - `List<T>` where `T` is a `@ProtocolMessage` data class — body is a
  *     sequence of nested-message bodies, byte-bounded by the sibling.
  *   - `T` where `T` is a `@ProtocolMessage` data class or sealed parent —

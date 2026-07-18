@@ -1797,9 +1797,11 @@ internal class CodecEmitter(
     private fun partialFieldTypeName(field: FieldSpec): TypeName =
         when (field) {
             is FieldSpec.Scalar -> scalarTypeName(field.kind)
-            is FieldSpec.LengthPrefixedString -> ClassName("kotlin", "String")
+            is FieldSpec.LengthPrefixedString ->
+                field.valueClass?.valueClassType ?: ClassName("kotlin", "String")
             is FieldSpec.LengthPrefixedMessage -> field.messageType
-            is FieldSpec.LengthFromString -> ClassName("kotlin", "String")
+            is FieldSpec.LengthFromString ->
+                field.valueClass?.valueClassType ?: ClassName("kotlin", "String")
             is FieldSpec.LengthFromMessage -> field.messageType
             is FieldSpec.LengthFromList ->
                 ClassName("kotlin.collections", "List").parameterizedBy(field.elementClassName)

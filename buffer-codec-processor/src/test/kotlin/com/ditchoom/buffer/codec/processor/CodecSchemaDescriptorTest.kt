@@ -157,6 +157,65 @@ class CodecSchemaDescriptorTest {
         assertTrue(rendered.startsWith("enum com.acme.Plain\n"), "no default → no default= token:\n$rendered")
     }
 
+    // ---- value-class-over-String is wire-insignificant --------------------
+
+    /**
+     * A `@JvmInline value class` over `String` is byte-for-byte identical on
+     * the wire to the bare `String` it wraps, so the descriptor — which tracks
+     * only wire-significant attributes — must render the two the same. This is
+     * what makes a plain `@LengthPrefixed String` field and a `@LengthPrefixed
+     * UserId` field interchangeable without registering as schema drift.
+     */
+    @Test
+    fun `value-class-over-String descriptor is identical to plain String under every framing`() {
+        val wrapper = ValueClassStringWrapper(ClassName("com.acme", "UserId"), "value")
+
+        assertEquals(
+            CodecSchemaDescriptor.describeField(
+                FieldSpec.LengthPrefixedString("id", "Owner", 2, Endianness.Big),
+            ),
+            CodecSchemaDescriptor.describeField(
+                FieldSpec.LengthPrefixedString("id", "Owner", 2, Endianness.Big, valueClass = wrapper),
+            ),
+            "@LengthPrefixed value-class-over-String must share the plain-String schema line",
+        )
+
+        assertEquals(
+            CodecSchemaDescriptor.describeField(
+                FieldSpec.LengthFromString("id", "Owner", LengthSource.Sibling("len", ScalarKind.UShort)),
+            ),
+            CodecSchemaDescriptor.describeField(
+                FieldSpec.LengthFromString(
+                    "id",
+                    "Owner",
+                    LengthSource.Sibling("len", ScalarKind.UShort),
+                    valueClass = wrapper,
+                ),
+            ),
+            "@LengthFrom value-class-over-String must share the plain-String schema line",
+        )
+
+        assertEquals(
+            CodecSchemaDescriptor.describeField(
+                FieldSpec.RemainingBytesString("id", "Owner", reservedTrailingBytes = 0),
+            ),
+            CodecSchemaDescriptor.describeField(
+                FieldSpec.RemainingBytesString("id", "Owner", reservedTrailingBytes = 0, valueClass = wrapper),
+            ),
+            "@RemainingBytes value-class-over-String must share the plain-String schema line",
+        )
+
+        assertEquals(
+            CodecSchemaDescriptor.describeConditionalInner(
+                ConditionalInner.LengthPrefixedString(2, Endianness.Big),
+            ),
+            CodecSchemaDescriptor.describeConditionalInner(
+                ConditionalInner.LengthPrefixedString(2, Endianness.Big, valueClass = wrapper),
+            ),
+            "@When @LengthPrefixed value-class-over-String must share the plain-String schema line",
+        )
+    }
+
     // ---- helpers ----------------------------------------------------------
 
     private fun assertNonEmptyLine(
