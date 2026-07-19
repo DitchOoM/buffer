@@ -10,10 +10,9 @@ import com.squareup.kotlinpoet.TypeName
  * describes why a shape is unsupported; [node] is the offending
  * source element to anchor a KSP error on.
  *
- * Note: in the byte-identical threading commit these diagnostics are
- * constructed but NOT emitted — [CodecEmitter.tryEmit] silently skips
- * `Rejected`/`NotApplicable` results. Emission is wired up in the
- * follow-on diagnostics pass.
+ * [CodecEmitter.tryEmit] emits these as KSP errors ([message] via
+ * `logger.error` anchored at [node]) whenever analysis returns a
+ * [AnalysisResult.Rejected]/[DispatchAnalysisResult.Rejected] result.
  */
 internal data class Diagnostic(
     val message: String,
@@ -24,8 +23,8 @@ internal data class Diagnostic(
  * Result of analyzing a top-level `@ProtocolMessage` symbol into a
  * [CodecShape]. Replaces the prior `CodecShape?` return:
  *   - [Supported] — a codec is generated from [shape].
- *   - [Rejected] — the shape is a SILENT GAP (per SUPPORT_MATRIX §2.5/§2.6);
- *     the follow-on pass will turn the [diagnostics] into KSP errors.
+ *   - [Rejected] — the shape is out of scope; [tryEmit][CodecEmitter.tryEmit]
+ *     turns the [diagnostics] into KSP errors.
  *   - [NotApplicable] — the symbol is genuinely not this analyzer's
  *     concern (handled elsewhere) OR is already rejected by a validator
  *     diagnostic, so the analyzer stays silent.
@@ -108,8 +107,8 @@ internal sealed interface VariantWireSize {
 }
 
 // ---------------------------------------------------------------------------
-// Unified dispatch IR (dispatch-path unification — see
-// DISPATCH_UNIFICATION_PLAN.md). One DispatchShape subsumes both the simple
+// Unified dispatch IR (the two sealed-dispatch paths were unified into one).
+// One DispatchShape subsumes both the simple
 // @PacketType and @DispatchOn dispatch paths. Both analyzers
 // (analyzeSealedDispatcher / analyzeDispatchOnSealedDispatcher) produce this
 // shape directly. Every optional/variant dimension is an explicit sum type —

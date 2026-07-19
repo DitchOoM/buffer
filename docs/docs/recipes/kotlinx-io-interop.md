@@ -18,7 +18,7 @@ dependencies {
 }
 ```
 
-The module depends on `kotlinx-io-core` (0.8.0) and re-exports it, so you don't need a separate
+The module depends on `kotlinx-io-core` (0.9.1) and re-exports it, so you don't need a separate
 kotlinx-io dependency. It ships for the full set of `buffer` targets.
 
 ## Copy semantics

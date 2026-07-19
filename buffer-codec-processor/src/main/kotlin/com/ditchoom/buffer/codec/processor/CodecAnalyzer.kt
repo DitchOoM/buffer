@@ -112,9 +112,9 @@ internal fun analyze(symbol: KSClassDeclaration): AnalysisResult {
     // codec via the existing data-class path. The dispatcher (separate emit
     // path keyed on the sealed parent) calls `${VariantSimpleName}Codec`.
     val ctor = symbol.primaryConstructor ?: return AnalysisResult.NotApplicable
-    // Empty parameter list: no codifiable fields. Validator-paired
-    // (SUPPORT_MATRIX §2.6 lists this as validator-silent today, but it
-    // is genuinely not a message shape) — stay silent to preserve behavior.
+    // Empty parameter list: no codifiable fields. This is genuinely not a
+    // message shape (rather than an unsupported one) — stay silent to
+    // preserve behavior.
     if (ctor.parameters.isEmpty()) return AnalysisResult.NotApplicable
     // Value class must have exactly one primary constructor parameter (Kotlin
     // already enforces this, but we add a defensive guard rather than relying on it).
@@ -3307,7 +3307,7 @@ internal fun classifyVariantWireSize(shape: CodecShape): VariantWireSize {
 }
 
 // -----------------------------------------------------------------------
-// Unified dispatch decode (DISPATCH_UNIFICATION_PLAN.md stage 3). One
+// Unified dispatch decode. One
 // builder subsumes BOTH the simple @PacketType decode
 // (DiscriminatorOwnership.ConsumedByDispatcher) and the @DispatchOn decode
 // (DiscriminatorOwnership.ReReadByVariant), byte-for-byte. The legacy

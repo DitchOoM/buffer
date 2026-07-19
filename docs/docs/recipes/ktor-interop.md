@@ -23,7 +23,7 @@ dependencies {
 }
 ```
 
-`buffer-ktor` transitively brings in `buffer-kotlinx-io`, `buffer-codec`, and the Ktor 3.2.0 IO / HTTP
+`buffer-ktor` transitively brings in `buffer-kotlinx-io`, `buffer-codec`, and the Ktor 3.5.1 IO / HTTP
 / serialization artifacts. Ktor's own channels are built on kotlinx-io, so the channel bridges reuse
 the [kotlinx-io bridge](./kotlinx-io-interop) internally.
 

@@ -9,7 +9,7 @@ Benchmarks run on:
 - **JavaScript**: Node.js v22
 - **WasmJS**: Node.js v22 with WASM runtime
 - **Native**: macOS ARM64 (Apple Silicon)
-- **Android**: Realme device
+- **Android**: results are from more than one device — see each section's caption (Pixel 6 / API 35 for the platform tables below; Realme RMX3933 / Android 14 / API 34 for the VarHandle section)
 
 ### Platform Comparison
 
@@ -207,7 +207,7 @@ These optimizations improved Native performance by 1.3-1.7x and fixed OOM crashe
 
 ### SIMD-Accelerated Bulk Operations (Native)
 
-On native platforms (Apple ARM64, Linux x86_64), Direct buffers (`AllocationZone.Direct`) use C cinterop functions that Clang auto-vectorizes to NEON or SSE2/AVX2 instructions.
+On native platforms (Apple ARM64, Linux x86_64), Direct buffers (from `BufferFactory.Default`) use C cinterop functions that Clang auto-vectorizes to NEON or SSE2/AVX2 instructions.
 
 **macOS ARM64 Benchmark Results (64KB buffers):**
 
@@ -228,7 +228,7 @@ Comparison uses the same Direct buffer type — "Baseline" is the old Kotlin-onl
 | bufferCopy | 939K ops/s | — | — |
 
 **Key takeaways:**
-- Use `AllocationZone.Direct` on native platforms for bulk operations (11-146x faster)
+- Use `BufferFactory.Default` (Direct) on native platforms for bulk operations (11-146x faster)
 - `xorMask()` gains the most because SIMD avoids byte-order swapping overhead
 - The `aligned` flag enables even faster SIMD scanning when data alignment is known
 - `xorMask()` is critical for WebSocket per-message-deflate masking performance

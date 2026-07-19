@@ -72,15 +72,25 @@ Best case for `STRUCTURAL` — a protocol dispatched on a *multi-byte* known mag
    All the real gain is in payload *values* the codec cannot see (`buffer-codec` generates
    codecs for data classes — no compile-time field values or string literals).
 
-## Recommendation
+## Outcome
 
-1. Add a `setDictionary` seam to `buffer-compression` (replace the `needsDictionary()` →
-   throw with actually applying the dictionary). Small-dictionary deflate = cheap high-ROI
-   first step.
-2. Feed it a **runtime/corpus-trained** dictionary, independent of `buffer-codec`.
-3. "Go big" follow-on: zstd support with digested dictionaries (avoids the per-message tax).
+The high-ROI recommendations from this investigation **shipped** in
+[#272](https://github.com/DitchOoM/buffer/pull/272):
+
+1. ✅ **`setDictionary` seam** — `compress`/`decompress` and the streaming `create()`
+   factories now take a `dictionary: ReadBuffer? = null`, and `CompressionAlgorithm`
+   exposes `supportsDictionary()`. The old `needsDictionary()` → throw stub is gone; the
+   dictionary is actually applied. (See `DictionaryTests.kt`, which cites this
+   investigation's "small dictionary is a free lunch" result.)
+2. ✅ Dictionaries are fed at runtime by the consumer (corpus/runtime-trained),
+   **independent of `buffer-codec`** — no schema-derived content.
+
+Still open / not pursued:
+
+3. "Go big" follow-on: zstd support with digested dictionaries (avoids the per-message
+   `setDictionary` tax). Not yet implemented.
 4. Optional: codec exposes field-boundary *hints* to help a runtime trainer align samples —
-   but dictionary *content* must be value-derived.
+   but dictionary *content* must stay value-derived. Not implemented.
 5. **Rejected:** codec-generated (schema-derived) dictionaries. 0–6%, not worth the
    schema-hash/versioning machinery, and a silent-corruption footgun on schema skew.
 
