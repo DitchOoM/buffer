@@ -829,12 +829,14 @@ public final class com/ditchoom/buffer/crypto/Kex {
 public abstract interface class com/ditchoom/buffer/crypto/KeyAgreementAsyncOps {
 	public abstract fun deriveSharedSecret (Lcom/ditchoom/buffer/crypto/KeyAgreementPrivateKey;Lcom/ditchoom/buffer/crypto/KeyAgreementPublicKey;Lcom/ditchoom/buffer/crypto/Info;ILcom/ditchoom/buffer/crypto/Salt;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public static synthetic fun deriveSharedSecret$default (Lcom/ditchoom/buffer/crypto/KeyAgreementAsyncOps;Lcom/ditchoom/buffer/crypto/KeyAgreementPrivateKey;Lcom/ditchoom/buffer/crypto/KeyAgreementPublicKey;Lcom/ditchoom/buffer/crypto/Info;ILcom/ditchoom/buffer/crypto/Salt;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public fun deriveTlsPremasterSecret (Lcom/ditchoom/buffer/crypto/KeyAgreementPrivateKey;Lcom/ditchoom/buffer/crypto/KeyAgreementPublicKey;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public abstract fun generateKeyPair (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public abstract fun getCurve ()Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;
 }
 
 public final class com/ditchoom/buffer/crypto/KeyAgreementAsyncOps$DefaultImpls {
 	public static synthetic fun deriveSharedSecret$default (Lcom/ditchoom/buffer/crypto/KeyAgreementAsyncOps;Lcom/ditchoom/buffer/crypto/KeyAgreementPrivateKey;Lcom/ditchoom/buffer/crypto/KeyAgreementPublicKey;Lcom/ditchoom/buffer/crypto/Info;ILcom/ditchoom/buffer/crypto/Salt;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static fun deriveTlsPremasterSecret (Lcom/ditchoom/buffer/crypto/KeyAgreementAsyncOps;Lcom/ditchoom/buffer/crypto/KeyAgreementPrivateKey;Lcom/ditchoom/buffer/crypto/KeyAgreementPublicKey;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
 public abstract interface class com/ditchoom/buffer/crypto/KeyAgreementBlockingOps : com/ditchoom/buffer/crypto/KeyAgreementAsyncOps {
@@ -845,6 +847,7 @@ public abstract interface class com/ditchoom/buffer/crypto/KeyAgreementBlockingO
 
 public final class com/ditchoom/buffer/crypto/KeyAgreementBlockingOps$DefaultImpls {
 	public static synthetic fun deriveSharedSecretBlocking$default (Lcom/ditchoom/buffer/crypto/KeyAgreementBlockingOps;Lcom/ditchoom/buffer/crypto/KeyAgreementPrivateKey;Lcom/ditchoom/buffer/crypto/KeyAgreementPublicKey;Lcom/ditchoom/buffer/crypto/Info;ILcom/ditchoom/buffer/crypto/Salt;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static fun deriveTlsPremasterSecret (Lcom/ditchoom/buffer/crypto/KeyAgreementBlockingOps;Lcom/ditchoom/buffer/crypto/KeyAgreementPrivateKey;Lcom/ditchoom/buffer/crypto/KeyAgreementPublicKey;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
 public abstract interface class com/ditchoom/buffer/crypto/KeyAgreementCurve {

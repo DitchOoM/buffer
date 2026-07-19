@@ -13,12 +13,15 @@ import com.ditchoom.buffer.ReadBuffer
  *
  * # Security contract
  *
- * **Raw Diffie–Hellman output is never handed back as a key.** A raw X25519/ECDH shared secret
- * is not a uniformly random key (it lives in a structured subset of the field), so every public
- * entry point here runs the raw secret through HKDF-Extract-then-Expand ([Hkdf]) with a
- * caller-supplied [Info] (and optional [Salt]) for domain separation, and returns the *derived*
- * key material. The raw secret is allocated in a wiped [SecureBuffer] and zeroed before return,
- * even on the failure path. The library exposes no API that returns the raw secret.
+ * **Raw Diffie–Hellman output is not a key.** A raw X25519/ECDH shared secret is not a uniformly
+ * random key (it lives in a structured subset of the field), so the default entry point
+ * [KeyAgreementAsyncOps.deriveSharedSecret] runs the raw secret through HKDF-Extract-then-Expand
+ * ([Hkdf]) with a caller-supplied [Info] (and optional [Salt]) for domain separation, and returns the
+ * *derived* key material; the raw secret is allocated in a wiped [SecureBuffer] and zeroed before
+ * return, even on the failure path. The **only** API that returns the raw secret is the narrowly
+ * scoped [KeyAgreementAsyncOps.deriveTlsPremasterSecret], provided so an out-of-module TLS/DTLS stack
+ * can obtain the (EC)DHE premaster / HKDF-Extract IKM its own key schedule requires; it carries a
+ * standing "this is not a key" warning and callers MUST run it through the protocol's KDF.
  *
  * **Public-key validation.** Peer public keys are validated before use:
  *  - X25519: low-order / small-subgroup points produce an all-zero shared secret; this is the
@@ -362,6 +365,48 @@ interface KeyAgreementAsyncOps {
         salt: Salt = Salt.None,
         factory: BufferFactory = BufferFactory.Default,
     ): ReadBuffer
+
+    /**
+     * Computes the **raw** Diffie–Hellman shared secret of [privateKey] and [peerPublicKey] (both on
+     * this [curve]) — the TLS/DTLS *(EC)DHE premaster secret* — and returns it **without** a KDF. For
+     * the NIST curves this is the big-endian X-coordinate of the shared point
+     * ([KeyAgreementCurve.sharedSecretBytes] bytes: 32 for P-256, 48 for P-384, 66 for P-521); for
+     * [KeyAgreementCurve.X25519] it is the 32-byte RFC 7748 output.
+     *
+     * ## This is NOT a key — read before using
+     *
+     * A raw Diffie–Hellman secret is **not** uniformly random (it lives in a structured subset of the
+     * field), so it MUST NOT be used directly as an encryption or MAC key. It is returned here for
+     * exactly one purpose: to seed a **protocol key schedule that runs its own KDF over it**, where the
+     * KDF is defined by the protocol and lives outside this module. The intended callers are:
+     *  - **TLS 1.2 / DTLS 1.2** — this *is* the ECDHE `premaster_secret`; the caller runs the TLS PRF
+     *    over it (RFC 5246 §8.1 / RFC 6347).
+     *  - **TLS 1.3 / DTLS 1.3** — this is the (EC)DHE input handed to `HKDF-Extract` as the IKM in the
+     *    key schedule (RFC 8446 §7.1 / RFC 9147).
+     *
+     * For **every other use**, call [deriveSharedSecret], which runs HKDF over the secret for you and
+     * is the recommended default. See `buffer-crypto/SECURITY.md`.
+     *
+     * The result is a wiped [SecureBuffer] holding [KeyAgreementCurve.sharedSecretBytes] bytes,
+     * read-ready. **The caller owns it and MUST free it** (`use {}` / `freeNativeMemory()`) once the
+     * key schedule has consumed it. Peer-key validation is identical to [deriveSharedSecret]: an
+     * off-curve / low-order / identity point (or, for X25519, an all-zero secret per RFC 7748 §6.1) is
+     * rejected with [InvalidPublicKey] before any secret is returned.
+     *
+     * @throws InvalidPublicKey for a rejected peer point (or an X25519 all-zero secret).
+     * @throws IllegalArgumentException if [privateKey] is not on this ops' [curve].
+     */
+    suspend fun deriveTlsPremasterSecret(
+        privateKey: KeyAgreementPrivateKey,
+        peerPublicKey: KeyAgreementPublicKey,
+    ): PlatformBuffer {
+        require(privateKey.curve == curve) {
+            "private key is for ${privateKey.curve.curveName}, not this ops' ${curve.curveName}"
+        }
+        // Delegates to the single audited raw-DH seam (still internal): same native provider
+        // validation + X25519 all-zero rejection as deriveSharedSecret, minus the KDF step.
+        return dhRawSecret(privateKey, peerPublicKey)
+    }
 }
 
 /** Key agreement with a synchronous (non-`suspend`) path, in addition to the inherited async one. */
