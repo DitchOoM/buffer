@@ -99,6 +99,69 @@ public final class com/ditchoom/buffer/crypto/Aead_jvmCommonKt {
 	public static final fun getChaChaPoly (Lcom/ditchoom/buffer/crypto/CryptoCapabilities;)Lcom/ditchoom/buffer/crypto/OptionalAead;
 }
 
+public abstract interface class com/ditchoom/buffer/crypto/AesEcb {
+}
+
+public final class com/ditchoom/buffer/crypto/AesEcb$Blocking : com/ditchoom/buffer/crypto/AesEcb {
+	public fun <init> (Lcom/ditchoom/buffer/crypto/AesEcbOps;)V
+	public final fun component1 ()Lcom/ditchoom/buffer/crypto/AesEcbOps;
+	public final fun copy (Lcom/ditchoom/buffer/crypto/AesEcbOps;)Lcom/ditchoom/buffer/crypto/AesEcb$Blocking;
+	public static synthetic fun copy$default (Lcom/ditchoom/buffer/crypto/AesEcb$Blocking;Lcom/ditchoom/buffer/crypto/AesEcbOps;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/AesEcb$Blocking;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getOps ()Lcom/ditchoom/buffer/crypto/AesEcbOps;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/AesEcb$Unavailable : com/ditchoom/buffer/crypto/AesEcb {
+	public static final field INSTANCE Lcom/ditchoom/buffer/crypto/AesEcb$Unavailable;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/AesEcbKey : java/lang/AutoCloseable {
+	public static final field Companion Lcom/ditchoom/buffer/crypto/AesEcbKey$Companion;
+	public abstract fun getCustody ()Lcom/ditchoom/buffer/crypto/KeyCustody;
+	public fun getProvenance ()Lcom/ditchoom/buffer/crypto/KeyProvenance;
+	public abstract fun getSizeBits ()I
+	public fun getSizeBytes ()I
+}
+
+public final class com/ditchoom/buffer/crypto/AesEcbKey$Companion {
+	public final fun of (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/crypto/AesEcbKey;
+	public static synthetic fun of$default (Lcom/ditchoom/buffer/crypto/AesEcbKey$Companion;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/AesEcbKey;
+}
+
+public final class com/ditchoom/buffer/crypto/AesEcbKey$DefaultImpls {
+	public static fun getProvenance (Lcom/ditchoom/buffer/crypto/AesEcbKey;)Lcom/ditchoom/buffer/crypto/KeyProvenance;
+	public static fun getSizeBytes (Lcom/ditchoom/buffer/crypto/AesEcbKey;)I
+}
+
+public final class com/ditchoom/buffer/crypto/AesEcbKt {
+	public static final field AES_ECB_BLOCK_BYTES I
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/AesEcbOps {
+	public fun decryptBlock (Lcom/ditchoom/buffer/crypto/AesEcbKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public abstract fun decryptBlock (Lcom/ditchoom/buffer/crypto/AesEcbKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/WriteBuffer;)V
+	public static synthetic fun decryptBlock$default (Lcom/ditchoom/buffer/crypto/AesEcbOps;Lcom/ditchoom/buffer/crypto/AesEcbKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public fun encryptBlock (Lcom/ditchoom/buffer/crypto/AesEcbKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public abstract fun encryptBlock (Lcom/ditchoom/buffer/crypto/AesEcbKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/WriteBuffer;)V
+	public static synthetic fun encryptBlock$default (Lcom/ditchoom/buffer/crypto/AesEcbOps;Lcom/ditchoom/buffer/crypto/AesEcbKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/PlatformBuffer;
+}
+
+public final class com/ditchoom/buffer/crypto/AesEcbOps$DefaultImpls {
+	public static fun decryptBlock (Lcom/ditchoom/buffer/crypto/AesEcbOps;Lcom/ditchoom/buffer/crypto/AesEcbKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public static synthetic fun decryptBlock$default (Lcom/ditchoom/buffer/crypto/AesEcbOps;Lcom/ditchoom/buffer/crypto/AesEcbKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public static fun encryptBlock (Lcom/ditchoom/buffer/crypto/AesEcbOps;Lcom/ditchoom/buffer/crypto/AesEcbKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public static synthetic fun encryptBlock$default (Lcom/ditchoom/buffer/crypto/AesEcbOps;Lcom/ditchoom/buffer/crypto/AesEcbKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/PlatformBuffer;
+}
+
+public final class com/ditchoom/buffer/crypto/AesEcb_jvmCommonKt {
+	public static final fun getAesEcb (Lcom/ditchoom/buffer/crypto/CryptoCapabilities;)Lcom/ditchoom/buffer/crypto/AesEcb;
+}
+
 public abstract interface class com/ditchoom/buffer/crypto/AesGcmKey : com/ditchoom/buffer/crypto/AeadKey, java/lang/AutoCloseable {
 	public static final field Companion Lcom/ditchoom/buffer/crypto/AesGcmKey$Companion;
 	public abstract fun getCustody ()Lcom/ditchoom/buffer/crypto/KeyCustody;
@@ -160,6 +223,7 @@ public abstract class com/ditchoom/buffer/crypto/CryptoMisuseException : com/dit
 public final class com/ditchoom/buffer/crypto/CryptoRandomKt {
 	public static final fun cryptoRandom (ILcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/PlatformBuffer;
 	public static synthetic fun cryptoRandom$default (ILcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public static final fun getSecureRandom ()Lkotlin/random/Random;
 }
 
 public final class com/ditchoom/buffer/crypto/CryptoRandom_jvmCommonKt {

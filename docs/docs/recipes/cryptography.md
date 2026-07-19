@@ -30,6 +30,7 @@ Cryptographic **operations** do not live on free functions. Each family exposes 
 |---|---|---|
 | AES-GCM | `CryptoCapabilities.aesGcm` → `Aead` | `Blocking` (native) · `AsyncOnly` (web) |
 | ChaCha20-Poly1305 | `CryptoCapabilities.chaChaPoly` → `OptionalAead` | `Blocking` · `AsyncOnly` · `Unavailable` |
+| AES-ECB (single block, raw) | `CryptoCapabilities.aesEcb` → `AesEcb` | `Blocking` (native) · `Unavailable` (web) |
 | Signatures | `CryptoCapabilities.signatures(scheme)` → `SignatureSupport` | `Blocking` · `AsyncOnly` · `Unavailable` |
 | Key agreement | `CryptoCapabilities.keyAgreement(curve)` → `KeyAgreementSupport` | `Blocking` · `AsyncOnly` · `Unavailable` |
 | HPKE | `CryptoCapabilities.hpke(suite)` → `HpkeSupport` | `Supported` · `Unsupported` |
@@ -131,6 +132,33 @@ The output is bare `ciphertext ‖ tag`; the receiver reconstructs the same `non
 :::danger You now own nonce uniqueness
 The self-framing ops make `(key, nonce)` reuse impossible by construction; the explicit-nonce ops hand that guarantee to you. **Reusing a `(key, nonce)` pair with AES-GCM or ChaCha20-Poly1305 is catastrophic** — it leaks the XOR of the two plaintexts, and for GCM leaks the authentication key, enabling forgery. Use these ops only with a derivation that provably yields a fresh nonce for every message under a given key (a monotonic counter that never rewinds, a ratchet, etc.). If you're unsure, use the self-framing `seal` / `open` — or, for a managed per-message counter, an [HPKE context](#hpke-rfc-9180), which derives `base_nonce XOR seq` for you and advances it only on success.
 :::
+
+## Single-block AES (ECB)
+
+:::danger ECB is not a general-purpose cipher
+`CryptoCapabilities.aesEcb` is the **bare keyed AES permutation over one 16-byte block** — no IV, no chaining, no padding, no authentication. Equal plaintext blocks map to equal ciphertext blocks under the same key, so **ECB hides nothing about message content and detects no tampering. Never use it to encrypt application data** — use the [AEAD](#seal--open-aead) family for confidentiality. This primitive exists only for standard constructions that use AES as a keyed pseudorandom permutation and run it forward once.
+:::
+
+The motivating use is **DTLS 1.3 / TLS 1.3 record sequence-number encryption** (RFC 9147 §4.2.3 / RFC 8446 §5.4.1): the mask is `AES-ECB-encrypt(sn_key, ciphertext_sample)`, and both peers recover the sequence number by XORing that mask — so only the forward (`encryptBlock`) direction is needed.
+
+The witness is `AesEcb.Blocking` on JVM/Android/Apple/Linux and `AesEcb.Unavailable` on JS/WASM (WebCrypto has no ECB mode, and DTLS 1.3 does not run on the web):
+
+```kotlin
+import com.ditchoom.buffer.crypto.*
+
+val block = when (val ecb = CryptoCapabilities.aesEcb) {
+    is AesEcb.Blocking -> {
+        // 16-byte (AES-128) or 32-byte (AES-256) key; here from a KDF/key schedule.
+        AesEcbKey.of(cryptoRandom(AES_128_KEY_BYTES)).use { key ->
+            // block must be exactly AES_ECB_BLOCK_BYTES (16); any other length is rejected.
+            ecb.ops.encryptBlock(key, sample) // → fresh read-ready 16-byte ciphertext block
+        }
+    }
+    AesEcb.Unavailable -> error("single-block AES is unavailable on this platform (web)")
+}
+```
+
+`encryptBlock` / `decryptBlock` also have a `(key, block, dest: WriteBuffer)` overload that writes straight into a destination buffer. `decryptBlock` inverts the permutation; it is unnecessary for keystream/masking uses (those run AES forward only) but is provided for constructions that invert a block. Keys are typed and sized (`AesEcbKey`), so an AES-128 and an AES-256 key can't be confused, and the material is wiped on `close()` (use `use { }`).
 
 ## Sign / Verify
 
@@ -639,6 +667,7 @@ Capability flags are tested error paths, not assumptions — the witness drives 
 | SHA-256/384/512, HMAC, HKDF | ✅ | ✅ | ✅ | ✅ | ✅ (pure-Kotlin core) |
 | AES-GCM 128/256 | ✅ | ✅ | ✅ | ✅ | ✅ (WebCrypto, async only) |
 | ChaCha20-Poly1305 | ✅ (JDK 11+) | ✅ | ✅ | ✅ | ❌ unavailable — not in WebCrypto |
+| AES-ECB (single block, raw — unauthenticated) | ✅ | ✅ | ✅ | ✅ | ❌ unavailable — no ECB in WebCrypto |
 | ECDSA P-256/384/521 (verify) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | ECDSA signing | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Ed25519 | ✅ (JDK 15+) | ❌ **all API levels** | ✅ | ✅ | ✅ newer engines (feature-detected) |

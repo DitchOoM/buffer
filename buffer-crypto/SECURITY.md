@@ -77,6 +77,8 @@ Run the full suite:
 - Hashes: `Sha256Test`, `Sha384Sha512Test`, `HmacSha256Test`, `HmacSha384Sha512Test`,
   `HkdfTest`, `HkdfSha384Sha512Test`, `Sha512FamilyWycheproofTest`
 - AEAD: `AeadTest`, `AeadWycheproofTest`, `AeadTamperTest`
+- Single-block AES (ECB): `AesEcbTest` (FIPS-197 Appendix C.1/C.3 + NIST SP 800-38A F.1
+  single-block KAT, encrypt/decrypt round-trip, key/block-length validation, capability contract)
 - Signatures: `SignatureKatTest`, `SignatureWycheproofTest`, `SignatureTamperTest`,
   `SignatureCapabilityTest`, `SignatureBackingTest`
 - Key agreement: `KeyAgreementKatTest`, `KeyAgreementWycheproofTest`, `KeyAgreementTest`
@@ -109,6 +111,26 @@ prevented by API/type design · **(e)** out of scope / documented trust assumpti
 | Key-size confusion (128 vs 256) | **(d)** typed sized keys + **(a)** |
 | ChaCha on WebCrypto | **(b)/(d)** throws — never polyfilled |
 | AES/GHASH timing side-channel | **(e)** trust AES-NI/CLMUL |
+
+### Single-block AES / ECB (raw block permutation)
+
+This is a deliberately low-level primitive — the bare keyed AES permutation over one 16-byte block,
+with **no** IV, chaining, padding, or authentication. It is **not** a general-purpose cipher and must
+never be used for bulk confidentiality: equal plaintext blocks map to equal ciphertext blocks under
+the same key, so ECB hides nothing about message content and detects no tampering. Its only intended
+use is keystream/PRF constructions that run AES forward once — e.g. **DTLS 1.3 / TLS 1.3 record
+sequence-number encryption** (RFC 9147 §4.2.3 / RFC 8446 §5.4.1), where the mask is
+`AES-ECB-encrypt(sn_key, ciphertext_sample)` and both peers recover the sequence number by XORing
+that mask (so only the forward direction is used). For confidentiality use the AEAD family above.
+
+| Vector | Defense |
+|---|---|
+| Misuse as a bulk cipher | **(d)/(e)** single-block-only API (multi-block rejected) + documented "not for confidentiality" contract; ECB pattern-leakage is inherent and out of scope by design |
+| Input length ≠ one 16-byte block | **(d)** enforce exactly 16 bytes + **(b)** runtime check + negative test |
+| Key-size confusion (128 vs 256) | **(d)** typed sized key (`AesEcbKey`) + **(b)** length validation + negative test |
+| Block permutation correctness | **(a)** FIPS-197 + NIST SP 800-38A single-block KAT on every native platform |
+| Use on the web | **(b)/(d)** witness is `Unavailable` — no ECB in WebCrypto, never polyfilled (DTLS 1.3 does not run on the web) |
+| AES timing side-channel | **(e)** trust AES-NI (JCA/CommonCrypto) / BoringSSL constant-time AES |
 
 ### Signatures (ECDSA P-256/384/521, Ed25519)
 | Vector | Defense |
@@ -179,6 +201,7 @@ These are tested error paths, not assumptions — the capability flag drives a `
 | SHA-256/384/512, HMAC, HKDF | ✓ | ✓ | ✓ | ✓ (pure-Kotlin core) |
 | AES-GCM 128/256 | ✓ | ✓ | ✓ | ✓ (WebCrypto, async) |
 | ChaCha20-Poly1305 | ✓ (JDK 11+) | ✓ | ⚠ pending (see §5) | ✗ throws — not in WebCrypto |
+| AES-ECB (single block, raw — unauthenticated) | ✓ | ✓ | ✓ | ✗ throws — no ECB in WebCrypto |
 | ECDSA P-256/384/521 (verify) | ✓ | ✓ | ✓ | ✓ |
 | ECDSA signing | ✓ | ✓ | ⚠ from-scalar gated (see §5) | ✓ |
 | Ed25519 | ✓ (JDK 15+) | ✓ **API 34+** (runtime gate, throws 28–33) | ⚠ pending (see §5) | ✓ newer engines (feature-detected) |
