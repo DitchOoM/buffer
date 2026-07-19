@@ -33,6 +33,16 @@ class CryptoCapabilitiesTest {
     }
 
     @Test
+    fun aesEcbWitnessResolves() {
+        // Single-block AES resolves to a native Blocking path or Unavailable (web); the witness must
+        // agree with the blocking-availability helper.
+        when (CryptoCapabilities.aesEcb) {
+            is AesEcb.Blocking -> assertTrue(aesEcbBlockingAvailable, "Blocking implies a sync path")
+            AesEcb.Unavailable -> assertFalse(aesEcbBlockingAvailable, "Unavailable implies no sync path")
+        }
+    }
+
+    @Test
     fun signatureWitnessResolvesForEveryScheme() {
         val schemes =
             listOf(

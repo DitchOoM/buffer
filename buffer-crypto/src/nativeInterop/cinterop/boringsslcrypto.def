@@ -14,7 +14,7 @@ package = com.ditchoom.buffer.crypto.cinterop.boringssl
 # (libraryPaths / staticLibraries) are injected by buffer-crypto/build.gradle.kts so the
 # same .def works for both the reused prebuilt (alien dev box) and the CI-built BoringSSL.
 
-headers = openssl/evp.h openssl/sha.h openssl/hmac.h openssl/aead.h openssl/ec.h openssl/ec_key.h openssl/ecdsa.h openssl/ecdh.h openssl/curve25519.h openssl/nid.h openssl/bn.h openssl/rand.h openssl/hkdf.h openssl/mem.h openssl/err.h openssl/crypto.h stdint.h string.h
+headers = openssl/evp.h openssl/sha.h openssl/hmac.h openssl/aead.h openssl/aes.h openssl/ec.h openssl/ec_key.h openssl/ecdsa.h openssl/ecdh.h openssl/curve25519.h openssl/nid.h openssl/bn.h openssl/rand.h openssl/hkdf.h openssl/mem.h openssl/err.h openssl/crypto.h stdint.h string.h
 
 compilerOpts.linux = -D_GNU_SOURCE
 
@@ -194,6 +194,32 @@ static inline int bcl_chacha_open(
     uint8_t *out, size_t out_cap, size_t *out_len) {
     return bcl_aead_open(EVP_aead_chacha20_poly1305(), key, key_len, nonce, nonce_len,
                          aad, aad_len, ct, ct_len, out, out_cap, out_len);
+}
+
+/* ===========================================================================
+ * Single-block AES (ECB): the bare keyed block permutation, one 16-byte block.
+ * Uses BoringSSL's low-level AES_encrypt/AES_decrypt — no IV, no chaining, no padding,
+ * no authentication. Intended only for keystream/PRF constructions (e.g. DTLS 1.3
+ * sequence-number masking), never for bulk confidentiality. key_len is 16 or 32 bytes.
+ * =========================================================================== */
+
+static inline int bcl_aes_ecb_encrypt_block(
+    const uint8_t *key, size_t key_len,
+    const uint8_t *in16, uint8_t *out16) {
+    AES_KEY aeskey;
+    if (AES_set_encrypt_key(key, (unsigned)(key_len * 8), &aeskey) != 0) return BCL_ERR;
+    AES_encrypt(in16, out16, &aeskey);
+    OPENSSL_cleanse(&aeskey, sizeof(aeskey));
+    return BCL_OK;
+}
+static inline int bcl_aes_ecb_decrypt_block(
+    const uint8_t *key, size_t key_len,
+    const uint8_t *in16, uint8_t *out16) {
+    AES_KEY aeskey;
+    if (AES_set_decrypt_key(key, (unsigned)(key_len * 8), &aeskey) != 0) return BCL_ERR;
+    AES_decrypt(in16, out16, &aeskey);
+    OPENSSL_cleanse(&aeskey, sizeof(aeskey));
+    return BCL_OK;
 }
 
 /* ===========================================================================

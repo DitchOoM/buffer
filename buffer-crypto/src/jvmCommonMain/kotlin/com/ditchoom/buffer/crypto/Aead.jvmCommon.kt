@@ -177,7 +177,7 @@ internal fun requireTagged(ciphertextAndTag: ReadBuffer) {
  * so the wipe cannot affect the spec and the raw key does not linger on the heap. The wipe runs in
  * a `finally` so the staged key is erased even when the spec constructor rejects the material.
  */
-private fun keySpec(
+internal fun keySpec(
     key: ReadBuffer,
     algorithm: String,
 ): SecretKeySpec {
