@@ -81,7 +81,9 @@ Run the full suite:
   single-block KAT, encrypt/decrypt round-trip, key/block-length validation, capability contract)
 - Signatures: `SignatureKatTest`, `SignatureWycheproofTest`, `SignatureTamperTest`,
   `SignatureCapabilityTest`, `SignatureBackingTest`
-- Key agreement: `KeyAgreementKatTest`, `KeyAgreementWycheproofTest`, `KeyAgreementTest`
+- Key agreement: `KeyAgreementKatTest`, `KeyAgreementWycheproofTest`, `KeyAgreementTest`,
+  `TlsPremasterSecretTest` (RFC 7748 §5.2 + NIST CAVP P-256 raw-secret KATs, premaster↔KDF
+  consistency, low-order / off-curve rejection)
 - HPKE / DHKEM (RFC 9180): `HpkeKatTest` (RFC 9180 Appendix A vectors, all four modes),
   `HpkeRoundTripTest`, `HpkeTamperTest`, `HpkeBackingTests`, `HpkeCapabilityTest`
 - Non-exportable / hardware-backed keys & custody: `HardwareKeyConformanceTest` (SPI +
@@ -151,9 +153,24 @@ that mask (so only the forward direction is used). For confidentiality use the A
 | X25519 all-zero shared secret | **(b)** constant-time all-zero rejection → `InvalidPublicKey` + **(a)** |
 | Low-order / small-subgroup public point | **(a)** + **(b)**/**(c)** |
 | ECDH invalid-curve / off-curve / infinity point | **(a)** + **(c)** provider rejects; checked & unchecked provider exceptions map uniformly to `InvalidPublicKey` (no exception-type oracle) |
-| Raw shared secret used without a KDF | **(b)/(d)** the API forces HKDF over the shared secret; the raw DH output is never returned |
+| Raw shared secret used without a KDF | **(b)/(d)** the default `deriveSharedSecret` forces HKDF over the shared secret and never returns the raw output; the sole raw path, `deriveTlsPremasterSecret`, is narrowly named for protocol key schedules, carries a standing "not a key" warning, and returns a wiped caller-owned `SecureBuffer` (see the premaster note below) |
 | Compressed/SPKI vs raw-point confusion | **(a)** + **(d)** per-platform encoding pinned |
 | Scalar-mult timing | **(e)** |
+
+#### `deriveTlsPremasterSecret` — the one raw-secret path
+
+`KeyAgreementAsyncOps.deriveTlsPremasterSecret(privateKey, peerPublicKey)` is the **only** public
+API that returns the raw (EC)DHE shared secret (the internal `dhRawSecret` seam otherwise stays
+`internal`, used only by HPKE/DHKEM). It exists so an out-of-module TLS/DTLS stack can obtain the
+material its own key schedule requires — the TLS 1.2/DTLS 1.2 `premaster_secret`, or the TLS
+1.3/DTLS 1.3 (EC)DHE input to `HKDF-Extract`. It is deliberately narrow, and misuse-sensitive:
+
+| Vector | Defense |
+|---|---|
+| Raw DH output used directly as a key | **(d)** named for its single legitimate use (TLS/DTLS premaster / HKDF IKM) with a standing "this is NOT a key — run it through the protocol KDF" warning in the KDoc + this note; `deriveSharedSecret` remains the recommended default |
+| All-zero / low-order / off-curve peer point | **(b)/(c)** identical validation to `deriveSharedSecret` — the shared `dhRawSecret` seam applies the constant-time X25519 all-zero rejection and the uniform provider `InvalidPublicKey` mapping *before* any secret is returned (`TlsPremasterSecretTest`) |
+| Raw secret lingering in memory | **(d)** returned in a wiped `SecureBuffer` the caller owns and MUST free (`use {}` / `freeNativeMemory()`); never logged |
+| Wrong-curve key confusion | **(a)** the ops are curve-bound; a private key off the ops' curve is rejected with `IllegalArgumentException` |
 
 ### KDF / MAC (HKDF, HMAC-SHA-2)
 | Vector | Defense |

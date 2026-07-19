@@ -265,6 +265,25 @@ suspend fun agree(): Boolean {
 
 Peer public keys are validated before use: X25519 all-zero shared secrets (low-order points, RFC 7748 §6.1) and ECDH off-curve / infinity / small-subgroup points are rejected with `InvalidPublicKey`. To exchange or persist a **public** key, use its encoding (`KeyAgreementCurve.publicKeyBytes` long) and rebuild it with `KeyAgreementPublicKey.of(curve, encoded)`.
 
+### Raw premaster secret for TLS / DTLS
+
+`deriveSharedSecret` runs HKDF for you and is the right call for almost everything. The exception is a **TLS/DTLS handshake**, whose own key schedule must consume the *raw* (EC)DHE secret directly — the TLS 1.2 `premaster_secret`, or the TLS 1.3 `HKDF-Extract` IKM. For that one case, `deriveTlsPremasterSecret` returns the raw secret:
+
+```kotlin
+// Inside a TLS/DTLS key schedule — the caller runs the protocol KDF (TLS PRF or HKDF-Extract).
+val ops = (CryptoCapabilities.keyAgreement(KeyAgreementCurve.P256) as KeyAgreementSupport.Blocking).ops
+val premaster = ops.deriveTlsPremasterSecret(myEphemeral.privateKey, peerPublicKey)
+premaster.use { secret ->
+    // TLS 1.2: PRF(secret, "master secret", ...); TLS 1.3: HKDF-Extract(salt, ikm = secret)
+}
+// `premaster` is a wiped SecureBuffer you own — `use {}` frees it. For P-256 it is the 32-byte
+// big-endian X-coordinate of the shared point; for X25519 it is the 32-byte RFC 7748 output.
+```
+
+:::danger A raw DH secret is not a key
+`deriveTlsPremasterSecret` returns structured, non-uniform field output — **never** use it directly as an encryption or MAC key. It is safe only as the input to a protocol key schedule that runs its own KDF over it. For every other use, call `deriveSharedSecret`, which does the KDF for you.
+:::
+
 :::note Private-key serialization is the raw scalar on every platform
 `importPrivateKey(curve, encoded)` and `KeyAgreementPrivateKey.exportEncoded()` use the **curve's raw big-endian scalar** (32/48/66 bytes for P-256/384/521, 32 bytes for X25519) on **every** platform, so a serialized private key is byte-portable across JVM/Android/Apple/Linux/JS/WASM. The platforms whose native stack needs a wrapped form reconstruct it just-in-time for the exchange and never surface it — Apple rebuilds the Security-framework X9.63 representation via CryptoKit, and JS/WASM wrap the scalar in PKCS#8 for WebCrypto. Public keys, shared secrets, signatures, and AEAD outputs are byte-identical across all platforms too.
 :::

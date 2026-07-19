@@ -2,6 +2,7 @@ package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 
 /*
@@ -81,4 +82,17 @@ internal suspend fun deriveSharedSecretAsync(
                 "${privateKey.curve.curveName} key agreement is unavailable on this platform",
             )
     return ops.deriveSharedSecret(privateKey, peerPublicKey, infoOf(info), length, saltOf(salt), factory)
+}
+
+/** Async raw TLS premaster secret through the witness; throws if the curve is unavailable here. */
+internal suspend fun deriveTlsPremasterSecret(
+    privateKey: KeyAgreementPrivateKey,
+    peerPublicKey: KeyAgreementPublicKey,
+): PlatformBuffer {
+    val ops =
+        keyAgreementAsyncOrNull(privateKey.curve)
+            ?: throw UnsupportedOperationException(
+                "${privateKey.curve.curveName} key agreement is unavailable on this platform",
+            )
+    return ops.deriveTlsPremasterSecret(privateKey, peerPublicKey)
 }
