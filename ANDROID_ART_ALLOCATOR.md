@@ -1,31 +1,20 @@
 # Android/ART Direct-Buffer Allocation — Findings & OOM Repro Reference
 
-## Current status (2026-07-05) — verified on branch `wip/android-allocator`
+## Current status — shipped
 
-Implementation is **complete and verified in the working tree, not yet merged**.
-Committed to `wip/android-allocator` (off `main` @ Kotlin 2.4.0 / v6.4.0).
+The fix is **merged and released**:
 
-**In place:**
-- `BufferSizeClass` power-of-two rounding + per-class buckets in `LockFreeBufferPool` /
-  `SingleThreadedBufferPool` (the fix — commonMain, factory-agnostic).
-- Native-memory lifecycle hardening: `String.toReadBuffer` defaults to `managed()`;
-  `ReadBuffer.indexOf(String)` frees its staging needle in a `finally`.
-- `BufferPoolFragmentationTests` (commonTest), `NonMovableOomRegressionTest`
-  (androidInstrumentedTest), `PoolChurnBenchmark` (commonBenchmark).
+- **#255** — size-class buckets (`BufferSizeClass` power-of-two rounding + per-class buckets
+  in `LockFreeBufferPool` / `SingleThreadedBufferPool`) that stop the Android ART
+  fragmentation OOM (commonMain, factory-agnostic), plus native-memory lifecycle hardening
+  (`String.toReadBuffer` defaults to `managed()`; `ReadBuffer.indexOf(String)` frees its
+  staging needle in a `finally`). Tests: `BufferPoolFragmentationTests` (commonTest),
+  `NonMovableOomRegressionTest` (androidInstrumentedTest), `PoolChurnBenchmark`.
+- **#267** — the ART fragmentation / factory-difference explainer docs.
 
-**Verification (2026-07-05):**
-1. `./gradlew allTests ktlintCheck` — **green**. Every platform's pool exercised
-   (JVM/JS-node/JS-browser/wasmJs/linuxX64/Android unit); 0 failures, 0 errors. The
-   size-class rounding preserves the existing pools' hit/miss and capacity assertions
-   (`popAtLeast` searches the request's bucket and up).
-2. Android instrumented repro on `api34def_oom` (API 34, default AOSP `sdk_phone64`,
-   heap 576m — the exact CI geometry): `case1` **PASSED** (2.83s), `case2` **SKIPPED**
-   (`@Ignore`d, factory routing rejected). `tests=2 failures=0 errors=0 skipped=1`.
-
-**PR:** single PR, **`minor`** label — the pool fix + lifecycle hardening land together
-(both from this investigation); `minor` because `String.toReadBuffer`'s default backing
-changed native→managed, observable to native-interop consumers. The "Implications for the
-fix" section below is the rationale for keeping the factory route out of scope.
+The factory-routing approach (`case2`) was **rejected** — the rationale is in the
+"Implications for the fix" section below. The rest of this document is standing ART
+reference material (allocation mechanics, OOM-message decoding, repro recipes).
 
 ---
 

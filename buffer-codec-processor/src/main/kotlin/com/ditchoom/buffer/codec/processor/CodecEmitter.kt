@@ -186,8 +186,8 @@ internal class CodecEmitter(
             }
             // A recognized-but-unsupported shape: emit the diagnostic(s)
             // so the build fails loudly instead of silently producing no
-            // codec (the Outcome-3 bug class). These cover the §2.5/§2.6
-            // silent gaps the validator does not already catch.
+            // codec — covering the silent gaps the validator does not
+            // already catch.
             is AnalysisResult.Rejected -> r.diagnostics.forEach { logger.error(it.message, it.node) }
             // Not a codec target (handled elsewhere or already rejected by
             // the validator) — stay silent to avoid double-reporting.

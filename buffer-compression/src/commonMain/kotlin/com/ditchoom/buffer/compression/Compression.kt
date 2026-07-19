@@ -157,11 +157,8 @@ expect val supportsRawDeflate: Boolean
  * When false, flush() produces independent compressed blocks and clears internal state.
  *
  * - JVM, Android, Apple: `true` - true zlib z_stream maintains state
- * - JS (Node.js): `false` - sync API uses batch compression, state cleared after flush
- * - JS (Browser): `false` - CompressionStream doesn't support flush
- *
- * Note: On JS Node.js, the async [SuspendingStreamingCompressor] DOES support stateful
- * flush using the Transform stream API, even though this flag is `false`.
+ * - JS/Wasm (Node.js): `true` - Node's zlib bindings maintain state across flush
+ * - JS/Wasm (Browser): `false` - CompressionStream doesn't support flush
  */
 expect val supportsStatefulFlush: Boolean
 
@@ -170,11 +167,13 @@ expect val supportsStatefulFlush: Boolean
  * non-default [WindowBits] argument.
  *
  * - Linux native: `true` - native zlib `deflateInit2` accepts the windowBits.
+ * - Apple: `true` - native zlib `deflateInit2` accepts the windowBits.
+ * - JS/Wasm (Node.js): `true` - Node's zlib options thread `windowBits` through.
  * - JVM, Android: `false` - `java.util.zip.Deflater` does not expose a window-size
  *   parameter; the value is silently ignored and the deflater always uses the
  *   algorithm default (15-bit / 32 KB window).
- * - Apple, JS, Wasm: `false` - currently not wired through to the underlying
- *   compressor; the value is silently ignored. (Tracked as a follow-up.)
+ * - JS/Wasm (Browser): `false` - the CompressionStream Web API has no window-size
+ *   parameter; the value is silently ignored.
  *
  * Round-trip tests pass on all platforms because both compressor and decompressor
  * fall back to the algorithm default when [WindowBits] is ignored. Use this flag

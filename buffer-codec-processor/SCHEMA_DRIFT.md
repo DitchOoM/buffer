@@ -1,8 +1,9 @@
 # Codec schema-drift checking — a consumer-facing wire-compat gate
 
-> Design spec / PR handoff. Implement against `buffer-codec-processor` plus a new
-> `buffer-codec-gradle-plugin` module. Self-contained: a fresh session should be able
-> to build the feature from this document alone.
+> Design + reference for the shipped schema-drift wire-compat gate (`buffer-codec-schema`
+> module + `buffer-codec-gradle-plugin`, landed in #195). Documents the motivation, the
+> descriptor format, and the drift-classification rules. Source comments across those
+> modules point here for the "why".
 
 ## Motivation
 
@@ -222,12 +223,12 @@ the count, and a reorder of same-count enums is invisible.
   consumers — the v1 format is human-diffable text tuned for review, not interchange.
   An export format is a separate concern.
 
-## Progress / handoff (as of 2026-06-16)
+## Implementation (shipped in #195)
 
-Steps 1–3 are **implemented and tested** (uncommitted on `main`). Only the dogfood
-(step 4) remains.
+The feature is fully implemented and tested. This section maps the design above to the
+source that realizes it.
 
-**Done — pure-logic core (emit → parse → classify), all unit-tested without Gradle:**
+**Pure-logic core (emit → parse → classify), unit-tested without Gradle:**
 
 - **IR:** `FieldSpec.EnumScalar.entryNames: List<String>` (declaration order == ordinal),
   populated in `analyzeEnumField` (`CodecIr.kt`, `CodecAnalyzer.kt`).

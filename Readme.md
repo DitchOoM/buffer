@@ -61,6 +61,11 @@ Find the latest version on [Maven Central](https://central.sonatype.com/artifact
 | `buffer-codec-gradle-plugin` | Gradle plugin (`com.ditchoom.buffer.codec-schema`) — baselines the wire shape and fails the build on breaking drift |
 | `buffer-compression` | `compress()`/`decompress()` (gzip, deflate) on `ReadBuffer` |
 | `buffer-flow` | Kotlin Flow extensions: `mapBuffer()`, `asStringFlow()`, `lines()` |
+| `buffer-crypto` | Hashing (SHA family, HMAC, HKDF, CRC-32), AEAD, signatures, key agreement, `secureRandom`, `SecureBuffer`, persistent `KeyStore` |
+| `buffer-kotlinx-io` | Zero-/single-copy bridges to `kotlinx-io` `RawSource`/`RawSink`/`Buffer` |
+| `buffer-ktor` | Ktor IO/HTTP interop: channel bridges, `BufferCodecConverter`, WebSocket masking |
+| `buffer-okio` | Okio interop: `Source`/`Sink`/`BufferedSource` bridges |
+| `buffer-sqldelight` | SQLDelight `ColumnAdapter` (copy-at-boundary) for storing buffers as BLOBs |
 
 ## Quick Example
 
@@ -75,7 +80,7 @@ val number = buffer.readInt()     // 42
 val text = buffer.readString(6)   // "Hello!"
 ```
 
-> **Tip:** Always use `BufferFactory` to allocate buffers — not `PlatformBuffer.allocate()`. Factories compose with pooling, deterministic cleanup, and custom allocation strategies. For structured binary data, use [Protocol Codecs](#protocol-codecs--stop-hand-writing-parsers) instead of manual read/write sequences.
+> **Tip:** Always allocate through `BufferFactory` (`Default` / `managed()` / `shared()` / `deterministic()`). Factories compose with pooling, deterministic cleanup, and custom allocation strategies. For structured binary data, use [Protocol Codecs](#protocol-codecs--stop-hand-writing-parsers) instead of manual read/write sequences.
 
 ## Protocol Codecs — Stop Hand-Writing Parsers
 
