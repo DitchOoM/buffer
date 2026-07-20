@@ -411,58 +411,76 @@ internal fun buildSizeHintFun(
             .addParameter("value", messageType)
             .addParameter("context", ENCODE_CONTEXT_CN)
             .returns(INT)
-    var constHint =
-        ((shape.singletonDispatchDiscriminator?.wireWidth ?: WireWidth.Zero) as? WireWidth.Fixed)?.bytes ?: 0
+    appendSizeHintBody(builder, collectSizeHintPlan(shape))
+    return builder.build()
+}
+
+/** The three ingredient kinds a generated `sizeHint` body sums. */
+private class SizeHintPlan(
+    initialConst: Int,
+) {
+    var constHint: Int = initialConst
     val dynamicTerms = mutableListOf<CodeBlock>()
     val elementLoops = mutableListOf<Pair<String, TypeName>>()
+}
+
+/** Walk the shape's fields into constant / per-value / per-element hint terms. */
+private fun collectSizeHintPlan(shape: CodecShape): SizeHintPlan {
+    val plan =
+        SizeHintPlan(
+            ((shape.singletonDispatchDiscriminator?.wireWidth ?: WireWidth.Zero) as? WireWidth.Fixed)?.bytes ?: 0,
+        )
     for (field in shape.fields) {
         when (field) {
             is FieldSpec.LengthPrefixedString -> {
-                constHint += field.prefixWidth
-                dynamicTerms += stringLengthTerm(field.name, field.valueClass)
+                plan.constHint += field.prefixWidth
+                plan.dynamicTerms += stringLengthTerm(field.name, field.valueClass)
             }
             is FieldSpec.RemainingBytesString ->
-                dynamicTerms += stringLengthTerm(field.name, field.valueClass)
+                plan.dynamicTerms += stringLengthTerm(field.name, field.valueClass)
             is FieldSpec.LengthFromString ->
-                dynamicTerms += stringLengthTerm(field.name, field.valueClass)
+                plan.dynamicTerms += stringLengthTerm(field.name, field.valueClass)
             is FieldSpec.ProtocolMessageScalar ->
-                dynamicTerms += CodeBlock.of("%T.sizeHint(value.%L, context)", field.codecType, field.name)
+                plan.dynamicTerms += CodeBlock.of("%T.sizeHint(value.%L, context)", field.codecType, field.name)
             is FieldSpec.LengthPrefixedMessage -> {
-                constHint += field.prefixWidth
-                dynamicTerms += CodeBlock.of("%T.sizeHint(value.%L, context)", field.codecType, field.name)
+                plan.constHint += field.prefixWidth
+                plan.dynamicTerms += CodeBlock.of("%T.sizeHint(value.%L, context)", field.codecType, field.name)
             }
             is FieldSpec.CountPrefixedProtocolMessageList -> {
-                constHint += 1 // minimum varint(count) width
-                elementLoops += field.name to field.elementCodecClassName
+                plan.constHint += 1 // minimum varint(count) width
+                plan.elementLoops += field.name to field.elementCodecClassName
             }
             is FieldSpec.RemainingBytesProtocolMessageList ->
-                elementLoops += field.name to field.elementCodecClassName
-            is FieldSpec.EnumScalar -> constHint += 1 // minimum ordinal-varint width
-            is FieldSpec.LengthPrefixedUseCodecPayload -> constHint += field.prefixWidth
-            is FieldSpec.FixedSize -> constHint += (field.wireWidth as? WireWidth.Fixed)?.bytes ?: 0
+                plan.elementLoops += field.name to field.elementCodecClassName
+            is FieldSpec.EnumScalar -> plan.constHint += 1 // minimum ordinal-varint width
+            is FieldSpec.LengthPrefixedUseCodecPayload -> plan.constHint += field.prefixWidth
+            is FieldSpec.FixedSize -> plan.constHint += (field.wireWidth as? WireWidth.Fixed)?.bytes ?: 0
             else -> {} // Conditional / opaque @UseCodec shapes: no cheap bound
         }
     }
-    if (dynamicTerms.isEmpty() && elementLoops.isEmpty()) {
-        builder.addStatement("return %L", constHint)
-        return builder.build()
-    }
-    if (elementLoops.isEmpty()) {
-        val sum = CodeBlock.builder().add("%L", constHint)
-        dynamicTerms.forEach { sum.add(" + %L", it) }
-        builder.addStatement("return %L", sum.build())
-        return builder.build()
-    }
-    builder.addStatement("var __hint = %L", constHint)
-    for ((listName, elementCodec) in elementLoops) {
-        builder.beginControlFlow("for (__elem in value.%L)", listName)
-        builder.addStatement("__hint += %T.sizeHint(__elem, context)", elementCodec)
-        builder.endControlFlow()
-    }
-    val sum = CodeBlock.builder().add("__hint")
-    dynamicTerms.forEach { sum.add(" + %L", it) }
+    return plan
+}
+
+/** Render the plan: constant-only, single-expression sum, or loop-accumulate. */
+private fun appendSizeHintBody(
+    builder: FunSpec.Builder,
+    plan: SizeHintPlan,
+) {
+    val base =
+        if (plan.elementLoops.isEmpty()) {
+            CodeBlock.of("%L", plan.constHint)
+        } else {
+            builder.addStatement("var __hint = %L", plan.constHint)
+            for ((listName, elementCodec) in plan.elementLoops) {
+                builder.beginControlFlow("for (__elem in value.%L)", listName)
+                builder.addStatement("__hint += %T.sizeHint(__elem, context)", elementCodec)
+                builder.endControlFlow()
+            }
+            CodeBlock.of("__hint")
+        }
+    val sum = CodeBlock.builder().add(base)
+    plan.dynamicTerms.forEach { sum.add(" + %L", it) }
     builder.addStatement("return %L", sum.build())
-    return builder.build()
 }
 
 private fun stringLengthTerm(
