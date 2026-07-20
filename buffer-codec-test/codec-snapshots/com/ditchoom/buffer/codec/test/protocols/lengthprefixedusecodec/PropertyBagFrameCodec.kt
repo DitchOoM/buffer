@@ -1,11 +1,14 @@
 package com.ditchoom.buffer.codec.test.protocols.lengthprefixedusecodec
 
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.LengthPrefixedListEncoder
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
@@ -34,10 +37,23 @@ public object PropertyBagFrameCodec : Codec<PropertyBagFrame> {
     `value`: PropertyBagFrame,
     context: EncodeContext,
   ) {
-    val __propertiesBodyBytes = value.properties.sumOf { (PropertyEntryCodec.wireSize(it, context) as WireSize.Exact).bytes }
-    MqttRemainingLengthCodec.encode(buffer, __propertiesBodyBytes.toUInt(), context)
+    var __propertiesBodyBytes = 0
+    var __propertiesAllExact = true
     for (__elem in value.properties) {
-      PropertyEntryCodec.encode(buffer, __elem, context)
+      val __elemSize = PropertyEntryCodec.wireSize(__elem, context)
+      if (__elemSize !is WireSize.Exact) {
+        __propertiesAllExact = false
+        break
+      }
+      __propertiesBodyBytes += __elemSize.bytes
+    }
+    if (__propertiesAllExact) {
+      MqttRemainingLengthCodec.encode(buffer, __propertiesBodyBytes.toUInt(), context)
+      for (__elem in value.properties) {
+        PropertyEntryCodec.encode(buffer, __elem, context)
+      }
+    } else {
+      LengthPrefixedListEncoder.encode(buffer, BufferFactory.Default, MqttRemainingLengthCodec, value.properties, PropertyEntryCodec, context)
     }
   }
 

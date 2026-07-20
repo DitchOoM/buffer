@@ -42,7 +42,7 @@ public object MqttV5PropertyUserPropertyCodec : Codec<MqttV5Property.UserPropert
   ) {
     buffer.writeUByte(value.id.raw)
     val keySizePosition = buffer.position()
-    buffer.position(keySizePosition + 2)
+    repeat(2) { buffer.writeUByte(0u) }
     val keyBodyStart = buffer.position()
     buffer.writeString(value.key, Charset.UTF8)
     val keyEndPosition = buffer.position()
@@ -56,7 +56,7 @@ public object MqttV5PropertyUserPropertyCodec : Codec<MqttV5Property.UserPropert
     buffer.writeUByte((keyPrefix and 0xFFu).toUByte())
     buffer.position(keyEndPosition)
     val valueSizePosition = buffer.position()
-    buffer.position(valueSizePosition + 2)
+    repeat(2) { buffer.writeUByte(0u) }
     val valueBodyStart = buffer.position()
     buffer.writeString(value.value, Charset.UTF8)
     val valueEndPosition = buffer.position()

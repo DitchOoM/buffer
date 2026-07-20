@@ -15,7 +15,12 @@ private const val MAX_ENCODE_CAPACITY = 1 shl 30 // 1 GiB safety ceiling
  *
  * When the encoder reports a [WireSize.Exact] size the buffer is allocated exactly once. For
  * [WireSize.BackPatch] encoders the capacity starts from an estimate and doubles on
- * [BufferOverflowException] until the value fits (capped at 1 GiB).
+ * [BufferOverflowException] until the value fits (capped at 1 GiB). [IllegalArgumentException] is
+ * treated the same way as a backstop: a position seek past the current limit signals out-of-bounds
+ * differently per platform (java.nio throws [IllegalArgumentException] rather than
+ * [BufferOverflowException]), and that signal must grow-and-retry rather than escape. Generated
+ * codecs reserve prefix slots with placeholder writes (which overflow retryably), so the backstop
+ * only matters for hand-written encoders.
  *
  * Frees the allocated buffer on any exception from [Encoder.encode] — not just the overflow-retry
  * path — so a failing encode never leaks native memory.
@@ -46,7 +51,9 @@ public fun <T> Encoder<T>.encodeToPlatformBuffer(
             buffer.resetForRead()
             freeOnExit = false
             return buffer
-        } catch (overflow: BufferOverflowException) {
+        } catch (overflow: Exception) {
+            val retryable = overflow is BufferOverflowException || overflow is IllegalArgumentException
+            if (!retryable) throw overflow
             freeOnExit = false
             buffer.freeNativeMemory()
             if (capacity >= MAX_ENCODE_CAPACITY) throw overflow

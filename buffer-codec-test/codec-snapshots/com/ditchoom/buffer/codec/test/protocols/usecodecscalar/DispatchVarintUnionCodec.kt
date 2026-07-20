@@ -53,12 +53,16 @@ public object DispatchVarintUnionCodec : Codec<DispatchVarintUnion> {
 
   override fun wireSize(`value`: DispatchVarintUnion, context: EncodeContext): WireSize = when (value) {
     is DispatchVarintUnion.Single -> {
-      val inner = (DispatchVarintUnionSingleCodec.wireSize(value, context) as WireSize.Exact).bytes
-      WireSize.Exact(1 + inner)
+      when (val inner = DispatchVarintUnionSingleCodec.wireSize(value, context)) {
+        is WireSize.Exact -> WireSize.Exact(1 + inner.bytes)
+        WireSize.BackPatch -> WireSize.BackPatch
+      }
     }
     is DispatchVarintUnion.Mixed -> {
-      val inner = (DispatchVarintUnionMixedCodec.wireSize(value, context) as WireSize.Exact).bytes
-      WireSize.Exact(1 + inner)
+      when (val inner = DispatchVarintUnionMixedCodec.wireSize(value, context)) {
+        is WireSize.Exact -> WireSize.Exact(1 + inner.bytes)
+        WireSize.BackPatch -> WireSize.BackPatch
+      }
     }
     is DispatchVarintUnion.Marker -> WireSize.Exact(1)
     is DispatchVarintUnion.Plain -> WireSize.BackPatch

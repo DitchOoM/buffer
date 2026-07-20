@@ -38,7 +38,7 @@ public object AsciiGreetingCodec : Codec<AsciiGreeting> {
     context: EncodeContext,
   ) {
     val commandSizePosition = buffer.position()
-    buffer.position(commandSizePosition + 2)
+    repeat(2) { buffer.writeUByte(0u) }
     val commandBodyStart = buffer.position()
     AsciiStringCodec.encode(buffer, value.command, context)
     val commandEndPosition = buffer.position()

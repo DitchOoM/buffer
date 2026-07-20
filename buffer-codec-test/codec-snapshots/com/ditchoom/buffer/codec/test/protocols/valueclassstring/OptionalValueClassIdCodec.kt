@@ -40,7 +40,7 @@ public object OptionalValueClassIdCodec : Codec<OptionalValueClassId> {
     if (value.hasId) {
       val idValue = value.id ?: throw EncodeException(fieldPath = "OptionalValueClassId.id", reason = "@When(\"hasId\") predicate is true but field is null")
       val idSizePosition = buffer.position()
-      buffer.position(idSizePosition + 2)
+      repeat(2) { buffer.writeUByte(0u) }
       val idBodyStart = buffer.position()
       buffer.writeString(idValue.value, Charset.UTF8)
       val idEndPosition = buffer.position()

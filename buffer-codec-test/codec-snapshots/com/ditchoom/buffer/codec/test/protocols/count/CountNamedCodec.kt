@@ -32,7 +32,7 @@ public object CountNamedCodec : Codec<CountNamed> {
     context: EncodeContext,
   ) {
     val nameSizePosition = buffer.position()
-    buffer.position(nameSizePosition + 2)
+    repeat(2) { buffer.writeUByte(0u) }
     val nameBodyStart = buffer.position()
     buffer.writeString(value.name, Charset.UTF8)
     val nameEndPosition = buffer.position()

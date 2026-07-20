@@ -40,7 +40,7 @@ public object MqttV5PropertyCorrelationDataCodec : Codec<MqttV5Property.Correlat
   ) {
     buffer.writeUByte(value.id.raw)
     val dataSizePosition = buffer.position()
-    buffer.position(dataSizePosition + 2)
+    repeat(2) { buffer.writeUByte(0u) }
     val dataBodyStart = buffer.position()
     BinaryDataCodec.encode(buffer, value.data, context)
     val dataEndPosition = buffer.position()

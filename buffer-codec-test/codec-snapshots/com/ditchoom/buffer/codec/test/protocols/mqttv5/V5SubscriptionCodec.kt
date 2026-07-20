@@ -33,7 +33,7 @@ public object V5SubscriptionCodec : Codec<V5Subscription> {
     context: EncodeContext,
   ) {
     val topicFilterSizePosition = buffer.position()
-    buffer.position(topicFilterSizePosition + 2)
+    repeat(2) { buffer.writeUByte(0u) }
     val topicFilterBodyStart = buffer.position()
     buffer.writeString(value.topicFilter, Charset.UTF8)
     val topicFilterEndPosition = buffer.position()

@@ -1943,13 +1943,32 @@ internal fun analyzeLengthPrefixedListSpec(
  *
  * Mirrors the message-wide BackPatch short-circuits in
  * [classifyVariantWireSize] / `buildWireSizeFun`. Any of these
- * annotations on a primary-constructor parameter forces BackPatch:
+ * on a primary-constructor parameter forces BackPatch:
  *  - `@When` (`Conditional` field shape, row 19),
  *  - `@RemainingBytes` (variable-bounded body),
  *  - `@UseCodec` (user codec wireSize is opaque, conservatively
  *    BackPatch — covers `UseCodecScalar`, `RemainingBytesPayload`,
  *    `LengthPrefixedUseCodecList`),
- *  - `@LengthPrefixed val: String` (`LengthPrefixedString`, row 15).
+ *  - `@Count` (the nested list's own elements may probe to BackPatch
+ *    at runtime, so the enclosing element can't be assumed Exact),
+ *  - `@LengthPrefixed val: String` or `@LengthPrefixed` on a
+ *    `@JvmInline value class`-over-String (`LengthPrefixedString`,
+ *    row 15 — the value-class wrapper is wire-identical to a bare
+ *    String and shares its BackPatch wireSize),
+ *  - a bare param typed as a `@ProtocolMessage` class
+ *    (`ProtocolMessageScalar`, which collapses the element codec's
+ *    wireSize to BackPatch regardless of the inner shape — it
+ *    carries no annotation for a purely annotation-driven scan to
+ *    see). `@LengthPrefixed`/`@LengthFrom` message params are
+ *    excluded: those field shapes stay runtime-Exact.
+ *
+ * This scan stays deliberately conservative: a miss no longer CCEs
+ * (the generated wireSize probes element sizes and degrades to
+ * BackPatch at runtime — see `appendElementWireSizeProbeLoop`), but
+ * the encode-path pre-measure selection for `@LengthPrefixed
+ * @UseCodec` lists still keys off it, so over-detecting only costs
+ * the scratch-buffer path, while under-detecting risks an encode
+ * ClassCastException.
  *
  * Sealed parents stay conservatively BackPatch — promoting to
  * Exact-when-all-variants-are-Exact is a follow-on refactor; no
@@ -1959,18 +1978,37 @@ internal fun detectElementBackPatch(elementDecl: KSClassDeclaration): Boolean {
     if (Modifier.SEALED in elementDecl.modifiers) return true
     val ctor = elementDecl.primaryConstructor ?: return false
     return ctor.parameters.any { param ->
-        val paramTypeQname =
-            param.type
-                .resolve()
-                .declaration.qualifiedName
-                ?.asString()
-        param.annotations.any { ann ->
-            when (ann.shortName.asString()) {
-                "When", "RemainingBytes", "UseCodec" -> true
-                "LengthPrefixed" -> paramTypeQname == "kotlin.String"
-                else -> false
+        val paramType = param.type.resolve()
+        val paramTypeQname = paramType.declaration.qualifiedName?.asString()
+        val paramTypeDecl = paramType.declaration as? KSClassDeclaration
+        val annotationForcesBackPatch =
+            param.annotations.any { ann ->
+                when (ann.shortName.asString()) {
+                    "When", "RemainingBytes", "UseCodec", "Count" -> true
+                    "LengthPrefixed" ->
+                        paramTypeQname == "kotlin.String" ||
+                            paramTypeDecl?.modifiers?.contains(Modifier.VALUE) == true
+                    else -> false
+                }
             }
-        }
+        if (annotationForcesBackPatch) return@any true
+        // Bare nested-message param → ProtocolMessageScalar collapse.
+        // Skip when a framing annotation reshapes the field into one of
+        // the runtime-Exact message shapes (LengthPrefixedMessage /
+        // LengthFromMessage).
+        val reframed =
+            param.annotations.any { ann ->
+                ann.shortName.asString() == "LengthPrefixed" || ann.shortName.asString() == "LengthFrom"
+            }
+        !reframed &&
+            paramTypeDecl != null &&
+            paramTypeDecl.annotations.any { ann ->
+                ann.shortName.asString() == "ProtocolMessage" &&
+                    ann.annotationType
+                        .resolve()
+                        .declaration.qualifiedName
+                        ?.asString() == PROTOCOL_MESSAGE_QNAME
+            }
     }
 }
 

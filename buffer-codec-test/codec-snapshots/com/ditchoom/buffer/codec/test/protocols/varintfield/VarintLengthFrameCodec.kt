@@ -28,7 +28,10 @@ public object VarintLengthFrameCodec : Codec<VarintLengthFrame> {
   }
 
   override fun wireSize(`value`: VarintLengthFrame, context: EncodeContext): WireSize {
-    val __valueSize = (QuicVarintCodec.wireSize(value.value, context) as WireSize.Exact).bytes
+    val __valueSize = when (val __s = QuicVarintCodec.wireSize(value.value, context)) {
+      is WireSize.Exact -> __s.bytes
+      WireSize.BackPatch -> return WireSize.BackPatch
+    }
     return WireSize.Exact(1 + __valueSize)
   }
 

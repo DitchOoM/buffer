@@ -36,7 +36,14 @@ public object CountFixedListCodec : Codec<CountFixedList> {
 
   override fun wireSize(`value`: CountFixedList, context: EncodeContext): WireSize {
     val __pointsCountSize = (UnsignedVarIntCodec.wireSize(value.points.size.toUInt(), context) as WireSize.Exact).bytes
-    val __pointsSize = __pointsCountSize + value.points.sumOf { (CountPointCodec.wireSize(it, context) as WireSize.Exact).bytes }
+    var __pointsElementsSize = 0
+    for (__elem in value.points) {
+      when (val __elemSize = CountPointCodec.wireSize(__elem, context)) {
+        is WireSize.Exact -> __pointsElementsSize += __elemSize.bytes
+        WireSize.BackPatch -> return WireSize.BackPatch
+      }
+    }
+    val __pointsSize = __pointsCountSize + __pointsElementsSize
     return WireSize.Exact(1 + __pointsSize)
   }
 

@@ -38,7 +38,7 @@ public object Slice15aLengthPrefixedPayloadCodec : Codec<Slice15aLengthPrefixedP
     context: EncodeContext,
   ) {
     val dataSizePosition = buffer.position()
-    buffer.position(dataSizePosition + 2)
+    repeat(2) { buffer.writeUByte(0u) }
     val dataBodyStart = buffer.position()
     BinaryDataCodec.encode(buffer, value.data, context)
     val dataEndPosition = buffer.position()

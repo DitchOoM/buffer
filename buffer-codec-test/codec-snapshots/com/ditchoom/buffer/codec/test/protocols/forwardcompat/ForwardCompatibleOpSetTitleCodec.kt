@@ -68,7 +68,7 @@ public object ForwardCompatibleOpSetTitleCodec {
     },
   ) { buffer ->
     val titleSizePosition = buffer.position()
-    buffer.position(titleSizePosition + 2)
+    repeat(2) { buffer.writeUByte(0u) }
     val titleBodyStart = buffer.position()
     buffer.writeString(value.title, Charset.UTF8)
     val titleEndPosition = buffer.position()

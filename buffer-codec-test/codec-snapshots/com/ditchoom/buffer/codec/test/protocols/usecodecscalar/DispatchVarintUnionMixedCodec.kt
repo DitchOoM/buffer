@@ -28,7 +28,10 @@ public object DispatchVarintUnionMixedCodec : Codec<DispatchVarintUnion.Mixed> {
   }
 
   override fun wireSize(`value`: DispatchVarintUnion.Mixed, context: EncodeContext): WireSize {
-    val __vSize = (QuicVarintCodec.wireSize(value.v, context) as WireSize.Exact).bytes
+    val __vSize = when (val __s = QuicVarintCodec.wireSize(value.v, context)) {
+      is WireSize.Exact -> __s.bytes
+      WireSize.BackPatch -> return WireSize.BackPatch
+    }
     return WireSize.Exact(1 + __vSize)
   }
 

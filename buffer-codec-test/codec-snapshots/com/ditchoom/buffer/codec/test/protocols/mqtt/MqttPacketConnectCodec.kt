@@ -152,7 +152,7 @@ public object MqttPacketConnectCodec {
     },
   ) { buffer ->
     val protocolNameSizePosition = buffer.position()
-    buffer.position(protocolNameSizePosition + 2)
+    repeat(2) { buffer.writeUByte(0u) }
     val protocolNameBodyStart = buffer.position()
     buffer.writeString(value.protocolName, Charset.UTF8)
     val protocolNameEndPosition = buffer.position()
@@ -171,7 +171,7 @@ public object MqttPacketConnectCodec {
       buffer.writeInt((value.protocolLevel.toInt() and 0xFF) or ((value.connectFlags.raw.toInt() and 0xFF) shl 8) or ((value.keepAliveSeconds.toInt() and 0xFFFF) shl 16))
     }
     val clientIdSizePosition = buffer.position()
-    buffer.position(clientIdSizePosition + 2)
+    repeat(2) { buffer.writeUByte(0u) }
     val clientIdBodyStart = buffer.position()
     buffer.writeString(value.clientId, Charset.UTF8)
     val clientIdEndPosition = buffer.position()
@@ -187,7 +187,7 @@ public object MqttPacketConnectCodec {
     if (value.connectFlags.willPresent) {
       val willTopicValue = value.willTopic ?: throw EncodeException(fieldPath = "Connect.willTopic", reason = "@When(\"connectFlags.willPresent\") predicate is true but field is null")
       val willTopicSizePosition = buffer.position()
-      buffer.position(willTopicSizePosition + 2)
+      repeat(2) { buffer.writeUByte(0u) }
       val willTopicBodyStart = buffer.position()
       buffer.writeString(willTopicValue, Charset.UTF8)
       val willTopicEndPosition = buffer.position()
@@ -204,7 +204,7 @@ public object MqttPacketConnectCodec {
     if (value.connectFlags.willPresent) {
       val willPayloadValue = value.willPayload ?: throw EncodeException(fieldPath = "Connect.willPayload", reason = "@When(\"connectFlags.willPresent\") predicate is true but field is null")
       val willPayloadSizePosition = buffer.position()
-      buffer.position(willPayloadSizePosition + 2)
+      repeat(2) { buffer.writeUByte(0u) }
       val willPayloadBodyStart = buffer.position()
       BinaryDataCodec.encode(buffer, willPayloadValue, context)
       val willPayloadEndPosition = buffer.position()
@@ -221,7 +221,7 @@ public object MqttPacketConnectCodec {
     if (value.connectFlags.usernamePresent) {
       val usernameValue = value.username ?: throw EncodeException(fieldPath = "Connect.username", reason = "@When(\"connectFlags.usernamePresent\") predicate is true but field is null")
       val usernameSizePosition = buffer.position()
-      buffer.position(usernameSizePosition + 2)
+      repeat(2) { buffer.writeUByte(0u) }
       val usernameBodyStart = buffer.position()
       buffer.writeString(usernameValue, Charset.UTF8)
       val usernameEndPosition = buffer.position()
@@ -238,7 +238,7 @@ public object MqttPacketConnectCodec {
     if (value.connectFlags.passwordPresent) {
       val passwordValue = value.password ?: throw EncodeException(fieldPath = "Connect.password", reason = "@When(\"connectFlags.passwordPresent\") predicate is true but field is null")
       val passwordSizePosition = buffer.position()
-      buffer.position(passwordSizePosition + 2)
+      repeat(2) { buffer.writeUByte(0u) }
       val passwordBodyStart = buffer.position()
       BinaryDataCodec.encode(buffer, passwordValue, context)
       val passwordEndPosition = buffer.position()

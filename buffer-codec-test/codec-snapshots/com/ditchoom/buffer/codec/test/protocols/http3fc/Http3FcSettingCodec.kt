@@ -28,8 +28,14 @@ public object Http3FcSettingCodec : Codec<Http3FcSetting> {
   }
 
   override fun wireSize(`value`: Http3FcSetting, context: EncodeContext): WireSize {
-    val __identifierSize = (QuicVarintCodec.wireSize(value.identifier, context) as WireSize.Exact).bytes
-    val __valueSize = (QuicVarintCodec.wireSize(value.value, context) as WireSize.Exact).bytes
+    val __identifierSize = when (val __s = QuicVarintCodec.wireSize(value.identifier, context)) {
+      is WireSize.Exact -> __s.bytes
+      WireSize.BackPatch -> return WireSize.BackPatch
+    }
+    val __valueSize = when (val __s = QuicVarintCodec.wireSize(value.value, context)) {
+      is WireSize.Exact -> __s.bytes
+      WireSize.BackPatch -> return WireSize.BackPatch
+    }
     return WireSize.Exact(0 + __identifierSize + __valueSize)
   }
 
