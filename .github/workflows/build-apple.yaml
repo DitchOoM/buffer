@@ -63,27 +63,17 @@ jobs:
           key: gradle-macos-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-macos-
-
-      # buffer-crypto applies com.ditchoom.boringssl.provision unconditionally, so even this Apple-only
-      # lane fails at configuration time until the plugin resolves. On a macOS GitHub runner buffer-crypto
-      # registers ONLY Apple targets (no linuxX64/linuxArm64), so the Linux cinterop is never wired and no
-      # bundle is needed — stage the plugin + BOM only (bundle: false). The action exports $BORINGSSL_ARGS
-      # (-PboringsslPluginVersion=0.0.1-rc.1), appended to each Gradle call below. Remove once the plugin
-      # ships to the Plugin Portal.
-      - name: Stage boringssl-kmp prerelease (plugin only)
-        uses: ./.github/actions/boringssl-prerelease
-
       - name: Get version
         id: version
-        run: echo "version=$(./gradlew -q nextVersion ${{ inputs.gradle-args }} $BORINGSSL_ARGS)" >> $GITHUB_OUTPUT
+        run: echo "version=$(./gradlew -q nextVersion ${{ inputs.gradle-args }})" >> $GITHUB_OUTPUT
 
       - name: Run Apple target tests
-        run: ./gradlew macosArm64Test iosSimulatorArm64Test ${{ inputs.gradle-args }} $BORINGSSL_ARGS
+        run: ./gradlew macosArm64Test iosSimulatorArm64Test ${{ inputs.gradle-args }}
 
       # The release/publish-to-Central path passes clean-publish: true to force a cold,
       # cache-free rebuild of the published artifacts. PR validation reuses the build cache.
       - name: Publish to Maven Local
-        run: ./gradlew publishToMavenLocal ${{ inputs.clean-publish && '--no-build-cache' || '' }} ${{ inputs.gradle-args }} $BORINGSSL_ARGS
+        run: ./gradlew publishToMavenLocal ${{ inputs.clean-publish && '--no-build-cache' || '' }} ${{ inputs.gradle-args }}
 
       - name: Upload Maven local artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

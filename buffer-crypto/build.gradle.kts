@@ -166,16 +166,16 @@ fun appleSwiftShim(
 // fortify/stack-protector/__isoc23_strtoull compat hacks.
 //
 // Bundle version + local dist dir are parameterized so the SAME script drives:
-//   * local / alien1 validation: publish the plugin to mavenLocal from boringssl-kmp and point
-//     -PboringsslLocalBundle at :boringssl-build/build/dist (the 0.0.1-dev lean cryptoOnly bundle).
-//   * a future published GitHub Release: drop the -P overrides — the plugin's baked-in checksums +
-//     default baseUrl then fetch the release tarballs by stable direct URL (no TOFU).
+//   * the published GitHub Release (default, no -P overrides): the plugin's baked-in checksums +
+//     default baseUrl fetch the release tarballs by stable direct URL (no TOFU).
+//   * local dev against an unreleased candidate: -PboringsslLocalBundle at :boringssl-build/build/dist
+//     (and -PboringsslBundleVersion / -PboringsslOwnerVersion / -PboringsslPluginVersion to pin it).
 // ---------------------------------------------------------------------------
-val boringsslBundleVersion = providers.gradleProperty("boringsslBundleVersion").getOrElse("0.0.1-dev")
+val boringsslBundleVersion = providers.gradleProperty("boringsslBundleVersion").getOrElse("0.0.6")
 val boringsslLocalBundle = providers.gradleProperty("boringsslLocalBundle").orNull
 // Version of the canonical :boringssl-canonical OWNER klib whose single libcrypto.a this
 // EXTERNAL-mode consumer links against (api dep on linuxMain). Overridable via -P.
-val boringsslOwnerVersion = providers.gradleProperty("boringsslOwnerVersion").getOrElse("0.0.1-SNAPSHOT")
+val boringsslOwnerVersion = providers.gradleProperty("boringsslOwnerVersion").getOrElse("0.0.6")
 
 boringssl {
     version = boringsslBundleVersion
