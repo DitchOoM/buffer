@@ -426,39 +426,53 @@ private class SizeHintPlan(
 
 /** Walk the shape's fields into constant / per-value / per-element hint terms. */
 private fun collectSizeHintPlan(shape: CodecShape): SizeHintPlan {
-    val plan =
-        SizeHintPlan(
-            ((shape.singletonDispatchDiscriminator?.wireWidth ?: WireWidth.Zero) as? WireWidth.Fixed)?.bytes ?: 0,
-        )
+    val plan = SizeHintPlan(singletonDiscriminatorHintBytes(shape))
     for (field in shape.fields) {
-        when (field) {
-            is FieldSpec.LengthPrefixedString -> {
-                plan.constHint += field.prefixWidth
-                plan.dynamicTerms += stringLengthTerm(field.name, field.valueClass)
-            }
-            is FieldSpec.RemainingBytesString ->
-                plan.dynamicTerms += stringLengthTerm(field.name, field.valueClass)
-            is FieldSpec.LengthFromString ->
-                plan.dynamicTerms += stringLengthTerm(field.name, field.valueClass)
-            is FieldSpec.ProtocolMessageScalar ->
-                plan.dynamicTerms += CodeBlock.of("%T.sizeHint(value.%L, context)", field.codecType, field.name)
-            is FieldSpec.LengthPrefixedMessage -> {
-                plan.constHint += field.prefixWidth
-                plan.dynamicTerms += CodeBlock.of("%T.sizeHint(value.%L, context)", field.codecType, field.name)
-            }
-            is FieldSpec.CountPrefixedProtocolMessageList -> {
-                plan.constHint += 1 // minimum varint(count) width
-                plan.elementLoops += field.name to field.elementCodecClassName
-            }
-            is FieldSpec.RemainingBytesProtocolMessageList ->
-                plan.elementLoops += field.name to field.elementCodecClassName
-            is FieldSpec.EnumScalar -> plan.constHint += 1 // minimum ordinal-varint width
-            is FieldSpec.LengthPrefixedUseCodecPayload -> plan.constHint += field.prefixWidth
-            is FieldSpec.FixedSize -> plan.constHint += (field.wireWidth as? WireWidth.Fixed)?.bytes ?: 0
-            else -> {} // Conditional / opaque @UseCodec shapes: no cheap bound
-        }
+        plan.addString(field) || plan.addStructural(field)
     }
     return plan
+}
+
+private fun singletonDiscriminatorHintBytes(shape: CodecShape): Int =
+    ((shape.singletonDispatchDiscriminator?.wireWidth ?: WireWidth.Zero) as? WireWidth.Fixed)?.bytes ?: 0
+
+/** String-shaped contributions: prefix constants + `accessor.length` terms. Returns false when not string-shaped. */
+private fun SizeHintPlan.addString(field: FieldSpec): Boolean {
+    when (field) {
+        is FieldSpec.LengthPrefixedString -> {
+            constHint += field.prefixWidth
+            dynamicTerms += stringLengthTerm(field.name, field.valueClass)
+        }
+        is FieldSpec.RemainingBytesString ->
+            dynamicTerms += stringLengthTerm(field.name, field.valueClass)
+        is FieldSpec.LengthFromString ->
+            dynamicTerms += stringLengthTerm(field.name, field.valueClass)
+        else -> return false
+    }
+    return true
+}
+
+/** Structural contributions: nested-message hints, element loops, fixed widths. */
+private fun SizeHintPlan.addStructural(field: FieldSpec): Boolean {
+    when (field) {
+        is FieldSpec.ProtocolMessageScalar ->
+            dynamicTerms += CodeBlock.of("%T.sizeHint(value.%L, context)", field.codecType, field.name)
+        is FieldSpec.LengthPrefixedMessage -> {
+            constHint += field.prefixWidth
+            dynamicTerms += CodeBlock.of("%T.sizeHint(value.%L, context)", field.codecType, field.name)
+        }
+        is FieldSpec.CountPrefixedProtocolMessageList -> {
+            constHint += 1 // minimum varint(count) width
+            elementLoops += field.name to field.elementCodecClassName
+        }
+        is FieldSpec.RemainingBytesProtocolMessageList ->
+            elementLoops += field.name to field.elementCodecClassName
+        is FieldSpec.EnumScalar -> constHint += 1 // minimum ordinal-varint width
+        is FieldSpec.LengthPrefixedUseCodecPayload -> constHint += field.prefixWidth
+        is FieldSpec.FixedSize -> constHint += (field.wireWidth as? WireWidth.Fixed)?.bytes ?: 0
+        else -> {} // Conditional / opaque @UseCodec shapes: no cheap bound
+    }
+    return true
 }
 
 /** Render the plan: constant-only, single-expression sum, or loop-accumulate. */
