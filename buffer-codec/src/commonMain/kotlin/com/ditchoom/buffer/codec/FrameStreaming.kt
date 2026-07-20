@@ -51,17 +51,27 @@ public fun <T> Encoder<T>.encodeToPlatformBuffer(
             buffer.resetForRead()
             freeOnExit = false
             return buffer
-        } catch (overflow: Exception) {
-            val retryable = overflow is BufferOverflowException || overflow is IllegalArgumentException
-            if (!retryable) throw overflow
+        } catch (overflow: BufferOverflowException) {
             freeOnExit = false
             buffer.freeNativeMemory()
-            if (capacity >= MAX_ENCODE_CAPACITY) throw overflow
-            capacity = minOf(capacity * 2, MAX_ENCODE_CAPACITY)
+            capacity = grownCapacityOrRethrow(capacity, overflow)
+        } catch (positionOverflow: IllegalArgumentException) {
+            freeOnExit = false
+            buffer.freeNativeMemory()
+            capacity = grownCapacityOrRethrow(capacity, positionOverflow)
         } finally {
             if (freeOnExit) buffer.freeNativeMemory()
         }
     }
+}
+
+/** Double [capacity] toward [MAX_ENCODE_CAPACITY]; rethrow [cause] once the ceiling is reached. */
+private fun grownCapacityOrRethrow(
+    capacity: Int,
+    cause: Exception,
+): Int {
+    if (capacity >= MAX_ENCODE_CAPACITY) throw cause
+    return minOf(capacity * 2, MAX_ENCODE_CAPACITY)
 }
 
 /**
