@@ -380,13 +380,19 @@ internal fun buildDispatchWireSizeFun(shape: DispatchShape): FunSpec {
                             WIRE_SIZE_CN,
                         )
                     is VariantWireSize.RuntimeExact -> {
+                        // The variant's wireSize is Exact in the common case,
+                        // but a runtime-probed shape (e.g. a `@Count` list
+                        // whose elements turn out BackPatch) may degrade —
+                        // forward BackPatch instead of casting (a cast threw
+                        // ClassCastException on every encode).
                         body.beginControlFlow("is %T ->", branchType)
-                        body.addStatement(
-                            "val inner = (%L.wireSize(value, context) as %T.Exact).bytes",
+                        body.beginControlFlow(
+                            "when (val inner = %L.wireSize(value, context))",
                             variant.codecReceiver(),
-                            WIRE_SIZE_CN,
                         )
-                        body.addStatement("%T.Exact(1 + inner)", WIRE_SIZE_CN)
+                        body.addStatement("is %T.Exact -> %T.Exact(1 + inner.bytes)", WIRE_SIZE_CN, WIRE_SIZE_CN)
+                        body.addStatement("%T.BackPatch -> %T.BackPatch", WIRE_SIZE_CN, WIRE_SIZE_CN)
+                        body.endControlFlow()
                         body.endControlFlow()
                     }
                     // Delegated is produced only by the @DispatchOn adapter

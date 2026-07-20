@@ -40,7 +40,7 @@ public object TwoStringsCodec : Codec<TwoStrings> {
     context: EncodeContext,
   ) {
     val firstSizePosition = buffer.position()
-    buffer.position(firstSizePosition + 2)
+    repeat(2) { buffer.writeUByte(0u) }
     val firstBodyStart = buffer.position()
     buffer.writeString(value.first, Charset.UTF8)
     val firstEndPosition = buffer.position()
@@ -54,7 +54,7 @@ public object TwoStringsCodec : Codec<TwoStrings> {
     buffer.writeUByte((firstPrefix and 0xFFu).toUByte())
     buffer.position(firstEndPosition)
     val secondSizePosition = buffer.position()
-    buffer.position(secondSizePosition + 2)
+    repeat(2) { buffer.writeUByte(0u) }
     val secondBodyStart = buffer.position()
     buffer.writeString(value.second, Charset.UTF8)
     val secondEndPosition = buffer.position()

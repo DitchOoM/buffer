@@ -35,7 +35,16 @@ public object RepeatedBlocksCodec : Codec<RepeatedBlocks> {
     }
   }
 
-  override fun wireSize(`value`: RepeatedBlocks, context: EncodeContext): WireSize = WireSize.Exact(2 + value.blocks.sumOf { (RepeatedBlockCodec.wireSize(it, context) as WireSize.Exact).bytes })
+  override fun wireSize(`value`: RepeatedBlocks, context: EncodeContext): WireSize {
+    var __blocksBodySize = 0
+    for (__elem in value.blocks) {
+      when (val __elemSize = RepeatedBlockCodec.wireSize(__elem, context)) {
+        is WireSize.Exact -> __blocksBodySize += __elemSize.bytes
+        WireSize.BackPatch -> return WireSize.BackPatch
+      }
+    }
+    return WireSize.Exact(2 + __blocksBodySize)
+  }
 
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

@@ -33,7 +33,7 @@ public object LpIntValueClassIdCodec : Codec<LpIntValueClassId> {
     context: EncodeContext,
   ) {
     val idSizePosition = buffer.position()
-    buffer.position(idSizePosition + 4)
+    repeat(4) { buffer.writeUByte(0u) }
     val idBodyStart = buffer.position()
     buffer.writeString(value.id.hex, Charset.UTF8)
     val idEndPosition = buffer.position()

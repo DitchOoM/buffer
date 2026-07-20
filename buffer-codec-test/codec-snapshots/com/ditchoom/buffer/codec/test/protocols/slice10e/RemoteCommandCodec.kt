@@ -34,7 +34,7 @@ public object RemoteCommandCodec : Codec<RemoteCommand> {
     context: EncodeContext,
   ) {
     val idSizePosition = buffer.position()
-    buffer.position(idSizePosition + 2)
+    repeat(2) { buffer.writeUByte(0u) }
     val idBodyStart = buffer.position()
     buffer.writeString(value.id, Charset.UTF8)
     val idEndPosition = buffer.position()

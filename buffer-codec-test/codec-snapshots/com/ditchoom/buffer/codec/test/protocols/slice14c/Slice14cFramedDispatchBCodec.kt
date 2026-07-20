@@ -68,7 +68,7 @@ public object Slice14cFramedDispatchBCodec {
     },
   ) { buffer ->
     val messageSizePosition = buffer.position()
-    buffer.position(messageSizePosition + 2)
+    repeat(2) { buffer.writeUByte(0u) }
     val messageBodyStart = buffer.position()
     buffer.writeString(value.message, Charset.UTF8)
     val messageEndPosition = buffer.position()

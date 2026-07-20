@@ -34,7 +34,7 @@ public object MqttV5PropertyReasonStringCodec : Codec<MqttV5Property.ReasonStrin
   ) {
     buffer.writeUByte(value.id.raw)
     val valueSizePosition = buffer.position()
-    buffer.position(valueSizePosition + 2)
+    repeat(2) { buffer.writeUByte(0u) }
     val valueBodyStart = buffer.position()
     buffer.writeString(value.value, Charset.UTF8)
     val valueEndPosition = buffer.position()

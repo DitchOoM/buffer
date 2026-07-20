@@ -33,7 +33,7 @@ public object StringTaggedPropertyCodec : Codec<StringTaggedProperty> {
     context: EncodeContext,
   ) {
     val tagSizePosition = buffer.position()
-    buffer.position(tagSizePosition + 2)
+    repeat(2) { buffer.writeUByte(0u) }
     val tagBodyStart = buffer.position()
     buffer.writeString(value.tag, Charset.UTF8)
     val tagEndPosition = buffer.position()

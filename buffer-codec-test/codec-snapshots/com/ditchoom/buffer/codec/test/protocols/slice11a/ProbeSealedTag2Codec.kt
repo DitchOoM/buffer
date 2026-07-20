@@ -32,7 +32,7 @@ public object ProbeSealedTag2Codec : Codec<ProbeSealed.Tag2> {
     context: EncodeContext,
   ) {
     val msgSizePosition = buffer.position()
-    buffer.position(msgSizePosition + 2)
+    repeat(2) { buffer.writeUByte(0u) }
     val msgBodyStart = buffer.position()
     buffer.writeString(value.msg, Charset.UTF8)
     val msgEndPosition = buffer.position()

@@ -33,7 +33,7 @@ public object MqttTopicFilterCodec : Codec<MqttTopicFilter> {
     context: EncodeContext,
   ) {
     val filterSizePosition = buffer.position()
-    buffer.position(filterSizePosition + 2)
+    repeat(2) { buffer.writeUByte(0u) }
     val filterBodyStart = buffer.position()
     buffer.writeString(value.filter, Charset.UTF8)
     val filterEndPosition = buffer.position()

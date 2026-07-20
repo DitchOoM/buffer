@@ -41,7 +41,7 @@ public object GrpcLengthPrefixedMessageCodec : Codec<GrpcLengthPrefixedMessage> 
   ) {
     buffer.writeUByte(value.compressedFlag)
     val messageSizePosition = buffer.position()
-    buffer.position(messageSizePosition + 4)
+    repeat(4) { buffer.writeUByte(0u) }
     val messageBodyStart = buffer.position()
     BinaryDataCodec.encode(buffer, value.message, context)
     val messageEndPosition = buffer.position()

@@ -41,7 +41,7 @@ public object WithFlagPayloadCodec : Codec<WithFlagPayload> {
     if (value.flags.want) {
       val payloadValue = value.payload ?: throw EncodeException(fieldPath = "WithFlagPayload.payload", reason = "@When(\"flags.want\") predicate is true but field is null")
       val payloadSizePosition = buffer.position()
-      buffer.position(payloadSizePosition + 2)
+      repeat(2) { buffer.writeUByte(0u) }
       val payloadBodyStart = buffer.position()
       buffer.writeString(payloadValue, Charset.UTF8)
       val payloadEndPosition = buffer.position()

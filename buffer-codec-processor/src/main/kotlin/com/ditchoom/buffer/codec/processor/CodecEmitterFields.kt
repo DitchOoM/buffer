@@ -957,7 +957,7 @@ internal fun appendEncodeConditionalLengthPrefixedUseCodecPayload(
     val endPosVar = "${field.name}EndPosition"
     val byteCountVar = "${field.name}ByteCount"
     body.addStatement("val %L = buffer.position()", sizePosVar)
-    body.addStatement("buffer.position(%L + %L)", sizePosVar, inner.prefixWidth)
+    appendPrefixSlotReservation(body, inner.prefixWidth)
     body.addStatement("val %L = buffer.position()", bodyStartVar)
     body.addStatement("%T.encode(buffer, %L, context)", inner.payloadCodecType, accessor)
     body.addStatement("val %L = buffer.position()", endPosVar)
@@ -1079,20 +1079,91 @@ internal fun appendBufferPrefixDecode(
     body.addStatement("val %L = (%L)", targetVar, parts.joinToString(" or "))
 }
 
+/**
+ * Encode a terminal `@LengthPrefixed val: @ProtocolMessage` body. Forks at
+ * runtime on the nested codec's wireSize:
+ *
+ * - **Exact** — write the prefix from the measured size, then the body
+ *   (the historical fast path, now with the same prefix-range guard the
+ *   String emit carries — the unguarded path silently mask-truncated an
+ *   oversized body into a corrupt prefix).
+ * - **BackPatch** — a nested body carrying its own variable-length field
+ *   reports BackPatch; reserve the prefix slot with placeholder writes,
+ *   encode the body, measure the position delta, guard, and back-patch
+ *   (the same shape as the `@LengthPrefixed val: String` emit). This path
+ *   used to throw ClassCastException on every encode.
+ */
 internal fun appendEncodeLengthPrefixed(
     body: CodeBlock.Builder,
     field: FieldSpec.LengthPrefixedMessage,
 ) {
-    val prefixVar = "${field.name}Prefix"
-    body.addStatement(
-        "val %L = (%T.wireSize(value.%L, context) as %T.Exact).bytes.toUInt()",
-        prefixVar,
+    val fieldPath = "${field.ownerSimpleName}.${field.name}"
+    val sizeVar = "${field.name}WireSize"
+    body.beginControlFlow(
+        "when (val %L = %T.wireSize(value.%L, context))",
+        sizeVar,
         field.codecType,
         field.name,
-        WIRE_SIZE_CN,
     )
+    body.beginControlFlow("is %T.Exact ->", WIRE_SIZE_CN)
+    val byteCountVar = "${field.name}ByteCount"
+    body.addStatement("val %L = %L.bytes", byteCountVar, sizeVar)
+    appendPrefixWidthGuard(body, byteCountVar, field.prefixWidth, fieldPath)
+    val prefixVar = "${field.name}Prefix"
+    body.addStatement("val %L = %L.toUInt()", prefixVar, byteCountVar)
     appendBufferPrefixEncode(body, prefixVar, field.prefixWidth, field.prefixWireOrder)
     body.addStatement("%T.encode(buffer, value.%L, context)", field.codecType, field.name)
+    body.endControlFlow()
+    body.beginControlFlow("%T.BackPatch ->", WIRE_SIZE_CN)
+    val sizePosVar = "${field.name}SizePosition"
+    val bodyStartVar = "${field.name}BodyStart"
+    val endPosVar = "${field.name}EndPosition"
+    val patchCountVar = "${field.name}PatchByteCount"
+    body.addStatement("val %L = buffer.position()", sizePosVar)
+    appendPrefixSlotReservation(body, field.prefixWidth)
+    body.addStatement("val %L = buffer.position()", bodyStartVar)
+    body.addStatement("%T.encode(buffer, value.%L, context)", field.codecType, field.name)
+    body.addStatement("val %L = buffer.position()", endPosVar)
+    body.addStatement("val %L = %L - %L", patchCountVar, endPosVar, bodyStartVar)
+    appendPrefixWidthGuard(body, patchCountVar, field.prefixWidth, fieldPath)
+    body.addStatement("buffer.position(%L)", sizePosVar)
+    val patchPrefixVar = "${field.name}PatchPrefix"
+    body.addStatement("val %L = %L.toUInt()", patchPrefixVar, patchCountVar)
+    appendBufferPrefixEncode(body, patchPrefixVar, field.prefixWidth, field.prefixWireOrder)
+    body.addStatement("buffer.position(%L)", endPosVar)
+    body.endControlFlow()
+    body.endControlFlow()
+}
+
+/**
+ * Emit the prefix-range guard shared by the length-prefix encode paths: for
+ * 1/2-byte prefixes, throw `EncodeException` when the measured body byte
+ * count exceeds the prefix's value range. 4-byte prefixes skip the guard —
+ * an Int-typed position delta can never exceed the UInt range.
+ */
+internal fun appendPrefixWidthGuard(
+    body: CodeBlock.Builder,
+    byteCountVar: String,
+    prefixWidth: Int,
+    fieldPath: String,
+) {
+    if (prefixWidth >= Int.SIZE_BYTES) return
+    val maxValue = (1L shl (prefixWidth * Byte.SIZE_BITS)) - 1
+    val widthName =
+        when (prefixWidth) {
+            1 -> "Byte"
+            2 -> "Short"
+            else -> error("unreachable: prefixWidth must be 1, 2, or 4")
+        }
+    body.beginControlFlow("if (%L > %L)", byteCountVar, maxValue)
+    body.addStatement(
+        "throw %T(fieldPath = %S, reason = %P)",
+        ENCODE_EXCEPTION_CN,
+        fieldPath,
+        "encoded message byte length \${$byteCountVar} exceeds " +
+            "@LengthPrefixed(LengthPrefix.$widthName) max $maxValue",
+    )
+    body.endControlFlow()
 }
 
 internal fun appendDecodeLengthPrefixedString(
@@ -1200,7 +1271,7 @@ internal fun appendLengthPrefixedStringEncode(
     val endPosVar = "${name}EndPosition"
     val byteCountVar = "${name}ByteCount"
     body.addStatement("val %L = buffer.position()", sizePosVar)
-    body.addStatement("buffer.position(%L + %L)", sizePosVar, prefixWidth)
+    appendPrefixSlotReservation(body, prefixWidth)
     body.addStatement("val %L = buffer.position()", bodyStartVar)
     body.addStatement(
         "buffer.writeString(%L, %T.UTF8)",
@@ -1882,22 +1953,11 @@ internal fun appendDecodeLengthPrefixedListBody(
 /**
  * Emit encode for `@LengthPrefixed
  * @UseCodec(C::class) val xs: List<E>`. Pre-measures the body byte
- * count via the element codec's `wireSize` (cast to `Exact`), writes
- * the prefix via the user codec's `encode`, then iterates and encodes
- * elements. BackPatch element codecs throw `ClassCastException` —
- * same fixture-design contract as `RemainingBytesProtocolMessageList`
- * and `LengthPrefixedMessage`.
- *
- * Generated shape:
- * ```
- * val __<name>BodyBytes = value.<name>.sumOf {
- *     (ElementCodec.wireSize(it, context) as WireSize.Exact).bytes
- * }
- * <codecType>.encode(buffer, __<name>BodyBytes.toUInt(), context)
- * for (__elem in value.<name>) {
- *     ElementCodec.encode(buffer, __elem, context)
- * }
- * ```
+ * count by probing each element codec's `wireSize`, writes the prefix
+ * via the user codec's `encode`, then iterates and encodes elements.
+ * A BackPatch element wireSize at runtime falls back to the
+ * scratch-staging `LengthPrefixedListEncoder` — see
+ * [appendEncodeLengthPrefixedListBody] for the emitted shape.
  */
 internal fun appendEncodeLengthPrefixedUseCodecList(
     body: CodeBlock.Builder,
@@ -1928,7 +1988,7 @@ internal fun appendEncodeLengthPrefixedUseCodecPayload(
     val endPosVar = "${field.name}EndPosition"
     val byteCountVar = "${field.name}ByteCount"
     body.addStatement("val %L = buffer.position()", sizePosVar)
-    body.addStatement("buffer.position(%L + %L)", sizePosVar, field.prefixWidth)
+    appendPrefixSlotReservation(body, field.prefixWidth)
     body.addStatement("val %L = buffer.position()", bodyStartVar)
     body.addStatement(
         "%T.encode(buffer, value.%L, context)",
@@ -1991,14 +2051,11 @@ internal fun appendEncodeLengthPrefixedUseCodecPayload(
  * correctly. An earlier emit used a fixed 64-byte scratch that silently
  * truncated sections over 64 bytes.
  *
- * **Data-class elements** — pre-measure body bytes via the element
- * codec's `wireSize as Exact`, write VBI prefix, iterate. BackPatch
- * elements throw `ClassCastException` — same fixture-design contract
- * as `RemainingBytesProtocolMessageList` and `LengthPrefixedMessage`.
- * Audit 2b notes the latent risk: a data-class element with a
- * `@LengthPrefixed val: String` field has BackPatch wireSize and
- * would CCE; no current fixture trips it because all sealed-parent
- * cases are routed through the scratch path.
+ * **Data-class elements** — probe each element's `wireSize`; when all
+ * report Exact, write the VBI prefix from the sum and iterate. If any
+ * element reports BackPatch at runtime (an element shape the analyze-time
+ * scan under-detects), fall back to the scratch path above instead of
+ * crashing — closing the latent ClassCastException Audit 2b flagged.
  */
 internal fun appendEncodeLengthPrefixedListBody(
     body: CodeBlock.Builder,
@@ -2020,14 +2077,25 @@ internal fun appendEncodeLengthPrefixedListBody(
             spec.elementCodecClassName,
         )
     } else {
+        // Pre-measure path for elements the analyzer classified Exact.
+        // Probe each element's wireSize rather than casting: if a shape the
+        // analyze-time scan under-detects reports BackPatch at runtime,
+        // fall back to the scratch-staging LengthPrefixedListEncoder (the
+        // same path always-BackPatch elements take) instead of throwing
+        // ClassCastException mid-encode.
         val bodyBytesVar = "__${namespacePrefix}BodyBytes"
-        body.addStatement(
-            "val %L = %L.sumOf { (%T.wireSize(it, context) as %T.Exact).bytes }",
-            bodyBytesVar,
-            accessor,
-            spec.elementCodecClassName,
-            WIRE_SIZE_CN,
-        )
+        val allExactVar = "__${namespacePrefix}AllExact"
+        body.addStatement("var %L = 0", bodyBytesVar)
+        body.addStatement("var %L = true", allExactVar)
+        body.beginControlFlow("for (__elem in %L)", accessor)
+        body.addStatement("val __elemSize = %T.wireSize(__elem, context)", spec.elementCodecClassName)
+        body.beginControlFlow("if (__elemSize !is %T.Exact)", WIRE_SIZE_CN)
+        body.addStatement("%L = false", allExactVar)
+        body.addStatement("break")
+        body.endControlFlow()
+        body.addStatement("%L += __elemSize.bytes", bodyBytesVar)
+        body.endControlFlow()
+        body.beginControlFlow("if (%L)", allExactVar)
         body.addStatement(
             "%T.encode(buffer, %L.toUInt(), context)",
             spec.codecType,
@@ -2036,7 +2104,36 @@ internal fun appendEncodeLengthPrefixedListBody(
         body.beginControlFlow("for (__elem in %L)", accessor)
         body.addStatement("%T.encode(buffer, __elem, context)", spec.elementCodecClassName)
         body.endControlFlow()
+        body.nextControlFlow("else")
+        body.addStatement(
+            "%T.encode(buffer, %T.%M, %T, %L, %T, context)",
+            LENGTH_PREFIXED_LIST_ENCODER_CN,
+            BUFFER_FACTORY_CN,
+            BUFFER_FACTORY_DEFAULT_MN,
+            spec.codecType,
+            accessor,
+            spec.elementCodecClassName,
+        )
+        body.endControlFlow()
     }
+}
+
+/**
+ * Reserve a length-prefix slot by writing `prefixWidth` placeholder bytes.
+ * MUST be a write, not a forward `buffer.position(pos + width)` seek: at a
+ * capacity boundary a seek past the limit throws a platform-dependent,
+ * non-retryable exception (java.nio signals `IllegalArgumentException`),
+ * which escapes `encodeToPlatformBuffer`'s grow-and-retry loop. A
+ * placeholder write overflows with the retryable [BufferOverflowException]
+ * — and on a growable scratch buffer it triggers growth, which a bare seek
+ * would not. The real prefix is back-patched over the placeholders once the
+ * body's byte count is known.
+ */
+internal fun appendPrefixSlotReservation(
+    body: CodeBlock.Builder,
+    prefixWidth: Int,
+) {
+    body.addStatement("repeat(%L) { buffer.writeUByte(0u) }", prefixWidth)
 }
 
 internal fun appendBufferPrefixEncode(

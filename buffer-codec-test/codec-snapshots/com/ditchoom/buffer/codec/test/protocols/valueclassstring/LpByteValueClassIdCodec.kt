@@ -30,7 +30,7 @@ public object LpByteValueClassIdCodec : Codec<LpByteValueClassId> {
     context: EncodeContext,
   ) {
     val idSizePosition = buffer.position()
-    buffer.position(idSizePosition + 1)
+    repeat(1) { buffer.writeUByte(0u) }
     val idBodyStart = buffer.position()
     buffer.writeString(value.id.value, Charset.UTF8)
     val idEndPosition = buffer.position()

@@ -30,7 +30,7 @@ public object BytePrefixedStringCodec : Codec<BytePrefixedString> {
     context: EncodeContext,
   ) {
     val nameSizePosition = buffer.position()
-    buffer.position(nameSizePosition + 1)
+    repeat(1) { buffer.writeUByte(0u) }
     val nameBodyStart = buffer.position()
     buffer.writeString(value.name, Charset.UTF8)
     val nameEndPosition = buffer.position()

@@ -43,17 +43,37 @@ public object WavFmtChunkCodec : Codec<WavFmtChunk> {
   ) {
     val fourCCRaw = value.fourCC.toInt()
     buffer.writeInt(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) fourCCRaw else swapBytes(fourCCRaw))
-    val bodyPrefix = (WavFmtBodyCodec.wireSize(value.body, context) as WireSize.Exact).bytes.toUInt()
-    buffer.writeUByte((bodyPrefix and 0xFFu).toUByte())
-    buffer.writeUByte(((bodyPrefix shr 8) and 0xFFu).toUByte())
-    buffer.writeUByte(((bodyPrefix shr 16) and 0xFFu).toUByte())
-    buffer.writeUByte(((bodyPrefix shr 24) and 0xFFu).toUByte())
-    WavFmtBodyCodec.encode(buffer, value.body, context)
+    when (val bodyWireSize = WavFmtBodyCodec.wireSize(value.body, context)) {
+      is WireSize.Exact -> {
+        val bodyByteCount = bodyWireSize.bytes
+        val bodyPrefix = bodyByteCount.toUInt()
+        buffer.writeUByte((bodyPrefix and 0xFFu).toUByte())
+        buffer.writeUByte(((bodyPrefix shr 8) and 0xFFu).toUByte())
+        buffer.writeUByte(((bodyPrefix shr 16) and 0xFFu).toUByte())
+        buffer.writeUByte(((bodyPrefix shr 24) and 0xFFu).toUByte())
+        WavFmtBodyCodec.encode(buffer, value.body, context)
+      }
+      WireSize.BackPatch -> {
+        val bodySizePosition = buffer.position()
+        repeat(4) { buffer.writeUByte(0u) }
+        val bodyBodyStart = buffer.position()
+        WavFmtBodyCodec.encode(buffer, value.body, context)
+        val bodyEndPosition = buffer.position()
+        val bodyPatchByteCount = bodyEndPosition - bodyBodyStart
+        buffer.position(bodySizePosition)
+        val bodyPatchPrefix = bodyPatchByteCount.toUInt()
+        buffer.writeUByte((bodyPatchPrefix and 0xFFu).toUByte())
+        buffer.writeUByte(((bodyPatchPrefix shr 8) and 0xFFu).toUByte())
+        buffer.writeUByte(((bodyPatchPrefix shr 16) and 0xFFu).toUByte())
+        buffer.writeUByte(((bodyPatchPrefix shr 24) and 0xFFu).toUByte())
+        buffer.position(bodyEndPosition)
+      }
+    }
   }
 
-  override fun wireSize(`value`: WavFmtChunk, context: EncodeContext): WireSize {
-    val bodySize = (WavFmtBodyCodec.wireSize(value.body, context) as WireSize.Exact).bytes
-    return WireSize.Exact(8 + bodySize)
+  override fun wireSize(`value`: WavFmtChunk, context: EncodeContext): WireSize = when (val bodySize = WavFmtBodyCodec.wireSize(value.body, context)) {
+    is WireSize.Exact -> WireSize.Exact(8 + bodySize.bytes)
+    WireSize.BackPatch -> WireSize.BackPatch
   }
 
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {

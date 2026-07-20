@@ -15,7 +15,12 @@ private const val MAX_ENCODE_CAPACITY = 1 shl 30 // 1 GiB safety ceiling
  *
  * When the encoder reports a [WireSize.Exact] size the buffer is allocated exactly once. For
  * [WireSize.BackPatch] encoders the capacity starts from an estimate and doubles on
- * [BufferOverflowException] until the value fits (capped at 1 GiB).
+ * [BufferOverflowException] until the value fits (capped at 1 GiB). [IllegalArgumentException] is
+ * treated the same way as a backstop: a position seek past the current limit signals out-of-bounds
+ * differently per platform (java.nio throws [IllegalArgumentException] rather than
+ * [BufferOverflowException]), and that signal must grow-and-retry rather than escape. Generated
+ * codecs reserve prefix slots with placeholder writes (which overflow retryably), so the backstop
+ * only matters for hand-written encoders.
  *
  * Frees the allocated buffer on any exception from [Encoder.encode] — not just the overflow-retry
  * path — so a failing encode never leaks native memory.
@@ -49,12 +54,24 @@ public fun <T> Encoder<T>.encodeToPlatformBuffer(
         } catch (overflow: BufferOverflowException) {
             freeOnExit = false
             buffer.freeNativeMemory()
-            if (capacity >= MAX_ENCODE_CAPACITY) throw overflow
-            capacity = minOf(capacity * 2, MAX_ENCODE_CAPACITY)
+            capacity = grownCapacityOrRethrow(capacity, overflow)
+        } catch (positionOverflow: IllegalArgumentException) {
+            freeOnExit = false
+            buffer.freeNativeMemory()
+            capacity = grownCapacityOrRethrow(capacity, positionOverflow)
         } finally {
             if (freeOnExit) buffer.freeNativeMemory()
         }
     }
+}
+
+/** Double [capacity] toward [MAX_ENCODE_CAPACITY]; rethrow [cause] once the ceiling is reached. */
+private fun grownCapacityOrRethrow(
+    capacity: Int,
+    cause: Exception,
+): Int {
+    if (capacity >= MAX_ENCODE_CAPACITY) throw cause
+    return minOf(capacity * 2, MAX_ENCODE_CAPACITY)
 }
 
 /**

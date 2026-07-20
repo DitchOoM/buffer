@@ -42,7 +42,7 @@ public class MqttPublishV3Codec<P : Payload>(
   ) {
     buffer.writeUByte(value.header.raw)
     val topicSizePosition = buffer.position()
-    buffer.position(topicSizePosition + 2)
+    repeat(2) { buffer.writeUByte(0u) }
     val topicBodyStart = buffer.position()
     buffer.writeString(value.topic, Charset.UTF8)
     val topicEndPosition = buffer.position()

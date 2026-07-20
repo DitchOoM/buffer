@@ -26,7 +26,10 @@ public object Http3FrameTypeCodec : Codec<Http3FrameType> {
   }
 
   override fun wireSize(`value`: Http3FrameType, context: EncodeContext): WireSize {
-    val __rawSize = (QuicVarintCodec.wireSize(value.raw, context) as WireSize.Exact).bytes
+    val __rawSize = when (val __s = QuicVarintCodec.wireSize(value.raw, context)) {
+      is WireSize.Exact -> __s.bytes
+      WireSize.BackPatch -> return WireSize.BackPatch
+    }
     return WireSize.Exact(0 + __rawSize)
   }
 
