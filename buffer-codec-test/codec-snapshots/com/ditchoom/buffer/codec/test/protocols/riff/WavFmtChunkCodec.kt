@@ -7,6 +7,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -51,7 +52,11 @@ public object WavFmtChunkCodec : Codec<WavFmtChunk> {
         buffer.writeUByte(((bodyPrefix shr 8) and 0xFFu).toUByte())
         buffer.writeUByte(((bodyPrefix shr 16) and 0xFFu).toUByte())
         buffer.writeUByte(((bodyPrefix shr 24) and 0xFFu).toUByte())
+        val bodyBodyStart = buffer.position()
         WavFmtBodyCodec.encode(buffer, value.body, context)
+        if (buffer.position() - bodyBodyStart != bodyByteCount) {
+          throw EncodeException(fieldPath = "WavFmtChunk.body", reason = """wireSize declared ${bodyByteCount} bytes but encode wrote ${buffer.position() - bodyBodyStart} — the codec's wireSize and encode disagree""")
+        }
       }
       WireSize.BackPatch -> {
         val bodySizePosition = buffer.position()

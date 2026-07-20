@@ -1106,15 +1106,51 @@ internal fun appendEncodeLengthPrefixed(
         field.name,
     )
     body.beginControlFlow("is %T.Exact ->", WIRE_SIZE_CN)
+    appendLengthPrefixedExactBranch(body, field, fieldPath, sizeVar)
+    body.endControlFlow()
+    body.beginControlFlow("%T.BackPatch ->", WIRE_SIZE_CN)
+    appendLengthPrefixedBackPatchBranch(body, field, fieldPath)
+    body.endControlFlow()
+    body.endControlFlow()
+}
+
+/** Exact branch: prefix from the declared size, then verify encode agreed. */
+private fun appendLengthPrefixedExactBranch(
+    body: CodeBlock.Builder,
+    field: FieldSpec.LengthPrefixedMessage,
+    fieldPath: String,
+    sizeVar: String,
+) {
     val byteCountVar = "${field.name}ByteCount"
     body.addStatement("val %L = %L.bytes", byteCountVar, sizeVar)
     appendPrefixWidthGuard(body, byteCountVar, field.prefixWidth, fieldPath)
     val prefixVar = "${field.name}Prefix"
     body.addStatement("val %L = %L.toUInt()", prefixVar, byteCountVar)
     appendBufferPrefixEncode(body, prefixVar, field.prefixWidth, field.prefixWireOrder)
+    // The prefix above was written from the DECLARED size. Verify the body
+    // actually encoded to that many bytes — a codec whose wireSize disagrees
+    // with its encode must fail loudly here, not ship a frame whose prefix
+    // and body disagree (silent wire corruption).
+    val bodyStartVar = "${field.name}BodyStart"
+    body.addStatement("val %L = buffer.position()", bodyStartVar)
     body.addStatement("%T.encode(buffer, value.%L, context)", field.codecType, field.name)
+    body.beginControlFlow("if (buffer.position() - %L != %L)", bodyStartVar, byteCountVar)
+    body.addStatement(
+        "throw %T(fieldPath = %S, reason = %P)",
+        ENCODE_EXCEPTION_CN,
+        fieldPath,
+        "wireSize declared \${$byteCountVar} bytes but encode wrote " +
+            "\${buffer.position() - $bodyStartVar} — the codec's wireSize and encode disagree",
+    )
     body.endControlFlow()
-    body.beginControlFlow("%T.BackPatch ->", WIRE_SIZE_CN)
+}
+
+/** BackPatch branch: reserve, encode, measure, guard, patch. */
+private fun appendLengthPrefixedBackPatchBranch(
+    body: CodeBlock.Builder,
+    field: FieldSpec.LengthPrefixedMessage,
+    fieldPath: String,
+) {
     val sizePosVar = "${field.name}SizePosition"
     val bodyStartVar = "${field.name}BodyStart"
     val endPosVar = "${field.name}EndPosition"
@@ -1131,8 +1167,6 @@ internal fun appendEncodeLengthPrefixed(
     body.addStatement("val %L = %L.toUInt()", patchPrefixVar, patchCountVar)
     appendBufferPrefixEncode(body, patchPrefixVar, field.prefixWidth, field.prefixWireOrder)
     body.addStatement("buffer.position(%L)", endPosVar)
-    body.endControlFlow()
-    body.endControlFlow()
 }
 
 /**
