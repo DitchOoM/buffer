@@ -33,5 +33,7 @@ public object WsCloseBodyCodec : Codec<WsCloseBody> {
 
   override fun wireSize(`value`: WsCloseBody, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: WsCloseBody, context: EncodeContext): Int = 2 + value.reason.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

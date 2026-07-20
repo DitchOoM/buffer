@@ -46,6 +46,11 @@ public object BoundaryDispCodec : Codec<BoundaryDisp> {
     is BoundaryDisp.Inherits -> WireSize.Exact(1)
   }
 
+  override fun sizeHint(`value`: BoundaryDisp, context: EncodeContext): Int = 1 + when (value) {
+    is BoundaryDisp.Named -> BoundaryDispNamedCodec.sizeHint(value, context)
+    is BoundaryDisp.Inherits -> BoundaryDispInheritsCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF

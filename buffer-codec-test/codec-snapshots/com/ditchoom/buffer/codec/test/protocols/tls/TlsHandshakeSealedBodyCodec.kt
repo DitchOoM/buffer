@@ -46,6 +46,11 @@ public object TlsHandshakeSealedBodyCodec : Codec<TlsHandshakeSealedBody> {
     is TlsHandshakeSealedBody.EndOfEarlyData -> WireSize.Exact(1)
   }
 
+  override fun sizeHint(`value`: TlsHandshakeSealedBody, context: EncodeContext): Int = 1 + when (value) {
+    is TlsHandshakeSealedBody.ClientHello -> TlsHandshakeSealedBodyClientHelloCodec.sizeHint(value, context)
+    is TlsHandshakeSealedBody.EndOfEarlyData -> TlsHandshakeSealedBodyEndOfEarlyDataCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF

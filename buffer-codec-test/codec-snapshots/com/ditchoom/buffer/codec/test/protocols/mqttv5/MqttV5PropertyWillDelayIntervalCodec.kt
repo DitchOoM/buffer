@@ -32,5 +32,7 @@ public object MqttV5PropertyWillDelayIntervalCodec : Codec<MqttV5Property.WillDe
 
   override fun wireSize(`value`: MqttV5Property.WillDelayInterval, context: EncodeContext): WireSize = WireSize.Exact(5)
 
+  override fun sizeHint(`value`: MqttV5Property.WillDelayInterval, context: EncodeContext): Int = 5
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 5) PeekResult.Complete(5) else PeekResult.NeedsMoreData
 }

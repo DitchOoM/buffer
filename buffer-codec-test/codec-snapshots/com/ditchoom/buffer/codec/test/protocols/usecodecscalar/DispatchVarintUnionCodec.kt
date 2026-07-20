@@ -73,6 +73,13 @@ public object DispatchVarintUnionCodec : Codec<DispatchVarintUnion> {
     }
   }
 
+  override fun sizeHint(`value`: DispatchVarintUnion, context: EncodeContext): Int = 1 + when (value) {
+    is DispatchVarintUnion.Single -> DispatchVarintUnionSingleCodec.sizeHint(value, context)
+    is DispatchVarintUnion.Mixed -> DispatchVarintUnionMixedCodec.sizeHint(value, context)
+    is DispatchVarintUnion.Marker -> DispatchVarintUnionMarkerCodec.sizeHint(value, context)
+    is DispatchVarintUnion.Plain -> DispatchVarintUnionPlainCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF

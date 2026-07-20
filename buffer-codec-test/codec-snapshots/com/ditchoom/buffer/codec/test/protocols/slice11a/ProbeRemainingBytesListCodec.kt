@@ -31,5 +31,13 @@ public object ProbeRemainingBytesListCodec : Codec<ProbeRemainingBytesList> {
 
   override fun wireSize(`value`: ProbeRemainingBytesList, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: ProbeRemainingBytesList, context: EncodeContext): Int {
+    var __hint = 0
+    for (__elem in value.xs) {
+      __hint += ProbeSealedCodec.sizeHint(__elem, context)
+    }
+    return __hint
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

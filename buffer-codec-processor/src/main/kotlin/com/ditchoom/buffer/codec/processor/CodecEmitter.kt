@@ -581,6 +581,7 @@ internal class CodecEmitter(
                     .addFunction(buildDecodeFun(shape))
                     .addFunction(buildEncodeFun(shape))
                     .addFunction(buildWireSizeFun(shape))
+                    .addFunction(buildSizeHintFun(shape))
                     .addFunction(buildPeekFrameFun(shape))
                     .also { builder ->
                         // Every codec carrying a typed payload field
@@ -634,6 +635,7 @@ internal class CodecEmitter(
             .addFunction(buildDecodeFun(shape, parameterizedMessage))
             .addFunction(buildEncodeFun(shape, parameterizedMessage))
             .addFunction(buildWireSizeFun(shape, parameterizedMessage))
+            .addFunction(buildSizeHintFun(shape, parameterizedMessage))
             .addFunction(buildPeekFrameFun(shape))
             .also { builder ->
                 // For the (class) shape, `Partial` is a

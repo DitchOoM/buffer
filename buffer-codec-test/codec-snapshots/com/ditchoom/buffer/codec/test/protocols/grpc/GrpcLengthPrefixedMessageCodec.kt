@@ -63,6 +63,8 @@ public object GrpcLengthPrefixedMessageCodec : Codec<GrpcLengthPrefixedMessage> 
     return WireSize.Exact(1 + __messageSize)
   }
 
+  override fun sizeHint(`value`: GrpcLengthPrefixedMessage, context: EncodeContext): Int = 5
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData

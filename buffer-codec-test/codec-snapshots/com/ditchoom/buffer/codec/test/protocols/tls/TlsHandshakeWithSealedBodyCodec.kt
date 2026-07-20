@@ -50,6 +50,8 @@ public object TlsHandshakeWithSealedBodyCodec : Codec<TlsHandshakeWithSealedBody
 
   override fun wireSize(`value`: TlsHandshakeWithSealedBody, context: EncodeContext): WireSize = WireSize.Exact(4 + value.length.toInt())
 
+  override fun sizeHint(`value`: TlsHandshakeWithSealedBody, context: EncodeContext): Int = 4
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData

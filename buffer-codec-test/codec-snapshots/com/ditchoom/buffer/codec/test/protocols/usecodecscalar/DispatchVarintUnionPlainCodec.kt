@@ -32,5 +32,7 @@ public object DispatchVarintUnionPlainCodec : Codec<DispatchVarintUnion.Plain> {
     return WireSize.Exact(0 + __valueSize)
   }
 
+  override fun sizeHint(`value`: DispatchVarintUnion.Plain, context: EncodeContext): Int = 0
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

@@ -26,5 +26,7 @@ public object V5ConnectReasonCodeQoSNotSupportedCodec : Codec<V5ConnectReasonCod
 
   override fun wireSize(`value`: V5ConnectReasonCode.QoSNotSupported, context: EncodeContext): WireSize = WireSize.Exact(1)
 
+  override fun sizeHint(`value`: V5ConnectReasonCode.QoSNotSupported, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 1) PeekResult.Complete(1) else PeekResult.NeedsMoreData
 }

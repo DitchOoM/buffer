@@ -32,5 +32,7 @@ public object ProbeConditionalCodec : Codec<ProbeConditional> {
 
   override fun wireSize(`value`: ProbeConditional, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: ProbeConditional, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

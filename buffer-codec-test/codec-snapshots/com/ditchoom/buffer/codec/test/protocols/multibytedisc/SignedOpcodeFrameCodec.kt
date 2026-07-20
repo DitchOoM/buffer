@@ -42,6 +42,11 @@ public object SignedOpcodeFrameCodec : Codec<SignedOpcodeFrame> {
     is SignedOpcodeFrame.Positive -> SignedOpcodeFramePositiveCodec.wireSize(value, context)
   }
 
+  override fun sizeHint(`value`: SignedOpcodeFrame, context: EncodeContext): Int = when (value) {
+    is SignedOpcodeFrame.Negative -> SignedOpcodeFrameNegativeCodec.sizeHint(value, context)
+    is SignedOpcodeFrame.Positive -> SignedOpcodeFramePositiveCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 2) return PeekResult.NeedsMoreData
     val __discRawB0 = stream.peekByte(baseOffset + 0).toInt() and 0xFF

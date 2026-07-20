@@ -35,6 +35,8 @@ public object VarintLengthFrameCodec : Codec<VarintLengthFrame> {
     return WireSize.Exact(1 + __valueSize)
   }
 
+  override fun sizeHint(`value`: VarintLengthFrame, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     val __valueFrame = QuicVarintCodec.peekFrameSize(stream, baseOffset + 0)
     if (__valueFrame !is PeekResult.Complete) {

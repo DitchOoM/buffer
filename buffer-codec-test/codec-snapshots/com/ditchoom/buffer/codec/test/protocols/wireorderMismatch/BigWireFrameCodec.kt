@@ -46,6 +46,11 @@ public object BigWireFrameCodec : Codec<BigWireFrame> {
     is BigWireFrame.Status -> WireSize.Exact(13)
   }
 
+  override fun sizeHint(`value`: BigWireFrame, context: EncodeContext): Int = 1 + when (value) {
+    is BigWireFrame.Sample -> BigWireFrameSampleCodec.sizeHint(value, context)
+    is BigWireFrame.Status -> BigWireFrameStatusCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF

@@ -33,6 +33,8 @@ public object Http3FcFrameTypeCodec : Codec<Http3FcFrameType> {
     return WireSize.Exact(0 + __rawSize)
   }
 
+  override fun sizeHint(`value`: Http3FcFrameType, context: EncodeContext): Int = 0
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     val __rawFrame = QuicVarintCodec.peekFrameSize(stream, baseOffset + 0)
     if (__rawFrame !is PeekResult.Complete) {

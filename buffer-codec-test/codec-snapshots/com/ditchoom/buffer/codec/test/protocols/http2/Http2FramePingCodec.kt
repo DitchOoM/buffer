@@ -38,5 +38,7 @@ public object Http2FramePingCodec : Codec<Http2Frame.Ping> {
 
   override fun wireSize(`value`: Http2Frame.Ping, context: EncodeContext): WireSize = WireSize.Exact(17)
 
+  override fun sizeHint(`value`: Http2Frame.Ping, context: EncodeContext): Int = 17
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 17) PeekResult.Complete(17) else PeekResult.NeedsMoreData
 }

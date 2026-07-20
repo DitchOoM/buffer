@@ -32,5 +32,7 @@ public object SignedSelectorFrameNineCodec : Codec<SignedSelectorFrame.Nine> {
 
   override fun wireSize(`value`: SignedSelectorFrame.Nine, context: EncodeContext): WireSize = WireSize.Exact(12)
 
+  override fun sizeHint(`value`: SignedSelectorFrame.Nine, context: EncodeContext): Int = 12
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 12) PeekResult.Complete(12) else PeekResult.NeedsMoreData
 }

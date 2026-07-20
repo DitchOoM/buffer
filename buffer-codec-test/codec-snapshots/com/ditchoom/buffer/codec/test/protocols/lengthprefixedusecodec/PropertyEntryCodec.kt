@@ -28,5 +28,7 @@ public object PropertyEntryCodec : Codec<PropertyEntry> {
 
   override fun wireSize(`value`: PropertyEntry, context: EncodeContext): WireSize = WireSize.Exact(5)
 
+  override fun sizeHint(`value`: PropertyEntry, context: EncodeContext): Int = 5
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 5) PeekResult.Complete(5) else PeekResult.NeedsMoreData
 }

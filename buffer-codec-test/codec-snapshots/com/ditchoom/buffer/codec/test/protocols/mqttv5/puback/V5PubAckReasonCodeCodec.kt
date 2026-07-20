@@ -66,6 +66,19 @@ public object V5PubAckReasonCodeCodec : Codec<V5PubAckReasonCode> {
     is V5PubAckReasonCode.PayloadFormatInvalid -> V5PubAckReasonCodePayloadFormatInvalidCodec.wireSize(value, context)
   }
 
+  override fun sizeHint(`value`: V5PubAckReasonCode, context: EncodeContext): Int = when (value) {
+    is V5PubAckReasonCode.Success -> V5PubAckReasonCodeSuccessCodec.sizeHint(value, context)
+    is V5PubAckReasonCode.NoMatchingSubscribers -> V5PubAckReasonCodeNoMatchingSubscribersCodec.sizeHint(value, context)
+    is V5PubAckReasonCode.UnspecifiedError -> V5PubAckReasonCodeUnspecifiedErrorCodec.sizeHint(value, context)
+    is V5PubAckReasonCode.ImplementationSpecificError -> V5PubAckReasonCodeImplementationSpecificErrorCodec.sizeHint(value, context)
+    is V5PubAckReasonCode.NotAuthorized -> V5PubAckReasonCodeNotAuthorizedCodec.sizeHint(value, context)
+    is V5PubAckReasonCode.TopicNameInvalid -> V5PubAckReasonCodeTopicNameInvalidCodec.sizeHint(value, context)
+    is V5PubAckReasonCode.PacketIdentifierInUse -> V5PubAckReasonCodePacketIdentifierInUseCodec.sizeHint(value, context)
+    is V5PubAckReasonCode.PacketIdentifierNotFound -> V5PubAckReasonCodePacketIdentifierNotFoundCodec.sizeHint(value, context)
+    is V5PubAckReasonCode.QuotaExceeded -> V5PubAckReasonCodeQuotaExceededCodec.sizeHint(value, context)
+    is V5PubAckReasonCode.PayloadFormatInvalid -> V5PubAckReasonCodePayloadFormatInvalidCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()

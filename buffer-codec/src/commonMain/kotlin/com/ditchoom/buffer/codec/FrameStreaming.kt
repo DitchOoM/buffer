@@ -6,7 +6,6 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.stream.StreamProcessor
 
-private const val MIN_ESTIMATE = 64
 private const val MAX_ENCODE_CAPACITY = 1 shl 30 // 1 GiB safety ceiling
 
 /**
@@ -41,7 +40,10 @@ public fun <T> Encoder<T>.encodeToPlatformBuffer(
     var capacity =
         when (val size = wireSize(value, context)) {
             is WireSize.Exact -> maxOf(size.bytes, 1)
-            WireSize.BackPatch -> MIN_ESTIMATE
+            // The encoder's lower-bound guess (generated codecs sum fixed
+            // widths + String.length per string field); clamped ≥ 1 so a
+            // zero hint still allocates. Under-hints grow-and-retry.
+            WireSize.BackPatch -> maxOf(sizeHint(value, context), 1)
         }
     while (true) {
         val buffer = factory.allocate(capacity)

@@ -74,6 +74,8 @@ public object TaggedPropertyBagCodec : Codec<TaggedPropertyBag> {
     return WireSize.Exact(1 + __propertiesSize)
   }
 
+  override fun sizeHint(`value`: TaggedPropertyBag, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 2) return PeekResult.NeedsMoreData
     val __propertiesPeekView = stream.peekBuffer(baseOffset + 1, 5) ?: return PeekResult.NeedsMoreData

@@ -51,6 +51,8 @@ public object MqttV5PropertyReasonStringCodec : Codec<MqttV5Property.ReasonStrin
 
   override fun wireSize(`value`: MqttV5Property.ReasonString, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: MqttV5Property.ReasonString, context: EncodeContext): Int = 3 + value.value.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData

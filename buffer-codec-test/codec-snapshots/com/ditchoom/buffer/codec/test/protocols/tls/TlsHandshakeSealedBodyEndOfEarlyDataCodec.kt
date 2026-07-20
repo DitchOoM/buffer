@@ -22,5 +22,7 @@ public object TlsHandshakeSealedBodyEndOfEarlyDataCodec : Codec<TlsHandshakeSeal
 
   override fun wireSize(`value`: TlsHandshakeSealedBody.EndOfEarlyData, context: EncodeContext): WireSize = WireSize.Exact(0)
 
+  override fun sizeHint(`value`: TlsHandshakeSealedBody.EndOfEarlyData, context: EncodeContext): Int = 0
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 0) PeekResult.Complete(0) else PeekResult.NeedsMoreData
 }

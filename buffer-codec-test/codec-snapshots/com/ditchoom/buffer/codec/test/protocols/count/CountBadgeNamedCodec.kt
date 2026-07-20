@@ -49,6 +49,8 @@ public object CountBadgeNamedCodec : Codec<CountBadge.Named> {
 
   override fun wireSize(`value`: CountBadge.Named, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: CountBadge.Named, context: EncodeContext): Int = 2 + value.name.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData

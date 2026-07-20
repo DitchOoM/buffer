@@ -61,6 +61,8 @@ public class MqttPublishV3Codec<P : Payload>(
 
   override fun wireSize(`value`: MqttPublishV3<P>, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: MqttPublishV3<P>, context: EncodeContext): Int = 5 + value.topic.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 
   public class Partial<P : Payload> internal constructor(

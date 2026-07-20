@@ -32,5 +32,7 @@ public object SignedOpcodeFrameNegativeCodec : Codec<SignedOpcodeFrame.Negative>
 
   override fun wireSize(`value`: SignedOpcodeFrame.Negative, context: EncodeContext): WireSize = WireSize.Exact(6)
 
+  override fun sizeHint(`value`: SignedOpcodeFrame.Negative, context: EncodeContext): Int = 6
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 6) PeekResult.Complete(6) else PeekResult.NeedsMoreData
 }

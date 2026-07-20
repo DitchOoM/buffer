@@ -57,6 +57,8 @@ public object MqttPublishV3ConcreteCodec : Codec<MqttPublishV3Concrete> {
 
   override fun wireSize(`value`: MqttPublishV3Concrete, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: MqttPublishV3Concrete, context: EncodeContext): Int = 5 + value.topic.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 
   public fun partial(buffer: ReadBuffer, context: DecodeContext): Partial {

@@ -46,5 +46,7 @@ public object FourUBytesCodec : Codec<FourUBytes> {
 
   override fun wireSize(`value`: FourUBytes, context: EncodeContext): WireSize = WireSize.Exact(4)
 
+  override fun sizeHint(`value`: FourUBytes, context: EncodeContext): Int = 4
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 4) PeekResult.Complete(4) else PeekResult.NeedsMoreData
 }

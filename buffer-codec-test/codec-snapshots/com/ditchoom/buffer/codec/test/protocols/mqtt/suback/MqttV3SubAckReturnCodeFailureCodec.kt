@@ -26,5 +26,7 @@ public object MqttV3SubAckReturnCodeFailureCodec : Codec<MqttV3SubAckReturnCode.
 
   override fun wireSize(`value`: MqttV3SubAckReturnCode.Failure, context: EncodeContext): WireSize = WireSize.Exact(1)
 
+  override fun sizeHint(`value`: MqttV3SubAckReturnCode.Failure, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 1) PeekResult.Complete(1) else PeekResult.NeedsMoreData
 }

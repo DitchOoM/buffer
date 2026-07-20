@@ -76,6 +76,8 @@ public object WavFmtChunkCodec : Codec<WavFmtChunk> {
     WireSize.BackPatch -> WireSize.BackPatch
   }
 
+  override fun sizeHint(`value`: WavFmtChunk, context: EncodeContext): Int = 8 + WavFmtBodyCodec.sizeHint(value.body, context)
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 4) return PeekResult.NeedsMoreData

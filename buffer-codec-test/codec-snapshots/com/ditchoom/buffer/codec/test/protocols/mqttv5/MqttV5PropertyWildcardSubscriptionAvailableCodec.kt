@@ -28,5 +28,7 @@ public object MqttV5PropertyWildcardSubscriptionAvailableCodec : Codec<MqttV5Pro
 
   override fun wireSize(`value`: MqttV5Property.WildcardSubscriptionAvailable, context: EncodeContext): WireSize = WireSize.Exact(2)
 
+  override fun sizeHint(`value`: MqttV5Property.WildcardSubscriptionAvailable, context: EncodeContext): Int = 2
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 2) PeekResult.Complete(2) else PeekResult.NeedsMoreData
 }

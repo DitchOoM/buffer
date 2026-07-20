@@ -63,6 +63,8 @@ public object MqttV5PropertyAuthenticationDataCodec : Codec<MqttV5Property.Authe
     return WireSize.Exact(1 + __dataSize)
   }
 
+  override fun sizeHint(`value`: MqttV5Property.AuthenticationData, context: EncodeContext): Int = 3
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData

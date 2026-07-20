@@ -61,6 +61,8 @@ public object Slice15aLengthPrefixedPayloadCodec : Codec<Slice15aLengthPrefixedP
     return WireSize.Exact(0 + __dataSize)
   }
 
+  override fun sizeHint(`value`: Slice15aLengthPrefixedPayload, context: EncodeContext): Int = 2
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData

@@ -42,6 +42,11 @@ public object SignedTagFrameCodec : Codec<SignedTagFrame> {
     is SignedTagFrame.Beta -> SignedTagFrameBetaCodec.wireSize(value, context)
   }
 
+  override fun sizeHint(`value`: SignedTagFrame, context: EncodeContext): Int = when (value) {
+    is SignedTagFrame.Alpha -> SignedTagFrameAlphaCodec.sizeHint(value, context)
+    is SignedTagFrame.Beta -> SignedTagFrameBetaCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 4) return PeekResult.NeedsMoreData
     val __discRawB0 = stream.peekByte(baseOffset + 0).toInt() and 0xFF

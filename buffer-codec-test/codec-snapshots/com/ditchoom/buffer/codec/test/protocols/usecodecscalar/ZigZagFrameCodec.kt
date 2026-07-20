@@ -34,5 +34,7 @@ public object ZigZagFrameCodec : Codec<ZigZagFrame> {
     return WireSize.Exact(4 + __valueSize)
   }
 
+  override fun sizeHint(`value`: ZigZagFrame, context: EncodeContext): Int = 4
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

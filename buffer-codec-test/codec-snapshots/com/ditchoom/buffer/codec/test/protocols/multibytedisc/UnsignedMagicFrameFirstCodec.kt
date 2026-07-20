@@ -32,5 +32,7 @@ public object UnsignedMagicFrameFirstCodec : Codec<UnsignedMagicFrame.First> {
 
   override fun wireSize(`value`: UnsignedMagicFrame.First, context: EncodeContext): WireSize = WireSize.Exact(12)
 
+  override fun sizeHint(`value`: UnsignedMagicFrame.First, context: EncodeContext): Int = 12
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 12) PeekResult.Complete(12) else PeekResult.NeedsMoreData
 }

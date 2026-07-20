@@ -34,6 +34,8 @@ public object TlsHandshakeBodyCodec : Codec<TlsHandshakeBody> {
 
   override fun wireSize(`value`: TlsHandshakeBody, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: TlsHandshakeBody, context: EncodeContext): Int = 2
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 
   public fun partial(buffer: ReadBuffer, context: DecodeContext): Partial {

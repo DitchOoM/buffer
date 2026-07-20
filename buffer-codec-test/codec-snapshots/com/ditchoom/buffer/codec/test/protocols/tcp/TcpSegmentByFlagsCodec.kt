@@ -51,6 +51,14 @@ public object TcpSegmentByFlagsCodec : Codec<TcpSegmentByFlags> {
     is TcpSegmentByFlags.SynAck -> TcpSegmentByFlagsSynAckCodec.wireSize(value, context)
   }
 
+  override fun sizeHint(`value`: TcpSegmentByFlags, context: EncodeContext): Int = when (value) {
+    is TcpSegmentByFlags.Syn -> TcpSegmentByFlagsSynCodec.sizeHint(value, context)
+    is TcpSegmentByFlags.Rst -> TcpSegmentByFlagsRstCodec.sizeHint(value, context)
+    is TcpSegmentByFlags.Ack -> TcpSegmentByFlagsAckCodec.sizeHint(value, context)
+    is TcpSegmentByFlags.FinAck -> TcpSegmentByFlagsFinAckCodec.sizeHint(value, context)
+    is TcpSegmentByFlags.SynAck -> TcpSegmentByFlagsSynAckCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()

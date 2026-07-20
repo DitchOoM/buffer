@@ -38,5 +38,7 @@ public object Http2FrameWindowUpdateCodec : Codec<Http2Frame.WindowUpdate> {
 
   override fun wireSize(`value`: Http2Frame.WindowUpdate, context: EncodeContext): WireSize = WireSize.Exact(13)
 
+  override fun sizeHint(`value`: Http2Frame.WindowUpdate, context: EncodeContext): Int = 13
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 13) PeekResult.Complete(13) else PeekResult.NeedsMoreData
 }

@@ -59,5 +59,7 @@ public object FlvTagHeaderCodec : Codec<FlvTagHeader> {
 
   override fun wireSize(`value`: FlvTagHeader, context: EncodeContext): WireSize = WireSize.Exact(11)
 
+  override fun sizeHint(`value`: FlvTagHeader, context: EncodeContext): Int = 11
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 11) PeekResult.Complete(11) else PeekResult.NeedsMoreData
 }

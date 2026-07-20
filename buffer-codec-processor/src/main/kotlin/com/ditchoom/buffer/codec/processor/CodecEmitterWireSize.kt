@@ -1,6 +1,8 @@
 package com.ditchoom.buffer.codec.processor
 
+import com.squareup.kotlinpoet.CodeBlock
 import com.squareup.kotlinpoet.FunSpec
+import com.squareup.kotlinpoet.INT
 import com.squareup.kotlinpoet.KModifier
 import com.squareup.kotlinpoet.TypeName
 
@@ -383,6 +385,95 @@ private fun appendElementWireSizeProbeLoop(
     builder.endControlFlow()
     builder.endControlFlow()
 }
+
+/**
+ * Emit the codec's `sizeHint(value, context): Int` override — the O(field
+ * count) lower-bound starting-capacity guess `encodeToPlatformBuffer`
+ * consults when `wireSize` reports BackPatch. Fixed widths and prefix widths
+ * fold into a compile-time constant; each string field contributes
+ * `accessor.length` (exact for ASCII content, a ≥⅓ lower bound for any
+ * UTF-8); nested messages and list elements contribute their own codec's
+ * `sizeHint`. Fields with no cheap bound (`@When` conditionals, opaque
+ * `@UseCodec` bodies) contribute 0 — under-hinting just falls back to the
+ * grow-and-retry behavior the hint replaces.
+ *
+ * Emitted for EVERY codec (all-fixed shapes get a constant) so parents'
+ * nested-field contributions never fall back to the interface default.
+ */
+internal fun buildSizeHintFun(
+    shape: CodecShape,
+    messageType: TypeName = shape.messageClassName,
+): FunSpec {
+    val builder =
+        FunSpec
+            .builder("sizeHint")
+            .addModifiers(KModifier.OVERRIDE)
+            .addParameter("value", messageType)
+            .addParameter("context", ENCODE_CONTEXT_CN)
+            .returns(INT)
+    var constHint =
+        ((shape.singletonDispatchDiscriminator?.wireWidth ?: WireWidth.Zero) as? WireWidth.Fixed)?.bytes ?: 0
+    val dynamicTerms = mutableListOf<CodeBlock>()
+    val elementLoops = mutableListOf<Pair<String, TypeName>>()
+    for (field in shape.fields) {
+        when (field) {
+            is FieldSpec.LengthPrefixedString -> {
+                constHint += field.prefixWidth
+                dynamicTerms += stringLengthTerm(field.name, field.valueClass)
+            }
+            is FieldSpec.RemainingBytesString ->
+                dynamicTerms += stringLengthTerm(field.name, field.valueClass)
+            is FieldSpec.LengthFromString ->
+                dynamicTerms += stringLengthTerm(field.name, field.valueClass)
+            is FieldSpec.ProtocolMessageScalar ->
+                dynamicTerms += CodeBlock.of("%T.sizeHint(value.%L, context)", field.codecType, field.name)
+            is FieldSpec.LengthPrefixedMessage -> {
+                constHint += field.prefixWidth
+                dynamicTerms += CodeBlock.of("%T.sizeHint(value.%L, context)", field.codecType, field.name)
+            }
+            is FieldSpec.CountPrefixedProtocolMessageList -> {
+                constHint += 1 // minimum varint(count) width
+                elementLoops += field.name to field.elementCodecClassName
+            }
+            is FieldSpec.RemainingBytesProtocolMessageList ->
+                elementLoops += field.name to field.elementCodecClassName
+            is FieldSpec.EnumScalar -> constHint += 1 // minimum ordinal-varint width
+            is FieldSpec.LengthPrefixedUseCodecPayload -> constHint += field.prefixWidth
+            is FieldSpec.FixedSize -> constHint += (field.wireWidth as? WireWidth.Fixed)?.bytes ?: 0
+            else -> {} // Conditional / opaque @UseCodec shapes: no cheap bound
+        }
+    }
+    if (dynamicTerms.isEmpty() && elementLoops.isEmpty()) {
+        builder.addStatement("return %L", constHint)
+        return builder.build()
+    }
+    if (elementLoops.isEmpty()) {
+        val sum = CodeBlock.builder().add("%L", constHint)
+        dynamicTerms.forEach { sum.add(" + %L", it) }
+        builder.addStatement("return %L", sum.build())
+        return builder.build()
+    }
+    builder.addStatement("var __hint = %L", constHint)
+    for ((listName, elementCodec) in elementLoops) {
+        builder.beginControlFlow("for (__elem in value.%L)", listName)
+        builder.addStatement("__hint += %T.sizeHint(__elem, context)", elementCodec)
+        builder.endControlFlow()
+    }
+    val sum = CodeBlock.builder().add("__hint")
+    dynamicTerms.forEach { sum.add(" + %L", it) }
+    builder.addStatement("return %L", sum.build())
+    return builder.build()
+}
+
+private fun stringLengthTerm(
+    fieldName: String,
+    valueClass: ValueClassStringWrapper?,
+): CodeBlock =
+    if (valueClass != null) {
+        CodeBlock.of("value.%L.%L.length", fieldName, valueClass.innerPropertyName)
+    } else {
+        CodeBlock.of("value.%L.length", fieldName)
+    }
 
 /**
  * A field whose wireSize the runtime-Exact branch can probe per value: an

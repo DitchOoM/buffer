@@ -46,5 +46,7 @@ public object BigWireFrameSampleCodec : Codec<BigWireFrame.Sample> {
 
   override fun wireSize(`value`: BigWireFrame.Sample, context: EncodeContext): WireSize = WireSize.Exact(26)
 
+  override fun sizeHint(`value`: BigWireFrame.Sample, context: EncodeContext): Int = 26
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 26) PeekResult.Complete(26) else PeekResult.NeedsMoreData
 }

@@ -26,5 +26,7 @@ public object V5ConnectReasonCodeBadUserNameOrPasswordCodec : Codec<V5ConnectRea
 
   override fun wireSize(`value`: V5ConnectReasonCode.BadUserNameOrPassword, context: EncodeContext): WireSize = WireSize.Exact(1)
 
+  override fun sizeHint(`value`: V5ConnectReasonCode.BadUserNameOrPassword, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 1) PeekResult.Complete(1) else PeekResult.NeedsMoreData
 }

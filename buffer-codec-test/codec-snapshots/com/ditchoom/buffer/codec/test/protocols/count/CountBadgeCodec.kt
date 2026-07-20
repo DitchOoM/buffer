@@ -46,6 +46,11 @@ public object CountBadgeCodec : Codec<CountBadge> {
     is CountBadge.Anonymous -> WireSize.Exact(1)
   }
 
+  override fun sizeHint(`value`: CountBadge, context: EncodeContext): Int = 1 + when (value) {
+    is CountBadge.Named -> CountBadgeNamedCodec.sizeHint(value, context)
+    is CountBadge.Anonymous -> CountBadgeAnonymousCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF

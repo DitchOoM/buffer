@@ -46,6 +46,11 @@ internal object InternalCommandCodec : Codec<InternalCommand> {
     is InternalCommand.Echo -> WireSize.BackPatch
   }
 
+  override fun sizeHint(`value`: InternalCommand, context: EncodeContext): Int = 1 + when (value) {
+    is InternalCommand.Ping -> InternalCommandPingCodec.sizeHint(value, context)
+    is InternalCommand.Echo -> InternalCommandEchoCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF

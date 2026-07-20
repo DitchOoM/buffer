@@ -26,5 +26,7 @@ public object WsHeaderByte2Codec : Codec<WsHeaderByte2> {
 
   override fun wireSize(`value`: WsHeaderByte2, context: EncodeContext): WireSize = WireSize.Exact(1)
 
+  override fun sizeHint(`value`: WsHeaderByte2, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 1) PeekResult.Complete(1) else PeekResult.NeedsMoreData
 }

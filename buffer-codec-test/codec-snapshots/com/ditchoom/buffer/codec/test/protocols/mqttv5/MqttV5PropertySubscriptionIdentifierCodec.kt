@@ -34,5 +34,7 @@ public object MqttV5PropertySubscriptionIdentifierCodec : Codec<MqttV5Property.S
     return WireSize.Exact(1 + __valueSize)
   }
 
+  override fun sizeHint(`value`: MqttV5Property.SubscriptionIdentifier, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

@@ -28,5 +28,7 @@ public object DeviceStateCodec : Codec<DeviceState> {
 
   override fun wireSize(`value`: DeviceState, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: DeviceState, context: EncodeContext): Int = 1 + ConnectionStatusCodec.sizeHint(value.connection, context)
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

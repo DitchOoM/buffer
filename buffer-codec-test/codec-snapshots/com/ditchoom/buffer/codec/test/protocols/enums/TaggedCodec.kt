@@ -34,6 +34,8 @@ public object TaggedCodec : Codec<Tagged> {
     return WireSize.Exact(1 + __levelSize)
   }
 
+  override fun sizeHint(`value`: Tagged, context: EncodeContext): Int = 2
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     val __levelFrame = UnsignedVarIntCodec.peekFrameSize(stream, baseOffset + 0)
     if (__levelFrame !is PeekResult.Complete) {

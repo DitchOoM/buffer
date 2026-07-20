@@ -26,5 +26,7 @@ public object WsMaskingKeyCodec : Codec<WsMaskingKey> {
 
   override fun wireSize(`value`: WsMaskingKey, context: EncodeContext): WireSize = WireSize.Exact(4)
 
+  override fun sizeHint(`value`: WsMaskingKey, context: EncodeContext): Int = 4
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 4) PeekResult.Complete(4) else PeekResult.NeedsMoreData
 }

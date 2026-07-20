@@ -22,5 +22,7 @@ public object DispatchVarintUnionMarkerCodec : Codec<DispatchVarintUnion.Marker>
 
   override fun wireSize(`value`: DispatchVarintUnion.Marker, context: EncodeContext): WireSize = WireSize.Exact(0)
 
+  override fun sizeHint(`value`: DispatchVarintUnion.Marker, context: EncodeContext): Int = 0
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 0) PeekResult.Complete(0) else PeekResult.NeedsMoreData
 }

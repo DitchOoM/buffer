@@ -73,6 +73,8 @@ public object LpWrappedTailCodec : Codec<LpWrappedTail> {
     WireSize.BackPatch -> WireSize.BackPatch
   }
 
+  override fun sizeHint(`value`: LpWrappedTail, context: EncodeContext): Int = 3 + WrappedLabelCodec.sizeHint(value.body, context)
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData

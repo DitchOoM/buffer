@@ -41,6 +41,8 @@ public class Http2FrameDataCodec<P : Payload>(
 
   override fun wireSize(`value`: Http2Frame.Data<P>, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: Http2Frame.Data<P>, context: EncodeContext): Int = 9
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 
   public class Partial<P : Payload> internal constructor(

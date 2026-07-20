@@ -32,5 +32,7 @@ public object SignedTagFrameBetaCodec : Codec<SignedTagFrame.Beta> {
 
   override fun wireSize(`value`: SignedTagFrame.Beta, context: EncodeContext): WireSize = WireSize.Exact(6)
 
+  override fun sizeHint(`value`: SignedTagFrame.Beta, context: EncodeContext): Int = 6
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 6) PeekResult.Complete(6) else PeekResult.NeedsMoreData
 }

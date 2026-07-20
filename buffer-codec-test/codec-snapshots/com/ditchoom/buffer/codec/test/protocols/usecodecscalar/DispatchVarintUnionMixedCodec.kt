@@ -35,6 +35,8 @@ public object DispatchVarintUnionMixedCodec : Codec<DispatchVarintUnion.Mixed> {
     return WireSize.Exact(1 + __vSize)
   }
 
+  override fun sizeHint(`value`: DispatchVarintUnion.Mixed, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     val __vFrame = QuicVarintCodec.peekFrameSize(stream, baseOffset + 0)
     if (__vFrame !is PeekResult.Complete) {

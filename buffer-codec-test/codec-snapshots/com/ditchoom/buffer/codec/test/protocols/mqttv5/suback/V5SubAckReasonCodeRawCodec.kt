@@ -26,5 +26,7 @@ public object V5SubAckReasonCodeRawCodec : Codec<V5SubAckReasonCodeRaw> {
 
   override fun wireSize(`value`: V5SubAckReasonCodeRaw, context: EncodeContext): WireSize = WireSize.Exact(1)
 
+  override fun sizeHint(`value`: V5SubAckReasonCodeRaw, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 1) PeekResult.Complete(1) else PeekResult.NeedsMoreData
 }

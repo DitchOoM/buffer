@@ -28,5 +28,7 @@ public object Issue156ResponseLedStateSetCodec : Codec<Issue156Response.LedState
 
   override fun wireSize(`value`: Issue156Response.LedStateSet, context: EncodeContext): WireSize = WireSize.Exact(3)
 
+  override fun sizeHint(`value`: Issue156Response.LedStateSet, context: EncodeContext): Int = 3
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 3) PeekResult.Complete(3) else PeekResult.NeedsMoreData
 }

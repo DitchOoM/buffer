@@ -34,5 +34,7 @@ public object Http2SettingCodec : Codec<Http2Setting> {
 
   override fun wireSize(`value`: Http2Setting, context: EncodeContext): WireSize = WireSize.Exact(6)
 
+  override fun sizeHint(`value`: Http2Setting, context: EncodeContext): Int = 6
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 6) PeekResult.Complete(6) else PeekResult.NeedsMoreData
 }

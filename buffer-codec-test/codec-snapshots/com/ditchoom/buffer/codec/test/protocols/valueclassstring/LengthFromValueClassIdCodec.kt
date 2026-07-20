@@ -43,6 +43,8 @@ public object LengthFromValueClassIdCodec : Codec<LengthFromValueClassId> {
 
   override fun wireSize(`value`: LengthFromValueClassId, context: EncodeContext): WireSize = WireSize.Exact(2 + value.len.toInt())
 
+  override fun sizeHint(`value`: LengthFromValueClassId, context: EncodeContext): Int = 2 + value.payload.value.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData

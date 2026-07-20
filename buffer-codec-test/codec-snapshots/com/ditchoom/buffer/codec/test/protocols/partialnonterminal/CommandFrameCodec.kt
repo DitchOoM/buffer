@@ -49,6 +49,8 @@ public class CommandFrameCodec<P : Payload>(
 
   override fun wireSize(`value`: CommandFrame<P>, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: CommandFrame<P>, context: EncodeContext): Int = 6
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 
   public class Partial<P : Payload> internal constructor(

@@ -34,5 +34,13 @@ public object CountSealedEntryListCodec : Codec<CountSealedEntryList> {
 
   override fun wireSize(`value`: CountSealedEntryList, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: CountSealedEntryList, context: EncodeContext): Int {
+    var __hint = 1
+    for (__elem in value.entries) {
+      __hint += CountSealedEntryCodec.sizeHint(__elem, context)
+    }
+    return __hint
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

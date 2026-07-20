@@ -26,5 +26,7 @@ public object V5AuthReasonCodeContinueAuthenticationCodec : Codec<V5AuthReasonCo
 
   override fun wireSize(`value`: V5AuthReasonCode.ContinueAuthentication, context: EncodeContext): WireSize = WireSize.Exact(1)
 
+  override fun sizeHint(`value`: V5AuthReasonCode.ContinueAuthentication, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 1) PeekResult.Complete(1) else PeekResult.NeedsMoreData
 }

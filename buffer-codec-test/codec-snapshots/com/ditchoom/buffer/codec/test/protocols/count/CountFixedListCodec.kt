@@ -47,5 +47,13 @@ public object CountFixedListCodec : Codec<CountFixedList> {
     return WireSize.Exact(1 + __pointsSize)
   }
 
+  override fun sizeHint(`value`: CountFixedList, context: EncodeContext): Int {
+    var __hint = 2
+    for (__elem in value.points) {
+      __hint += CountPointCodec.sizeHint(__elem, context)
+    }
+    return __hint
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

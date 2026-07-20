@@ -32,5 +32,7 @@ public object CountPointCodec : Codec<CountPoint> {
 
   override fun wireSize(`value`: CountPoint, context: EncodeContext): WireSize = WireSize.Exact(3)
 
+  override fun sizeHint(`value`: CountPoint, context: EncodeContext): Int = 3
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 3) PeekResult.Complete(3) else PeekResult.NeedsMoreData
 }

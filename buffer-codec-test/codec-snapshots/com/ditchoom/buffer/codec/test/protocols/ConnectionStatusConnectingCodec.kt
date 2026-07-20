@@ -26,5 +26,7 @@ public object ConnectionStatusConnectingCodec : Codec<ConnectionStatus.Connectin
 
   override fun wireSize(`value`: ConnectionStatus.Connecting, context: EncodeContext): WireSize = WireSize.Exact(1)
 
+  override fun sizeHint(`value`: ConnectionStatus.Connecting, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 1) PeekResult.Complete(1) else PeekResult.NeedsMoreData
 }

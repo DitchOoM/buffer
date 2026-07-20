@@ -34,5 +34,13 @@ public object CountTaggedListCodec : Codec<CountTaggedList> {
 
   override fun wireSize(`value`: CountTaggedList, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: CountTaggedList, context: EncodeContext): Int {
+    var __hint = 1
+    for (__elem in value.tags) {
+      __hint += CountTaggedEntryCodec.sizeHint(__elem, context)
+    }
+    return __hint
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

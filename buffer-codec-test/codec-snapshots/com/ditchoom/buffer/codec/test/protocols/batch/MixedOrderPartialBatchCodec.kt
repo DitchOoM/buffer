@@ -36,5 +36,7 @@ public object MixedOrderPartialBatchCodec : Codec<MixedOrderPartialBatch> {
 
   override fun wireSize(`value`: MixedOrderPartialBatch, context: EncodeContext): WireSize = WireSize.Exact(8)
 
+  override fun sizeHint(`value`: MixedOrderPartialBatch, context: EncodeContext): Int = 8
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 8) PeekResult.Complete(8) else PeekResult.NeedsMoreData
 }

@@ -48,6 +48,13 @@ public object EthernetFrameByEtherTypeCodec : Codec<EthernetFrameByEtherType> {
     is EthernetFrameByEtherType.Ipv6 -> EthernetFrameByEtherTypeIpv6Codec.wireSize(value, context)
   }
 
+  override fun sizeHint(`value`: EthernetFrameByEtherType, context: EncodeContext): Int = when (value) {
+    is EthernetFrameByEtherType.Ipv4 -> EthernetFrameByEtherTypeIpv4Codec.sizeHint(value, context)
+    is EthernetFrameByEtherType.Arp -> EthernetFrameByEtherTypeArpCodec.sizeHint(value, context)
+    is EthernetFrameByEtherType.VlanTag -> EthernetFrameByEtherTypeVlanTagCodec.sizeHint(value, context)
+    is EthernetFrameByEtherType.Ipv6 -> EthernetFrameByEtherTypeIpv6Codec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 2) return PeekResult.NeedsMoreData
     val __discRawB0 = stream.peekByte(baseOffset + 0).toInt() and 0xFF

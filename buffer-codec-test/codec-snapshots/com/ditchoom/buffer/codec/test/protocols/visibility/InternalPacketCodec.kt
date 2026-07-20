@@ -51,6 +51,8 @@ internal object InternalPacketCodec : Codec<InternalPacket> {
 
   override fun wireSize(`value`: InternalPacket, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: InternalPacket, context: EncodeContext): Int = 6 + value.name.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 4) return PeekResult.NeedsMoreData

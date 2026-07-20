@@ -33,6 +33,8 @@ public class SimpleGenericFrameCommandCodec<P : Payload>(
 
   override fun wireSize(`value`: SimpleGenericFrame.Command<P>, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: SimpleGenericFrame.Command<P>, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 
   public class Partial<P : Payload> internal constructor(

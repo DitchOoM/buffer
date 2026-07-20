@@ -72,6 +72,18 @@ public class WsFrameCodec<P : Payload>(
     }
   }
 
+  override fun sizeHint(`value`: WsFrame<P>, context: EncodeContext): Int {
+    @Suppress("UNCHECKED_CAST")
+    return when (value) {
+      is WsFrame.Continuation<*> -> continuationCodec.sizeHint(value as WsFrame.Continuation<P>, context)
+      is WsFrame.Text<*> -> textCodec.sizeHint(value as WsFrame.Text<P>, context)
+      is WsFrame.Binary<*> -> binaryCodec.sizeHint(value as WsFrame.Binary<P>, context)
+      is WsFrame.Close -> WsFrameCloseCodec.sizeHint(value, context)
+      is WsFrame.Ping<*> -> pingCodec.sizeHint(value as WsFrame.Ping<P>, context)
+      is WsFrame.Pong<*> -> pongCodec.sizeHint(value as WsFrame.Pong<P>, context)
+    }
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = WsFrame.peekFrameSize(stream, baseOffset)
 
   public companion object {

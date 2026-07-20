@@ -71,6 +71,8 @@ public object TwoStringsCodec : Codec<TwoStrings> {
 
   override fun wireSize(`value`: TwoStrings, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: TwoStrings, context: EncodeContext): Int = 4 + value.first.length + value.second.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData

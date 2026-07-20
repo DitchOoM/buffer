@@ -26,5 +26,7 @@ public object V5DisconnectReasonCodePacketTooLargeCodec : Codec<V5DisconnectReas
 
   override fun wireSize(`value`: V5DisconnectReasonCode.PacketTooLarge, context: EncodeContext): WireSize = WireSize.Exact(1)
 
+  override fun sizeHint(`value`: V5DisconnectReasonCode.PacketTooLarge, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 1) PeekResult.Complete(1) else PeekResult.NeedsMoreData
 }

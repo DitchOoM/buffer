@@ -40,6 +40,10 @@ public object Issue156ResponseCodec : Codec<Issue156Response> {
     is Issue156Response.LedStateSet -> WireSize.Exact(4)
   }
 
+  override fun sizeHint(`value`: Issue156Response, context: EncodeContext): Int = 1 + when (value) {
+    is Issue156Response.LedStateSet -> Issue156ResponseLedStateSetCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF
