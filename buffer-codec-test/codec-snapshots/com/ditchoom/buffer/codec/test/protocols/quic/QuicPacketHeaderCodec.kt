@@ -42,6 +42,11 @@ public object QuicPacketHeaderCodec : Codec<QuicPacketHeader> {
     is QuicPacketHeader.LongHeader -> QuicPacketHeaderLongHeaderCodec.wireSize(value, context)
   }
 
+  override fun sizeHint(`value`: QuicPacketHeader, context: EncodeContext): Int = when (value) {
+    is QuicPacketHeader.ShortHeader -> QuicPacketHeaderShortHeaderCodec.sizeHint(value, context)
+    is QuicPacketHeader.LongHeader -> QuicPacketHeaderLongHeaderCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()

@@ -53,6 +53,8 @@ public object SandwichBatchCodec : Codec<SandwichBatch> {
 
   override fun wireSize(`value`: SandwichBatch, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: SandwichBatch, context: EncodeContext): Int = 9
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData

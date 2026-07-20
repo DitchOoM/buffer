@@ -45,6 +45,12 @@ public object V5AuthReasonCodeCodec : Codec<V5AuthReasonCode> {
     is V5AuthReasonCode.ReAuthenticate -> V5AuthReasonCodeReAuthenticateCodec.wireSize(value, context)
   }
 
+  override fun sizeHint(`value`: V5AuthReasonCode, context: EncodeContext): Int = when (value) {
+    is V5AuthReasonCode.Success -> V5AuthReasonCodeSuccessCodec.sizeHint(value, context)
+    is V5AuthReasonCode.ContinueAuthentication -> V5AuthReasonCodeContinueAuthenticationCodec.sizeHint(value, context)
+    is V5AuthReasonCode.ReAuthenticate -> V5AuthReasonCodeReAuthenticateCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()

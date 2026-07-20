@@ -26,5 +26,7 @@ internal object InternalCommandPingCodec : Codec<InternalCommand.Ping> {
 
   override fun wireSize(`value`: InternalCommand.Ping, context: EncodeContext): WireSize = WireSize.Exact(8)
 
+  override fun sizeHint(`value`: InternalCommand.Ping, context: EncodeContext): Int = 8
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 8) PeekResult.Complete(8) else PeekResult.NeedsMoreData
 }

@@ -77,6 +77,8 @@ public class WsFrameBinaryCodec<P : Payload>(
 
   override fun wireSize(`value`: WsFrame.Binary<P>, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: WsFrame.Binary<P>, context: EncodeContext): Int = 2
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 
   public class Partial<P : Payload> internal constructor(

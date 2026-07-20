@@ -48,6 +48,8 @@ public object Http2FrameSettingsCodec : Codec<Http2Frame.Settings> {
 
   override fun wireSize(`value`: Http2Frame.Settings, context: EncodeContext): WireSize = WireSize.Exact(9 + value.header.length)
 
+  override fun sizeHint(`value`: Http2Frame.Settings, context: EncodeContext): Int = 9
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 4) return PeekResult.NeedsMoreData

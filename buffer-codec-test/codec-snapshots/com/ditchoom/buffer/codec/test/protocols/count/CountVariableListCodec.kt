@@ -34,5 +34,13 @@ public object CountVariableListCodec : Codec<CountVariableList> {
 
   override fun wireSize(`value`: CountVariableList, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: CountVariableList, context: EncodeContext): Int {
+    var __hint = 1
+    for (__elem in value.names) {
+      __hint += CountNamedCodec.sizeHint(__elem, context)
+    }
+    return __hint
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

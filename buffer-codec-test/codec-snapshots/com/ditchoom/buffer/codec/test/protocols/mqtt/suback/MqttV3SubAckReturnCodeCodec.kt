@@ -48,6 +48,13 @@ public object MqttV3SubAckReturnCodeCodec : Codec<MqttV3SubAckReturnCode> {
     is MqttV3SubAckReturnCode.Failure -> MqttV3SubAckReturnCodeFailureCodec.wireSize(value, context)
   }
 
+  override fun sizeHint(`value`: MqttV3SubAckReturnCode, context: EncodeContext): Int = when (value) {
+    is MqttV3SubAckReturnCode.SuccessMaximumQoS0 -> MqttV3SubAckReturnCodeSuccessMaximumQoS0Codec.sizeHint(value, context)
+    is MqttV3SubAckReturnCode.SuccessMaximumQoS1 -> MqttV3SubAckReturnCodeSuccessMaximumQoS1Codec.sizeHint(value, context)
+    is MqttV3SubAckReturnCode.SuccessMaximumQoS2 -> MqttV3SubAckReturnCodeSuccessMaximumQoS2Codec.sizeHint(value, context)
+    is MqttV3SubAckReturnCode.Failure -> MqttV3SubAckReturnCodeFailureCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()

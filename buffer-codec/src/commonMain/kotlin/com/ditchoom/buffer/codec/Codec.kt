@@ -58,6 +58,29 @@ interface Encoder<in T> {
         value: T,
         context: EncodeContext,
     ): WireSize = WireSize.BackPatch
+
+    /**
+     * Starting-capacity hint consulted by `encodeToPlatformBuffer` when
+     * [wireSize] reports [WireSize.BackPatch]. A cheap lower-bound guess —
+     * NOT a contract: under-hinting costs grow-and-retry doublings (the
+     * pre-hint behavior), over-hinting costs one-time allocation slack;
+     * neither affects the encoded bytes.
+     *
+     * Generated codecs override this with `O(field count)` arithmetic —
+     * fixed widths as constants plus `String.length` per string field
+     * (exact for ASCII content, a ≥⅓ lower bound for any UTF-8) plus
+     * nested/element hints. Hand-written encoders may override it whenever
+     * they can guess better than [DEFAULT_SIZE_HINT].
+     */
+    fun sizeHint(
+        value: T,
+        context: EncodeContext,
+    ): Int = DEFAULT_SIZE_HINT
+
+    companion object {
+        /** Fallback starting capacity when an encoder offers no better guess. */
+        public const val DEFAULT_SIZE_HINT: Int = 64
+    }
 }
 
 /**

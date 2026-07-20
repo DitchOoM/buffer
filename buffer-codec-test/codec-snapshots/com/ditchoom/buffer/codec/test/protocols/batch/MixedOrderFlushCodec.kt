@@ -38,5 +38,7 @@ public object MixedOrderFlushCodec : Codec<MixedOrderFlush> {
 
   override fun wireSize(`value`: MixedOrderFlush, context: EncodeContext): WireSize = WireSize.Exact(8)
 
+  override fun sizeHint(`value`: MixedOrderFlush, context: EncodeContext): Int = 8
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 8) PeekResult.Complete(8) else PeekResult.NeedsMoreData
 }

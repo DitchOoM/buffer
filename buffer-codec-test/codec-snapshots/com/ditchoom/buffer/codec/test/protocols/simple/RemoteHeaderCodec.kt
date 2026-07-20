@@ -33,6 +33,8 @@ public object RemoteHeaderCodec : Codec<RemoteHeader> {
 
   override fun wireSize(`value`: RemoteHeader, context: EncodeContext): WireSize = WireSize.Exact(7 + value.payloadLength.toInt())
 
+  override fun sizeHint(`value`: RemoteHeader, context: EncodeContext): Int = 7 + value.payload.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData

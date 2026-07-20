@@ -22,5 +22,7 @@ public object CountBadgeAnonymousCodec : Codec<CountBadge.Anonymous> {
 
   override fun wireSize(`value`: CountBadge.Anonymous, context: EncodeContext): WireSize = WireSize.Exact(0)
 
+  override fun sizeHint(`value`: CountBadge.Anonymous, context: EncodeContext): Int = 0
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 0) PeekResult.Complete(0) else PeekResult.NeedsMoreData
 }

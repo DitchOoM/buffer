@@ -49,6 +49,8 @@ public object WrappedLabelCodec : Codec<WrappedLabel> {
 
   override fun wireSize(`value`: WrappedLabel, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: WrappedLabel, context: EncodeContext): Int = 2 + value.label.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData

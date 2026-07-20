@@ -30,5 +30,7 @@ public object LittleTagCodec : Codec<LittleTag> {
 
   override fun wireSize(`value`: LittleTag, context: EncodeContext): WireSize = WireSize.Exact(2)
 
+  override fun sizeHint(`value`: LittleTag, context: EncodeContext): Int = 2
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 2) PeekResult.Complete(2) else PeekResult.NeedsMoreData
 }

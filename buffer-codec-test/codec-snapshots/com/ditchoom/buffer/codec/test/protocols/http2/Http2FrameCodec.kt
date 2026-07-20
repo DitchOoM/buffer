@@ -57,6 +57,16 @@ public class Http2FrameCodec<P : Payload>(
     }
   }
 
+  override fun sizeHint(`value`: Http2Frame<P>, context: EncodeContext): Int {
+    @Suppress("UNCHECKED_CAST")
+    return when (value) {
+      is Http2Frame.Data<*> -> dataCodec.sizeHint(value as Http2Frame.Data<P>, context)
+      is Http2Frame.Settings -> Http2FrameSettingsCodec.sizeHint(value, context)
+      is Http2Frame.Ping -> Http2FramePingCodec.sizeHint(value, context)
+      is Http2Frame.WindowUpdate -> Http2FrameWindowUpdateCodec.sizeHint(value, context)
+    }
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 4) return PeekResult.NeedsMoreData
     val __discRawB0 = stream.peekByte(baseOffset + 0).toInt() and 0xFF

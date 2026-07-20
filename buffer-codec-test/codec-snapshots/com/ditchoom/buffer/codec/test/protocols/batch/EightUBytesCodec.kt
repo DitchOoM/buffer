@@ -58,5 +58,7 @@ public object EightUBytesCodec : Codec<EightUBytes> {
 
   override fun wireSize(`value`: EightUBytes, context: EncodeContext): WireSize = WireSize.Exact(8)
 
+  override fun sizeHint(`value`: EightUBytes, context: EncodeContext): Int = 8
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 8) PeekResult.Complete(8) else PeekResult.NeedsMoreData
 }

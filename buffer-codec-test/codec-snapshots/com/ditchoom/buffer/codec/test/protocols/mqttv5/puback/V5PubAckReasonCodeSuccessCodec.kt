@@ -26,5 +26,7 @@ public object V5PubAckReasonCodeSuccessCodec : Codec<V5PubAckReasonCode.Success>
 
   override fun wireSize(`value`: V5PubAckReasonCode.Success, context: EncodeContext): WireSize = WireSize.Exact(1)
 
+  override fun sizeHint(`value`: V5PubAckReasonCode.Success, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 1) PeekResult.Complete(1) else PeekResult.NeedsMoreData
 }

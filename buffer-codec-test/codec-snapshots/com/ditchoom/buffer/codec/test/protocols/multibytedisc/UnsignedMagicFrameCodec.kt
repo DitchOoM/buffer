@@ -42,6 +42,11 @@ public object UnsignedMagicFrameCodec : Codec<UnsignedMagicFrame> {
     is UnsignedMagicFrame.Second -> UnsignedMagicFrameSecondCodec.wireSize(value, context)
   }
 
+  override fun sizeHint(`value`: UnsignedMagicFrame, context: EncodeContext): Int = when (value) {
+    is UnsignedMagicFrame.First -> UnsignedMagicFrameFirstCodec.sizeHint(value, context)
+    is UnsignedMagicFrame.Second -> UnsignedMagicFrameSecondCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 8) return PeekResult.NeedsMoreData
     val __discRawB0 = stream.peekByte(baseOffset + 0).toLong() and 0xFFL

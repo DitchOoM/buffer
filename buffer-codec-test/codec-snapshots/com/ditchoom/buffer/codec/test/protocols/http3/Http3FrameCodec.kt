@@ -49,6 +49,13 @@ public object Http3FrameCodec : Codec<Http3Frame> {
     is Http3Frame.Extension -> Http3FrameExtensionCodec.wireSize(value, context)
   }
 
+  override fun sizeHint(`value`: Http3Frame, context: EncodeContext): Int = when (value) {
+    is Http3Frame.Data -> Http3FrameDataCodec.sizeHint(value, context)
+    is Http3Frame.Headers -> Http3FrameHeadersCodec.sizeHint(value, context)
+    is Http3Frame.Settings -> Http3FrameSettingsCodec.sizeHint(value, context)
+    is Http3Frame.Extension -> Http3FrameExtensionCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     val __discFrame = Http3FrameTypeCodec.peekFrameSize(stream, baseOffset)
     if (__discFrame !is PeekResult.Complete) {

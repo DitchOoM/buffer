@@ -34,5 +34,7 @@ public object BigDispatchFrameTypeACodec : Codec<BigDispatchFrame.TypeA> {
 
   override fun wireSize(`value`: BigDispatchFrame.TypeA, context: EncodeContext): WireSize = WireSize.Exact(8)
 
+  override fun sizeHint(`value`: BigDispatchFrame.TypeA, context: EncodeContext): Int = 8
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 8) PeekResult.Complete(8) else PeekResult.NeedsMoreData
 }

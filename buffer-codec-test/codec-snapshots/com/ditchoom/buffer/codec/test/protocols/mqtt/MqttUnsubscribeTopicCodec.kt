@@ -49,6 +49,8 @@ public object MqttUnsubscribeTopicCodec : Codec<MqttUnsubscribeTopic> {
 
   override fun wireSize(`value`: MqttUnsubscribeTopic, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: MqttUnsubscribeTopic, context: EncodeContext): Int = 2 + value.name.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData

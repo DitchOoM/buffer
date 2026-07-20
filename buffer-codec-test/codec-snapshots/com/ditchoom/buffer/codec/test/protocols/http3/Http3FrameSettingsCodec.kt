@@ -40,6 +40,8 @@ public object Http3FrameSettingsCodec : Codec<Http3Frame.Settings> {
 
   override fun wireSize(`value`: Http3Frame.Settings, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: Http3Frame.Settings, context: EncodeContext): Int = 0
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __priorBytes = 0
     val __frameTypeFrame = Http3FrameTypeCodec.peekFrameSize(stream, baseOffset + __priorBytes)

@@ -59,6 +59,8 @@ public object WithFlagPayloadCodec : Codec<WithFlagPayload> {
 
   override fun wireSize(`value`: WithFlagPayload, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: WithFlagPayload, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData

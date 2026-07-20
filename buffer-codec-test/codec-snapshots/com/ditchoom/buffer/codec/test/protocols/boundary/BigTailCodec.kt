@@ -72,6 +72,8 @@ public object BigTailCodec : Codec<BigTail> {
 
   override fun wireSize(`value`: BigTail, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: BigTail, context: EncodeContext): Int = 6 + value.a.length + value.b.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData

@@ -28,5 +28,7 @@ public object MqttV5PropertyRequestResponseInformationCodec : Codec<MqttV5Proper
 
   override fun wireSize(`value`: MqttV5Property.RequestResponseInformation, context: EncodeContext): WireSize = WireSize.Exact(2)
 
+  override fun sizeHint(`value`: MqttV5Property.RequestResponseInformation, context: EncodeContext): Int = 2
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 2) PeekResult.Complete(2) else PeekResult.NeedsMoreData
 }

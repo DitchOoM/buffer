@@ -52,6 +52,8 @@ public object RemoteCommandCodec : Codec<RemoteCommand> {
 
   override fun wireSize(`value`: RemoteCommand, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: RemoteCommand, context: EncodeContext): Int = 2 + value.id.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 
   public fun partial(buffer: ReadBuffer, context: DecodeContext): Partial {

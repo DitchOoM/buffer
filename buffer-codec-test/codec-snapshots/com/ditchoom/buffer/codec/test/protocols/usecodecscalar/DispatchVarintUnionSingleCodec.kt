@@ -33,6 +33,8 @@ public object DispatchVarintUnionSingleCodec : Codec<DispatchVarintUnion.Single>
     return WireSize.Exact(0 + __vSize)
   }
 
+  override fun sizeHint(`value`: DispatchVarintUnion.Single, context: EncodeContext): Int = 0
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     val __vFrame = QuicVarintCodec.peekFrameSize(stream, baseOffset + 0)
     if (__vFrame !is PeekResult.Complete) {

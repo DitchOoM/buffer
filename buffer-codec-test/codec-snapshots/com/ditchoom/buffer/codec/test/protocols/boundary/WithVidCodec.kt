@@ -71,6 +71,8 @@ public object WithVidCodec : Codec<WithVid> {
 
   override fun wireSize(`value`: WithVid, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: WithVid, context: EncodeContext): Int = 4 + value.pad.length + value.id.value.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData

@@ -3234,18 +3234,23 @@ internal fun classifyVariantWireSize(shape: CodecShape): VariantWireSize {
     // wireSize is BackPatch (see buildWireSizeFun's RemainingBytesPayload
     // early-return); the dispatcher must skip the runtime-Exact cast.
     if (shape.fields.any { it is FieldSpec.RemainingBytesPayload }) return VariantWireSize.BackPatch
-    // A NON-`VariableLengthCodec` `@UseCodec` scalar may report `BackPatch` at runtime, so the
-    // dispatcher can't assume Exact — collapse (mirrors buildWireSizeFun's `!isVariableLength`
-    // BackPatch guard). A `VariableLengthCodec`-backed `@UseCodec` scalar reports
-    // `Exact(encodedLength)` and is promoted to RuntimeExact below — the "promote later if a vector
-    // benefits" note made good (a sealed grid-op union whose payloads are LEB128 `@UseCodec` fields).
-    if (shape.fields.any { it is FieldSpec.UseCodecScalar && !it.isVariableLength }) return VariantWireSize.BackPatch
-    // Same — buildWireSizeFun collapses
-    // LengthPrefixedUseCodecList-bearing shapes to BackPatch.
-    if (shape.fields.any { it is FieldSpec.LengthPrefixedUseCodecList }) return VariantWireSize.BackPatch
-    // Same — buildWireSizeFun collapses
-    // LengthPrefixedUseCodecPayload-bearing shapes to BackPatch.
-    if (shape.fields.any { it is FieldSpec.LengthPrefixedUseCodecPayload }) return VariantWireSize.BackPatch
+    // `@UseCodec` shapes (bare scalar, `@LengthPrefixed` payload/list) are
+    // RuntimeExact: the variant codec's wireSize probes the user codec per
+    // value (Exact composes, BackPatch degrades), and the dispatcher's
+    // RuntimeExact emit forwards whichever the probe reports — it no longer
+    // casts, so a runtime BackPatch is safe. A known-BackPatch list element
+    // type keeps the constant collapse (its wireSize fun never probes).
+    if (shape.fields.any { it is FieldSpec.LengthPrefixedUseCodecList && it.spec.elementIsBackPatch }) {
+        return VariantWireSize.BackPatch
+    }
+    if (shape.fields.any {
+            it is FieldSpec.UseCodecScalar ||
+                it is FieldSpec.LengthPrefixedUseCodecList ||
+                it is FieldSpec.LengthPrefixedUseCodecPayload
+        }
+    ) {
+        return VariantWireSize.RuntimeExact
+    }
     // Same — buildWireSizeFun collapses bare
     // `val: T : @ProtocolMessage` shapes to BackPatch.
     if (shape.fields.any { it is FieldSpec.ProtocolMessageScalar }) return VariantWireSize.BackPatch

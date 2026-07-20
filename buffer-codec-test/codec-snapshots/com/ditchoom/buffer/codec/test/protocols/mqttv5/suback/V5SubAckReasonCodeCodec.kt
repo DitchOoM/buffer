@@ -72,6 +72,21 @@ public object V5SubAckReasonCodeCodec : Codec<V5SubAckReasonCode> {
     is V5SubAckReasonCode.WildcardSubscriptionsNotSupported -> V5SubAckReasonCodeWildcardSubscriptionsNotSupportedCodec.wireSize(value, context)
   }
 
+  override fun sizeHint(`value`: V5SubAckReasonCode, context: EncodeContext): Int = when (value) {
+    is V5SubAckReasonCode.GrantedQoS0 -> V5SubAckReasonCodeGrantedQoS0Codec.sizeHint(value, context)
+    is V5SubAckReasonCode.GrantedQoS1 -> V5SubAckReasonCodeGrantedQoS1Codec.sizeHint(value, context)
+    is V5SubAckReasonCode.GrantedQoS2 -> V5SubAckReasonCodeGrantedQoS2Codec.sizeHint(value, context)
+    is V5SubAckReasonCode.UnspecifiedError -> V5SubAckReasonCodeUnspecifiedErrorCodec.sizeHint(value, context)
+    is V5SubAckReasonCode.ImplementationSpecificError -> V5SubAckReasonCodeImplementationSpecificErrorCodec.sizeHint(value, context)
+    is V5SubAckReasonCode.NotAuthorized -> V5SubAckReasonCodeNotAuthorizedCodec.sizeHint(value, context)
+    is V5SubAckReasonCode.TopicFilterInvalid -> V5SubAckReasonCodeTopicFilterInvalidCodec.sizeHint(value, context)
+    is V5SubAckReasonCode.PacketIdentifierInUse -> V5SubAckReasonCodePacketIdentifierInUseCodec.sizeHint(value, context)
+    is V5SubAckReasonCode.QuotaExceeded -> V5SubAckReasonCodeQuotaExceededCodec.sizeHint(value, context)
+    is V5SubAckReasonCode.SharedSubscriptionsNotSupported -> V5SubAckReasonCodeSharedSubscriptionsNotSupportedCodec.sizeHint(value, context)
+    is V5SubAckReasonCode.SubscriptionIdentifiersNotSupported -> V5SubAckReasonCodeSubscriptionIdentifiersNotSupportedCodec.sizeHint(value, context)
+    is V5SubAckReasonCode.WildcardSubscriptionsNotSupported -> V5SubAckReasonCodeWildcardSubscriptionsNotSupportedCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()

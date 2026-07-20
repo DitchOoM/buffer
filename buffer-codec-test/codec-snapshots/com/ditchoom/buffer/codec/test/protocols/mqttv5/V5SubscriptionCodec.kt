@@ -51,6 +51,8 @@ public object V5SubscriptionCodec : Codec<V5Subscription> {
 
   override fun wireSize(`value`: V5Subscription, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: V5Subscription, context: EncodeContext): Int = 3 + value.topicFilter.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData

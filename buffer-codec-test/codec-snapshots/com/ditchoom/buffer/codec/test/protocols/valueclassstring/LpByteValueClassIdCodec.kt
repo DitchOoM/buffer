@@ -46,6 +46,8 @@ public object LpByteValueClassIdCodec : Codec<LpByteValueClassId> {
 
   override fun wireSize(`value`: LpByteValueClassId, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: LpByteValueClassId, context: EncodeContext): Int = 1 + value.id.value.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData

@@ -32,5 +32,7 @@ public object RepeatedBlockCodec : Codec<RepeatedBlock> {
 
   override fun wireSize(`value`: RepeatedBlock, context: EncodeContext): WireSize = WireSize.Exact(3)
 
+  override fun sizeHint(`value`: RepeatedBlock, context: EncodeContext): Int = 3
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 3) PeekResult.Complete(3) else PeekResult.NeedsMoreData
 }

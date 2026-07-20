@@ -30,5 +30,7 @@ public object SignedTagCodec : Codec<SignedTag> {
 
   override fun wireSize(`value`: SignedTag, context: EncodeContext): WireSize = WireSize.Exact(4)
 
+  override fun sizeHint(`value`: SignedTag, context: EncodeContext): Int = 4
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 4) PeekResult.Complete(4) else PeekResult.NeedsMoreData
 }

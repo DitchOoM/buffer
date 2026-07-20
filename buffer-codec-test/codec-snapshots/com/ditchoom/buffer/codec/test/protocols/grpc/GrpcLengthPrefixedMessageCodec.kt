@@ -55,7 +55,15 @@ public object GrpcLengthPrefixedMessageCodec : Codec<GrpcLengthPrefixedMessage> 
     buffer.position(messageEndPosition)
   }
 
-  override fun wireSize(`value`: GrpcLengthPrefixedMessage, context: EncodeContext): WireSize = WireSize.BackPatch
+  override fun wireSize(`value`: GrpcLengthPrefixedMessage, context: EncodeContext): WireSize {
+    val __messageSize = when (val __s = BinaryDataCodec.wireSize(value.message, context)) {
+      is WireSize.Exact -> 4 + __s.bytes
+      WireSize.BackPatch -> return WireSize.BackPatch
+    }
+    return WireSize.Exact(1 + __messageSize)
+  }
+
+  override fun sizeHint(`value`: GrpcLengthPrefixedMessage, context: EncodeContext): Int = 5
 
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0

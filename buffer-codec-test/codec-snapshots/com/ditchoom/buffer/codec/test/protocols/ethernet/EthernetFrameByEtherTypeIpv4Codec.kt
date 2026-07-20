@@ -26,5 +26,7 @@ public object EthernetFrameByEtherTypeIpv4Codec : Codec<EthernetFrameByEtherType
 
   override fun wireSize(`value`: EthernetFrameByEtherType.Ipv4, context: EncodeContext): WireSize = WireSize.Exact(2)
 
+  override fun sizeHint(`value`: EthernetFrameByEtherType.Ipv4, context: EncodeContext): Int = 2
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 2) PeekResult.Complete(2) else PeekResult.NeedsMoreData
 }

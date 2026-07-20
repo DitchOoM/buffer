@@ -26,5 +26,7 @@ public object MqttFixedHeaderCodec : Codec<MqttFixedHeader> {
 
   override fun wireSize(`value`: MqttFixedHeader, context: EncodeContext): WireSize = WireSize.Exact(1)
 
+  override fun sizeHint(`value`: MqttFixedHeader, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 1) PeekResult.Complete(1) else PeekResult.NeedsMoreData
 }

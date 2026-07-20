@@ -59,7 +59,22 @@ public object TaggedPropertyBagCodec : Codec<TaggedPropertyBag> {
     }
   }
 
-  override fun wireSize(`value`: TaggedPropertyBag, context: EncodeContext): WireSize = WireSize.BackPatch
+  override fun wireSize(`value`: TaggedPropertyBag, context: EncodeContext): WireSize {
+    var __propertiesBodyBytes = 0
+    for (__elem in value.properties) {
+      when (val __elemSize = PropertyEntryCodec.wireSize(__elem, context)) {
+        is WireSize.Exact -> __propertiesBodyBytes += __elemSize.bytes
+        WireSize.BackPatch -> return WireSize.BackPatch
+      }
+    }
+    val __propertiesSize = when (val __p = MqttRemainingLengthCodec.wireSize(__propertiesBodyBytes.toUInt(), context)) {
+      is WireSize.Exact -> __p.bytes + __propertiesBodyBytes
+      WireSize.BackPatch -> return WireSize.BackPatch
+    }
+    return WireSize.Exact(1 + __propertiesSize)
+  }
+
+  override fun sizeHint(`value`: TaggedPropertyBag, context: EncodeContext): Int = 1
 
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 2) return PeekResult.NeedsMoreData

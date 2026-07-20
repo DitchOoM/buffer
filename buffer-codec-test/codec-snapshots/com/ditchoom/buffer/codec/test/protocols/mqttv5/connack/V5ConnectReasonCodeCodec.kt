@@ -102,6 +102,31 @@ public object V5ConnectReasonCodeCodec : Codec<V5ConnectReasonCode> {
     is V5ConnectReasonCode.ConnectionRateExceeded -> V5ConnectReasonCodeConnectionRateExceededCodec.wireSize(value, context)
   }
 
+  override fun sizeHint(`value`: V5ConnectReasonCode, context: EncodeContext): Int = when (value) {
+    is V5ConnectReasonCode.Success -> V5ConnectReasonCodeSuccessCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.UnspecifiedError -> V5ConnectReasonCodeUnspecifiedErrorCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.MalformedPacket -> V5ConnectReasonCodeMalformedPacketCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.ProtocolError -> V5ConnectReasonCodeProtocolErrorCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.ImplementationSpecificError -> V5ConnectReasonCodeImplementationSpecificErrorCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.UnsupportedProtocolVersion -> V5ConnectReasonCodeUnsupportedProtocolVersionCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.ClientIdentifierNotValid -> V5ConnectReasonCodeClientIdentifierNotValidCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.BadUserNameOrPassword -> V5ConnectReasonCodeBadUserNameOrPasswordCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.NotAuthorized -> V5ConnectReasonCodeNotAuthorizedCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.ServerUnavailable -> V5ConnectReasonCodeServerUnavailableCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.ServerBusy -> V5ConnectReasonCodeServerBusyCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.Banned -> V5ConnectReasonCodeBannedCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.BadAuthenticationMethod -> V5ConnectReasonCodeBadAuthenticationMethodCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.TopicNameInvalid -> V5ConnectReasonCodeTopicNameInvalidCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.PacketTooLarge -> V5ConnectReasonCodePacketTooLargeCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.QuotaExceeded -> V5ConnectReasonCodeQuotaExceededCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.PayloadFormatInvalid -> V5ConnectReasonCodePayloadFormatInvalidCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.RetainNotSupported -> V5ConnectReasonCodeRetainNotSupportedCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.QoSNotSupported -> V5ConnectReasonCodeQoSNotSupportedCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.UseAnotherServer -> V5ConnectReasonCodeUseAnotherServerCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.ServerMoved -> V5ConnectReasonCodeServerMovedCodec.sizeHint(value, context)
+    is V5ConnectReasonCode.ConnectionRateExceeded -> V5ConnectReasonCodeConnectionRateExceededCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()

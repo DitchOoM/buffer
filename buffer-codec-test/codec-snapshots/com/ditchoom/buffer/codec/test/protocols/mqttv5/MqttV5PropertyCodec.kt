@@ -117,6 +117,36 @@ public object MqttV5PropertyCodec : Codec<MqttV5Property> {
     is MqttV5Property.SharedSubscriptionAvailable -> MqttV5PropertySharedSubscriptionAvailableCodec.wireSize(value, context)
   }
 
+  override fun sizeHint(`value`: MqttV5Property, context: EncodeContext): Int = when (value) {
+    is MqttV5Property.PayloadFormatIndicator -> MqttV5PropertyPayloadFormatIndicatorCodec.sizeHint(value, context)
+    is MqttV5Property.MessageExpiryInterval -> MqttV5PropertyMessageExpiryIntervalCodec.sizeHint(value, context)
+    is MqttV5Property.ContentType -> MqttV5PropertyContentTypeCodec.sizeHint(value, context)
+    is MqttV5Property.ResponseTopic -> MqttV5PropertyResponseTopicCodec.sizeHint(value, context)
+    is MqttV5Property.CorrelationData -> MqttV5PropertyCorrelationDataCodec.sizeHint(value, context)
+    is MqttV5Property.SubscriptionIdentifier -> MqttV5PropertySubscriptionIdentifierCodec.sizeHint(value, context)
+    is MqttV5Property.SessionExpiryInterval -> MqttV5PropertySessionExpiryIntervalCodec.sizeHint(value, context)
+    is MqttV5Property.AssignedClientIdentifier -> MqttV5PropertyAssignedClientIdentifierCodec.sizeHint(value, context)
+    is MqttV5Property.ServerKeepAlive -> MqttV5PropertyServerKeepAliveCodec.sizeHint(value, context)
+    is MqttV5Property.AuthenticationMethod -> MqttV5PropertyAuthenticationMethodCodec.sizeHint(value, context)
+    is MqttV5Property.AuthenticationData -> MqttV5PropertyAuthenticationDataCodec.sizeHint(value, context)
+    is MqttV5Property.RequestProblemInformation -> MqttV5PropertyRequestProblemInformationCodec.sizeHint(value, context)
+    is MqttV5Property.WillDelayInterval -> MqttV5PropertyWillDelayIntervalCodec.sizeHint(value, context)
+    is MqttV5Property.RequestResponseInformation -> MqttV5PropertyRequestResponseInformationCodec.sizeHint(value, context)
+    is MqttV5Property.ResponseInformation -> MqttV5PropertyResponseInformationCodec.sizeHint(value, context)
+    is MqttV5Property.ServerReference -> MqttV5PropertyServerReferenceCodec.sizeHint(value, context)
+    is MqttV5Property.ReasonString -> MqttV5PropertyReasonStringCodec.sizeHint(value, context)
+    is MqttV5Property.ReceiveMaximum -> MqttV5PropertyReceiveMaximumCodec.sizeHint(value, context)
+    is MqttV5Property.TopicAliasMaximum -> MqttV5PropertyTopicAliasMaximumCodec.sizeHint(value, context)
+    is MqttV5Property.TopicAlias -> MqttV5PropertyTopicAliasCodec.sizeHint(value, context)
+    is MqttV5Property.MaximumQoS -> MqttV5PropertyMaximumQoSCodec.sizeHint(value, context)
+    is MqttV5Property.RetainAvailable -> MqttV5PropertyRetainAvailableCodec.sizeHint(value, context)
+    is MqttV5Property.UserProperty -> MqttV5PropertyUserPropertyCodec.sizeHint(value, context)
+    is MqttV5Property.MaximumPacketSize -> MqttV5PropertyMaximumPacketSizeCodec.sizeHint(value, context)
+    is MqttV5Property.WildcardSubscriptionAvailable -> MqttV5PropertyWildcardSubscriptionAvailableCodec.sizeHint(value, context)
+    is MqttV5Property.SubscriptionIdentifiersAvailable -> MqttV5PropertySubscriptionIdentifiersAvailableCodec.sizeHint(value, context)
+    is MqttV5Property.SharedSubscriptionAvailable -> MqttV5PropertySharedSubscriptionAvailableCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()

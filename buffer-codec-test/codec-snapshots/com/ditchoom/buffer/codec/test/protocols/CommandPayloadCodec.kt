@@ -52,6 +52,12 @@ public object CommandPayloadCodec : Codec<CommandPayload> {
     is CommandPayload.ResetDevice -> WireSize.Exact(1)
   }
 
+  override fun sizeHint(`value`: CommandPayload, context: EncodeContext): Int = 1 + when (value) {
+    is CommandPayload.SetRgbState -> CommandPayloadSetRgbStateCodec.sizeHint(value, context)
+    is CommandPayload.GetRgbState -> CommandPayloadGetRgbStateCodec.sizeHint(value, context)
+    is CommandPayload.ResetDevice -> CommandPayloadResetDeviceCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF

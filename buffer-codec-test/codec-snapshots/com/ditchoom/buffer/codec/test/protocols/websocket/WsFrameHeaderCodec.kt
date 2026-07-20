@@ -71,6 +71,8 @@ public object WsFrameHeaderCodec : Codec<WsFrameHeader> {
 
   override fun wireSize(`value`: WsFrameHeader, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: WsFrameHeader, context: EncodeContext): Int = 2
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData

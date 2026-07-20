@@ -51,5 +51,13 @@ public object CountThenTrailerCodec : Codec<CountThenTrailer> {
     return WireSize.Exact(4 + __pointsSize)
   }
 
+  override fun sizeHint(`value`: CountThenTrailer, context: EncodeContext): Int {
+    var __hint = 5
+    for (__elem in value.points) {
+      __hint += CountPointCodec.sizeHint(__elem, context)
+    }
+    return __hint
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

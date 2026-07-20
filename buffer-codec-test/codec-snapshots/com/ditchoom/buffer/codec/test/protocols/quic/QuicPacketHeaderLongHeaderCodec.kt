@@ -26,5 +26,7 @@ public object QuicPacketHeaderLongHeaderCodec : Codec<QuicPacketHeader.LongHeade
 
   override fun wireSize(`value`: QuicPacketHeader.LongHeader, context: EncodeContext): WireSize = WireSize.Exact(1)
 
+  override fun sizeHint(`value`: QuicPacketHeader.LongHeader, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 1) PeekResult.Complete(1) else PeekResult.NeedsMoreData
 }

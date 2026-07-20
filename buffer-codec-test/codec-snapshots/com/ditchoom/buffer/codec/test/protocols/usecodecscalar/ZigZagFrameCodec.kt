@@ -26,7 +26,15 @@ public object ZigZagFrameCodec : Codec<ZigZagFrame> {
     ZigZagUIntCodec.encode(buffer, value.value, context)
   }
 
-  override fun wireSize(`value`: ZigZagFrame, context: EncodeContext): WireSize = WireSize.BackPatch
+  override fun wireSize(`value`: ZigZagFrame, context: EncodeContext): WireSize {
+    val __valueSize = when (val __s = ZigZagUIntCodec.wireSize(value.value, context)) {
+      is WireSize.Exact -> __s.bytes
+      WireSize.BackPatch -> return WireSize.BackPatch
+    }
+    return WireSize.Exact(4 + __valueSize)
+  }
+
+  override fun sizeHint(`value`: ZigZagFrame, context: EncodeContext): Int = 4
 
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

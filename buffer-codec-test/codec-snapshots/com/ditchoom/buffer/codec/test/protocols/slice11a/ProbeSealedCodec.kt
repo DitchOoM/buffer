@@ -46,6 +46,11 @@ public object ProbeSealedCodec : Codec<ProbeSealed> {
     is ProbeSealed.Tag2 -> WireSize.BackPatch
   }
 
+  override fun sizeHint(`value`: ProbeSealed, context: EncodeContext): Int = 1 + when (value) {
+    is ProbeSealed.Tag1 -> ProbeSealedTag1Codec.sizeHint(value, context)
+    is ProbeSealed.Tag2 -> ProbeSealedTag2Codec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF

@@ -26,5 +26,7 @@ public object PacketIdCodec : Codec<PacketId> {
 
   override fun wireSize(`value`: PacketId, context: EncodeContext): WireSize = WireSize.Exact(2)
 
+  override fun sizeHint(`value`: PacketId, context: EncodeContext): Int = 2
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 2) PeekResult.Complete(2) else PeekResult.NeedsMoreData
 }

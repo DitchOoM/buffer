@@ -51,6 +51,8 @@ public object StringTaggedPropertyCodec : Codec<StringTaggedProperty> {
 
   override fun wireSize(`value`: StringTaggedProperty, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: StringTaggedProperty, context: EncodeContext): Int = 3 + value.tag.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData

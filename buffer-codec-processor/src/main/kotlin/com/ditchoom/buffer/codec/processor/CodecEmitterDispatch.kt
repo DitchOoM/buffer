@@ -443,6 +443,55 @@ internal fun buildDispatchWireSizeFun(shape: DispatchShape): FunSpec {
 }
 
 /**
+ * Non-framed dispatch `sizeHint` builder — the starting-capacity companion
+ * to [buildDispatchWireSizeFun], forwarding to the matched variant codec's
+ * `sizeHint`. [DiscriminatorOwnership.ConsumedByDispatcher] adds the 1-byte
+ * discriminator the dispatcher writes; [DiscriminatorOwnership.ReReadByVariant]
+ * pure-delegates (the variant hint covers its self-framed discriminator).
+ * Mirrors the wireSize builder's generic-variant star-projection casts.
+ */
+internal fun buildDispatchSizeHintFun(shape: DispatchShape): FunSpec {
+    val parentTypeRef = shape.parentTypeRef()
+    val body = CodeBlock.builder()
+    val anyGeneric = shape.variants.any { it.codecRef is VariantCodecRef.GenericInstance }
+    if (anyGeneric) {
+        body.add("@Suppress(%S)\n", "UNCHECKED_CAST")
+    }
+    val discriminatorTerm =
+        when (shape.discriminator.ownership) {
+            DiscriminatorOwnership.ConsumedByDispatcher -> "1 + "
+            DiscriminatorOwnership.ReReadByVariant -> ""
+        }
+    body.beginControlFlow("return %Lwhen (value)", discriminatorTerm)
+    for (variant in shape.variants) {
+        val branchType = variant.branchTypeName(shape.genericity)
+        if (variant.codecRef is VariantCodecRef.GenericInstance) {
+            body.addStatement(
+                "is %T -> %L.sizeHint(value as %T, context)",
+                branchType,
+                variant.codecReceiver(),
+                variant.typedRef(shape.genericity),
+            )
+        } else {
+            body.addStatement(
+                "is %T -> %L.sizeHint(value, context)",
+                branchType,
+                variant.codecReceiver(),
+            )
+        }
+    }
+    body.endControlFlow()
+    return FunSpec
+        .builder("sizeHint")
+        .addModifiers(KModifier.OVERRIDE)
+        .addParameter("value", parentTypeRef)
+        .addParameter("context", ENCODE_CONTEXT_CN)
+        .returns(INT)
+        .addCode(body.build())
+        .build()
+}
+
+/**
  * THE unified NON-framed dispatch peekFrameSize builder. Reproduces the
  * (now-removed) simple-@PacketType `buildDispatcherPeekFrameFun` and
  * non-framed @DispatchOn `buildDispatchOnPeekFun` output byte-for-byte by
@@ -687,6 +736,7 @@ internal fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
                 } else {
                     builder.addFunction(buildDispatchEncodeFun(shape))
                     builder.addFunction(buildDispatchWireSizeFun(shape))
+                    builder.addFunction(buildDispatchSizeHintFun(shape))
                     builder.addFunction(buildDispatchPeekFun(shape))
                 }
                 builder.build()
@@ -731,6 +781,7 @@ internal fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
                 } else {
                     builder.addFunction(buildDispatchEncodeFun(shape))
                     builder.addFunction(buildDispatchWireSizeFun(shape))
+                    builder.addFunction(buildDispatchSizeHintFun(shape))
                     builder.addFunction(buildDispatchPeekFun(shape))
                 }
                 // The `decodeAggregating` companion (per-call payload-codec

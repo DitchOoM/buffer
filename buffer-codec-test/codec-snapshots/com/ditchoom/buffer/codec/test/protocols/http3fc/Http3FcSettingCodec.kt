@@ -39,5 +39,7 @@ public object Http3FcSettingCodec : Codec<Http3FcSetting> {
     return WireSize.Exact(0 + __identifierSize + __valueSize)
   }
 
+  override fun sizeHint(`value`: Http3FcSetting, context: EncodeContext): Int = 0
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

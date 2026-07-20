@@ -26,5 +26,7 @@ public object CountNestedEntryCodec : Codec<CountNestedEntry> {
 
   override fun wireSize(`value`: CountNestedEntry, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: CountNestedEntry, context: EncodeContext): Int = 0 + CountInnerFixedCodec.sizeHint(value.inner, context)
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

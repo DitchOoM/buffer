@@ -46,6 +46,8 @@ public object PngChunkCodec : Codec<PngChunk> {
 
   override fun wireSize(`value`: PngChunk, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: PngChunk, context: EncodeContext): Int = 12
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 
   public fun partial(buffer: ReadBuffer, context: DecodeContext): Partial {

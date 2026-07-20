@@ -49,6 +49,8 @@ public object ProbeSealedTag2Codec : Codec<ProbeSealed.Tag2> {
 
   override fun wireSize(`value`: ProbeSealed.Tag2, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: ProbeSealed.Tag2, context: EncodeContext): Int = 2 + value.msg.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData

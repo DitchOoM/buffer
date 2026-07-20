@@ -26,5 +26,7 @@ public object TcpFlagsByteCodec : Codec<TcpFlagsByte> {
 
   override fun wireSize(`value`: TcpFlagsByte, context: EncodeContext): WireSize = WireSize.Exact(1)
 
+  override fun sizeHint(`value`: TcpFlagsByte, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 1) PeekResult.Complete(1) else PeekResult.NeedsMoreData
 }

@@ -49,6 +49,8 @@ public object LpPlainStringIdCodec : Codec<LpPlainStringId> {
 
   override fun wireSize(`value`: LpPlainStringId, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: LpPlainStringId, context: EncodeContext): Int = 2 + value.id.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData

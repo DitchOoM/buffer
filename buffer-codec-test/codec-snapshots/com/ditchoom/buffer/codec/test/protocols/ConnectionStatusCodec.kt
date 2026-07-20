@@ -58,6 +58,13 @@ public object ConnectionStatusCodec : Codec<ConnectionStatus> {
     is ConnectionStatus.Failed -> WireSize.Exact(1)
   }
 
+  override fun sizeHint(`value`: ConnectionStatus, context: EncodeContext): Int = 1 + when (value) {
+    is ConnectionStatus.Disconnected -> ConnectionStatusDisconnectedCodec.sizeHint(value, context)
+    is ConnectionStatus.Connecting -> ConnectionStatusConnectingCodec.sizeHint(value, context)
+    is ConnectionStatus.Connected -> ConnectionStatusConnectedCodec.sizeHint(value, context)
+    is ConnectionStatus.Failed -> ConnectionStatusFailedCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF

@@ -37,6 +37,8 @@ public object ConditionalBreaksBatchCodec : Codec<ConditionalBreaksBatch> {
 
   override fun wireSize(`value`: ConditionalBreaksBatch, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: ConditionalBreaksBatch, context: EncodeContext): Int = 3
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData

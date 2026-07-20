@@ -49,6 +49,8 @@ public object MqttConnectProtocolNameCodec : Codec<MqttConnectProtocolName> {
 
   override fun wireSize(`value`: MqttConnectProtocolName, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: MqttConnectProtocolName, context: EncodeContext): Int = 2 + value.name.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData

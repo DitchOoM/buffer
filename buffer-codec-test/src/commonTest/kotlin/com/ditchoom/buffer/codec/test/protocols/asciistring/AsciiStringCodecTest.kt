@@ -102,6 +102,22 @@ class AsciiStringCodecTest {
     }
 
     @Test
+    fun lengthPrefixedFixtureWireSizeComposesExact() {
+        // The codec's Exact(value.length) is probed by the generated
+        // message-level wireSize and composed with the 2-byte prefix, so
+        // encodeToPlatformBuffer allocates exactly once instead of walking
+        // the 64-byte-doubling BackPatch loop.
+        assertEquals(
+            WireSize.Exact(2 + 7),
+            AsciiGreetingCodec.wireSize(AsciiGreeting(command = "CONNECT"), EncodeContext.Empty),
+        )
+        assertEquals(
+            WireSize.Exact(2),
+            AsciiGreetingCodec.wireSize(AsciiGreeting(command = ""), EncodeContext.Empty),
+        )
+    }
+
+    @Test
     fun lengthPrefixedFixtureRoundTripsEmpty() {
         val original = AsciiGreeting(command = "")
         val buffer = BufferFactory.Default.allocate(8)

@@ -26,5 +26,7 @@ public object TcpSegmentByFlagsFinAckCodec : Codec<TcpSegmentByFlags.FinAck> {
 
   override fun wireSize(`value`: TcpSegmentByFlags.FinAck, context: EncodeContext): WireSize = WireSize.Exact(1)
 
+  override fun sizeHint(`value`: TcpSegmentByFlags.FinAck, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 1) PeekResult.Complete(1) else PeekResult.NeedsMoreData
 }

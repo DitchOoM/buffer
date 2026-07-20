@@ -57,6 +57,16 @@ public object V5UnsubAckReasonCodeCodec : Codec<V5UnsubAckReasonCode> {
     is V5UnsubAckReasonCode.PacketIdentifierInUse -> V5UnsubAckReasonCodePacketIdentifierInUseCodec.wireSize(value, context)
   }
 
+  override fun sizeHint(`value`: V5UnsubAckReasonCode, context: EncodeContext): Int = when (value) {
+    is V5UnsubAckReasonCode.Success -> V5UnsubAckReasonCodeSuccessCodec.sizeHint(value, context)
+    is V5UnsubAckReasonCode.NoSubscriptionExisted -> V5UnsubAckReasonCodeNoSubscriptionExistedCodec.sizeHint(value, context)
+    is V5UnsubAckReasonCode.UnspecifiedError -> V5UnsubAckReasonCodeUnspecifiedErrorCodec.sizeHint(value, context)
+    is V5UnsubAckReasonCode.ImplementationSpecificError -> V5UnsubAckReasonCodeImplementationSpecificErrorCodec.sizeHint(value, context)
+    is V5UnsubAckReasonCode.NotAuthorized -> V5UnsubAckReasonCodeNotAuthorizedCodec.sizeHint(value, context)
+    is V5UnsubAckReasonCode.TopicFilterInvalid -> V5UnsubAckReasonCodeTopicFilterInvalidCodec.sizeHint(value, context)
+    is V5UnsubAckReasonCode.PacketIdentifierInUse -> V5UnsubAckReasonCodePacketIdentifierInUseCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()

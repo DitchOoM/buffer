@@ -61,5 +61,7 @@ public object LittleWirePacketCodec : Codec<LittleWirePacket> {
 
   override fun wireSize(`value`: LittleWirePacket, context: EncodeContext): WireSize = WireSize.Exact(43)
 
+  override fun sizeHint(`value`: LittleWirePacket, context: EncodeContext): Int = 43
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 43) PeekResult.Complete(43) else PeekResult.NeedsMoreData
 }

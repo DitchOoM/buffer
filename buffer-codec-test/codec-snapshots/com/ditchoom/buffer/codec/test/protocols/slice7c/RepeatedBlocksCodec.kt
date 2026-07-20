@@ -46,5 +46,13 @@ public object RepeatedBlocksCodec : Codec<RepeatedBlocks> {
     return WireSize.Exact(2 + __blocksBodySize)
   }
 
+  override fun sizeHint(`value`: RepeatedBlocks, context: EncodeContext): Int {
+    var __hint = 2
+    for (__elem in value.blocks) {
+      __hint += RepeatedBlockCodec.sizeHint(__elem, context)
+    }
+    return __hint
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

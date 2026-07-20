@@ -22,5 +22,7 @@ public object CommandPayloadResetDeviceCodec : Codec<CommandPayload.ResetDevice>
 
   override fun wireSize(`value`: CommandPayload.ResetDevice, context: EncodeContext): WireSize = WireSize.Exact(0)
 
+  override fun sizeHint(`value`: CommandPayload.ResetDevice, context: EncodeContext): Int = 0
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 0) PeekResult.Complete(0) else PeekResult.NeedsMoreData
 }

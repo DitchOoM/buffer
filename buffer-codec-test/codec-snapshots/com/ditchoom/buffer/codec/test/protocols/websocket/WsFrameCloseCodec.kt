@@ -76,5 +76,7 @@ public object WsFrameCloseCodec : Codec<WsFrame.Close> {
 
   override fun wireSize(`value`: WsFrame.Close, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: WsFrame.Close, context: EncodeContext): Int = 2
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

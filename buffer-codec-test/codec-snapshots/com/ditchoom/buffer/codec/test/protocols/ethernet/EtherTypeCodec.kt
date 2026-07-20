@@ -26,5 +26,7 @@ public object EtherTypeCodec : Codec<EtherType> {
 
   override fun wireSize(`value`: EtherType, context: EncodeContext): WireSize = WireSize.Exact(2)
 
+  override fun sizeHint(`value`: EtherType, context: EncodeContext): Int = 2
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 2) PeekResult.Complete(2) else PeekResult.NeedsMoreData
 }

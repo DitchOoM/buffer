@@ -41,6 +41,8 @@ public object BoundedFrameCodec : Codec<BoundedFrame> {
 
   override fun wireSize(`value`: BoundedFrame, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: BoundedFrame, context: EncodeContext): Int = 2
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 3) return PeekResult.NeedsMoreData
     val __lengthPeekView = stream.peekBuffer(baseOffset + 2, 5) ?: return PeekResult.NeedsMoreData

@@ -38,9 +38,12 @@ class DispatchVarintUnionCodecTest {
     }
 
     @Test
-    fun nonVariableLengthUseCodecVariantStaysBackPatch() {
+    fun nonVariableLengthUseCodecVariantComposesExact() {
+        // Plain's user codec declares Exact(4); the dispatcher probes the
+        // variant codec and composes 1 (discriminator) + 4 (body). Before the
+        // @UseCodec promotion this collapsed to BackPatch at analyze time.
         assertEquals(
-            WireSize.BackPatch,
+            WireSize.Exact(5),
             DispatchVarintUnionCodec.wireSize(DispatchVarintUnion.Plain(1u), EncodeContext.Empty),
         )
     }

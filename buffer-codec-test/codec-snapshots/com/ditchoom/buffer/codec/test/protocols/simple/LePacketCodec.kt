@@ -33,6 +33,8 @@ public object LePacketCodec : Codec<LePacket> {
 
   override fun wireSize(`value`: LePacket, context: EncodeContext): WireSize = WireSize.Exact(2 + value.header.length)
 
+  override fun sizeHint(`value`: LePacket, context: EncodeContext): Int = 2 + value.payload.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData

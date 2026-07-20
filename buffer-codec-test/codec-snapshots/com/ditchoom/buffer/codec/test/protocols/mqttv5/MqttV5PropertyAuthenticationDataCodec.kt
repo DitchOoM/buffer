@@ -55,7 +55,15 @@ public object MqttV5PropertyAuthenticationDataCodec : Codec<MqttV5Property.Authe
     buffer.position(dataEndPosition)
   }
 
-  override fun wireSize(`value`: MqttV5Property.AuthenticationData, context: EncodeContext): WireSize = WireSize.BackPatch
+  override fun wireSize(`value`: MqttV5Property.AuthenticationData, context: EncodeContext): WireSize {
+    val __dataSize = when (val __s = BinaryDataCodec.wireSize(value.data, context)) {
+      is WireSize.Exact -> 2 + __s.bytes
+      WireSize.BackPatch -> return WireSize.BackPatch
+    }
+    return WireSize.Exact(1 + __dataSize)
+  }
+
+  override fun sizeHint(`value`: MqttV5Property.AuthenticationData, context: EncodeContext): Int = 3
 
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0

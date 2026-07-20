@@ -51,5 +51,7 @@ public object BoundaryHostCodec : Codec<BoundaryHost> {
 
   override fun wireSize(`value`: BoundaryHost, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: BoundaryHost, context: EncodeContext): Int = 2 + value.host.length + BoundaryDispCodec.sizeHint(value.disp, context)
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

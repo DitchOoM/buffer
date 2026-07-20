@@ -24,7 +24,15 @@ public object DispatchVarintUnionPlainCodec : Codec<DispatchVarintUnion.Plain> {
     ZigZagUIntCodec.encode(buffer, value.value, context)
   }
 
-  override fun wireSize(`value`: DispatchVarintUnion.Plain, context: EncodeContext): WireSize = WireSize.BackPatch
+  override fun wireSize(`value`: DispatchVarintUnion.Plain, context: EncodeContext): WireSize {
+    val __valueSize = when (val __s = ZigZagUIntCodec.wireSize(value.value, context)) {
+      is WireSize.Exact -> __s.bytes
+      WireSize.BackPatch -> return WireSize.BackPatch
+    }
+    return WireSize.Exact(0 + __valueSize)
+  }
+
+  override fun sizeHint(`value`: DispatchVarintUnion.Plain, context: EncodeContext): Int = 0
 
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

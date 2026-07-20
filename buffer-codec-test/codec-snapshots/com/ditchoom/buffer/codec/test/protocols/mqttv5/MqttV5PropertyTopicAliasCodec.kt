@@ -32,5 +32,7 @@ public object MqttV5PropertyTopicAliasCodec : Codec<MqttV5Property.TopicAlias> {
 
   override fun wireSize(`value`: MqttV5Property.TopicAlias, context: EncodeContext): WireSize = WireSize.Exact(3)
 
+  override fun sizeHint(`value`: MqttV5Property.TopicAlias, context: EncodeContext): Int = 3
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 3) PeekResult.Complete(3) else PeekResult.NeedsMoreData
 }

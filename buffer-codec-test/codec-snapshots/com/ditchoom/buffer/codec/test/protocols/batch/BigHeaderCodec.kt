@@ -34,5 +34,7 @@ public object BigHeaderCodec : Codec<BigHeader> {
 
   override fun wireSize(`value`: BigHeader, context: EncodeContext): WireSize = WireSize.Exact(8)
 
+  override fun sizeHint(`value`: BigHeader, context: EncodeContext): Int = 8
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 8) PeekResult.Complete(8) else PeekResult.NeedsMoreData
 }

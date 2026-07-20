@@ -40,5 +40,7 @@ public object WavFmtBodyCodec : Codec<WavFmtBody> {
 
   override fun wireSize(`value`: WavFmtBody, context: EncodeContext): WireSize = WireSize.Exact(16)
 
+  override fun sizeHint(`value`: WavFmtBody, context: EncodeContext): Int = 16
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 16) PeekResult.Complete(16) else PeekResult.NeedsMoreData
 }

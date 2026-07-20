@@ -26,5 +26,7 @@ public object V5ConnectReasonCodeServerUnavailableCodec : Codec<V5ConnectReasonC
 
   override fun wireSize(`value`: V5ConnectReasonCode.ServerUnavailable, context: EncodeContext): WireSize = WireSize.Exact(1)
 
+  override fun sizeHint(`value`: V5ConnectReasonCode.ServerUnavailable, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 1) PeekResult.Complete(1) else PeekResult.NeedsMoreData
 }

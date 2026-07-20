@@ -26,5 +26,7 @@ public object SimpleGenericFrameStatusCodec : Codec<SimpleGenericFrame.Status> {
 
   override fun wireSize(`value`: SimpleGenericFrame.Status, context: EncodeContext): WireSize = WireSize.Exact(1)
 
+  override fun sizeHint(`value`: SimpleGenericFrame.Status, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 1) PeekResult.Complete(1) else PeekResult.NeedsMoreData
 }

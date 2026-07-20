@@ -120,6 +120,37 @@ public object V5DisconnectReasonCodeCodec : Codec<V5DisconnectReasonCode> {
     is V5DisconnectReasonCode.WildcardSubscriptionsNotSupported -> V5DisconnectReasonCodeWildcardSubscriptionsNotSupportedCodec.wireSize(value, context)
   }
 
+  override fun sizeHint(`value`: V5DisconnectReasonCode, context: EncodeContext): Int = when (value) {
+    is V5DisconnectReasonCode.NormalDisconnection -> V5DisconnectReasonCodeNormalDisconnectionCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.DisconnectWithWillMessage -> V5DisconnectReasonCodeDisconnectWithWillMessageCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.UnspecifiedError -> V5DisconnectReasonCodeUnspecifiedErrorCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.MalformedPacket -> V5DisconnectReasonCodeMalformedPacketCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.ProtocolError -> V5DisconnectReasonCodeProtocolErrorCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.ImplementationSpecificError -> V5DisconnectReasonCodeImplementationSpecificErrorCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.NotAuthorized -> V5DisconnectReasonCodeNotAuthorizedCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.ServerBusy -> V5DisconnectReasonCodeServerBusyCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.ServerShuttingDown -> V5DisconnectReasonCodeServerShuttingDownCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.KeepAliveTimeout -> V5DisconnectReasonCodeKeepAliveTimeoutCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.SessionTakenOver -> V5DisconnectReasonCodeSessionTakenOverCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.TopicFilterInvalid -> V5DisconnectReasonCodeTopicFilterInvalidCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.TopicNameInvalid -> V5DisconnectReasonCodeTopicNameInvalidCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.ReceiveMaximumExceeded -> V5DisconnectReasonCodeReceiveMaximumExceededCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.TopicAliasInvalid -> V5DisconnectReasonCodeTopicAliasInvalidCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.PacketTooLarge -> V5DisconnectReasonCodePacketTooLargeCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.QuotaExceeded -> V5DisconnectReasonCodeQuotaExceededCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.AdministrativeAction -> V5DisconnectReasonCodeAdministrativeActionCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.PayloadFormatInvalid -> V5DisconnectReasonCodePayloadFormatInvalidCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.RetainNotSupported -> V5DisconnectReasonCodeRetainNotSupportedCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.QoSNotSupported -> V5DisconnectReasonCodeQoSNotSupportedCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.UseAnotherServer -> V5DisconnectReasonCodeUseAnotherServerCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.ServerMoved -> V5DisconnectReasonCodeServerMovedCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.SharedSubscriptionsNotSupported -> V5DisconnectReasonCodeSharedSubscriptionsNotSupportedCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.ConnectionRateExceeded -> V5DisconnectReasonCodeConnectionRateExceededCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.MaximumConnectTime -> V5DisconnectReasonCodeMaximumConnectTimeCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.SubscriptionIdentifiersNotSupported -> V5DisconnectReasonCodeSubscriptionIdentifiersNotSupportedCodec.sizeHint(value, context)
+    is V5DisconnectReasonCode.WildcardSubscriptionsNotSupported -> V5DisconnectReasonCodeWildcardSubscriptionsNotSupportedCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()

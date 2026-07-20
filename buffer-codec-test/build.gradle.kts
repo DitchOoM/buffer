@@ -8,6 +8,13 @@ plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.ksp)
     alias(libs.plugins.ktlint)
+    alias(libs.plugins.kotlinx.benchmark)
+    alias(libs.plugins.kotlin.allopen)
+}
+
+// Required for JMH @State classes
+allOpen {
+    annotation("org.openjdk.jmh.annotations.State")
 }
 
 group = "com.ditchoom"
@@ -29,6 +36,9 @@ kotlin {
 
     jvm {
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
+        compilations.create("benchmark") {
+            associateWith(this@jvm.compilations.getByName("main"))
+        }
     }
     js {
         browser()
@@ -55,7 +65,11 @@ kotlin {
             tvosX64()
         }
         if (HostManager.hostIsLinux) {
-            linuxX64()
+            linuxX64 {
+                compilations.create("benchmark") {
+                    associateWith(this@linuxX64.compilations.getByName("main"))
+                }
+            }
             linuxArm64()
         }
     } else {
@@ -63,7 +77,11 @@ kotlin {
             val osArch = System.getProperty("os.arch")
             if (osArch == "aarch64") macosArm64() else macosX64()
         } else if (HostManager.hostIsLinux) {
-            linuxX64()
+            linuxX64 {
+                compilations.create("benchmark") {
+                    associateWith(this@linuxX64.compilations.getByName("main"))
+                }
+            }
         }
     }
 
@@ -84,6 +102,45 @@ kotlin {
         // the plugin's task wiring is covered by buffer-codec-gradle-plugin's TestKit tests.
         jvmTest.dependencies {
             implementation(project(":buffer-codec-schema"))
+        }
+        // Benchmark source sets - all share the same source directory
+        val jvmBenchmark by getting {
+            kotlin.srcDir("src/commonBenchmark/kotlin")
+            dependencies {
+                implementation(libs.kotlinx.benchmark.runtime)
+            }
+        }
+        if (HostManager.hostIsLinux) {
+            val linuxX64Benchmark by getting {
+                kotlin.srcDir("src/commonBenchmark/kotlin")
+                dependencies {
+                    implementation(libs.kotlinx.benchmark.runtime)
+                }
+            }
+        }
+    }
+}
+
+// kotlinx-benchmark configuration (mirrors :buffer-flow)
+benchmark {
+    targets {
+        register("jvmBenchmark")
+        if (HostManager.hostIsLinux) {
+            register("linuxX64Benchmark")
+        }
+    }
+    configurations {
+        named("main") {
+            warmups = 3
+            iterations = 5
+            iterationTime = 1000
+            iterationTimeUnit = "ms"
+        }
+        register("quick") {
+            warmups = 1
+            iterations = 2
+            iterationTime = 500
+            iterationTimeUnit = "ms"
         }
     }
 }

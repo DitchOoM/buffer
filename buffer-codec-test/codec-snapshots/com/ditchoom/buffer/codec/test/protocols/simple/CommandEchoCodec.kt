@@ -49,6 +49,8 @@ public object CommandEchoCodec : Codec<Command.Echo> {
 
   override fun wireSize(`value`: Command.Echo, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: Command.Echo, context: EncodeContext): Int = 2 + value.msg.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0
     if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData

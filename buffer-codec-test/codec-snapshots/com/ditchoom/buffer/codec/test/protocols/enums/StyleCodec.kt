@@ -38,5 +38,7 @@ public object StyleCodec : Codec<Style> {
     return WireSize.Exact(1 + __colorSize + __prioritySize)
   }
 
+  override fun sizeHint(`value`: Style, context: EncodeContext): Int = 3
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

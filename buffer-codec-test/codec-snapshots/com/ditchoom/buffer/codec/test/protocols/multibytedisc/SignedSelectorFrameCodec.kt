@@ -42,6 +42,11 @@ public object SignedSelectorFrameCodec : Codec<SignedSelectorFrame> {
     is SignedSelectorFrame.Nine -> SignedSelectorFrameNineCodec.wireSize(value, context)
   }
 
+  override fun sizeHint(`value`: SignedSelectorFrame, context: EncodeContext): Int = when (value) {
+    is SignedSelectorFrame.Two -> SignedSelectorFrameTwoCodec.sizeHint(value, context)
+    is SignedSelectorFrame.Nine -> SignedSelectorFrameNineCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 8) return PeekResult.NeedsMoreData
     val __discRawB0 = stream.peekByte(baseOffset + 0).toLong() and 0xFFL

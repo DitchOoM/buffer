@@ -31,5 +31,7 @@ public object RemainingValueClassWithTrailerCodec : Codec<RemainingValueClassWit
 
   override fun wireSize(`value`: RemainingValueClassWithTrailer, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: RemainingValueClassWithTrailer, context: EncodeContext): Int = 5 + value.id.value.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

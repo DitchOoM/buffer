@@ -26,5 +26,7 @@ public object V5UnsubAckReasonCodeNoSubscriptionExistedCodec : Codec<V5UnsubAckR
 
   override fun wireSize(`value`: V5UnsubAckReasonCode.NoSubscriptionExisted, context: EncodeContext): WireSize = WireSize.Exact(1)
 
+  override fun sizeHint(`value`: V5UnsubAckReasonCode.NoSubscriptionExisted, context: EncodeContext): Int = 1
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 1) PeekResult.Complete(1) else PeekResult.NeedsMoreData
 }

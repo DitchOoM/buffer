@@ -53,6 +53,14 @@ public class SimpleGenericFrameCodec<P : Payload>(
     is SimpleGenericFrame.Status -> WireSize.Exact(2)
   }
 
+  override fun sizeHint(`value`: SimpleGenericFrame<P>, context: EncodeContext): Int {
+    @Suppress("UNCHECKED_CAST")
+    return 1 + when (value) {
+      is SimpleGenericFrame.Command<*> -> commandCodec.sizeHint(value as SimpleGenericFrame.Command<P>, context)
+      is SimpleGenericFrame.Status -> SimpleGenericFrameStatusCodec.sizeHint(value, context)
+    }
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF

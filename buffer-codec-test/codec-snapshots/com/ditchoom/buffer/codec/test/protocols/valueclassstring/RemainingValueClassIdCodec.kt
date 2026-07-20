@@ -29,5 +29,7 @@ public object RemainingValueClassIdCodec : Codec<RemainingValueClassId> {
 
   override fun wireSize(`value`: RemainingValueClassId, context: EncodeContext): WireSize = WireSize.BackPatch
 
+  override fun sizeHint(`value`: RemainingValueClassId, context: EncodeContext): Int = 1 + value.id.value.length
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
 }

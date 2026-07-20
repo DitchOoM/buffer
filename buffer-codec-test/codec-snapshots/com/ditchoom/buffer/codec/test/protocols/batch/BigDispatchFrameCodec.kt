@@ -46,6 +46,11 @@ public object BigDispatchFrameCodec : Codec<BigDispatchFrame> {
     is BigDispatchFrame.TypeB -> WireSize.Exact(9)
   }
 
+  override fun sizeHint(`value`: BigDispatchFrame, context: EncodeContext): Int = 1 + when (value) {
+    is BigDispatchFrame.TypeA -> BigDispatchFrameTypeACodec.sizeHint(value, context)
+    is BigDispatchFrame.TypeB -> BigDispatchFrameTypeBCodec.sizeHint(value, context)
+  }
+
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF
