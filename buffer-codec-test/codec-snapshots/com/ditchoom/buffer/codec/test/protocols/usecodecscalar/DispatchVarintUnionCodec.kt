@@ -65,7 +65,12 @@ public object DispatchVarintUnionCodec : Codec<DispatchVarintUnion> {
       }
     }
     is DispatchVarintUnion.Marker -> WireSize.Exact(1)
-    is DispatchVarintUnion.Plain -> WireSize.BackPatch
+    is DispatchVarintUnion.Plain -> {
+      when (val inner = DispatchVarintUnionPlainCodec.wireSize(value, context)) {
+        is WireSize.Exact -> WireSize.Exact(1 + inner.bytes)
+        WireSize.BackPatch -> WireSize.BackPatch
+      }
+    }
   }
 
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {

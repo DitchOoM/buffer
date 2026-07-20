@@ -106,12 +106,28 @@ class LengthPrefixedUseCodecListCodecTest {
     }
 
     @Test
-    fun propertyBagWireSizeIsBackPatch() {
-        // Conservative collapse — runtime-Exact composition is a follow-on.
+    fun propertyBagWireSizeComposesExact() {
+        // The element codec's wireSize is probed per element and the VBI
+        // prefix codec sizes the byte count: empty list = varint(0) alone;
+        // three 5-byte entries = varint(15) + 15.
         assertEquals(
-            WireSize.BackPatch,
+            WireSize.Exact(1),
             PropertyBagFrameCodec.wireSize(
                 PropertyBagFrame(properties = emptyList()),
+                EncodeContext.Empty,
+            ),
+        )
+        assertEquals(
+            WireSize.Exact(1 + 15),
+            PropertyBagFrameCodec.wireSize(
+                PropertyBagFrame(
+                    properties =
+                        listOf(
+                            PropertyEntry(1u, 0x0101u),
+                            PropertyEntry(2u, 0x0202u),
+                            PropertyEntry(3u, 0x0303u),
+                        ),
+                ),
                 EncodeContext.Empty,
             ),
         )

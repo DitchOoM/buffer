@@ -47,9 +47,12 @@ class UseCodecScalarCodecTest {
     }
 
     @Test
-    fun zigZagFrameWireSizeIsBackPatch() {
+    fun zigZagFrameWireSizeComposesUserCodecExact() {
+        // The user codec declares Exact(4); the message-level wireSize probes
+        // it and composes: 4 (id: Int) + 4 (zig-zag body) — no BackPatch
+        // collapse, so encodeToPlatformBuffer allocates exactly once.
         assertEquals(
-            WireSize.BackPatch,
+            WireSize.Exact(8),
             ZigZagFrameCodec.wireSize(ZigZagFrame(id = 1, value = 1u), EncodeContext.Empty),
         )
     }

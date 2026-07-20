@@ -53,7 +53,13 @@ public object Slice15aLengthPrefixedPayloadCodec : Codec<Slice15aLengthPrefixedP
     buffer.position(dataEndPosition)
   }
 
-  override fun wireSize(`value`: Slice15aLengthPrefixedPayload, context: EncodeContext): WireSize = WireSize.BackPatch
+  override fun wireSize(`value`: Slice15aLengthPrefixedPayload, context: EncodeContext): WireSize {
+    val __dataSize = when (val __s = BinaryDataCodec.wireSize(value.data, context)) {
+      is WireSize.Exact -> 2 + __s.bytes
+      WireSize.BackPatch -> return WireSize.BackPatch
+    }
+    return WireSize.Exact(0 + __dataSize)
+  }
 
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0

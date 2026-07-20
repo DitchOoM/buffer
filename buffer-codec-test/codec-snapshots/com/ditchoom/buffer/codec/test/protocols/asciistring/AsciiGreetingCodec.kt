@@ -53,7 +53,13 @@ public object AsciiGreetingCodec : Codec<AsciiGreeting> {
     buffer.position(commandEndPosition)
   }
 
-  override fun wireSize(`value`: AsciiGreeting, context: EncodeContext): WireSize = WireSize.BackPatch
+  override fun wireSize(`value`: AsciiGreeting, context: EncodeContext): WireSize {
+    val __commandSize = when (val __s = AsciiStringCodec.wireSize(value.command, context)) {
+      is WireSize.Exact -> 2 + __s.bytes
+      WireSize.BackPatch -> return WireSize.BackPatch
+    }
+    return WireSize.Exact(0 + __commandSize)
+  }
 
   override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     var __offset = 0

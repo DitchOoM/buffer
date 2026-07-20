@@ -41,35 +41,16 @@ internal fun buildWireSizeFun(
         builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
         return builder.build()
     }
-    // An OPAQUE `@UseCodec val: <scalar>` field's wireSize is unknown to the framework, so
-    // the message collapses to BackPatch. A `VariableLengthCodec`-backed field
-    // (`isVariableLength`) is the exception: it reports `Exact(encodedLength(value))` at
-    // runtime, so a message whose only variable fields are such codecs stays on the
-    // precompute path via the runtime-Exact branch below (just before the terminal `when`).
-    // This subsumes the former sole-varint-value-class special case (#186): a single
-    // variable-length `@UseCodec` scalar (an HTTP/3 frame type wrapping a QUIC varint) now
-    // falls through to that branch, which yields the same `Exact(encodedLength)` the
-    // `@FramedBy`-after-varint emit needs to size its framing header per value.
-    if (shape.fields.any { it is FieldSpec.UseCodecScalar && !it.isVariableLength }) {
-        builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
-        return builder.build()
-    }
-    // `@LengthPrefixed @UseCodec val: List<E>`
-    // wireSize composes the user codec's prefix size with the sum of
-    // element wireSizes. Same conservative BackPatch collapse as the
-    // bare-scalar case — runtime-Exact-via-cast is a follow-on.
-    if (shape.fields.any { it is FieldSpec.LengthPrefixedUseCodecList }) {
-        builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
-        return builder.build()
-    }
-    // `@LengthPrefixed @UseCodec val: T: Payload`
-    // wireSize composes a fixed prefix with the user codec's body size,
-    // which is opaque. Same conservative BackPatch collapse as the
-    // bare-scalar / list cases — runtime-Exact-via-cast is a follow-on.
-    if (shape.fields.any { it is FieldSpec.LengthPrefixedUseCodecPayload }) {
-        builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
-        return builder.build()
-    }
+    // `@UseCodec` field shapes (bare scalar, `@LengthPrefixed` payload,
+    // `@LengthPrefixed` list) are NOT collapsed here: when every other field
+    // is FixedSize they ride the runtime-Exact branch below, which PROBES the
+    // user codec's wireSize per value — `Exact` composes into the precompute
+    // sum, `BackPatch` (the `Codec` interface default) degrades the whole
+    // message at runtime. A user codec that declares its size (e.g.
+    // `AsciiStringCodec`'s `Exact(value.length)`) thus buys the enclosing
+    // message a single exact allocation in `encodeToPlatformBuffer`. Mixed
+    // shapes that don't qualify for the runtime-Exact branch fall to the
+    // conservative guards after it.
     // Bare `val: T: @ProtocolMessage` wireSize
     // delegates to T's codec at runtime (RuntimeExact). Same conservative
     // BackPatch collapse on the parent — promoting to runtime-Exact-via-
@@ -175,12 +156,58 @@ internal fun buildWireSizeFun(
                     )
                 is FieldSpec.CountPrefixedProtocolMessageList ->
                     appendCountListWireSizeLocal(builder, f)
+                is FieldSpec.LengthPrefixedUseCodecPayload -> {
+                    // Fixed-width prefix + probed payload body size.
+                    builder.beginControlFlow(
+                        "val %L = when (val __s = %T.wireSize(value.%L, context))",
+                        "__${f.name}Size",
+                        f.payloadCodecType,
+                        f.name,
+                    )
+                    builder.addStatement("is %T.Exact -> %L + __s.bytes", WIRE_SIZE_CN, f.prefixWidth)
+                    builder.addStatement("%T.BackPatch -> return %T.BackPatch", WIRE_SIZE_CN, WIRE_SIZE_CN)
+                    builder.endControlFlow()
+                }
+                is FieldSpec.LengthPrefixedUseCodecList -> {
+                    // Probed element-size sum + the prefix codec's width for
+                    // that byte count (the VBI prefix is value-dependent).
+                    val bodyBytesVar = "__${f.name}BodyBytes"
+                    appendElementWireSizeProbeLoop(
+                        builder = builder,
+                        listAccessor = "value.${f.name}",
+                        elementCodec = f.spec.elementCodecClassName,
+                        sumVar = bodyBytesVar,
+                    )
+                    builder.beginControlFlow(
+                        "val %L = when (val __p = %T.wireSize(%L.toUInt(), context))",
+                        "__${f.name}Size",
+                        f.spec.codecType,
+                        bodyBytesVar,
+                    )
+                    builder.addStatement("is %T.Exact -> __p.bytes + %L", WIRE_SIZE_CN, bodyBytesVar)
+                    builder.addStatement("%T.BackPatch -> return %T.BackPatch", WIRE_SIZE_CN, WIRE_SIZE_CN)
+                    builder.endControlFlow()
+                }
                 else -> {}
             }
         }
         val sizeTerms = listOf(fixedBytes.toString()) + runtimeExactVarFields.map { "__${it.name}Size" }
         val sumExpr = sizeTerms.joinToString(" + ")
         builder.addStatement("return %T.Exact(%L)", WIRE_SIZE_CN, sumExpr)
+        return builder.build()
+    }
+    // Conservative fallbacks for `@UseCodec` shapes that did NOT qualify for
+    // the runtime-Exact branch (mixed with another variable-width field the
+    // probe sum can't express). The terminal `when` below sums fixed scalar
+    // headers only and would silently under-count these fields, so they must
+    // collapse to BackPatch — the same behavior they had before promotion.
+    if (shape.fields.any {
+            it is FieldSpec.UseCodecScalar ||
+                it is FieldSpec.LengthPrefixedUseCodecList ||
+                it is FieldSpec.LengthPrefixedUseCodecPayload
+        }
+    ) {
+        builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
         return builder.build()
     }
     when (val terminal = shape.fields.lastOrNull()) {
@@ -358,12 +385,19 @@ private fun appendElementWireSizeProbeLoop(
 }
 
 /**
- * A field whose wireSize is known only at runtime but always `Exact`: a
- * `VariableLengthCodec`-backed `@UseCodec` scalar, an enum riding its ordinal
- * as an `UnsignedVarIntCodec` varint, or a `@Count` element-count list (varint
- * element count plus the summed element wireSizes).
+ * A field whose wireSize the runtime-Exact branch can probe per value: an
+ * enum riding its ordinal as an `UnsignedVarIntCodec` varint, a `@Count`
+ * element-count list, or any `@UseCodec` shape (bare scalar, length-prefixed
+ * payload, length-prefixed list). `VariableLengthCodec`-backed scalars always
+ * probe `Exact(encodedLength)`; other user codecs report whatever their
+ * `wireSize` override declares (interface default `BackPatch`, in which case
+ * the probe degrades the message at runtime).
  */
 private fun FieldSpec.isRuntimeExactVar(): Boolean =
     this is FieldSpec.EnumScalar ||
         this is FieldSpec.CountPrefixedProtocolMessageList ||
-        (this is FieldSpec.UseCodecScalar && isVariableLength)
+        this is FieldSpec.UseCodecScalar ||
+        this is FieldSpec.LengthPrefixedUseCodecPayload ||
+        // A known-BackPatch element type would make the probe loop degrade on
+        // every call — let the shape fall to the constant-BackPatch guard.
+        (this is FieldSpec.LengthPrefixedUseCodecList && !spec.elementIsBackPatch)

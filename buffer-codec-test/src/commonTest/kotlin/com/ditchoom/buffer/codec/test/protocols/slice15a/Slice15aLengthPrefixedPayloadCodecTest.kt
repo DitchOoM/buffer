@@ -105,13 +105,14 @@ class Slice15aLengthPrefixedPayloadCodecTest {
     }
 
     @Test
-    fun wireSizeReportsBackPatchForTopLevelMessage() {
-        // The containing message's wireSize collapses to BackPatch
-        // ( parallel of slices 10a/11 — the user codec's body
-        // size is opaque, conservative collapse).
+    fun wireSizeComposesUserCodecExactForTopLevelMessage() {
+        // BinaryDataCodec declares Exact(byteSize()); the message-level
+        // wireSize probes it and composes 2 (Short prefix) + 1 (body byte).
+        // Before the @UseCodec promotion this collapsed to BackPatch.
         val msg = Slice15aLengthPrefixedPayload(data = BinaryData(byteArrayOf(0x42)))
         val ws = Slice15aLengthPrefixedPayloadCodec.wireSize(msg, EncodeContext.Empty)
-        assertIs<WireSize.BackPatch>(ws)
+        assertIs<WireSize.Exact>(ws)
+        assertEquals(3, ws.bytes)
     }
 
     @Test
