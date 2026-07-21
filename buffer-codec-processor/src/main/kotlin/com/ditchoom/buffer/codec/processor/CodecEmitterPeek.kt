@@ -104,7 +104,7 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
     // view to discover the value, then computes total = priorBytes +
     // codec-width + value.toInt() — the user codec does the var-int
     // read against the peek view. Placed BEFORE the
-    // `RemainingBytesProtocolMessageList` / `RemainingBytesPayload`
+    // `RemainingBytesProtocolMessageList` / `DeferredPayload`
     // NoFraming collapses below: a bounding codec gives peek the
     // value-driven byte count that bounds any trailing
     // `@RemainingBytes` body.
@@ -244,7 +244,7 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
     // reads against the caller-set limit; 's outer
     // dispatcher will own peek by reading the fixed header's
     // remaining-length first.
-    if (shape.fields.any { it is FieldSpec.RemainingBytesPayload }) {
+    if (shape.fields.any { it is FieldSpec.DeferredPayload }) {
         builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
         return builder.build()
     }
@@ -838,9 +838,9 @@ internal fun appendSequentialPeek(
                     "CountPrefixedProtocolMessageList should be handled by buildPeekFrameFun's " +
                         "upfront NoFraming short-circuit before reaching the sequential walk.",
                 )
-            is FieldSpec.RemainingBytesPayload ->
+            is FieldSpec.DeferredPayload ->
                 error(
-                    "RemainingBytesPayload should be handled by buildPeekFrameFun's " +
+                    "DeferredPayload should be handled by buildPeekFrameFun's " +
                         "upfront NoFraming short-circuit before reaching the sequential walk.",
                 )
             is FieldSpec.RemainingBytesString ->

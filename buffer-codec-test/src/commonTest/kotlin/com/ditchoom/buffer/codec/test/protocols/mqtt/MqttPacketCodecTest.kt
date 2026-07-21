@@ -535,7 +535,7 @@ class MqttPacketCodecTest {
     fun roundTripsPublishVariantViaDispatcherAtQos1() {
         // The integration test — Publish<P> routes through
         // the dispatcher's generic class with the supplied payload
-        // codec. Confirms @RemainingLength + RemainingBytesPayload
+        // codec. Confirms @RemainingLength + DeferredPayload
         // composition lifts the carve-out correctly. Run
         // at QoS=1 (header byte 0x32) so the packetId slot is on the
         // wire and round-trips through the dispatcher.

@@ -295,7 +295,7 @@ internal data class CodecShape(
     /**
      * When the @ProtocolMessage data class
      * carries a `<P : Payload>` type parameter and a
-     * `RemainingBytesPayload` field whose source is
+     * `DeferredPayload` field whose source is
      * `ConstructorInjected`, this is the type-parameter name
      * (`P`) and the constructor-injected codec parameter name
      * (`payloadCodec`). When non-null, the emitter generates
@@ -643,7 +643,7 @@ internal sealed interface FieldSpec {
      * `@RemainingBytes val: String` — UTF-8 string consuming the rest of the
      * buffer. Decode reads `buffer.readString(buffer.remaining(), Charset.UTF8)`;
      * encode writes the value's UTF-8 bytes. Same caller-bounds-buffer contract
-     * as [RemainingBytesPayload]: an outer dispatcher
+     * as [DeferredPayload]: an outer dispatcher
      * sets `buffer.limit()` before this codec runs.
      *
      * Terminal-only (must be the last non-conditional field). The annotation
@@ -671,14 +671,23 @@ internal sealed interface FieldSpec {
     ) : FieldSpec
 
     /**
-     * `@RemainingBytes @UseCodec(C::class) val:
-     * P` where `P` extends `com.ditchoom.buffer.codec.Payload` and
-     * `C` is a Kotlin `object` implementing `Codec<P>`. Decode
-     * delegates to `C.decode(buffer, context)` against the bounded
-     * buffer; encode delegates to `C.encode(buffer, value.<name>,
-     * context)`. Caller-bounds-buffer contract: an outer dispatcher
-     * (for example MQTT) sets `buffer.limit` to bound the
-     * payload region before this codec runs.
+     * A payload field whose decode is *deferred* to a `Codec<P>` the
+     * generated codec does not itself own — either a user `object`
+     * named by `@UseCodec(C::class)` or a codec injected through the
+     * constructor for a `<P : Payload>` type parameter (see
+     * [PayloadCodecSource]). The generated codec's only job is to hand
+     * that codec a correctly bounded region.
+     *
+     * Today the region is always "the rest of the bounded buffer":
+     * `@RemainingBytes @UseCodec(C::class) val: P` where `P` extends
+     * `com.ditchoom.buffer.codec.Payload`. Decode delegates to
+     * `C.decode(buffer, context)` against the bounded buffer; encode
+     * delegates to `C.encode(buffer, value.<name>, context)`.
+     * Caller-bounds-buffer contract: an outer dispatcher (for example
+     * MQTT) sets `buffer.limit` to bound the payload region before this
+     * codec runs. Issue #293 widens the shape to a payload sized by a
+     * sibling length field (`@LengthFrom`), which is why the spec is
+     * named for the deferral rather than for `@RemainingBytes`.
      *
      * Narrow: terminal-only (no fields after the
      * payload), no generics on the outer message,
@@ -688,7 +697,7 @@ internal sealed interface FieldSpec {
      * across platforms (single-platform `object`
      * declaration only).
      */
-    data class RemainingBytesPayload(
+    data class DeferredPayload(
         override val name: String,
         val ownerSimpleName: String,
         val payloadType: TypeName,
@@ -1269,7 +1278,7 @@ internal sealed interface LengthSource {
 
 /**
  * Typed source of a `Codec<T>` instance for a
- * `RemainingBytesPayload` field. Mirrors the `LengthSource`
+ * `DeferredPayload` field. Mirrors the `LengthSource`
  * pattern (doctrine #2: no nullable fields representing form
  * distinction; the type system enforces exhaustive `when`).
  *

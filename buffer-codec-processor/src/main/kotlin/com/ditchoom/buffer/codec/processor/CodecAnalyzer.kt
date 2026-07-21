@@ -222,7 +222,7 @@ internal fun analyze(symbol: KSClassDeclaration): AnalysisResult {
         ) {
             return AnalysisResult.NotApplicable
         }
-        if (field is FieldSpec.RemainingBytesPayload &&
+        if (field is FieldSpec.DeferredPayload &&
             index != fields.lastIndex &&
             !trailingFieldsAreFixedSize(fields, index)
         ) {
@@ -251,7 +251,7 @@ internal fun analyze(symbol: KSClassDeclaration): AnalysisResult {
                     field.copy(reservedTrailingBytes = reserved)
                 is FieldSpec.RemainingBytesProtocolMessageList ->
                     field.copy(reservedTrailingBytes = reserved)
-                is FieldSpec.RemainingBytesPayload ->
+                is FieldSpec.DeferredPayload ->
                     field.copy(reservedTrailingBytes = reserved)
                 else -> field
             }
@@ -259,7 +259,7 @@ internal fun analyze(symbol: KSClassDeclaration): AnalysisResult {
 
     val pkg = symbol.packageName.asString()
     // If the data class declares <P: Payload> but no
-    // RemainingBytesPayload field uses it via ConstructorInjected,
+    // DeferredPayload field uses it via ConstructorInjected,
     // the type parameter is unused — return null so the emitter
     // skips. The validator in ProtocolMessageProcessor surfaces
     // the user-facing diagnostic.
@@ -270,7 +270,7 @@ internal fun analyze(symbol: KSClassDeclaration): AnalysisResult {
     // is a true silent gap → Rejected (loud in the next pass).
     if (payloadTypeParameter != null &&
         fields.none { f ->
-            f is FieldSpec.RemainingBytesPayload &&
+            f is FieldSpec.DeferredPayload &&
                 f.source is PayloadCodecSource.ConstructorInjected
         }
     ) {
@@ -576,10 +576,10 @@ internal fun analyzeField(
         // is expected and composes via the Partial
         // outer-limit machinery).
         // `@RemainingBytes @UseCodec val: P` where
-        // P : Payload routes to RemainingBytesPayload.
+        // P : Payload routes to DeferredPayload.
         // `@RemainingBytes val: P` where P is the
         // type parameter `<P : Payload>` of the enclosing data class
-        // routes to RemainingBytesPayload via ConstructorInjected.
+        // routes to DeferredPayload via ConstructorInjected.
         if (lengthFromAnn != null || lengthPrefixed != null || wireBytesAnn != null) {
             return FieldAnalysis.Err(
                 Diagnostic(
@@ -593,11 +593,11 @@ internal fun analyzeField(
             // self-contained value, or a non-`Payload` borrowed view whose
             // codec opts in via `ViewCodec` (the zero-copy escape — see
             // [implementsViewCodec]).
-            return analyzeRemainingBytesPayloadField(param, type, useCodecAnn, ownerSimpleName)
+            return analyzeDeferredPayloadField(param, type, useCodecAnn, ownerSimpleName)
         }
         if (useCodecAnn == null && payloadTypeParameter != null && type.matchesTypeParameter(payloadTypeParameter)) {
             return FieldAnalysis.Ok(
-                FieldSpec.RemainingBytesPayload(
+                FieldSpec.DeferredPayload(
                     name = name,
                     ownerSimpleName = ownerSimpleName,
                     payloadType = TypeVariableName(payloadTypeParameter.typeVariableName),
@@ -1688,7 +1688,7 @@ internal fun analyzeEnumField(
  * doesn't implement `Codec<P>`); the validator surfaces the
  * user-facing diagnostic.
  */
-internal fun analyzeRemainingBytesPayloadField(
+internal fun analyzeDeferredPayloadField(
     param: KSValueParameter,
     type: KSType,
     useCodecAnn: KSAnnotation,
@@ -1715,7 +1715,7 @@ internal fun analyzeRemainingBytesPayloadField(
     val codecPkg = codecDecl.packageName.asString()
     val codecSimple = codecDecl.simpleName.asString()
     return FieldAnalysis.Ok(
-        FieldSpec.RemainingBytesPayload(
+        FieldSpec.DeferredPayload(
             name = name,
             ownerSimpleName = ownerSimpleName,
             payloadType = classNameOf(payloadDecl),
@@ -1947,7 +1947,7 @@ internal fun analyzeLengthPrefixedListSpec(
  *  - `@When` (`Conditional` field shape, row 19),
  *  - `@RemainingBytes` (variable-bounded body),
  *  - `@UseCodec` (user codec wireSize is opaque, conservatively
- *    BackPatch — covers `UseCodecScalar`, `RemainingBytesPayload`,
+ *    BackPatch — covers `UseCodecScalar`, `DeferredPayload`,
  *    `LengthPrefixedUseCodecList`),
  *  - `@Count` (the nested list's own elements may probe to BackPatch
  *    at runtime, so the enclosing element can't be assumed Exact),
@@ -2016,7 +2016,7 @@ internal fun detectElementBackPatch(elementDecl: KSClassDeclaration): Boolean {
  * Does this type implement
  * `com.ditchoom.buffer.codec.Payload`? Used in `analyzeField` to
  * route `@RemainingBytes @UseCodec` on a Payload-typed field to
- * `RemainingBytesPayload` (the analyzer falls through to other
+ * `DeferredPayload` (the analyzer falls through to other
  * shapes when this returns false).
  */
 internal fun KSType.implementsPayload(): Boolean {
@@ -3231,9 +3231,9 @@ internal fun classifyVariantWireSize(shape: CodecShape): VariantWireSize {
     // wireSize per the buildWireSizeFun early-return rule.
     if (shape.fields.any { it is FieldSpec.RemainingBytesString }) return VariantWireSize.BackPatch
     // Same BackPatch classification — variant codec's own
-    // wireSize is BackPatch (see buildWireSizeFun's RemainingBytesPayload
+    // wireSize is BackPatch (see buildWireSizeFun's DeferredPayload
     // early-return); the dispatcher must skip the runtime-Exact cast.
-    if (shape.fields.any { it is FieldSpec.RemainingBytesPayload }) return VariantWireSize.BackPatch
+    if (shape.fields.any { it is FieldSpec.DeferredPayload }) return VariantWireSize.BackPatch
     // `@UseCodec` shapes (bare scalar, `@LengthPrefixed` payload/list) are
     // RuntimeExact: the variant codec's wireSize probes the user codec per
     // value (Exact composes, BackPatch degrades), and the dispatcher's
@@ -3324,9 +3324,9 @@ internal fun classifyVariantWireSize(shape: CodecShape): VariantWireSize {
         is FieldSpec.LengthPrefixedString, is FieldSpec.Conditional -> VariantWireSize.BackPatch
         // Handled by the upfront BackPatch short-circuit; this
         // branch is unreachable because the early return collapses any
-        // shape carrying a RemainingBytesPayload field before the
+        // shape carrying a DeferredPayload field before the
         // terminal-shape `when` runs.
-        is FieldSpec.RemainingBytesPayload -> VariantWireSize.BackPatch
+        is FieldSpec.DeferredPayload -> VariantWireSize.BackPatch
         // Both cases handled upfront — a non-VariableLengthCodec `@UseCodec` scalar by the BackPatch
         // short-circuit, a VariableLengthCodec one by the RuntimeExact early-return. This defensive
         // branch is unreachable; it keeps the `when` exhaustive (BackPatch is the conservative arm).

@@ -135,8 +135,8 @@ contract):
 | `@LengthFrom("sibling.property")` dotted value-class-property form | `LengthSource.ValueClassProperty`; HTTP/2 SETTINGS |
 | `@RemainingBytes val: String` (or value class over `String`) | `RemainingBytesString` |
 | `@RemainingBytes val: @ProtocolMessage` bare, or `List<@ProtocolMessage>` | `RemainingBytesProtocolMessageList` |
-| `@RemainingBytes @UseCodec(Codec) val: P : Payload` | `RemainingBytesPayload`; `BinaryData` |
-| `@RemainingBytes val: P` (generic `<P : Payload>`) | `RemainingBytesPayload` with `PayloadCodecSource.ConstructorInjected` |
+| `@RemainingBytes @UseCodec(Codec) val: P : Payload` | `DeferredPayload`; `BinaryData` |
+| `@RemainingBytes val: P` (generic `<P : Payload>`) | `DeferredPayload` with `PayloadCodecSource.ConstructorInjected` |
 | `@Count val: List<@ProtocolMessage>` (varint element count, non-terminal) | `CountPrefixedProtocolMessageList` |
 | `@When(sibling: Boolean) val: T?` — scalar / value-class scalar / string / `@ProtocolMessage` / `@UseCodec` inner | `Conditional` + `ConditionalInner.*` |
 | `@When("sibling.property → Boolean)` dotted form | `ConditionRef.ValueClassProperty`; MQTT `MqttFixedHeader.qosGreaterThanZero` |

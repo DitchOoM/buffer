@@ -388,7 +388,7 @@ class CodecSchemaDescriptorTest {
             FieldSpec.ProtocolMessageScalar("nested", "Owner", cn, codec),
             FieldSpec.UseCodecScalar("v", "Owner", cn, codec, isBounding = false, isVariableLength = true),
             FieldSpec.RemainingBytesString("rest", "Owner", reservedTrailingBytes = 0),
-            FieldSpec.RemainingBytesPayload("payload", "Owner", cn, PayloadCodecSource.UserCodecObject(codec), 0),
+            FieldSpec.DeferredPayload("payload", "Owner", cn, PayloadCodecSource.UserCodecObject(codec), 0),
             FieldSpec.LengthPrefixedUseCodecList("props", "Owner", listSpec),
             FieldSpec.LengthPrefixedUseCodecPayload("blob", "Owner", cn, codec, 2, Endianness.Big),
             FieldSpec.RemainingBytesProtocolMessageList("topics", "Owner", cn, codec, elementIsBackPatch = false),

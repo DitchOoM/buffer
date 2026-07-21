@@ -607,7 +607,7 @@ internal class CodecEmitter(
      * `class FooCodec<P : Payload>(private val payloadCodec: Codec<P>)
      *  : Codec<Foo<P>>`
      * for shapes whose data class declares a `<P : Payload>` type
-     * parameter and a corresponding `RemainingBytesPayload` field with
+     * parameter and a corresponding `DeferredPayload` field with
      * `ConstructorInjected` source.
      */
     private fun buildGenericCodecTypeSpec(
@@ -775,7 +775,7 @@ internal class CodecEmitter(
                 appendDecodeRemainingBytesProtocolMessageList(body, field)
             is FieldSpec.CountPrefixedProtocolMessageList ->
                 appendDecodeCountPrefixedProtocolMessageList(body, field)
-            is FieldSpec.RemainingBytesPayload -> appendDecodeRemainingBytesPayload(body, field)
+            is FieldSpec.DeferredPayload -> appendDecodeDeferredPayload(body, field)
             is FieldSpec.RemainingBytesString -> appendDecodeRemainingBytesString(body, field)
             is FieldSpec.UseCodecScalar -> appendDecodeUseCodecScalar(body, field)
             is FieldSpec.LengthPrefixedUseCodecList -> appendDecodeLengthPrefixedUseCodecList(body, field)
@@ -860,7 +860,7 @@ internal class CodecEmitter(
                 appendEncodeRemainingBytesProtocolMessageList(body, field)
             is FieldSpec.CountPrefixedProtocolMessageList ->
                 appendEncodeCountPrefixedProtocolMessageList(body, field)
-            is FieldSpec.RemainingBytesPayload -> appendEncodeRemainingBytesPayload(body, field)
+            is FieldSpec.DeferredPayload -> appendEncodeDeferredPayload(body, field)
             is FieldSpec.RemainingBytesString -> appendEncodeRemainingBytesString(body, field)
             is FieldSpec.UseCodecScalar -> appendEncodeUseCodecScalar(body, field, shape)
             is FieldSpec.LengthPrefixedUseCodecList -> appendEncodeLengthPrefixedUseCodecList(body, field)
@@ -1390,7 +1390,7 @@ internal class CodecEmitter(
 
     /**
      * Gate for emitting the `Partial` decode pattern. Partial is emitted
-     * only when [FieldSpec.RemainingBytesPayload] is the *last* field of
+     * only when [FieldSpec.DeferredPayload] is the *last* field of
      * the shape. The Partial flow is the streaming-style "decode the
      * header now, defer the payload" contract — meaningful only when the
      * payload is genuinely trailing (e.g. `MqttPacket.Publish<P>`, v3/v5
@@ -1407,7 +1407,7 @@ internal class CodecEmitter(
      * and restoring on completion — no consumer-visible API change versus
      * the unbounded path.
      *
-     * Non-terminal payload (issue #168): when [FieldSpec.RemainingBytesPayload]
+     * Non-terminal payload (issue #168): when [FieldSpec.DeferredPayload]
      * is followed only by fixed-size trailers (e.g. a `checksum: UShort` after
      * `@RemainingBytes val payload: P`), Partial still applies — `partial(...)`
      * reads the header *and* the trailer eagerly (the payload's wire extent is
@@ -1419,7 +1419,7 @@ internal class CodecEmitter(
      * scope here), so those shapes fall back to normal decode/encode.
      */
     private fun shouldEmitPartial(shape: CodecShape): Boolean {
-        val payloadIndex = shape.fields.indexOfFirst { it is FieldSpec.RemainingBytesPayload }
+        val payloadIndex = shape.fields.indexOfFirst { it is FieldSpec.DeferredPayload }
         if (payloadIndex < 0) return false
         val trailing = shape.fields.subList(payloadIndex + 1, shape.fields.size)
         // Terminal payload — the original streaming-defer shape.
@@ -1466,8 +1466,8 @@ internal class CodecEmitter(
     ): TypeSpec {
         val payloadIndex = shape.payloadFieldIndex()
         val payloadField =
-            (shape.fields.getOrNull(payloadIndex) as? FieldSpec.RemainingBytesPayload)
-                ?: error("buildPartialClassTypeSpec called for shape without a RemainingBytesPayload")
+            (shape.fields.getOrNull(payloadIndex) as? FieldSpec.DeferredPayload)
+                ?: error("buildPartialClassTypeSpec called for shape without a DeferredPayload")
         // Fields before the payload (decoded eagerly in `partial`) and the
         // fixed-size trailer after it (also decoded eagerly — non-terminal
         // payload, issue #168). For the terminal shape `afterFields` is empty
@@ -1575,7 +1575,7 @@ internal class CodecEmitter(
     private fun buildPartialCompleteFun(
         shape: CodecShape,
         payloadTypeParameter: PayloadTypeParameter?,
-        payloadField: FieldSpec.RemainingBytesPayload,
+        payloadField: FieldSpec.DeferredPayload,
         hasBoundingField: Boolean,
         nonTerminal: Boolean = false,
     ): FunSpec {
@@ -1660,7 +1660,7 @@ internal class CodecEmitter(
      * surrounding generic codec class).
      *
      * The body decodes every header field (everything before the
-     * trailing `RemainingBytesPayload`), then constructs the nested
+     * trailing `DeferredPayload`), then constructs the nested
      * `Partial` capturing the buffer + context. The header decode
      * statements are the same `appendDecodeField` emit used by the
      * full `decode(...)` — Partial differs only in stopping before
@@ -1672,7 +1672,7 @@ internal class CodecEmitter(
         payloadTypeParameter: PayloadTypeParameter?,
     ): FunSpec {
         val payloadIndex = shape.payloadFieldIndex()
-        val payloadField = shape.fields[payloadIndex] as FieldSpec.RemainingBytesPayload
+        val payloadField = shape.fields[payloadIndex] as FieldSpec.DeferredPayload
         val beforeFields = shape.fields.subList(0, payloadIndex)
         val afterFields = shape.fields.subList(payloadIndex + 1, shape.fields.size)
         val nonTerminal = afterFields.isNotEmpty()
@@ -1792,7 +1792,7 @@ internal class CodecEmitter(
      * field on the `Partial` class. The `Partial` mirrors the data
      * class's header fields with their original Kotlin types, so this
      * map is a closed mirror of `FieldSpec`'s shape-to-type mapping.
-     * The trailing `RemainingBytesPayload` field is never asked for
+     * The trailing `DeferredPayload` field is never asked for
      * (it's stripped by `headerFields = shape.fields.dropLast(1)` at
      * every call site).
      */
@@ -1809,26 +1809,26 @@ internal class CodecEmitter(
                 ClassName("kotlin.collections", "List").parameterizedBy(field.elementClassName)
             is FieldSpec.CountPrefixedProtocolMessageList ->
                 // Self-delimiting, so a `@Count` list may sit as a non-terminal
-                // header field ahead of a trailing RemainingBytesPayload; map it
+                // header field ahead of a trailing DeferredPayload; map it
                 // to its `List<Element>` Kotlin type (mirror of LengthFromList).
                 ClassName("kotlin.collections", "List").parameterizedBy(field.elementClassName)
             is FieldSpec.RemainingBytesProtocolMessageList ->
                 error(
                     "partialFieldTypeName called on a RemainingBytesProtocolMessageList field — " +
                         "this shape is terminal-only and the Partial decode pattern only fires " +
-                        "for shapes with a trailing RemainingBytesPayload. The two shapes are " +
+                        "for shapes with a trailing DeferredPayload. The two shapes are " +
                         "mutually exclusive at the terminal slot, so this branch is unreachable.",
                 )
-            is FieldSpec.RemainingBytesPayload ->
+            is FieldSpec.DeferredPayload ->
                 error(
-                    "partialFieldTypeName called on a RemainingBytesPayload field — caller " +
+                    "partialFieldTypeName called on a DeferredPayload field — caller " +
                         "should strip the payload field before mapping header types.",
                 )
             is FieldSpec.RemainingBytesString ->
                 error(
                     "partialFieldTypeName called on a RemainingBytesString field — this shape " +
                         "is terminal-only and the Partial decode pattern only fires for shapes " +
-                        "with a trailing RemainingBytesPayload. The two are mutually exclusive " +
+                        "with a trailing DeferredPayload. The two are mutually exclusive " +
                         "at the terminal slot, so this branch is unreachable.",
                 )
             is FieldSpec.UseCodecScalar -> field.fieldType
@@ -1842,8 +1842,8 @@ internal class CodecEmitter(
         }
 }
 
-/** Index of the (single) `RemainingBytesPayload` field, or -1. */
-private fun CodecShape.payloadFieldIndex(): Int = fields.indexOfFirst { it is FieldSpec.RemainingBytesPayload }
+/** Index of the (single) `DeferredPayload` field, or -1. */
+private fun CodecShape.payloadFieldIndex(): Int = fields.indexOfFirst { it is FieldSpec.DeferredPayload }
 
 /**
  * Emits the framed-body truncation guard between the framing codec's `decode`

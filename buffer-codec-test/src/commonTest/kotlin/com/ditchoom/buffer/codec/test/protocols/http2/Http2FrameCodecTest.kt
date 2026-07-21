@@ -546,7 +546,7 @@ class Http2FrameCodecTest {
     @Test
     fun dataVariantWireSizeForwardsToVariantCodec() {
         // The dispatcher's wireSize forwards to the variant codec,
-        // which is BackPatch for any RemainingBytesPayload-bearing
+        // which is BackPatch for any DeferredPayload-bearing
         // shape. Confirms the generic dispatcher's wireSize path
         // correctly routes through the constructed variant codec
         // instance (not a static reference).

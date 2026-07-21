@@ -128,7 +128,7 @@ internal object CodecSchemaDescriptor {
                     "bounding=${field.isBounding} variable=${field.isVariableLength}"
             is FieldSpec.RemainingBytesString ->
                 "string remaining reserved=${field.reservedTrailingBytes}B"
-            is FieldSpec.RemainingBytesPayload ->
+            is FieldSpec.DeferredPayload ->
                 "payload:${field.payloadType} remaining " +
                     "codec=${describePayloadCodecSource(field.source)} " +
                     "reserved=${field.reservedTrailingBytes}B"

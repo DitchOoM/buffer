@@ -39,7 +39,7 @@ internal fun buildWireSizeFun(
     // unconditionally — promoting to runtime-Exact-via-cast (mirroring
     // LengthPrefixedMessage) is a follow-on once we have a vector
     // where the size optimization actually matters.
-    if (shape.fields.any { it is FieldSpec.RemainingBytesPayload }) {
+    if (shape.fields.any { it is FieldSpec.DeferredPayload }) {
         builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
         return builder.build()
     }
@@ -295,9 +295,9 @@ internal fun buildWireSizeFun(
                 bodySizeVar,
             )
         }
-        is FieldSpec.RemainingBytesPayload ->
+        is FieldSpec.DeferredPayload ->
             error(
-                "RemainingBytesPayload terminal shape should be handled by the BackPatch " +
+                "DeferredPayload terminal shape should be handled by the BackPatch " +
                     "early-return at the top of buildWireSizeFun; reaching this branch " +
                     "indicates a missed early return.",
             )

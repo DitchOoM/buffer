@@ -1556,9 +1556,9 @@ internal fun appendEncodeLengthFromMessage(
  * as the other `@RemainingBytes` shapes. The outer dispatcher (slice
  * 10d for MQTT) sets the limit before calling this codec.
  */
-internal fun appendDecodeRemainingBytesPayload(
+internal fun appendDecodeDeferredPayload(
     body: CodeBlock.Builder,
-    field: FieldSpec.RemainingBytesPayload,
+    field: FieldSpec.DeferredPayload,
 ) {
     if (field.reservedTrailingBytes == 0) {
         body.addStatement(
@@ -1568,7 +1568,7 @@ internal fun appendDecodeRemainingBytesPayload(
         )
         return
     }
-    // Non-terminal RemainingBytesPayload. Narrow the
+    // Non-terminal DeferredPayload. Narrow the
     // buffer's limit to leave the trailing FixedSize fields in the
     // outer-limit region; restore the outer limit in a try/finally
     // so the trailing field emits run against the original limit.
@@ -1594,9 +1594,9 @@ internal fun appendDecodeRemainingBytesPayload(
  * buffer's current position and the trust contract (row 16) leaves
  * total-byte-count consistency to the outer dispatcher.
  */
-internal fun appendEncodeRemainingBytesPayload(
+internal fun appendEncodeDeferredPayload(
     body: CodeBlock.Builder,
-    field: FieldSpec.RemainingBytesPayload,
+    field: FieldSpec.DeferredPayload,
 ) {
     body.addStatement(
         "%L.encode(buffer, value.%L, context)",
@@ -1610,7 +1610,7 @@ internal fun appendEncodeRemainingBytesPayload(
  * position to `buffer.limit()`. The caller (or an outer dispatcher) is
  * responsible for narrowing `buffer.limit()` to the bounded extent before
  * invoking decode; same caller-bounds-buffer contract as
- * [appendDecodeRemainingBytesPayload].
+ * [appendDecodeDeferredPayload].
  */
 internal fun appendDecodeRemainingBytesString(
     body: CodeBlock.Builder,
