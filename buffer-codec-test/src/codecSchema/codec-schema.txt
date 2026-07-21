@@ -126,11 +126,21 @@ message com.ditchoom.buffer.codec.test.protocols.boundary.BoundaryDisp.Named
 message com.ditchoom.buffer.codec.test.protocols.boundary.BoundaryHost
   0 host string len-prefix=2B/Default
   1 disp msg:com.ditchoom.buffer.codec.test.protocols.boundary.BoundaryDisp
+message com.ditchoom.buffer.codec.test.protocols.boundary.HonestHost
+  0 kind scalar:Byte wire=1B order=Default
+  1 inner msg:com.ditchoom.buffer.codec.test.protocols.boundary.HonestInner len-prefix=2B/Default
+message com.ditchoom.buffer.codec.test.protocols.boundary.HonestInner
+  0 v codec:com.ditchoom.buffer.codec.test.protocols.boundary.HonestSizeCodec bounding=false variable=false
 message com.ditchoom.buffer.codec.test.protocols.boundary.LpByteWrappedTail
   0 body msg:com.ditchoom.buffer.codec.test.protocols.boundary.WrappedLabel len-prefix=1B/Default
 message com.ditchoom.buffer.codec.test.protocols.boundary.LpWrappedTail
   0 kind scalar:Byte wire=1B order=Default
   1 body msg:com.ditchoom.buffer.codec.test.protocols.boundary.WrappedLabel len-prefix=2B/Default
+message com.ditchoom.buffer.codec.test.protocols.boundary.MisdeclaredHost
+  0 kind scalar:Byte wire=1B order=Default
+  1 inner msg:com.ditchoom.buffer.codec.test.protocols.boundary.MisdeclaredInner len-prefix=2B/Default
+message com.ditchoom.buffer.codec.test.protocols.boundary.MisdeclaredInner
+  0 v codec:com.ditchoom.buffer.codec.test.protocols.boundary.MisdeclaredSizeCodec bounding=false variable=false
 message com.ditchoom.buffer.codec.test.protocols.boundary.WithVid
   0 pad string len-prefix=2B/Default
   1 id string len-prefix=2B/Default

@@ -47,7 +47,11 @@ public object LpWrappedTailCodec : Codec<LpWrappedTail> {
         val bodyPrefix = bodyByteCount.toUInt()
         buffer.writeUByte(((bodyPrefix shr 8) and 0xFFu).toUByte())
         buffer.writeUByte((bodyPrefix and 0xFFu).toUByte())
+        val bodyBodyStart = buffer.position()
         WrappedLabelCodec.encode(buffer, value.body, context)
+        if (buffer.position() - bodyBodyStart != bodyByteCount) {
+          throw EncodeException(fieldPath = "LpWrappedTail.body", reason = """wireSize declared ${bodyByteCount} bytes but encode wrote ${buffer.position() - bodyBodyStart} — the codec's wireSize and encode disagree""")
+        }
       }
       WireSize.BackPatch -> {
         val bodySizePosition = buffer.position()
