@@ -83,6 +83,9 @@ public object Http2SettingsFrameCodec : Codec<Http2SettingsFrame> {
       throw DecodeException(fieldPath = "Http2SettingsFrame.entries", bufferPosition = -1, expected = "@LengthFrom source <= ${'$'}{Int.MAX_VALUE}", actual = length.toString())
     }
     val entriesBytes = length.toInt()
+    if (entriesBytes < 0 || entriesBytes > Int.MAX_VALUE - __offset) {
+      throw DecodeException(fieldPath = "Http2SettingsFrame.entries", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + entriesBytes.toLong()}""")
+    }
     if (stream.available() - baseOffset < __offset + entriesBytes) return PeekResult.NeedsMoreData
     __offset += entriesBytes
     return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData
