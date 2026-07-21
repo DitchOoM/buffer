@@ -377,6 +377,7 @@ class CodecSchemaDescriptorTest {
     private val samplePayloadExtents: List<PayloadExtent> =
         listOf(
             PayloadExtent.ToLimit(0),
+            PayloadExtent.Sibling(LengthSource.Sibling("len", ScalarKind.UShort)),
         )
 
     /** A payload field that varies only in [extent] — the fixture for the distinctness check. */

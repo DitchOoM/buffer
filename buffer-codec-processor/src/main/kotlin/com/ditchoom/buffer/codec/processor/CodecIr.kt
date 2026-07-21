@@ -1351,6 +1351,27 @@ internal sealed interface PayloadExtent {
          */
         val reservedTrailingBytes: Int = 0,
     ) : PayloadExtent
+
+    /**
+     * `@LengthFrom("n") val: P` — the region is exactly the `n` bytes
+     * named by a prior sibling field (issue #293). The payload is told
+     * its extent outright, which is what makes the shape framable: peek
+     * can walk the sibling and add its value without running the
+     * deferred codec, so `peekFrameSize` returns a real byte count
+     * instead of collapsing the message to `NoFraming`.
+     *
+     * Unlike [ToLimit] this does not require the payload to be terminal
+     * or to reserve trailing bytes — the bound is explicit, so ordinary
+     * fields may follow it.
+     *
+     * The [source] mirrors `LengthFromString` / `LengthFromList` /
+     * `LengthFromMessage`, so the same sibling forms are accepted (a
+     * peekable unsigned scalar, or a `value class` property returning
+     * `Int`) and the same peek walker applies.
+     */
+    data class Sibling(
+        val source: LengthSource,
+    ) : PayloadExtent
 }
 
 /**

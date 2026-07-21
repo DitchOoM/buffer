@@ -180,6 +180,30 @@ message com.ditchoom.buffer.codec.test.protocols.count.CountThenTrailer
   1 trailer scalar:UInt wire=4B order=Big
 message com.ditchoom.buffer.codec.test.protocols.count.CountVariableList
   0 names list:com.ditchoom.buffer.codec.test.protocols.count.CountNamed count-prefixed
+message com.ditchoom.buffer.codec.test.protocols.deferredpayload.ShortReadFrame
+  0 payloadLength scalar:UShort wire=2B order=Default
+  1 payload payload:com.ditchoom.buffer.codec.test.protocols.payload.TextPayload len-from=sibling:payloadLength codec=com.ditchoom.buffer.codec.test.protocols.deferredpayload.ShortReadPayloadCodec
+message com.ditchoom.buffer.codec.test.protocols.deferredpayload.SmpFrame
+  0 op scalar:UByte wire=1B order=Default
+  1 flags scalar:UByte wire=1B order=Default
+  2 payloadLength scalar:UShort wire=2B order=Default
+  3 group scalar:UShort wire=2B order=Default
+  4 sequence scalar:UByte wire=1B order=Default
+  5 commandId scalar:UByte wire=1B order=Default
+  6 payload payload:com.ditchoom.buffer.codec.test.protocols.payload.TextPayload len-from=sibling:payloadLength codec=com.ditchoom.buffer.codec.test.protocols.payload.TextPayloadCodec
+message com.ditchoom.buffer.codec.test.protocols.deferredpayload.SmpFrameWithTrailer
+  0 payloadLength scalar:UShort wire=2B order=Default
+  1 payload payload:com.ditchoom.buffer.codec.test.protocols.payload.TextPayload len-from=sibling:payloadLength codec=com.ditchoom.buffer.codec.test.protocols.payload.TextPayloadCodec
+  2 checksum scalar:UShort wire=2B order=Default
+  3 note string len-prefix=2B/Default
+message com.ditchoom.buffer.codec.test.protocols.deferredpayload.SmpGenericFrame
+  0 op scalar:UByte wire=1B order=Default
+  1 flags scalar:UByte wire=1B order=Default
+  2 payloadLength scalar:UShort wire=2B order=Default
+  3 group scalar:UShort wire=2B order=Default
+  4 sequence scalar:UByte wire=1B order=Default
+  5 commandId scalar:UByte wire=1B order=Default
+  6 payload payload:P len-from=sibling:payloadLength codec=injected:payloadCodec
 message com.ditchoom.buffer.codec.test.protocols.dns.DnsHeader
   0 id scalar:UShort wire=2B order=Big
   1 flags scalar:UShort wire=2B order=Big

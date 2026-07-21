@@ -139,6 +139,14 @@ internal object CodecSchemaDescriptor {
                         "payload:${field.payloadType} remaining " +
                             "codec=${describePayloadCodecSource(field.source)} " +
                             "reserved=${extent.reservedTrailingBytes}B"
+                    // Mirrors the `len-from=` token the other @LengthFrom shapes use.
+                    // Deliberately shares no tokens with the ToLimit arm: swapping
+                    // @RemainingBytes for @LengthFrom must read as drift even though
+                    // the bytes can coincide, because the named sibling becomes
+                    // load-bearing for framing the moment the payload reads it.
+                    is PayloadExtent.Sibling ->
+                        "payload:${field.payloadType} len-from=${describeLengthSource(extent.source)} " +
+                            "codec=${describePayloadCodecSource(field.source)}"
                 }
             is FieldSpec.LengthPrefixedUseCodecList ->
                 "list:${field.elementClassName.canonicalName} len-prefix-codec=${field.codecType.canonicalName}"

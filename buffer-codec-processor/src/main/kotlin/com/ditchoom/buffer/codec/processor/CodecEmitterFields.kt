@@ -1561,6 +1561,7 @@ internal fun appendDecodeDeferredPayload(
 ) {
     when (val extent = field.extent) {
         is PayloadExtent.ToLimit -> appendDecodeDeferredPayloadToLimit(body, field, extent)
+        is PayloadExtent.Sibling -> appendDecodeDeferredPayloadSibling(body, field, extent)
     }
 }
 
@@ -1604,12 +1605,87 @@ private fun appendDecodeDeferredPayloadToLimit(
 }
 
 /**
+ * (issue #293) — emit decode for `@LengthFrom("n") val: P`, the
+ * sibling-sized deferred payload. Union of
+ * [appendDecodeLengthFromMessage]'s bound (sibling → `setLimit`, outer
+ * limit restored in a `finally`) and [appendDecodeDeferredPayloadToLimit]'s
+ * delegation to a codec the generated code does not own.
+ *
+ * Adds one thing neither parent has: a strict-consumption check. The
+ * bound tells us exactly where the payload ends, so a codec that stops
+ * short has desynchronised the stream for every field after it. The
+ * `@LengthFrom @ProtocolMessage` path can trust-and-restore instead
+ * because its codec is generated from the same schema; a runtime-supplied
+ * `Codec<P>` is arbitrary user code and gets no such benefit of the
+ * doubt. Over-reading is already impossible — the narrowed limit stops it.
+ *
+ * Generated shape:
+ * ```
+ * <Int.MAX_VALUE guard for the sibling kind, if needed>
+ * val <name>Bytes = <sibling>.toInt()
+ * val <name>OuterLimit = buffer.limit()
+ * val <name>End = buffer.position() + <name>Bytes
+ * buffer.setLimit(<name>End)
+ * val <name> = try {
+ *     <codec>.decode(buffer, context)
+ * } finally {
+ *     buffer.setLimit(<name>OuterLimit)
+ * }
+ * if (buffer.position() != <name>End) throw DecodeException(...)
+ * ```
+ */
+private fun appendDecodeDeferredPayloadSibling(
+    body: CodeBlock.Builder,
+    field: FieldSpec.DeferredPayload,
+    extent: PayloadExtent.Sibling,
+) {
+    if (extent.source is LengthSource.Sibling) {
+        appendLengthFromIntMaxGuard(
+            body = body,
+            siblingAccessor = extent.source.siblingName,
+            siblingKind = extent.source.siblingKind,
+            ownerSimpleName = field.ownerSimpleName,
+            fieldName = field.name,
+        )
+    }
+    val bytesVar = "${field.name}Bytes"
+    val outerLimitVar = "${field.name}OuterLimit"
+    val endVar = "${field.name}End"
+    body.addStatement("val %L = %L", bytesVar, extent.source.decodeAccessor())
+    body.addStatement("val %L = buffer.limit()", outerLimitVar)
+    body.addStatement("val %L = buffer.position() + %L", endVar, bytesVar)
+    body.addStatement("buffer.setLimit(%L)", endVar)
+    body.beginControlFlow("val %L = try", field.name)
+    body.addStatement("%L.decode(buffer, context)", field.source.codecReceiver())
+    body.nextControlFlow("finally")
+    body.addStatement("buffer.setLimit(%L)", outerLimitVar)
+    body.endControlFlow()
+    body.beginControlFlow("if (buffer.position() != %L)", endVar)
+    body.addStatement(
+        "throw %T(\n  fieldPath = %S,\n  bufferPosition = buffer.position(),\n" +
+            "  expected = \"the payload codec to consume all \" + %L + \" bytes\",\n" +
+            "  actual = (%L - buffer.position()).toString() + \" bytes left unread\",\n)",
+        DECODE_EXCEPTION_CN,
+        "${field.ownerSimpleName}.${field.name}",
+        bytesVar,
+        endVar,
+    )
+    body.endControlFlow()
+}
+
+/**
  * Emit encode for
  * `@RemainingBytes @UseCodec(C::class) val: P`. Delegates to the
  * user-supplied `C.encode(buffer, value.<name>, context)`. No length
  * carrier on the wire — the user codec writes its bytes against the
  * buffer's current position and the trust contract (row 16) leaves
  * total-byte-count consistency to the outer dispatcher.
+ *
+ * Shared by both extents. Under [PayloadExtent.Sibling] the length
+ * carrier is an ordinary prior field encoded by its own emit step, so
+ * the same row-16 trust contract as `@LengthFrom @ProtocolMessage`
+ * applies: keeping `value.<sibling>` consistent with the bytes the
+ * payload codec writes is the caller's job.
  */
 internal fun appendEncodeDeferredPayload(
     body: CodeBlock.Builder,

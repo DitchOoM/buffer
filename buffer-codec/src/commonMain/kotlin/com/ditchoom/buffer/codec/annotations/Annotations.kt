@@ -294,6 +294,21 @@ annotation class RemainingBytes
  * )
  * ```
  *
+ * ## Bound field types
+ *
+ * `String` (or a value class over `String`), `List<T>` where `T` is a
+ * `@ProtocolMessage` data class, a nested `@ProtocolMessage` data class or
+ * sealed parent, or a **deferred payload** — either
+ * `@UseCodec(C::class) val: P` where `P : Payload`, or the enclosing
+ * message's `<P : Payload>` type parameter, decoded by the
+ * constructor-injected codec. See [UseCodec] for the payload forms.
+ *
+ * The payload form is the framable alternative to [RemainingBytes]: both hand
+ * a bounded region to a codec the generated code does not own, but
+ * `@LengthFrom` takes the bound from the wire instead of from the caller's
+ * buffer limit, so `peekFrameSize` can size the frame and the payload need not
+ * be the last field.
+ *
  * @param field The name of the sibling field that holds the byte length.
  *   Must exist, come before this field, and resolve to either a
  *   non-nullable numeric scalar (`Byte`/`Short`/`Int`/`Long`/`UByte`/
@@ -552,12 +567,20 @@ annotation class When(
  * ```kotlin
  * @ProtocolMessage
  * data class ImageFrame(
- *     val bitmapLength: Int,
+ *     val bitmapLength: UShort,
  *     @UseCodec(PngBitmapCodec::class) @LengthFrom("bitmapLength") val bitmap: ImageBitmap,
  * )
- * // Generated: narrow buffer.limit() by bitmapLength.toInt(), call PngBitmapCodec.decode,
+ * // ImageBitmap : Payload; PngBitmapCodec is an object implementing Codec<ImageBitmap>.
+ * // Generated: narrow buffer.limit() to bitmapLength bytes, call PngBitmapCodec.decode,
  * // restore the outer limit on finally.
  * ```
+ *
+ * Unlike [RemainingBytes], the byte count is on the wire, so this shape stays
+ * framable: `peekFrameSize` walks the sibling and reports the total without
+ * running your codec. The codec **must consume its whole region** — stopping
+ * short desynchronises every field after it, so decode throws
+ * [com.ditchoom.buffer.codec.DecodeException] rather than continuing at the
+ * wrong offset.
  *
  * ## Extension pattern — ship your own per-charset / per-format codec
  *

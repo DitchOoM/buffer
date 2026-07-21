@@ -239,12 +239,17 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
         builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
         return builder.build()
     }
-    // Same NoFraming collapse for `@RemainingBytes
-    // @UseCodec val: P`. Body byte count is whatever the user codec
-    // reads against the caller-set limit; 's outer
-    // dispatcher will own peek by reading the fixed header's
-    // remaining-length first.
-    if (shape.fields.any { it is FieldSpec.DeferredPayload }) {
+    // Same NoFraming collapse for `@RemainingBytes @UseCodec val: P`. Body
+    // byte count is whatever the user codec reads against the caller-set
+    // limit; the outer dispatcher will own peek by reading the fixed
+    // header's remaining-length first.
+    //
+    // Extent-aware since #293: this collapse is a property of the *bound*,
+    // not of the payload being codec-deferred. A `@LengthFrom` payload
+    // states its byte count in a sibling the walk can read, so it frames
+    // exactly like `LengthFromString` / `LengthFromMessage` and is handled
+    // in the sequential walk below.
+    if (shape.fields.any { it is FieldSpec.DeferredPayload && it.extent is PayloadExtent.ToLimit }) {
         builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
         return builder.build()
     }
@@ -839,10 +844,24 @@ internal fun appendSequentialPeek(
                         "upfront NoFraming short-circuit before reaching the sequential walk.",
                 )
             is FieldSpec.DeferredPayload ->
-                error(
-                    "DeferredPayload should be handled by buildPeekFrameFun's " +
-                        "upfront NoFraming short-circuit before reaching the sequential walk.",
-                )
+                when (val extent = field.extent) {
+                    is PayloadExtent.ToLimit ->
+                        error(
+                            "A to-limit DeferredPayload should be handled by buildPeekFrameFun's " +
+                                "upfront NoFraming short-circuit before reaching the sequential walk.",
+                        )
+                    // (issue #293) Peek shape identical to LengthFromString /
+                    // LengthFromMessage: the sibling states the body byte count,
+                    // and peek never runs the deferred codec — so what the codec
+                    // would do with those bytes is irrelevant to framing.
+                    is PayloadExtent.Sibling ->
+                        appendSequentialPeekLengthFrom(
+                            body = body,
+                            name = field.name,
+                            ownerSimpleName = field.ownerSimpleName,
+                            source = extent.source,
+                        )
+                }
             is FieldSpec.RemainingBytesString ->
                 error(
                     "RemainingBytesString should be handled by buildPeekFrameFun's " +
@@ -918,6 +937,14 @@ internal fun collectPeekStashSources(shape: CodecShape): Set<String> {
             is FieldSpec.LengthFromString -> sources += field.source.siblingName
             is FieldSpec.LengthFromList -> sources += field.source.siblingName
             is FieldSpec.LengthFromMessage -> sources += field.source.siblingName
+            // (issue #293) A sibling-sized payload reads its length carrier in
+            // peek exactly like the other @LengthFrom shapes, so the carrier has
+            // to be stashed. A to-limit payload reads no sibling at all.
+            is FieldSpec.DeferredPayload ->
+                when (val extent = field.extent) {
+                    is PayloadExtent.Sibling -> sources += extent.source.siblingName
+                    is PayloadExtent.ToLimit -> {}
+                }
             else -> { /* not a source */ }
         }
     }

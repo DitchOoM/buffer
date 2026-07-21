@@ -1421,6 +1421,19 @@ internal class CodecEmitter(
     private fun shouldEmitPartial(shape: CodecShape): Boolean {
         val payloadIndex = shape.fields.indexOfFirst { it is FieldSpec.DeferredPayload }
         if (payloadIndex < 0) return false
+        // A sibling-sized payload (#293) does not get Partial yet. Nothing about
+        // the shape forbids it — `complete()` would recompute the bound from the
+        // length carrier, which `partial()` has already decoded and exposed as a
+        // header `val`, needing no new Partial state. What is unresolved is how
+        // that recomputed bound composes with the *other* bounds Partial already
+        // juggles (`@FramedBy`, a bounding `@UseCodec` field, the eager trailer
+        // seek), and getting that wrong desynchronises a stream rather than
+        // failing loudly. Deliberately deferred rather than guessed; these shapes
+        // fall back to normal decode/encode, which is fully supported. Framing —
+        // the actual ask in #293 — comes from peekFrameSize and is unaffected.
+        if ((shape.fields[payloadIndex] as FieldSpec.DeferredPayload).extent is PayloadExtent.Sibling) {
+            return false
+        }
         val trailing = shape.fields.subList(payloadIndex + 1, shape.fields.size)
         // Terminal payload — the original streaming-defer shape.
         if (trailing.isEmpty()) return true
@@ -1704,13 +1717,18 @@ internal class CodecEmitter(
             // by `shouldEmitPartial`, so no framing/bounding handling here.
             appendDecodeFields(body, beforeFields)
             body.addStatement("val __payloadStart = buffer.position()")
-            // A non-terminal payload is a to-limit extent by construction: the
-            // reservation is what makes the end computable without decoding.
-            // A sibling-sized extent (#293 phase 4) derives its end from the
-            // already-decoded header instead, with no new Partial state.
+            // A non-terminal payload here is a to-limit extent: the reservation is
+            // what makes the end computable without decoding. Sibling extents are
+            // turned away by `shouldEmitPartial` (see the note there), so this is
+            // the only arm the Partial emit can reach.
             val reservedTrailingBytes =
                 when (val extent = payloadField.extent) {
                     is PayloadExtent.ToLimit -> extent.reservedTrailingBytes
+                    is PayloadExtent.Sibling ->
+                        error(
+                            "Partial decode reached a sibling-sized payload — shouldEmitPartial " +
+                                "gates these out, so the Partial class should never have been emitted.",
+                        )
                 }
             body.addStatement("val __payloadEnd = buffer.limit() - %L", reservedTrailingBytes)
             body.addStatement("buffer.position(__payloadEnd)")

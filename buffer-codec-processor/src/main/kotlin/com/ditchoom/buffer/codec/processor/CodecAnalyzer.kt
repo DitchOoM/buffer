@@ -222,7 +222,13 @@ internal fun analyze(symbol: KSClassDeclaration): AnalysisResult {
         ) {
             return AnalysisResult.NotApplicable
         }
-        if (field is FieldSpec.DeferredPayload &&
+        // Only a to-limit payload is position-constrained. Its end is
+        // `limit - <fixed trailer bytes>`, so a variable-size trailer would
+        // leave it with no way to know where it stops. A sibling-sized payload
+        // (#293) is told its byte count outright, so anything may follow it.
+        val isToLimitPayload =
+            field is FieldSpec.DeferredPayload && field.extent is PayloadExtent.ToLimit
+        if (isToLimitPayload &&
             index != fields.lastIndex &&
             !trailingFieldsAreFixedSize(fields, index)
         ) {
@@ -254,10 +260,13 @@ internal fun analyze(symbol: KSClassDeclaration): AnalysisResult {
                 is FieldSpec.DeferredPayload ->
                     when (field.extent) {
                         // Only a to-limit payload needs a reservation — it is how
-                        // the payload learns where it ends. A sibling-sized extent
-                        // (#293 phase 3) already knows, so it keeps its own extent.
+                        // the payload learns where it ends.
                         is PayloadExtent.ToLimit ->
                             field.copy(extent = PayloadExtent.ToLimit(reserved))
+                        // A sibling states the byte count outright, so the payload
+                        // already knows where it ends and trailing fields need no
+                        // reservation carved out for them.
+                        is PayloadExtent.Sibling -> field
                     }
                 else -> field
             }
@@ -599,7 +608,13 @@ internal fun analyzeField(
             // self-contained value, or a non-`Payload` borrowed view whose
             // codec opts in via `ViewCodec` (the zero-copy escape — see
             // [implementsViewCodec]).
-            return analyzeDeferredPayloadField(param, type, useCodecAnn, ownerSimpleName)
+            return analyzeDeferredPayloadField(
+                param,
+                type,
+                useCodecAnn,
+                ownerSimpleName,
+                extent = PayloadExtent.ToLimit(),
+            )
         }
         if (useCodecAnn == null && payloadTypeParameter != null && type.matchesTypeParameter(payloadTypeParameter)) {
             return FieldAnalysis.Ok(
@@ -669,6 +684,23 @@ internal fun analyzeField(
                 Diagnostic("@LengthFrom cannot be combined with @LengthPrefixed/@WireBytes", param),
             )
         }
+        //   - a deferred payload sized by the sibling (issue #293), either
+        //     `@LengthFrom("n") @UseCodec(C) val: P` or `@LengthFrom("n")
+        //     val: P` for the enclosing class's `<P : Payload>` parameter.
+        // Routed BEFORE the `when (typeQname)` below: a type parameter has no
+        // useful `qualifiedName`, so `P` would fall through to the
+        // nested-@ProtocolMessage arm and be rejected there for not carrying
+        // `@ProtocolMessage`.
+        analyzeLengthFromDeferredPayloadField(
+            param = param,
+            type = type,
+            lengthFromAnn = lengthFromAnn,
+            useCodecAnn = useCodecAnn,
+            ownerSimpleName = ownerSimpleName,
+            payloadTypeParameter = payloadTypeParameter,
+            params = params,
+            index = index,
+        )?.let { return it }
         val typeQname = type.declaration.qualifiedName?.asString()
         return when (typeQname) {
             "kotlin.String" ->
@@ -1688,18 +1720,22 @@ internal fun analyzeEnumField(
 }
 
 /**
- * `@RemainingBytes @UseCodec(C::class) val: P`
- * where `P` extends `com.ditchoom.buffer.codec.Payload` and `C` is
- * a Kotlin `object` implementing `Codec<P>`. Returns null silently
- * for shapes the validator rejects (target not an `object`, target
- * doesn't implement `Codec<P>`); the validator surfaces the
- * user-facing diagnostic.
+ * `@UseCodec(C::class) val: P` where `P` extends
+ * `com.ditchoom.buffer.codec.Payload` and `C` is a Kotlin `object`
+ * implementing `Codec<P>`. The caller supplies the [extent] — this
+ * resolves only the codec source, so the same routine serves
+ * `@RemainingBytes` (to-limit) and `@LengthFrom` (sibling-sized).
+ *
+ * Returns null silently for shapes the validator rejects (target not an
+ * `object`, target doesn't implement `Codec<P>`); the validator surfaces
+ * the user-facing diagnostic.
  */
 internal fun analyzeDeferredPayloadField(
     param: KSValueParameter,
     type: KSType,
     useCodecAnn: KSAnnotation,
     ownerSimpleName: String,
+    extent: PayloadExtent,
 ): FieldAnalysis {
     val name =
         param.name?.asString() ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
@@ -1727,7 +1763,70 @@ internal fun analyzeDeferredPayloadField(
             ownerSimpleName = ownerSimpleName,
             payloadType = classNameOf(payloadDecl),
             source = PayloadCodecSource.UserCodecObject(ClassName(codecPkg, codecSimple)),
-            extent = PayloadExtent.ToLimit(),
+            extent = extent,
+        ),
+    )
+}
+
+/**
+ * `@LengthFrom("n") @UseCodec(C) val: P` and `@LengthFrom("n") val: P`
+ * (issue #293) — a deferred payload whose region is the `n` bytes named
+ * by a prior sibling rather than the rest of the caller-bounded buffer.
+ * Both [PayloadCodecSource] forms are accepted; the extent is what is
+ * new here, so the two axes are resolved independently and combined.
+ *
+ * Returns null when the field is not a deferred-payload shape at all,
+ * letting `analyzeField` fall through to the String / List /
+ * nested-message `@LengthFrom` arms. Returns `Err` only once the shape
+ * has been *recognised* and something about it is wrong, so a real
+ * mistake is never silently reinterpreted as some other shape.
+ */
+@Suppress("ReturnCount") // guard-clause validity checks, consistent with the analyze* family
+internal fun analyzeLengthFromDeferredPayloadField(
+    param: KSValueParameter,
+    type: KSType,
+    lengthFromAnn: KSAnnotation,
+    useCodecAnn: KSAnnotation?,
+    ownerSimpleName: String,
+    payloadTypeParameter: PayloadTypeParameter?,
+    params: List<KSValueParameter>,
+    index: Int,
+): FieldAnalysis? {
+    // Mirrors the `@RemainingBytes` routing: a `Payload` (or a borrowed
+    // view whose codec opts in via `ViewCodec`) named by `@UseCodec`, or
+    // the enclosing message's `<P : Payload>` parameter resolved through
+    // the constructor-injected codec.
+    val userCodecAnn = useCodecAnn?.takeIf { type.implementsPayload() || param.hasViewUseCodec() }
+    val injected =
+        payloadTypeParameter?.takeIf { useCodecAnn == null && type.matchesTypeParameter(it) }
+    if (userCodecAnn == null && injected == null) return null
+
+    val referenced =
+        lengthFromAnn.arguments
+            .firstOrNull { it.name?.asString() == "field" }
+            ?.value as? String
+            ?: return FieldAnalysis.Err(Diagnostic("@LengthFrom is missing its field argument", param))
+    val source =
+        analyzeLengthSource(referenced, params, index)
+            ?: return FieldAnalysis.Err(
+                Diagnostic("@LengthFrom(\"$referenced\") does not resolve to a supported length carrier", param),
+            )
+    val extent = PayloadExtent.Sibling(source)
+
+    if (userCodecAnn != null) {
+        return analyzeDeferredPayloadField(param, type, userCodecAnn, ownerSimpleName, extent)
+    }
+    // Injected form — `injected` is non-null by the guard above.
+    val binding = injected ?: return null
+    val name =
+        param.name?.asString() ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
+    return FieldAnalysis.Ok(
+        FieldSpec.DeferredPayload(
+            name = name,
+            ownerSimpleName = ownerSimpleName,
+            payloadType = TypeVariableName(binding.typeVariableName),
+            source = PayloadCodecSource.ConstructorInjected(binding.codecParameterName),
+            extent = extent,
         ),
     )
 }

@@ -135,8 +135,10 @@ contract):
 | `@LengthFrom("sibling.property")` dotted value-class-property form | `LengthSource.ValueClassProperty`; HTTP/2 SETTINGS |
 | `@RemainingBytes val: String` (or value class over `String`) | `RemainingBytesString` |
 | `@RemainingBytes val: @ProtocolMessage` bare, or `List<@ProtocolMessage>` | `RemainingBytesProtocolMessageList` |
-| `@RemainingBytes @UseCodec(Codec) val: P : Payload` | `DeferredPayload`; `BinaryData` |
-| `@RemainingBytes val: P` (generic `<P : Payload>`) | `DeferredPayload` with `PayloadCodecSource.ConstructorInjected` |
+| `@RemainingBytes @UseCodec(Codec) val: P : Payload` | `DeferredPayload` + `PayloadExtent.ToLimit`; `BinaryData` |
+| `@RemainingBytes val: P` (generic `<P : Payload>`) | `DeferredPayload` + `ToLimit` with `PayloadCodecSource.ConstructorInjected` |
+| `@LengthFrom(sibling) @UseCodec(Codec) val: P : Payload` | `DeferredPayload` + `PayloadExtent.Sibling`; `deferredpayload/SmpFrame` (#293) |
+| `@LengthFrom(sibling) val: P` (generic `<P : Payload>`) | `DeferredPayload` + `Sibling` with `ConstructorInjected`; `deferredpayload/SmpGenericFrame` (#293) |
 | `@Count val: List<@ProtocolMessage>` (varint element count, non-terminal) | `CountPrefixedProtocolMessageList` |
 | `@When(sibling: Boolean) val: T?` — scalar / value-class scalar / string / `@ProtocolMessage` / `@UseCodec` inner | `Conditional` + `ConditionalInner.*` |
 | `@When("sibling.property → Boolean)` dotted form | `ConditionRef.ValueClassProperty`; MQTT `MqttFixedHeader.qosGreaterThanZero` |
@@ -161,7 +163,7 @@ Diagnostics live in `ProtocolMessageProcessor.kt` (`validate*`) and `CodecAnalyz
 | `@RemainingBytes` primitive array | "Primitive array element types … : Payload with a hand-written Codec<T>" — `validateRemainingBytesElementType` |
 | `@LengthFrom` bad bound type / sibling declared at-or-after / non-numeric sibling / dotted-property not value class / property not Int | `validateLengthFrom` (message family begins "@LengthFrom(…") |
 | `@When` on a non-nullable type / non-Boolean source / source declared at-or-after / dotted-property not value class or not Boolean / malformed grammar-2 | `validateWhen` |
-| `@UseCodec` composed with `@LengthFrom` | "@UseCodec … composed with `@LengthFrom` is not yet supported … deferred to a future release" — `validateUseCodec` |
+| `@UseCodec` composed with `@LengthFrom` on a non-`Payload`, non-`ViewCodec` bound type | "@LengthFrom @UseCodec … requires the bound field's type to extend `Payload`" — `validateUseCodec` |
 | `@UseCodec` target not a Kotlin `object` / not implementing `Codec<T>` | `validateUseCodec` |
 | `Payload` field without `@UseCodec` / `@RemainingBytes @UseCodec` on a non-`Payload` type | "Payload field requires @UseCodec" — `validateUseCodec` |
 | `@LengthPrefixed @UseCodec` codec not `BoundingLengthCodec<UInt>` / List element not `@ProtocolMessage` / element carrying `<P : Payload>` | `validateLengthPrefixedUseCodec` |
