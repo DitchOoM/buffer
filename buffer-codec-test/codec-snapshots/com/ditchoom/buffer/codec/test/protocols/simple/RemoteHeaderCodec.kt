@@ -5,6 +5,7 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
+import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
@@ -47,6 +48,9 @@ public object RemoteHeaderCodec : Codec<RemoteHeader> {
     if (stream.available() - baseOffset < __offset + 4) return PeekResult.NeedsMoreData
     __offset += 4
     val payloadBytes = payloadLength.toInt()
+    if (payloadBytes < 0 || payloadBytes > Int.MAX_VALUE - __offset) {
+      throw DecodeException(fieldPath = "RemoteHeader.payload", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + payloadBytes.toLong()}""")
+    }
     if (stream.available() - baseOffset < __offset + payloadBytes) return PeekResult.NeedsMoreData
     __offset += payloadBytes
     return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData

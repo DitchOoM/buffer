@@ -1003,6 +1003,23 @@ internal fun appendSequentialPeekLengthFrom(
         name,
         source.decodeAccessor(),
     )
+    // `__offset + <name>Bytes` below must not overflow: the sibling carries a
+    // wire-supplied number, and `appendLengthFromIntMaxGuard` bounds it against
+    // `Int.MAX_VALUE` alone — which still overflows once a non-zero `__offset`
+    // is added, yielding a negative `PeekResult.Complete`. Signed and
+    // value-class-property sources can also deliver a negative count outright,
+    // which no upstream guard rejects. Same shape and message convention as
+    // `appendSequentialPeekLengthPrefixed`'s guard.
+    val bytesVar = "${name}Bytes"
+    body.beginControlFlow("if (%L < 0 || %L > Int.MAX_VALUE - __offset)", bytesVar, bytesVar)
+    body.addStatement(
+        "throw %T(fieldPath = %S, bufferPosition = baseOffset + __offset, expected = %S, actual = %P)",
+        DECODE_EXCEPTION_CN,
+        "$ownerSimpleName.$name",
+        "__offset + @LengthFrom source in 0..\${Int.MAX_VALUE}",
+        "\${__offset.toLong() + $bytesVar.toLong()}",
+    )
+    body.endControlFlow()
     body.addStatement(
         "if (stream.available() - baseOffset < __offset + %LBytes) return %T.NeedsMoreData",
         name,

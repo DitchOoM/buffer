@@ -66,6 +66,9 @@ public object TlsHandshakeCodec : Codec<TlsHandshake> {
       throw DecodeException(fieldPath = "TlsHandshake.body", bufferPosition = -1, expected = "@LengthFrom source <= ${'$'}{Int.MAX_VALUE}", actual = length.toString())
     }
     val bodyBytes = length.toInt()
+    if (bodyBytes < 0 || bodyBytes > Int.MAX_VALUE - __offset) {
+      throw DecodeException(fieldPath = "TlsHandshake.body", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + bodyBytes.toLong()}""")
+    }
     if (stream.available() - baseOffset < __offset + bodyBytes) return PeekResult.NeedsMoreData
     __offset += bodyBytes
     return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData

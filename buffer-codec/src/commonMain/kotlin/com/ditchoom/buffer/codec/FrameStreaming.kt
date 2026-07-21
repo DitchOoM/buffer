@@ -86,21 +86,35 @@ private fun grownCapacityOrRethrow(
  * bytes, then decodes exactly that many via [StreamProcessor.readBufferScoped] so the sliced frame
  * is released back to the pool after [Decoder.decode] returns.
  *
+ * The declared frame size is checked against [MaxFrameBytesKey] (defaulting to
+ * [DEFAULT_MAX_FRAME_BYTES]) before any bytes are sliced. This is the only bound on how much a
+ * streaming loop will accumulate: a peer that declares a frame far larger than it intends to send
+ * would otherwise have the caller buffer transport bytes indefinitely, waiting for a frame that
+ * never completes. The check rejects non-positive sizes for the same reason — a codec whose
+ * `peekFrameSize` arithmetic overflowed must not reach [StreamProcessor.readBufferScoped].
+ *
  * @throws IllegalStateException if this codec does not participate in frame detection
  *   ([PeekResult.NoFraming]) — i.e. its wire format has no determinable frame size. Such a codec
  *   cannot drive a streaming loop; frame it explicitly (e.g. a length prefix) instead.
+ * @throws FrameTooLargeException if the declared frame size exceeds the ceiling in effect or is
+ *   not a positive byte count.
  */
 public fun <T> Codec<T>.readFrame(
     stream: StreamProcessor,
     context: DecodeContext = DecodeContext.Empty,
 ): T? =
     when (val peek = peekFrameSize(stream)) {
-        is PeekResult.Complete ->
+        is PeekResult.Complete -> {
+            val maxFrameBytes = context[MaxFrameBytesKey] ?: DEFAULT_MAX_FRAME_BYTES
+            if (peek.bytes !in 1..maxFrameBytes) {
+                throw FrameTooLargeException(declaredBytes = peek.bytes, maxBytes = maxFrameBytes)
+            }
             if (stream.available() < peek.bytes) {
                 null
             } else {
                 stream.readBufferScoped(peek.bytes) { decode(this, context) }
             }
+        }
         PeekResult.NeedsMoreData -> null
         PeekResult.NoFraming ->
             throw IllegalStateException(
