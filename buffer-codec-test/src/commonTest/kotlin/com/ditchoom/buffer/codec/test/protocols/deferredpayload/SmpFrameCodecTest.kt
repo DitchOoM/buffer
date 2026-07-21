@@ -308,6 +308,68 @@ class SmpFrameCodecTest {
         assertEquals("ShortReadFrame.payload", failure.fieldPath)
     }
 
+    // ---- sealed-variant shape (issue #168's second example) ---------------
+
+    /**
+     * A sibling-sized payload inside a **sealed variant**, not a top-level data
+     * class — the `Frame.Command` shape from issue #168, which is the other
+     * message #293 migrates. Exercises the dispatcher path: variant codec,
+     * variant `Partial`, and discriminator-composed framing.
+     */
+    @Test
+    fun sealedVariantRoundTripsAndFrames() {
+        val pool = BufferPool()
+        val codec = DeferredDispatchFrameCodec(TextPayloadCodec)
+        val original =
+            DeferredDispatchFrame.Command(
+                counter = 1u,
+                payloadLength = 2u,
+                payload = TextPayload("hi"),
+                checksum = 0xBEEFu,
+            )
+        val encoded = buildBuffer { codec.encode(it, original, EncodeContext.Empty) }
+        encoded.resetForRead()
+        val totalBytes = encoded.remaining()
+        // 1 discriminator + 2 counter + 2 length + 2 payload + 2 checksum
+        assertEquals(9, totalBytes)
+
+        val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
+        try {
+            stream.append(encoded)
+            // The dispatcher frames by reading the discriminator and delegating to
+            // the variant's peek — no payload codec involved.
+            assertEquals(PeekResult.Complete(totalBytes), codec.peekFrameSize(stream))
+            val decoded =
+                stream.readBufferScoped(totalBytes) { codec.decode(this, DecodeContext.Empty) }
+            assertEquals(original, decoded)
+        } finally {
+            stream.release()
+            pool.clear()
+        }
+    }
+
+    /** The variant keeps its `Partial` — the capability #168/#171 established. */
+    @Test
+    fun sealedVariantStillEmitsPartial() {
+        val original =
+            DeferredDispatchFrame.Command(
+                counter = 7u,
+                payloadLength = 3u,
+                payload = TextPayload("abc"),
+                checksum = 0x1234u,
+            )
+        val buf =
+            buildBuffer {
+                DeferredDispatchFrameCommandCodec(TextPayloadCodec).encode(it, original, EncodeContext.Empty)
+            }
+        buf.resetForRead()
+
+        val partial = DeferredDispatchFrameCommandCodec.partial<TextPayload>(buf, DecodeContext.Empty)
+        assertEquals(7u.toUShort(), partial.counter, "header readable before choosing a payload codec")
+        assertEquals(0x1234u.toUShort(), partial.checksum, "trailer read eagerly, past the payload")
+        assertEquals(original, partial.complete(TextPayloadCodec))
+    }
+
     private fun frameFor(payload: TextPayload) =
         SmpFrame(
             op = 0u,

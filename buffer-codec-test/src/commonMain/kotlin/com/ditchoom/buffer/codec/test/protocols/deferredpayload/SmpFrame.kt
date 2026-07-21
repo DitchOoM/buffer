@@ -10,6 +10,7 @@ import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.annotations.LengthFrom
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
+import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.UseCodec
 import com.ditchoom.buffer.codec.test.protocols.payload.TextPayload
@@ -136,3 +137,44 @@ data class ShortReadFrame(
     @UseCodec(ShortReadPayloadCodec::class)
     val payload: TextPayload,
 )
+
+/**
+ * The reporter's *second* shape from issue #168, migrated to `@LengthFrom`.
+ *
+ * #168 asked why `Partial` was generated for `SmpPacket` but not for a sealed
+ * `Frame` whose variants carry `counter` / `length` / payload / `checksum`;
+ * #171 answered it by allowing a non-terminal payload with fixed-size
+ * trailers. That shape is the other half of what #293 migrates, so it gets a
+ * fixture: a sealed variant — not a top-level data class — with a
+ * sibling-sized generic payload and a trailer after it.
+ *
+ * Declared with a generic parent (`<out P : Payload>`), which is the form the
+ * processor supports; the raw non-generic parent in #168's original snippet is
+ * rejected by `validateGenericPayloadVariantShape` (issue #176).
+ *
+ * ```text
+ * Command<TextPayload>(counter=1, payloadLength=2, payload="hi", checksum=0xBEEF):
+ *   0A            @PacketType discriminator (consumed by the dispatcher)
+ *   00 01         counter
+ *   00 02         payloadLength
+ *   68 69         payload, exactly payloadLength bytes
+ *   BE EF         checksum
+ * ```
+ */
+@ProtocolMessage
+sealed interface DeferredDispatchFrame<out P : Payload> {
+    @ProtocolMessage
+    @PacketType(0x0A)
+    data class Command<P : Payload>(
+        val counter: UShort,
+        val payloadLength: UShort,
+        @LengthFrom("payloadLength") val payload: P,
+        val checksum: UShort,
+    ) : DeferredDispatchFrame<P>
+
+    @ProtocolMessage
+    @PacketType(0xA0)
+    data class Status(
+        val code: UByte,
+    ) : DeferredDispatchFrame<Nothing>
+}
