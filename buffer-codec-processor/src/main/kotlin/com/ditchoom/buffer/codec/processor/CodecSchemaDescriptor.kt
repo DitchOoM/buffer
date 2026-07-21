@@ -129,9 +129,17 @@ internal object CodecSchemaDescriptor {
             is FieldSpec.RemainingBytesString ->
                 "string remaining reserved=${field.reservedTrailingBytes}B"
             is FieldSpec.DeferredPayload ->
-                "payload:${field.payloadType} remaining " +
-                    "codec=${describePayloadCodecSource(field.source)} " +
-                    "reserved=${field.reservedTrailingBytes}B"
+                // Exhaustive over PayloadExtent: the extent is wire-significant,
+                // so each arm spells out its own token layout rather than sharing
+                // one. `remaining`/`reserved=` are the historical tokens and must
+                // stay exactly where they are — moving them is drift on every
+                // message that already carries this shape.
+                when (val extent = field.extent) {
+                    is PayloadExtent.ToLimit ->
+                        "payload:${field.payloadType} remaining " +
+                            "codec=${describePayloadCodecSource(field.source)} " +
+                            "reserved=${extent.reservedTrailingBytes}B"
+                }
             is FieldSpec.LengthPrefixedUseCodecList ->
                 "list:${field.elementClassName.canonicalName} len-prefix-codec=${field.codecType.canonicalName}"
             is FieldSpec.LengthPrefixedUseCodecPayload ->

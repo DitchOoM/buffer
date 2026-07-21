@@ -1704,7 +1704,15 @@ internal class CodecEmitter(
             // by `shouldEmitPartial`, so no framing/bounding handling here.
             appendDecodeFields(body, beforeFields)
             body.addStatement("val __payloadStart = buffer.position()")
-            body.addStatement("val __payloadEnd = buffer.limit() - %L", payloadField.reservedTrailingBytes)
+            // A non-terminal payload is a to-limit extent by construction: the
+            // reservation is what makes the end computable without decoding.
+            // A sibling-sized extent (#293 phase 4) derives its end from the
+            // already-decoded header instead, with no new Partial state.
+            val reservedTrailingBytes =
+                when (val extent = payloadField.extent) {
+                    is PayloadExtent.ToLimit -> extent.reservedTrailingBytes
+                }
+            body.addStatement("val __payloadEnd = buffer.limit() - %L", reservedTrailingBytes)
             body.addStatement("buffer.position(__payloadEnd)")
             appendDecodeFields(body, afterFields)
             val ctorArgs =

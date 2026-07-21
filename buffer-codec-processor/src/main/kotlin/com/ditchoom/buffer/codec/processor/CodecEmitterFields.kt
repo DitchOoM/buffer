@@ -1549,6 +1549,22 @@ internal fun appendEncodeLengthFromMessage(
 }
 
 /**
+ * Emit decode for a payload whose codec is not owned by the generated
+ * codec, dispatching on how its region is bounded. Each
+ * [PayloadExtent] arm owns a whole emit strategy — the bound is the
+ * only thing the generated code contributes, so it is the thing that
+ * differs.
+ */
+internal fun appendDecodeDeferredPayload(
+    body: CodeBlock.Builder,
+    field: FieldSpec.DeferredPayload,
+) {
+    when (val extent = field.extent) {
+        is PayloadExtent.ToLimit -> appendDecodeDeferredPayloadToLimit(body, field, extent)
+    }
+}
+
+/**
  * Emit decode for
  * `@RemainingBytes @UseCodec(C::class) val: P`. Delegates to the
  * user-supplied `C.decode(buffer, context)` against whatever
@@ -1556,11 +1572,12 @@ internal fun appendEncodeLengthFromMessage(
  * as the other `@RemainingBytes` shapes. The outer dispatcher (slice
  * 10d for MQTT) sets the limit before calling this codec.
  */
-internal fun appendDecodeDeferredPayload(
+private fun appendDecodeDeferredPayloadToLimit(
     body: CodeBlock.Builder,
     field: FieldSpec.DeferredPayload,
+    extent: PayloadExtent.ToLimit,
 ) {
-    if (field.reservedTrailingBytes == 0) {
+    if (extent.reservedTrailingBytes == 0) {
         body.addStatement(
             "val %L = %L.decode(buffer, context)",
             field.name,
@@ -1577,7 +1594,7 @@ internal fun appendDecodeDeferredPayload(
     body.addStatement(
         "buffer.setLimit(%L - %L)",
         outerLimitVar,
-        field.reservedTrailingBytes,
+        extent.reservedTrailingBytes,
     )
     body.beginControlFlow("val %L = try", field.name)
     body.addStatement("%L.decode(buffer, context)", field.source.codecReceiver())

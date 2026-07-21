@@ -252,7 +252,13 @@ internal fun analyze(symbol: KSClassDeclaration): AnalysisResult {
                 is FieldSpec.RemainingBytesProtocolMessageList ->
                     field.copy(reservedTrailingBytes = reserved)
                 is FieldSpec.DeferredPayload ->
-                    field.copy(reservedTrailingBytes = reserved)
+                    when (field.extent) {
+                        // Only a to-limit payload needs a reservation — it is how
+                        // the payload learns where it ends. A sibling-sized extent
+                        // (#293 phase 3) already knows, so it keeps its own extent.
+                        is PayloadExtent.ToLimit ->
+                            field.copy(extent = PayloadExtent.ToLimit(reserved))
+                    }
                 else -> field
             }
     }
@@ -602,6 +608,7 @@ internal fun analyzeField(
                     ownerSimpleName = ownerSimpleName,
                     payloadType = TypeVariableName(payloadTypeParameter.typeVariableName),
                     source = PayloadCodecSource.ConstructorInjected(payloadTypeParameter.codecParameterName),
+                    extent = PayloadExtent.ToLimit(),
                 ),
             )
         }
@@ -1720,6 +1727,7 @@ internal fun analyzeDeferredPayloadField(
             ownerSimpleName = ownerSimpleName,
             payloadType = classNameOf(payloadDecl),
             source = PayloadCodecSource.UserCodecObject(ClassName(codecPkg, codecSimple)),
+            extent = PayloadExtent.ToLimit(),
         ),
     )
 }

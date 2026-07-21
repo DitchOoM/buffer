@@ -701,9 +701,10 @@ internal sealed interface FieldSpec {
         override val name: String,
         val ownerSimpleName: String,
         val payloadType: TypeName,
+        /** *Whose* codec decodes the region. */
         val source: PayloadCodecSource,
-        /** See [RemainingBytesString.reservedTrailingBytes]. */
-        val reservedTrailingBytes: Int = 0,
+        /** *How* the region handed to that codec is bounded. */
+        val extent: PayloadExtent,
     ) : FieldSpec
 
     /**
@@ -1307,6 +1308,49 @@ internal sealed interface PayloadCodecSource {
     data class ConstructorInjected(
         val parameterName: String,
     ) : PayloadCodecSource
+}
+
+/**
+ * How the wire region handed to a [FieldSpec.DeferredPayload]'s codec
+ * is bounded — the second of the shape's two axes, fully orthogonal to
+ * [PayloadCodecSource] (which says *whose* codec reads that region).
+ * Every combination of the two is legal; conflating them is what made
+ * `@LengthFrom` payloads unrepresentable before issue #293.
+ *
+ * Same `LengthSource` / [PayloadCodecSource] pattern (doctrine #2): the
+ * form distinction is a type, not a nullable field or a sentinel `Int`,
+ * so every consumer is forced through an exhaustive `when`.
+ *
+ * Wire-significant: the extent is recorded in the schema descriptor and
+ * a change to it is drift, even when a given message's bytes happen to
+ * be identical under both arms. Once the `@LengthFrom` arm lands (#293
+ * phase 3) its length carrier is load-bearing for framing — it can no
+ * longer be resized, reordered, or dropped without breaking decode of
+ * the payload that reads it, which is precisely what the drift gate is
+ * there to catch.
+ */
+internal sealed interface PayloadExtent {
+    /**
+     * The region runs to `buffer.limit()` — the caller-bounds-buffer
+     * contract of `@RemainingBytes`. An outer dispatcher (for example
+     * MQTT's remaining-length) narrowed the limit before this codec ran;
+     * the payload gets whatever is left.
+     */
+    data class ToLimit(
+        /**
+         * Sum of `wireBytes` for trailing FixedSize fields after the
+         * payload — see [FieldSpec.RemainingBytesString.reservedTrailingBytes].
+         * 0 when the payload is terminal.
+         *
+         * This lives here rather than on [FieldSpec.DeferredPayload]
+         * because it exists solely to emulate an explicit length: it is
+         * the only way a to-limit payload can know where it ends when
+         * something follows it. A payload sized by a sibling length
+         * (#293 phase 3) is told its extent outright, so a reservation
+         * would be meaningless there.
+         */
+        val reservedTrailingBytes: Int = 0,
+    ) : PayloadExtent
 }
 
 /**
