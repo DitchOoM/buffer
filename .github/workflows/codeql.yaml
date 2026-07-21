@@ -54,7 +54,6 @@ jobs:
           # security-relevant glue). Kotlin/Native + JS/WASM actuals are not analyzable by CodeQL.
           build-mode: manual
           queries: security-extended
-
       - name: Compile Kotlin (JVM) for extraction
         # Parked for Kotlin 2.4.0 (see job banner). Non-fatal until CODEQL_KOTLIN_240_SUPPORTED=true.
         continue-on-error: ${{ vars.CODEQL_KOTLIN_240_SUPPORTED != 'true' }}

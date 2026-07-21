@@ -63,7 +63,6 @@ jobs:
           key: gradle-macos-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-macos-
-
       - name: Get version
         id: version
         run: echo "version=$(./gradlew -q nextVersion ${{ inputs.gradle-args }})" >> $GITHUB_OUTPUT
