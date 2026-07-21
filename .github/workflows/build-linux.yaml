@@ -84,26 +84,70 @@ jobs:
           key: gradle-linux-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-linux-
-      - name: Install ARM64 dependencies
+
+      # Two ARM64 runtime libs that the QEMU-emulated test binaries need inside the
+      # cross sysroot (`qemu-aarch64-static -L /usr/aarch64-linux-gnu`, below).
+      # gcc-aarch64-linux-gnu populates that sysroot with libc only, and Ubuntu
+      # ships no cross package for the rest — noble carries libc6{,-dbg,-dev}-arm64-cross
+      # and nothing else — so these two are taken straight from the pool. apt is not
+      # an alternative that avoids the network: arm64 lives solely on
+      # ports.ubuntu.com (archive.ubuntu.com has no binary-arm64 at all), so a
+      # multiarch `apt-get install zlib1g:arm64` would hit the same host, and pull
+      # the ~1.8 MB arm64 index every run to do it. These two files are ~144 KB.
+      #
+      # Cached because they are version-pinned: refetched only when this workflow
+      # changes, not once per run.
+      - name: Cache ARM64 runtime libraries
+        id: cache-arm64-libs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/arm64-libs
+          key: arm64-libs-${{ hashFiles('.github/workflows/build-linux.yaml') }}
+
+      # Bounded and retried because an unbounded stall here has already cost a full
+      # green build: in run 29865567822 this download hung for 35m47s against a
+      # 13-51s norm, and the job was killed at the 60-minute wall during post-job
+      # cache save — after every test had passed. ports.ubuntu.com stalls often
+      # enough from Azure-hosted runners that "fail fast and retry" has to be
+      # explicit; curl's default is to wait forever.
+      - name: Download ARM64 runtime libraries
+        if: steps.cache-arm64-libs.outputs.cache-hit != 'true'
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
+          set -euo pipefail
+          mkdir -p /tmp/arm64-libs
+          cd /tmp/arm64-libs
+          for url in \
+            https://ports.ubuntu.com/pool/main/libx/libxcrypt/libcrypt1_4.4.36-4build1_arm64.deb \
+            https://ports.ubuntu.com/pool/main/z/zlib/zlib1g_1.3.dfsg-3.1ubuntu2_arm64.deb
+          do
+            curl -fsSLO --retry 5 --retry-all-errors --retry-delay 5 \
+              --connect-timeout 15 --max-time 120 "$url"
+          done
+
+      - name: Install ARM64 dependencies
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          # Acquire::Retries so a transient mirror failure retries instead of failing
+          # the job, same reasoning as the curl flags above.
+          sudo apt-get -o Acquire::Retries=5 update
           # gcc/g++-aarch64-linux-gnu cross-compile :buffer's simdutf (C++) for arm64; qemu-user-static
           # runs the arm64 test.kexe binaries. buffer-crypto no longer builds BoringSSL in-repo — its
           # libcrypto.a comes prebuilt from the com.ditchoom.boringssl.provision bundle — so no BoringSSL
           # toolchain is needed here; the aarch64 cross-compiler is retained solely for simdutf.
-          sudo apt-get install -y qemu-user-static gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          # ARM64 runtime libraries for QEMU
-          mkdir -p /tmp/arm64-libs
-          cd /tmp/arm64-libs
-          curl -LO http://ports.ubuntu.com/pool/main/libx/libxcrypt/libcrypt1_4.4.36-4build1_arm64.deb
-          ar x libcrypt1_*.deb
-          tar xf data.tar.zst
-          sudo cp -r usr/lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
-          # ARM64 zlib for buffer-compression QEMU tests
-          curl -LO http://ports.ubuntu.com/pool/main/z/zlib/zlib1g_1.3.dfsg-3.1ubuntu2_arm64.deb
-          ar x zlib1g_*.deb
-          tar xf data.tar.zst
-          sudo cp -r usr/lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
+          sudo apt-get -o Acquire::Retries=5 install -y \
+            qemu-user-static gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          # Unpack each .deb in its own directory. `ar x` drops a `data.tar.*` into
+          # the working directory, so a shared one lets a stale archive be reused
+          # silently if a future package version switches compression — the previous
+          # form hardcoded `tar xf data.tar.zst` for both.
+          for deb in /tmp/arm64-libs/*.deb; do
+            dir="$(mktemp -d)"
+            ( cd "$dir" && ar x "$deb" && tar xf data.tar.* )
+            sudo cp -r "$dir"/usr/lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
+            rm -rf "$dir"
+          done
 
       - name: Get version
         id: version
