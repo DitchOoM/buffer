@@ -6,12 +6,15 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
+import com.ditchoom.buffer.codec.Decoder
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
+import kotlin.UByte
+import kotlin.UShort
 
 public class SmpGenericFrameCodec<P : Payload>(
   private val payloadCodec: Codec<P>,
@@ -97,5 +100,69 @@ public class SmpGenericFrameCodec<P : Payload>(
     if (stream.available() - baseOffset < __offset + payloadBytes) return PeekResult.NeedsMoreData
     __offset += payloadBytes
     return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData
+  }
+
+  public class Partial<P : Payload> internal constructor(
+    public val op: UByte,
+    public val flags: UByte,
+    public val payloadLength: UShort,
+    public val group: UShort,
+    public val sequence: UByte,
+    public val commandId: UByte,
+    private val payloadStart: Int,
+    private val payloadEnd: Int,
+    private val buffer: ReadBuffer,
+    private val context: DecodeContext,
+  ) {
+    public fun complete(payloadCodec: Decoder<P>): SmpGenericFrame<P> {
+      buffer.position(payloadStart)
+      val __payloadSavedLimit = buffer.limit()
+      buffer.setLimit(payloadEnd)
+      return try {
+        val payload = payloadCodec.decode(buffer, context)
+        if (buffer.position() != payloadEnd) {
+          throw DecodeException(
+                fieldPath = "SmpGenericFrame.payload",
+                bufferPosition = buffer.position(),
+                expected = "the payload codec to consume all " + (payloadEnd - payloadStart) + " bytes",
+                actual = (payloadEnd - buffer.position()).toString() + " bytes left unread",
+              )
+        }
+        SmpGenericFrame<P>(op = op, flags = flags, payloadLength = payloadLength, group = group, sequence = sequence, commandId = commandId, payload = payload)
+      } finally {
+        buffer.setLimit(__payloadSavedLimit)
+      }
+    }
+  }
+
+  public companion object {
+    public fun <P : Payload> partial(buffer: ReadBuffer, context: DecodeContext): Partial<P> {
+      val __batch2 = buffer.readLong()
+      val op: kotlin.UByte
+      val flags: kotlin.UByte
+      val payloadLength: kotlin.UShort
+      val group: kotlin.UShort
+      val sequence: kotlin.UByte
+      val commandId: kotlin.UByte
+      if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) {
+        op = (__batch2 ushr 56 and 0xFFL).toUByte()
+        flags = (__batch2 ushr 48 and 0xFFL).toUByte()
+        payloadLength = (__batch2 ushr 32 and 0xFFFFL).toUShort()
+        group = (__batch2 ushr 16 and 0xFFFFL).toUShort()
+        sequence = (__batch2 ushr 8 and 0xFFL).toUByte()
+        commandId = (__batch2 and 0xFFL).toUByte()
+      } else {
+        op = (__batch2 and 0xFFL).toUByte()
+        flags = (__batch2 ushr 8 and 0xFFL).toUByte()
+        payloadLength = (__batch2 ushr 16 and 0xFFFFL).toUShort()
+        group = (__batch2 ushr 32 and 0xFFFFL).toUShort()
+        sequence = (__batch2 ushr 48 and 0xFFL).toUByte()
+        commandId = (__batch2 ushr 56 and 0xFFL).toUByte()
+      }
+      val __payloadStart = buffer.position()
+      val __payloadEnd = __payloadStart + payloadLength.toInt()
+      buffer.position(__payloadEnd)
+      return Partial<P>(op = op, flags = flags, payloadLength = payloadLength, group = group, sequence = sequence, commandId = commandId, payloadStart = __payloadStart, payloadEnd = __payloadEnd, buffer = buffer, context = context)
+    }
   }
 }

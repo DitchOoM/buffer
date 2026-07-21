@@ -105,6 +105,7 @@ applied identically to standalone codecs (`CodecShape.payloadTypeParameter`) and
 | Generic parent emitted as `class FooCodec<P : Payload>(payloadCodec)` (not `object`) for any `Genericity.Generic`, including `FixedByte` | `buildDispatchFileSpec` (`Genericity.Generic` arm) |
 | Generic variant carrying `<P : Payload>` referenced from the dispatcher as a constructor-injected `GenericInstance` codec field | `VariantCodecRef.GenericInstance`; `analyzeSealedDispatcher` / `analyzeDispatchOnSealedDispatcher` |
 | `Partial<P>` aggregator machinery for constructor-injected codec resolution | snapshot `slice10e/RemoteCommandCodec.kt` (`Partial<P>`); `buildDispatchOnAggregatorCompanion` |
+| `Partial` for a sibling-sized payload, incl. a **variable-width** trailer after it | `deferredpayload/SmpFrameWithTrailer` (#293); `partialCapturesPayloadRegion` |
 
 #### Rejected (with diagnostic)
 
@@ -137,7 +138,7 @@ contract):
 | `@RemainingBytes val: @ProtocolMessage` bare, or `List<@ProtocolMessage>` | `RemainingBytesProtocolMessageList` |
 | `@RemainingBytes @UseCodec(Codec) val: P : Payload` | `DeferredPayload` + `PayloadExtent.ToLimit`; `BinaryData` |
 | `@RemainingBytes val: P` (generic `<P : Payload>`) | `DeferredPayload` + `ToLimit` with `PayloadCodecSource.ConstructorInjected` |
-| `@LengthFrom(sibling) @UseCodec(Codec) val: P : Payload` | `DeferredPayload` + `PayloadExtent.Sibling`; `deferredpayload/SmpFrame` (#293) |
+| `@LengthFrom(sibling) @UseCodec(Codec) val: P : Payload` | `DeferredPayload` + `PayloadExtent.Sibling`; `deferredpayload/SmpFrame` (#293) — framable via `peekFrameSize`, unlike `@RemainingBytes` |
 | `@LengthFrom(sibling) val: P` (generic `<P : Payload>`) | `DeferredPayload` + `Sibling` with `ConstructorInjected`; `deferredpayload/SmpGenericFrame` (#293) |
 | `@Count val: List<@ProtocolMessage>` (varint element count, non-terminal) | `CountPrefixedProtocolMessageList` |
 | `@When(sibling: Boolean) val: T?` — scalar / value-class scalar / string / `@ProtocolMessage` / `@UseCodec` inner | `Conditional` + `ConditionalInner.*` |

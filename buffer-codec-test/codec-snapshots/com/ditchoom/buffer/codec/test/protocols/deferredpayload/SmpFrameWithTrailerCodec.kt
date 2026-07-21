@@ -13,6 +13,8 @@ import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.test.protocols.payload.TextPayloadCodec
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
+import kotlin.String
+import kotlin.UShort
 
 public object SmpFrameWithTrailerCodec : Codec<SmpFrameWithTrailer> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): SmpFrameWithTrailer {
@@ -95,5 +97,52 @@ public object SmpFrameWithTrailerCodec : Codec<SmpFrameWithTrailer> {
     }
     __offset += 2 + notePrefix.toInt()
     return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData
+  }
+
+  public fun partial(buffer: ReadBuffer, context: DecodeContext): Partial {
+    val payloadLength = buffer.readUShort()
+    val __payloadStart = buffer.position()
+    val __payloadEnd = __payloadStart + payloadLength.toInt()
+    buffer.position(__payloadEnd)
+    val checksum = buffer.readUShort()
+    val notePrefixB0 = buffer.readUByte().toUInt()
+    val notePrefixB1 = buffer.readUByte().toUInt()
+    val notePrefix = ((notePrefixB0 shl 8) or notePrefixB1)
+    if (notePrefix > Int.MAX_VALUE.toUInt()) {
+      throw DecodeException(fieldPath = "SmpFrameWithTrailer.note", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = notePrefix.toString())
+    }
+    val noteLength = notePrefix.toInt()
+    val note = buffer.readString(noteLength, Charset.UTF8)
+    return Partial(payloadLength = payloadLength, checksum = checksum, note = note, payloadStart = __payloadStart, payloadEnd = __payloadEnd, buffer = buffer, context = context)
+  }
+
+  public class Partial internal constructor(
+    public val payloadLength: UShort,
+    public val checksum: UShort,
+    public val note: String,
+    private val payloadStart: Int,
+    private val payloadEnd: Int,
+    private val buffer: ReadBuffer,
+    private val context: DecodeContext,
+  ) {
+    public fun complete(): SmpFrameWithTrailer {
+      buffer.position(payloadStart)
+      val __payloadSavedLimit = buffer.limit()
+      buffer.setLimit(payloadEnd)
+      return try {
+        val payload = TextPayloadCodec.decode(buffer, context)
+        if (buffer.position() != payloadEnd) {
+          throw DecodeException(
+                fieldPath = "SmpFrameWithTrailer.payload",
+                bufferPosition = buffer.position(),
+                expected = "the payload codec to consume all " + (payloadEnd - payloadStart) + " bytes",
+                actual = (payloadEnd - buffer.position()).toString() + " bytes left unread",
+              )
+        }
+        SmpFrameWithTrailer(payloadLength = payloadLength, payload = payload, checksum = checksum, note = note)
+      } finally {
+        buffer.setLimit(__payloadSavedLimit)
+      }
+    }
   }
 }

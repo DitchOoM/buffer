@@ -1660,15 +1660,34 @@ private fun appendDecodeDeferredPayloadSibling(
     body.nextControlFlow("finally")
     body.addStatement("buffer.setLimit(%L)", outerLimitVar)
     body.endControlFlow()
-    body.beginControlFlow("if (buffer.position() != %L)", endVar)
+    appendPayloadConsumptionCheck(body, field, endExpr = endVar, bytesExpr = bytesVar)
+}
+
+/**
+ * Emit the strict-consumption guard for a sibling-sized deferred payload: the
+ * wire declared the region, so a codec that stops short of it has left every
+ * following field reading from the wrong offset.
+ *
+ * Shared by the two places that know the region — the inline decode path and
+ * `Partial.complete()` — so both report the same failure the same way. Only
+ * reachable for [PayloadExtent.Sibling]; a to-limit payload's region *is*
+ * whatever its codec reads, so there is no shortfall to detect.
+ */
+internal fun appendPayloadConsumptionCheck(
+    body: CodeBlock.Builder,
+    field: FieldSpec.DeferredPayload,
+    endExpr: String,
+    bytesExpr: String,
+) {
+    body.beginControlFlow("if (buffer.position() != %L)", endExpr)
     body.addStatement(
         "throw %T(\n  fieldPath = %S,\n  bufferPosition = buffer.position(),\n" +
             "  expected = \"the payload codec to consume all \" + %L + \" bytes\",\n" +
             "  actual = (%L - buffer.position()).toString() + \" bytes left unread\",\n)",
         DECODE_EXCEPTION_CN,
         "${field.ownerSimpleName}.${field.name}",
-        bytesVar,
-        endVar,
+        bytesExpr,
+        endExpr,
     )
     body.endControlFlow()
 }

@@ -10,6 +10,7 @@ import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
+import kotlin.UShort
 
 public object ShortReadFrameCodec : Codec<ShortReadFrame> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): ShortReadFrame {
@@ -58,5 +59,41 @@ public object ShortReadFrameCodec : Codec<ShortReadFrame> {
     if (stream.available() - baseOffset < __offset + payloadBytes) return PeekResult.NeedsMoreData
     __offset += payloadBytes
     return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData
+  }
+
+  public fun partial(buffer: ReadBuffer, context: DecodeContext): Partial {
+    val payloadLength = buffer.readUShort()
+    val __payloadStart = buffer.position()
+    val __payloadEnd = __payloadStart + payloadLength.toInt()
+    buffer.position(__payloadEnd)
+    return Partial(payloadLength = payloadLength, payloadStart = __payloadStart, payloadEnd = __payloadEnd, buffer = buffer, context = context)
+  }
+
+  public class Partial internal constructor(
+    public val payloadLength: UShort,
+    private val payloadStart: Int,
+    private val payloadEnd: Int,
+    private val buffer: ReadBuffer,
+    private val context: DecodeContext,
+  ) {
+    public fun complete(): ShortReadFrame {
+      buffer.position(payloadStart)
+      val __payloadSavedLimit = buffer.limit()
+      buffer.setLimit(payloadEnd)
+      return try {
+        val payload = ShortReadPayloadCodec.decode(buffer, context)
+        if (buffer.position() != payloadEnd) {
+          throw DecodeException(
+                fieldPath = "ShortReadFrame.payload",
+                bufferPosition = buffer.position(),
+                expected = "the payload codec to consume all " + (payloadEnd - payloadStart) + " bytes",
+                actual = (payloadEnd - buffer.position()).toString() + " bytes left unread",
+              )
+        }
+        ShortReadFrame(payloadLength = payloadLength, payload = payload)
+      } finally {
+        buffer.setLimit(__payloadSavedLimit)
+      }
+    }
   }
 }

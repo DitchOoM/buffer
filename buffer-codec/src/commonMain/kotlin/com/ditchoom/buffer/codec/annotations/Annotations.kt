@@ -306,8 +306,14 @@ annotation class RemainingBytes
  * The payload form is the framable alternative to [RemainingBytes]: both hand
  * a bounded region to a codec the generated code does not own, but
  * `@LengthFrom` takes the bound from the wire instead of from the caller's
- * buffer limit, so `peekFrameSize` can size the frame and the payload need not
- * be the last field.
+ * buffer limit. Three consequences: `peekFrameSize` can size the frame, the
+ * payload need not be the last field, and the fields that follow it may be any
+ * width (a to-limit payload's trailers must all be fixed-size, since its end is
+ * `limit - <trailer bytes>`).
+ *
+ * The `partial(...)` / `complete(codec)` deferral is generated for this shape
+ * too, so a header can be decoded and routed on before a payload codec is
+ * chosen.
  *
  * @param field The name of the sibling field that holds the byte length.
  *   Must exist, come before this field, and resolve to either a

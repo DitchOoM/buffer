@@ -217,6 +217,97 @@ class SmpFrameCodecTest {
         }
     }
 
+    // ---- partial / complete deferral --------------------------------------
+
+    /**
+     * The header/payload split the issue is really about: `partial()` decodes
+     * the envelope, the caller picks a `Codec<P>` from what it sees there, and
+     * `complete()` decodes the body. Two actors, two times.
+     *
+     * This is also the migration guarantee. The same message with
+     * `@RemainingBytes val payload: P` already emits a `Partial` (issue #168 /
+     * #171), so moving to `@LengthFrom` must not take it away.
+     */
+    @Test
+    fun partialExposesTheHeaderAndDefersThePayload() {
+        val original =
+            SmpGenericFrame(
+                op = 0u,
+                flags = 0u,
+                payloadLength = 2u,
+                group = 9u,
+                sequence = 1u,
+                commandId = 3u,
+                payload = TextPayload("hi"),
+            )
+        val codec = SmpGenericFrameCodec(TextPayloadCodec)
+        val buf = buildBuffer { codec.encode(it, original, EncodeContext.Empty) }
+        buf.resetForRead()
+
+        val partial = SmpGenericFrameCodec.partial<TextPayload>(buf, DecodeContext.Empty)
+        // Every header field is readable before any payload codec is chosen —
+        // routing on group/commandId is the whole point.
+        assertEquals(9u.toUShort(), partial.group)
+        assertEquals(3u.toUByte(), partial.commandId)
+        assertEquals(2u.toUShort(), partial.payloadLength)
+
+        assertEquals(original, partial.complete(TextPayloadCodec))
+    }
+
+    /**
+     * A `Partial` whose payload is followed by a **variable-width** field.
+     * Impossible under `@RemainingBytes`, where the payload's end is
+     * `limit - <trailer bytes>` and so every trailer must have a known width.
+     * A sibling states the length outright, so the restriction lifts.
+     */
+    @Test
+    fun partialSupportsAVariableWidthTrailer() {
+        val original =
+            SmpFrameWithTrailer(
+                payloadLength = 2u,
+                payload = TextPayload("hi"),
+                checksum = 0xBEEFu,
+                note = "trailing",
+            )
+        val buf = buildBuffer { SmpFrameWithTrailerCodec.encode(it, original, EncodeContext.Empty) }
+        buf.resetForRead()
+
+        val partial = SmpFrameWithTrailerCodec.partial(buf, DecodeContext.Empty)
+        assertEquals(0xBEEFu.toUShort(), partial.checksum, "trailer read eagerly, past the payload")
+        assertEquals("trailing", partial.note)
+        assertEquals(original, partial.complete())
+    }
+
+    /** `complete()` bounds the payload to the sibling region, not to the buffer. */
+    @Test
+    fun completeBoundsThePayloadToTheSiblingRegion() {
+        val original =
+            SmpFrameWithTrailer(
+                payloadLength = 2u,
+                payload = TextPayload("hi"),
+                checksum = 0u,
+                note = "xyz",
+            )
+        val buf = buildBuffer { SmpFrameWithTrailerCodec.encode(it, original, EncodeContext.Empty) }
+        buf.resetForRead()
+        val completed = SmpFrameWithTrailerCodec.partial(buf, DecodeContext.Empty).complete()
+        // TextPayloadCodec reads remaining(); without the bound it would swallow
+        // the checksum and note bytes too.
+        assertEquals(TextPayload("hi"), completed.payload)
+    }
+
+    /** `complete()` enforces the same consumption contract as `decode()`. */
+    @Test
+    fun completeRejectsAnUnderReadingPayloadCodec() {
+        val buf = BufferFactory.Default.allocate(32)
+        buf.writeUShort(4u)
+        buf.writeString("abcd", Charset.UTF8)
+        buf.resetForRead()
+        val partial = ShortReadFrameCodec.partial(buf, DecodeContext.Empty)
+        val failure = assertFailsWith<DecodeException> { partial.complete() }
+        assertEquals("ShortReadFrame.payload", failure.fieldPath)
+    }
+
     private fun frameFor(payload: TextPayload) =
         SmpFrame(
             op = 0u,
