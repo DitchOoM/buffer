@@ -434,7 +434,7 @@ kotlin {
         // libcrypto.a reaches every linux final link (buffer-crypto's own linuxX64Test AND downstream
         // co-links like socket-quic-quiche). Guarded to a linux host where the linuxMain default-
         // hierarchy source set actually exists (linux targets are only registered there).
-        if (HostManager.hostIsLinux || isRunningOnGithub) {
+        if (HostManager.hostIsLinux) {
             val linuxMain by getting {
                 dependencies {
                     api("com.ditchoom.boringssl:boringssl-canonical:$boringsslOwnerVersion")
