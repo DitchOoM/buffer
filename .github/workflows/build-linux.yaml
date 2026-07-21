@@ -38,8 +38,18 @@ jobs:
           java-version: '21'
           cache: gradle
 
-      - name: Setup Chrome
-        uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2
+      # GitHub-hosted ubuntu runners ship Google Chrome + Chromium preinstalled, so point Karma's
+      # jsBrowserTest / wasmJsBrowserTest at the preinstalled binary via CHROME_BIN instead of
+      # re-downloading a fresh Chrome through browser-actions/setup-chrome. That action pulls from
+      # Google's CDN on every run and intermittently fails with `read ECONNRESET` — a network flake
+      # entirely unrelated to anything under test. Resolving the on-image browser removes the
+      # download (and the flake class) while keeping the browser tests running.
+      - name: Locate preinstalled Chrome
+        run: |
+          CHROME_BIN="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium-browser || command -v chromium || true)"
+          test -n "$CHROME_BIN" || { echo "::error::No preinstalled Chrome/Chromium found on the runner"; exit 1; }
+          echo "CHROME_BIN=$CHROME_BIN" >> "$GITHUB_ENV"
+          echo "Using preinstalled browser: $CHROME_BIN ($("$CHROME_BIN" --version 2>/dev/null || echo version-unknown))"
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
@@ -74,11 +84,13 @@ jobs:
           key: gradle-linux-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-linux-
-
       - name: Install ARM64 dependencies
         run: |
           sudo apt-get update
-          # g++-aarch64-linux-gnu is needed to cross-compile buffer-crypto's BoringSSL (C++) for arm64.
+          # gcc/g++-aarch64-linux-gnu cross-compile :buffer's simdutf (C++) for arm64; qemu-user-static
+          # runs the arm64 test.kexe binaries. buffer-crypto no longer builds BoringSSL in-repo — its
+          # libcrypto.a comes prebuilt from the com.ditchoom.boringssl.provision bundle — so no BoringSSL
+          # toolchain is needed here; the aarch64 cross-compiler is retained solely for simdutf.
           sudo apt-get install -y qemu-user-static gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
           # ARM64 runtime libraries for QEMU
           mkdir -p /tmp/arm64-libs
@@ -122,19 +134,24 @@ jobs:
           testDebugUnitTest testBenchmarkUnitTest
           ${{ inputs.gradle-args }}
 
+      # BoringSSL is provisioned by the com.ditchoom.boringssl.provision plugin (resolved from the
+      # Plugin Portal / Maven Central at the pinned version): it downloads the checksum-pinned
+      # linuxX64/linuxArm64 bundle from the boringssl-kmp GitHub Release and verifies it against its
+      # baked-in SHA-256 before use — no in-repo BoringSSL build, no TOFU.
       - name: Run Linux x64 tests
         # :buffer-crypto:linuxX64Test runs the full common crypto suite (KAT + Wycheproof +
-        # tamper/negative + capability) over the BoringSSL backend. Its first run provisions
-        # BoringSSL via the self-contained buildBoringsslX64 task (clone + cmake + make crypto),
-        # which needs the go/cmake toolchains present on the runner.
+        # tamper/negative + capability) over the BoringSSL backend. BoringSSL's libcrypto.a is now
+        # provisioned by the com.ditchoom.boringssl.provision plugin (download + sha256-verify), not
+        # built in-repo — this is also the pin-downgrade (API42 -> API21) validation gate.
         run: >-
           ./gradlew :buffer:linuxX64Test :buffer-compression:linuxX64Test :buffer-flow:linuxX64Test
           :buffer-codec:linuxX64Test :buffer-codec-test:linuxX64Test :buffer-crypto:linuxX64Test
           ${{ inputs.gradle-args }}
 
       - name: Build ARM64 test binaries
-        # buffer-crypto cross-builds its arm64 BoringSSL via buildBoringsslArm64 (uses the
-        # aarch64-linux-gnu cross toolchain installed above).
+        # buffer-crypto's arm64 BoringSSL is the prebuilt linuxArm64 tarball from the provision bundle
+        # (no in-repo cross-build); :buffer's simdutf is still cross-built with the aarch64 toolchain
+        # installed above. The linkDebugTestLinuxArm64 output is then QEMU-run below.
         run: >-
           ./gradlew :buffer:linkDebugTestLinuxArm64 :buffer-compression:linkDebugTestLinuxArm64 :buffer-flow:linkDebugTestLinuxArm64
           :buffer-codec-test:linkDebugTestLinuxArm64 :buffer-crypto:linkDebugTestLinuxArm64

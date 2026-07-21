@@ -50,7 +50,6 @@ jobs:
           distribution: "zulu"
           java-version: "21"
           cache: gradle
-
       - name: Run detekt across all modules and source sets
         # detektAll fans out to every module's `detekt` task; each scans its KMP
         # src/<sourceSet>/kotlin dirs (configured in the root build.gradle.kts).
