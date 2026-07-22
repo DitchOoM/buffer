@@ -84,6 +84,9 @@ public object SmpFrameWithTrailerCodec : Codec<SmpFrameWithTrailer> {
     val payloadLength = ((payloadLengthB0 shl 8) or payloadLengthB1).toUInt().toUShort()
     __offset += 2
     val payloadBytes = payloadLength.toInt()
+    if (payloadBytes < 0 || payloadBytes > Int.MAX_VALUE - __offset) {
+      throw DecodeException(fieldPath = "SmpFrameWithTrailer.payload", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + payloadBytes.toLong()}""")
+    }
     if (stream.available() - baseOffset < __offset + payloadBytes) return PeekResult.NeedsMoreData
     __offset += payloadBytes
     if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData

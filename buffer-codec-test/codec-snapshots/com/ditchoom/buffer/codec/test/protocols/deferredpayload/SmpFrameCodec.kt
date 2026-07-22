@@ -94,6 +94,9 @@ public object SmpFrameCodec : Codec<SmpFrame> {
     if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData
     __offset += 1
     val payloadBytes = payloadLength.toInt()
+    if (payloadBytes < 0 || payloadBytes > Int.MAX_VALUE - __offset) {
+      throw DecodeException(fieldPath = "SmpFrame.payload", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + payloadBytes.toLong()}""")
+    }
     if (stream.available() - baseOffset < __offset + payloadBytes) return PeekResult.NeedsMoreData
     __offset += payloadBytes
     return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData
