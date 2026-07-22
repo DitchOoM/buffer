@@ -478,7 +478,10 @@ private val appleResolution: ProtectedKeyResolution by lazy {
         } else {
             // Present but the generate-and-discard probe failed — typically an unentitled binary
             // (the macOS CLI test runner).
-            ProtectedKeyResolution.Refused(ProtectedKeyBackend.AppleSecureEnclave, CapabilityFinding.Enclave.ProbeFailed)
+            ProtectedKeyResolution.Refused(
+                ProtectedKeyBackend.AppleSecureEnclave,
+                CapabilityFinding.Enclave.ProbeFailed,
+            )
         }
     }
 }
