@@ -14,8 +14,9 @@ import kotlin.time.TimeSource
  *    successful op produces standard ciphertext / signatures (proving the seam wires through).
  *  - Each use is gated on [ProtectedKeySpec.authorization]; a denying gate raises [AuthorizationFailed],
  *    exactly as a refused biometric / keystore unlock would.
- *  - Eligibility is a realistic subset: AES-GCM and ECDSA P-256 only. ChaCha20-Poly1305 and Ed25519
- *    are rejected (Enclave/StrongBox do not back them), matching the no-hardware-variant decision.
+ *  - Eligibility is a realistic subset: AES-GCM, ECDSA P-256, and ECDH P-256 only (the Android
+ *    Keystore subset). ChaCha20-Poly1305, Ed25519, and X25519 are rejected (Enclave/StrongBox do
+ *    not back them), matching the no-hardware-variant decision.
  *  - Keys are generated, never imported: AES material is fresh CSPRNG bytes; the ECDSA key uses a
  *    fixed NIST P-256 test keypair (buffer-crypto exposes no ECDSA keypair generation, so a known
  *    keypair is used so the test can build the matching public [VerifyKey] — verify keys are public).
@@ -95,7 +96,9 @@ internal class FakeHardware(
     )
 
     override fun eligible(alg: ProtectedKeyAlgorithm): Boolean =
-        alg == ProtectedKeyAlgorithm.AesGcm || alg == ProtectedKeyAlgorithm.EcdsaP256
+        alg == ProtectedKeyAlgorithm.AesGcm ||
+            alg == ProtectedKeyAlgorithm.EcdsaP256 ||
+            alg == ProtectedKeyAlgorithm.EcdhP256
 
     override suspend fun generateAesGcm(spec: ProtectedKeySpec): AesGcmKey = aesGcmPair(spec).hardware
 
@@ -110,10 +113,14 @@ internal class FakeHardware(
     override suspend fun generateKeyAgreement(
         curve: KeyAgreementCurve,
         spec: ProtectedKeySpec,
-    ): KeyAgreementKeyPair =
-        // The fake secure element backs only AES-GCM + ECDSA P-256, matching Enclave/StrongBox; a
-        // key-agreement request is not eligible, exactly as on the real hardware providers.
-        throw HardwareKeyException.AlgorithmNotEligible()
+    ): KeyAgreementKeyPair {
+        // The fake element backs ECDH P-256 only (mirroring the Android Keystore subset); X25519 /
+        // P-384 / P-521 refuse with the same typed error as any ineligible algorithm.
+        if (curve != KeyAgreementCurve.P256 || !eligible(curve.toProtectedKeyAlgorithm())) {
+            throw HardwareKeyException.AlgorithmNotEligible()
+        }
+        return keyAgreementPair(spec).hardware
+    }
 
     /** Richer result for the conformance test: the hardware key and a software twin with the same key. */
     fun aesGcmPair(
@@ -156,6 +163,40 @@ internal class FakeHardware(
                 },
             )
         return AesGcmPair(hardware, twin)
+    }
+
+    /** A hardware agreement pair plus the software twin (same scalar) tests can derive against directly. */
+    class AgreementPair(
+        val hardware: KeyAgreementKeyPair,
+        val softwareTwin: KeyAgreementKeyPair,
+    )
+
+    /**
+     * Richer result for the conformance test: the "element"-held key pair driven through the gated
+     * DH closure, plus the in-memory twin it wraps. The gated closure computes the raw `DH(sk, peer)`
+     * through the module's own seam — proving the [ProtectedKeyAgreementPrivateKey] machinery routes
+     * a non-exportable key's derive through [dhRawSecret] and the shared KDF, not a stub.
+     */
+    suspend fun keyAgreementPair(
+        spec: ProtectedKeySpec,
+        policy: UserAuthenticationPolicy? = null,
+    ): AgreementPair {
+        val inner = keyAgreementAsyncOps(KeyAgreementCurve.P256).generateKeyPair()
+        val auth = FakeAuthPolicy(spec.authorization, policy)
+        val hardware =
+            keyAgreementKeyPairOf(
+                KeyAgreementCurve.P256,
+                ProtectedKeyAgreementPrivateKey(
+                    curve = KeyAgreementCurve.P256,
+                    custody = custody,
+                    gatedDh = { peer ->
+                        auth.beforeOp()
+                        dhRawSecret(inner.privateKey, peer)
+                    },
+                ),
+                inner.publicKey,
+            )
+        return AgreementPair(hardware, inner)
     }
 
     /** Richer result for the conformance test: the hardware signing key and its public verify key. */

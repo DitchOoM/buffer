@@ -137,13 +137,74 @@ class KeyStoreInstrumentedTest {
     fun ineligibleAlgorithmsAreRefused() =
         runTest {
             val s = store()
-            // Only ECDSA P-256 signing is hardware-backed here; other schemes / key agreement refuse.
+            // Ed25519 signing and X25519 agreement are never keystore-backed on any API level.
             assertFailsWith<HardwareKeyException.AlgorithmNotEligible> {
                 s.getOrGenerateSigning(alias("ed"), SignatureScheme.Ed25519)
             }
             assertFailsWith<HardwareKeyException.AlgorithmNotEligible> {
-                s.getOrGenerateKeyAgreement(alias("kex"), KeyAgreementCurve.P256)
+                s.getOrGenerateKeyAgreement(alias("x-kex"), KeyAgreementCurve.X25519)
             }
+            // ECDH P-256 is probed (PURPOSE_AGREE_KEY, API 31+): where the device lacks it, the
+            // store must refuse rather than over-promise hardware custody. Where it holds, the
+            // round-trip contract is pinned by keyAgreementIsIdempotentReloadsAcrossRestartAndDerives.
+            if (!s.eligible(ProtectedKeyAlgorithm.EcdhP256)) {
+                assertFailsWith<HardwareKeyException.AlgorithmNotEligible> {
+                    s.getOrGenerateKeyAgreement(alias("kex"), KeyAgreementCurve.P256)
+                }
+            }
+        }
+
+    @Test
+    fun keyAgreementIsIdempotentReloadsAcrossRestartAndDerives() =
+        runTest {
+            val s = store()
+            // API-level-honest gate: pre-31 devices (the API-21 CI leg) exercise the refusal branch
+            // in ineligibleAlgorithmsAreRefused; 31+ devices (the API-35 CI leg) exercise this one.
+            if (!s.eligible(ProtectedKeyAlgorithm.EcdhP256)) return@runTest
+            val a = alias("device-kex")
+            val first = s.getOrGenerateKeyAgreement(a, KeyAgreementCurve.P256)
+            assertEquals(KeyProvenance.Hardware, first.privateKey.provenance)
+            assertEquals(CustodyTier.Hardware, s.custodyFor(ProtectedKeyAlgorithm.EcdhP256).tier)
+            val pub = first.publicKey.exportSpki().toHex()
+
+            // A second get-or-generate over a fresh store returns the SAME key, not a new one.
+            val again = store().getOrGenerateKeyAgreement(a, KeyAgreementCurve.P256)
+            assertEquals(pub, again.publicKey.exportSpki().toHex())
+
+            // Simulated restart: a brand-new store re-attaches, and the reloaded handle derives the
+            // same secret as a software peer does against the persisted public key — the keystore
+            // ECDH is real, standard, and stable across reloads.
+            val reloaded = assertNotNull(store().loadKeyAgreement(a))
+            assertEquals(pub, reloaded.publicKey.exportSpki().toHex())
+            val ops = assertNotNull(keyAgreementAsyncOrNull(KeyAgreementCurve.P256))
+            val peer = ops.generateKeyPair()
+            val info = Info.Of(ascii("keystore-kex"))
+            val viaFirst = ops.deriveSharedSecret(first.privateKey, peer.publicKey, info, length = 32)
+            val viaReloaded = ops.deriveSharedSecret(reloaded.privateKey, peer.publicKey, info, length = 32)
+            val viaPeer = ops.deriveSharedSecret(peer.privateKey, reloaded.publicKey, info, length = 32)
+            assertEquals(viaPeer.toHex(), viaFirst.toHex(), "hw derive must match the peer's derivation")
+            assertEquals(viaPeer.toHex(), viaReloaded.toHex(), "reloaded hw key must derive the same secret")
+        }
+
+    @Test
+    fun agreementAliasNeverSilentlyReplacesAnotherKind() =
+        runTest {
+            val s = store()
+            if (!s.eligible(ProtectedKeyAlgorithm.EcdhP256)) return@runTest
+            val a = alias("mixed-kex")
+            s.getOrGenerateSigning(a, SignatureScheme.EcdsaP256)
+            // Both kinds are keystore PrivateKeyEntries — the purpose-recorded kind must still win.
+            val clash =
+                assertFailsWith<KeyStoreException.AliasMismatch> {
+                    s.getOrGenerateKeyAgreement(a, KeyAgreementCurve.P256)
+                }
+            assertEquals(ProtectedKeyAlgorithm.EcdsaP256, clash.stored)
+            assertEquals(ProtectedKeyAlgorithm.EcdhP256, clash.requested)
+            // And the kind-mismatched loads answer null, never a mistyped handle.
+            assertNull(s.loadKeyAgreement(a))
+            val kex = alias("kex-then-sign")
+            s.getOrGenerateKeyAgreement(kex, KeyAgreementCurve.P256)
+            assertNull(s.loadSigning(kex))
         }
 
     @Test

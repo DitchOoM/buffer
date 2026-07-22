@@ -31,6 +31,7 @@ import java.security.interfaces.ECPublicKey
 import java.security.spec.ECGenParameterSpec
 import java.util.UUID
 import javax.crypto.Cipher
+import javax.crypto.KeyAgreement
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.SecretKeyFactory
@@ -46,8 +47,9 @@ import javax.crypto.spec.GCMParameterSpec
  * signature bytes cross the JCA boundary as arrays — the payload itself streams buffer→cipher→buffer
  * through the shared [finalInto] / [openInto] plumbing, identical to the in-memory AES-GCM path.
  *
- * Eligibility mirrors what a secure element actually backs: AES-256/128-GCM and ECDSA P-256.
- * (Ed25519 / P-384 / P-521 are not offered — see [eligible].)
+ * Eligibility mirrors what a secure element actually backs: AES-256/128-GCM, ECDSA P-256, and — on
+ * API 31+ where the keystore honors `PURPOSE_AGREE_KEY` (probed, not inferred from the API level) —
+ * ECDH P-256 key agreement. (Ed25519 / P-384 / P-521 / X25519 are not offered — see [eligible].)
  *
  * **Robustness shape (all driven by real device behaviour):**
  *  - **StrongBox fallback is exception-broad.** A device that lacks (or under-provisions) a secure
@@ -106,9 +108,19 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
      */
     override val dedicatedSecureElement: Boolean by lazy { probeStrongBox() }
 
+    /**
+     * `true` once a `PURPOSE_AGREE_KEY` generation *and* a full keystore ECDH against a software
+     * peer succeed. Probed (generate-and-agree with a throwaway key) rather than inferred from the
+     * API level: `PURPOSE_AGREE_KEY` exists from API 31, but whether the device's Keymaster/KeyMint
+     * actually implements agreement is exactly the kind of claim cheap-device implementations and
+     * the emulator diverge on — so the answer comes from the keystore itself, like [probeStrongBox].
+     */
+    private val agreementSupported: Boolean by lazy { probeAgreement() }
+
     override fun eligible(alg: ProtectedKeyAlgorithm): Boolean =
         when (alg) {
             ProtectedKeyAlgorithm.AesGcm, ProtectedKeyAlgorithm.EcdsaP256 -> true
+            ProtectedKeyAlgorithm.EcdhP256 -> agreementSupported
             else -> false
         }
 
@@ -123,9 +135,58 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
     override suspend fun generateKeyAgreement(
         curve: KeyAgreementCurve,
         spec: ProtectedKeySpec,
-    ): KeyAgreementKeyPair =
-        // Android Keystore backs no app-controlled ECDH/X25519 agreement key here; not eligible.
-        throw HardwareKeyException.AlgorithmNotEligible()
+    ): KeyAgreementKeyPair {
+        // Only ECDH P-256, and only where the keystore-probed PURPOSE_AGREE_KEY support holds
+        // (API 31+). X25519 has no AndroidKeyStore agreement backing on any API level.
+        if (curve != KeyAgreementCurve.P256 || !eligible(ProtectedKeyAlgorithm.EcdhP256)) {
+            throw HardwareKeyException.AlgorithmNotEligible()
+        }
+        val policy = ResolvedAndroidPolicy.Advisory(spec.authorization)
+        val alias = newAlias("ecdh")
+        val keyPair = keystoreOp { generateAgreementKeyPair(alias, policy) }
+        val publicKey = KeyAgreementPublicKey.of(curve, uncompressedPoint(keyPair.public as ECPublicKey))
+        // Ephemeral: the scratch alias is deleted when the returned pair (or its private key) is closed.
+        return buildKeyAgreementPair(
+            keyPair.private,
+            publicKey,
+            policy.gate,
+            onClose = { runCatching { keyStore.deleteEntry(alias) } },
+        )
+    }
+
+    /**
+     * Wraps an AndroidKeystore ECDH private-key handle as a [KeyAgreementKeyPair]. Shared by the
+     * ephemeral provider ([generateKeyAgreement], a scratch alias deleted on close) and the
+     * persistent [AndroidKeystoreKeyStore] (a named alias whose [onClose] is a no-op).
+     *
+     * Agreement keys are only ever **advisory**-gated: [UserAuthenticatedKeyProvider] exposes no key
+     * agreement, and `BiometricPrompt.CryptoObject` cannot wrap a JCA `KeyAgreement` on the API
+     * levels this module supports — so the [gate] here is the advisory
+     * [ProtectedKeySpec.authorization], evaluated before every derive (outside the keystore lock).
+     */
+    internal fun buildKeyAgreementPair(
+        privateKey: PrivateKey,
+        publicKey: KeyAgreementPublicKey,
+        gate: HardwareAuthorization,
+        onClose: () -> Unit,
+    ): KeyAgreementKeyPair {
+        val curve = publicKey.curve
+        val agreementPrivateKey =
+            ProtectedKeyAgreementPrivateKey(
+                curve = curve,
+                custody = custody,
+                gatedDh = { peer ->
+                    if (!gate.authorize()) throw AuthorizationFailed()
+                    require(peer.curve == curve) { "private/public key curve mismatch" }
+                    // Peer-point conversion happens outside the keystore lock; a malformed or
+                    // off-curve point is rejected before the element is ever touched.
+                    val jcaPeer = p256PublicKey(peer.encoded)
+                    keystoreOp { agreeP256(privateKey, jcaPeer) }
+                },
+                onClose = onClose,
+            )
+        return keyAgreementKeyPairOf(curve, agreementPrivateKey, publicKey)
+    }
 
     /** Generates an AES-GCM keystore key under [policy] — the shared path for unbound and OS-bound keys. */
     internal suspend fun generateAesGcmBound(
@@ -280,17 +341,54 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
         return buildAesGcmKey(key, spec.aesKeySizeBits, policy, onClose = {})
     }
 
+    /** Generates a persistent ECDH P-256 agreement key under [alias]; onClose is a no-op (the stored key survives). */
+    internal suspend fun generatePersistentKeyAgreement(
+        alias: String,
+        spec: ProtectedKeySpec,
+    ): KeyAgreementKeyPair {
+        val policy = ResolvedAndroidPolicy.Advisory(spec.authorization)
+        val keyPair = keystoreOp { generateAgreementKeyPair(alias, policy) }
+        val publicKey =
+            KeyAgreementPublicKey.of(KeyAgreementCurve.P256, uncompressedPoint(keyPair.public as ECPublicKey))
+        return buildKeyAgreementPair(keyPair.private, publicKey, policy.gate, onClose = {})
+    }
+
     /**
      * Re-attaches to a persisted signing key under [alias], or `null` if the alias is absent or holds
-     * a key of a different kind. The gate is [spec]'s advisory authorization; onClose is a no-op.
+     * a key of a different kind (an AES entry, or an agreement key — both signing and agreement keys
+     * are `PrivateKeyEntry`s, so the keystore-recorded purposes disambiguate). The gate is [spec]'s
+     * advisory authorization; onClose is a no-op.
      */
     internal suspend fun reattachSigning(
         alias: String,
         spec: ProtectedKeySpec,
     ): SigningKey? {
-        val entry = keystoreOp { keyStore.getEntry(alias, null) } as? KeyStore.PrivateKeyEntry ?: return null
+        val entry =
+            keystoreOp {
+                (keyStore.getEntry(alias, null) as? KeyStore.PrivateKeyEntry)
+                    ?.takeIf { privateEntryAlgorithm(it.privateKey) == ProtectedKeyAlgorithm.EcdsaP256 }
+            } ?: return null
         val verifyKey = VerifyKey.ecdsaP256(uncompressedPoint(entry.certificate.publicKey as ECPublicKey))
         return buildSigningKey(entry.privateKey, verifyKey, ResolvedAndroidPolicy.Advisory(spec.authorization), onClose = {})
+    }
+
+    /**
+     * Re-attaches to a persisted agreement key under [alias], or `null` if the alias is absent or
+     * holds a key of a different kind (purpose-checked, mirroring [reattachSigning]). The gate is
+     * [spec]'s advisory authorization; onClose is a no-op.
+     */
+    internal suspend fun reattachKeyAgreement(
+        alias: String,
+        spec: ProtectedKeySpec,
+    ): KeyAgreementKeyPair? {
+        val entry =
+            keystoreOp {
+                (keyStore.getEntry(alias, null) as? KeyStore.PrivateKeyEntry)
+                    ?.takeIf { privateEntryAlgorithm(it.privateKey) == ProtectedKeyAlgorithm.EcdhP256 }
+            } ?: return null
+        val point = uncompressedPoint(entry.certificate.publicKey as ECPublicKey)
+        val publicKey = KeyAgreementPublicKey.of(KeyAgreementCurve.P256, point)
+        return buildKeyAgreementPair(entry.privateKey, publicKey, spec.authorization, onClose = {})
     }
 
     /** Re-attaches to a persisted AES-GCM key under [alias], or `null` if absent / a different kind. */
@@ -309,8 +407,8 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
             if (!keyStore.containsAlias(alias)) {
                 null
             } else {
-                when (keyStore.getEntry(alias, null)) {
-                    is KeyStore.PrivateKeyEntry -> ProtectedKeyAlgorithm.EcdsaP256
+                when (val entry = keyStore.getEntry(alias, null)) {
+                    is KeyStore.PrivateKeyEntry -> privateEntryAlgorithm(entry.privateKey)
                     is KeyStore.SecretKeyEntry -> ProtectedKeyAlgorithm.AesGcm
                     else -> null
                 }
@@ -426,6 +524,18 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
                 }.generateKeyPair()
         }
 
+    private fun generateAgreementKeyPair(
+        alias: String,
+        policy: ResolvedAndroidPolicy,
+    ): java.security.KeyPair =
+        generateWithStrongBoxFallback { strongBox ->
+            KeyPairGenerator
+                .getInstance(KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEY_STORE)
+                .apply {
+                    initialize(agreementSpec(alias, strongBox, policy))
+                }.generateKeyPair()
+        }
+
     /**
      * Builds a key with `setIsStrongBoxBacked(true)`, falling back to the TEE on *any* StrongBox
      * rejection. Crucially this is not gated on [StrongBoxUnavailableException]: real devices reject
@@ -478,6 +588,46 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
                 runCatching { keyStore.deleteEntry(alias) }
             }
         }
+
+    /**
+     * Probes whether the keystore actually backs ECDH P-256 agreement keys: generates a throwaway
+     * `PURPOSE_AGREE_KEY` key and runs a full keystore ECDH against a fresh software peer. The
+     * end-to-end agreement matters — a device may accept the generation spec and still fail the
+     * `KeyAgreement` op (support claims and Keymaster reality diverge on exactly this purpose), so
+     * generation alone would over-promise. Pre-31 the purpose does not exist; fail fast.
+     */
+    private fun probeAgreement(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
+        return synchronized(keystoreMonitor) {
+            val alias = newAlias("probe-ecdh")
+            try {
+                val keyPair =
+                    KeyPairGenerator
+                        .getInstance(KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEY_STORE)
+                        .apply {
+                            initialize(agreementSpec(alias, strongBox = false, policy = probeAdvisoryPolicy))
+                        }.generateKeyPair()
+                val peer =
+                    KeyPairGenerator
+                        .getInstance("EC")
+                        .apply { initialize(ECGenParameterSpec(SECP256R1)) }
+                        .generateKeyPair()
+                val ka = KeyAgreement.getInstance(ECDH, ANDROID_KEY_STORE)
+                ka.init(keyPair.private)
+                ka.doPhase(peer.public, true)
+                val secret = ka.generateSecret()
+                val ok = secret.size == P256_FIELD_BYTES
+                secret.fill(0)
+                ok
+            } catch (_: Throwable) {
+                // Purpose rejected, agreement unimplemented, or any provisioning failure ⇒ route
+                // key agreement to the software floor instead of over-promising hardware custody.
+                false
+            } finally {
+                runCatching { keyStore.deleteEntry(alias) }
+            }
+        }
+    }
 }
 
 private fun newAlias(kind: String): String = "$ALIAS_PREFIX$kind-${UUID.randomUUID()}"
@@ -490,10 +640,13 @@ private fun requireValidAesSize(sizeBits: Int) {
     if (!valid) throw HardwareKeyException.UnsupportedHardwareKey()
 }
 
-private const val ANDROID_KEY_STORE = "AndroidKeyStore"
+// ANDROID_KEY_STORE / SECP256R1 are shared with the agreement helpers in
+// HardwareKeyAgreement.android.kt (internal, not private); the SEC1/field-width constants stay
+// private because same-named private constants already exist in other files of this package.
+internal const val ANDROID_KEY_STORE = "AndroidKeyStore"
 private const val AES_GCM_TRANSFORM = "AES/GCM/NoPadding"
 private const val ECDSA_SHA256 = "SHA256withECDSA"
-private const val SECP256R1 = "secp256r1"
+internal const val SECP256R1 = "secp256r1"
 private const val ALIAS_PREFIX = "com.ditchoom.buffer.crypto.hw."
 private const val P256_FIELD_BYTES = 32
 private const val SEC1_UNCOMPRESSED = 0x04
