@@ -1053,6 +1053,10 @@ message com.ditchoom.buffer.codec.test.protocols.simple.SmallFlags
 message com.ditchoom.buffer.codec.test.protocols.simple.TwoStrings
   0 first string len-prefix=2B/Default
   1 second string len-prefix=2B/Default
+message com.ditchoom.buffer.codec.test.protocols.simple.WideLengthFrame
+  0 length scalar:UInt wire=4B order=Big
+  1 flags scalar:UByte wire=1B order=Big
+  2 payload string len-from=sibling:length
 message com.ditchoom.buffer.codec.test.protocols.simple.WithFlagPayload
   0 flags valueclass:com.ditchoom.buffer.codec.test.protocols.simple.SmallFlags scalar:UByte wire=1B order=Default
   1 payload? when(sibling:flags.want) string len-prefix=2B/Default
