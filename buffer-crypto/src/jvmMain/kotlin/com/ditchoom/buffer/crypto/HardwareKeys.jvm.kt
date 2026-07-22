@@ -50,6 +50,15 @@ import java.security.spec.X509EncodedKeySpec
  * reliable way to distinguish a discrete TPM from a firmware TPM, so the claim stays at
  * "hardware-isolated, non-exportable" - the same conservative posture as a TEE-only Android device.
  *
+ * **Custody trust boundary (operator-delegated):** unlike the Android/Apple backends, where the OS
+ * pins which element backs a key, the hardware-custody claim here is exactly as trustworthy as the
+ * *configured module*. Pointing the module path at a software PKCS#11 implementation (e.g. SoftHSM)
+ * yields software keys labeled [KeyCustody.NonExportable.Hardware] - the JCA bridge cannot read
+ * `CK_TOKEN_INFO` to verify the token is a TPM. Deployments that rely on the custody tier MUST
+ * treat the module path/PIN configuration as security-sensitive, same-integrity-domain state.
+ * The PIN additionally arrives as an immutable system-property/environment `String`; only the
+ * `char[]` copy handed to the login is wiped - an inherent limit of env-based configuration.
+ *
  * `ByteArray` appears at the unavoidable JCA seam (X509EncodedKeySpec / generateSecret / BigInteger),
  * never as a library data structure; secret-bearing arrays are wiped after use.
  */
@@ -59,7 +68,12 @@ internal class Tpm2Pkcs11HardwareKeyProvider(
     /** PKCS#11 cannot confirm a discrete element, so this never over-claims. See the file KDoc. */
     override val dedicatedSecureElement: Boolean get() = false
 
-    /** Serializes token ops (TPM round-trips are slow and strictly ordered) off the calling thread. */
+    /**
+     * Serializes suspend token ops (TPM round-trips are slow) off the calling thread. The lazy
+     * [agreementSupported] probe is the one exception: [eligible] is non-suspend so the probe cannot
+     * take this Mutex and may overlap an in-flight op - safe because SunPKCS11 pools sessions and
+     * the resource manager (tpm2-abrmd / kernel `/dev/tpmrm0`) serializes at the TPM boundary.
+     */
     private val tokenLock = Mutex()
 
     /**
