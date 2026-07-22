@@ -29,8 +29,9 @@ internal actual fun platformKeyStore(config: KeyStoreConfig): KeyStore =
  * alias methods persist — a key from [getOrGenerateSigning] / [loadSigning] survives `close()` and
  * process restart until [delete]d.
  *
- * Serves only the algorithms an AndroidKeystore backs non-exportably: ECDSA P-256 signing and
- * AES-GCM. A get-or-generate for anything else (Ed25519 / P-384 / P-521 / key agreement) throws
+ * Serves only the algorithms an AndroidKeystore backs non-exportably: ECDSA P-256 signing, AES-GCM,
+ * and — on API 31+ where the keystore-probed `PURPOSE_AGREE_KEY` support holds — ECDH P-256 key
+ * agreement. A get-or-generate for anything else (Ed25519 / P-384 / P-521 / X25519) throws
  * [HardwareKeyException.AlgorithmNotEligible] — consult [custodyFor] / [eligible] first, or supply a
  * software [KeyStoreConfig.storage] for a persistent key the element cannot hold.
  */
@@ -92,8 +93,17 @@ internal class AndroidKeystoreKeyStore(
         spec: ProtectedKeySpec,
     ): KeyAgreementKeyPair {
         requireValidAlias(alias)
-        // An AndroidKeystore backs no app-controlled ECDH / X25519 agreement key.
-        throw HardwareKeyException.AlgorithmNotEligible()
+        // Only ECDH P-256, and only where the keystore-probed PURPOSE_AGREE_KEY support holds
+        // (API 31+); X25519 has no AndroidKeystore agreement backing on any API level.
+        if (curve != KeyAgreementCurve.P256 || !provider.eligible(ProtectedKeyAlgorithm.EcdhP256)) {
+            throw HardwareKeyException.AlgorithmNotEligible()
+        }
+        val ns = namespaced(alias)
+        return when (val stored = provider.entryAlgorithm(ns)) {
+            null -> provider.generatePersistentKeyAgreement(ns, spec)
+            ProtectedKeyAlgorithm.EcdhP256 -> requireNotNull(provider.reattachKeyAgreement(ns, spec))
+            else -> throw KeyStoreException.AliasMismatch(alias, stored, curve.toProtectedKeyAlgorithm())
+        }
     }
 
     override suspend fun loadSigning(alias: String): SigningKey? {
@@ -108,8 +118,7 @@ internal class AndroidKeystoreKeyStore(
 
     override suspend fun loadKeyAgreement(alias: String): KeyAgreementKeyPair? {
         requireValidAlias(alias)
-        // No agreement key is ever persisted here (see getOrGenerateKeyAgreement).
-        return null
+        return provider.reattachKeyAgreement(namespaced(alias), ProtectedKeySpec())
     }
 
     override suspend fun contains(alias: String): Boolean {

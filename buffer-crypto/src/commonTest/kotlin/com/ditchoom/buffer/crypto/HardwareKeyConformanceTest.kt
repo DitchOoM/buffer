@@ -18,7 +18,7 @@ import kotlin.time.TestTimeSource
  * under test (witness → gated closure, blocking-seam safety net, the auth gate) is the production
  * code, not the fake.
  *
- * Proves, for the two families a secure element backs (AES-GCM + ECDSA P-256):
+ * Proves, for the families a secure element backs (AES-GCM + ECDSA P-256 + ECDH P-256):
  *  - the public `CryptoCapabilities.hardware` witness is [HardwareSupport.Unavailable] on every
  *    platform in 6.0 (no backend ships yet);
  *  - hardware keys carry [KeyProvenance.Hardware] and a realistic eligibility subset;
@@ -86,16 +86,49 @@ class HardwareKeyConformanceTest {
                 aes.close()
             }
         }
+
+        // ECDH P-256 key agreement is probed per device (Android API 31+ Keystore) — gate on
+        // eligibility. Where it holds, a real element-held key must agree with a software peer:
+        // both sides derive the same secret, proving the keystore DH produced standard ECDH.
+        if (provider.eligible(ProtectedKeyAlgorithm.EcdhP256)) {
+            val pair = provider.generateKeyAgreement(KeyAgreementCurve.P256, grant)
+            try {
+                assertEquals(KeyProvenance.Hardware, pair.privateKey.provenance)
+                assertFailsWith<UnsupportedOperationException>("a hardware agreement key has no exportable scalar") {
+                    pair.privateKey.exportEncoded()
+                }
+                val ops = keyAgreementAsyncOrNull(KeyAgreementCurve.P256)
+                if (ops != null) {
+                    val peer = ops.generateKeyPair()
+                    try {
+                        val info = Info.Of(ascii("hw-ka-conformance"))
+                        val viaHardware = ops.deriveSharedSecret(pair.privateKey, peer.publicKey, info, length = 32)
+                        val viaPeer = ops.deriveSharedSecret(peer.privateKey, pair.publicKey, info, length = 32)
+                        assertEquals(
+                            viaPeer.toHex(),
+                            viaHardware.toHex(),
+                            "real hw ECDH must agree with a software peer",
+                        )
+                    } finally {
+                        peer.close()
+                    }
+                }
+            } finally {
+                pair.close()
+            }
+        }
     }
 
     @Test
     fun eligibilityIsARealisticSubset() {
         assertTrue(provider.eligible(ProtectedKeyAlgorithm.AesGcm), "AES-GCM is eligible")
         assertTrue(provider.eligible(ProtectedKeyAlgorithm.EcdsaP256), "ECDSA P-256 is eligible")
-        // A secure element backs neither ChaCha20-Poly1305 nor Ed25519 (nor P-384/P-521 here).
+        assertTrue(provider.eligible(ProtectedKeyAlgorithm.EcdhP256), "ECDH P-256 is eligible")
+        // A secure element backs neither ChaCha20-Poly1305 nor Ed25519 (nor P-384/P-521/X25519 here).
         assertTrue(!provider.eligible(ProtectedKeyAlgorithm.Ed25519), "Ed25519 not eligible")
         assertTrue(!provider.eligible(ProtectedKeyAlgorithm.EcdsaP384), "P-384 not eligible")
         assertTrue(!provider.eligible(ProtectedKeyAlgorithm.EcdsaP521), "P-521 not eligible")
+        assertTrue(!provider.eligible(ProtectedKeyAlgorithm.X25519), "X25519 not eligible")
     }
 
     @Test
@@ -180,13 +213,53 @@ class HardwareKeyConformanceTest {
         }
     }
 
+    // ---- Key agreement (ECDH P-256) ----
+
     @Test
-    fun generateKeyAgreementIsNotEligibleOnHardware() =
+    fun hardwareKeyAgreementDerivesTheSameSecretAsItsSoftwareTwin() =
         runTest {
-            // The hardware providers back no app-controlled agreement key; the request is refused with
-            // the same typed error as any ineligible algorithm.
+            val keys = provider.keyAgreementPair(grant)
+            val ops = keyAgreementAsyncOrNull(KeyAgreementCurve.P256) ?: return@runTest
+            val peer = ops.generateKeyPair()
+            val info = Info.Of(ascii("hw-ka"))
+            // The hardware key derives through its gated closure; the software twin (same scalar)
+            // and the peer's own derivation must all land on identical key material — the
+            // ProtectedKeyAgreementPrivateKey seam wires through to real ECDH + the shared KDF.
+            val viaHardware = ops.deriveSharedSecret(keys.hardware.privateKey, peer.publicKey, info, length = 32)
+            val viaTwin = ops.deriveSharedSecret(keys.softwareTwin.privateKey, peer.publicKey, info, length = 32)
+            val viaPeer = ops.deriveSharedSecret(peer.privateKey, keys.hardware.publicKey, info, length = 32)
+            assertEquals(viaTwin.toHex(), viaHardware.toHex(), "hw derive must match its software twin")
+            assertEquals(viaPeer.toHex(), viaHardware.toHex(), "hw derive must match the peer's derivation")
+        }
+
+    @Test
+    fun hardwareKeyAgreementReportsHardwareProvenanceAndNoExport() =
+        runTest {
+            val pair = provider.generateKeyAgreement(KeyAgreementCurve.P256, grant)
+            assertEquals(KeyProvenance.Hardware, pair.privateKey.provenance)
+            assertFailsWith<UnsupportedOperationException>("a non-exportable agreement key must not export") {
+                pair.privateKey.exportEncoded()
+            }
+        }
+
+    @Test
+    fun hardwareKeyAgreementDeniedAuthorizationFails() =
+        runTest {
+            val keys = provider.keyAgreementPair(deny)
+            val ops = keyAgreementAsyncOrNull(KeyAgreementCurve.P256) ?: return@runTest
+            val peer = ops.generateKeyPair()
+            assertFailsWith<AuthorizationFailed> {
+                ops.deriveSharedSecret(keys.hardware.privateKey, peer.publicKey, Info.Of(ascii("denied")), length = 32)
+            }
+        }
+
+    @Test
+    fun generateKeyAgreementRejectsIneligibleCurve() =
+        runTest {
+            // The element backs no X25519 agreement key; refused with the same typed error as any
+            // ineligible algorithm.
             assertFailsWith<HardwareKeyException.AlgorithmNotEligible> {
-                provider.generateKeyAgreement(KeyAgreementCurve.P256, grant)
+                provider.generateKeyAgreement(KeyAgreementCurve.X25519, grant)
             }
         }
 
