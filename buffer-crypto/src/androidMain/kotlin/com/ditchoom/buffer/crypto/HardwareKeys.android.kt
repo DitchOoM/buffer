@@ -635,7 +635,10 @@ private val androidResolution: ProtectedKeyResolution by lazy {
         ?.let { ProtectedKeyResolution.Available(ProtectedKeyBackend.AndroidKeystore, it) }
         // Construction only fails where there is no AndroidKeyStore JCA provider at all — a host-JVM
         // unit-test run, never a device or emulator.
-        ?: ProtectedKeyResolution.Refused(ProtectedKeyBackend.AndroidKeystore, CapabilityFinding.Keystore.ProviderMissing)
+        ?: ProtectedKeyResolution.Refused(
+            ProtectedKeyBackend.AndroidKeystore,
+            CapabilityFinding.Keystore.ProviderMissing,
+        )
 }
 
 internal actual fun platformProtectedKeyResolution(): ProtectedKeyResolution = androidResolution

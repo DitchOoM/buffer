@@ -168,7 +168,7 @@ private val jvmResolution: ProtectedKeyResolution by lazy { resolveTpm2Pkcs11() 
 
 internal actual fun platformProtectedKeyResolution(): ProtectedKeyResolution = jvmResolution
 
-@Suppress("SwallowedException", "TooGenericExceptionCaught", "ReturnCount")
+@Suppress("SwallowedException", "TooGenericExceptionCaught", "ReturnCount", "CyclomaticComplexMethod")
 private fun resolveTpm2Pkcs11(): ProtectedKeyResolution {
     val explicitModule = configured(MODULE_PROP, MODULE_ENV)
     val os = System.getProperty("os.name")?.lowercase() ?: ""
@@ -254,6 +254,7 @@ private fun probeFailure(
  * and converts that one JCA artifact into the typed value at the boundary - the string never leaves
  * this function, and consumers only ever see [Ckr]/[CkrClass].
  */
+@Suppress("ReturnCount")
 private fun ckrOf(failure: Throwable): Ckr? {
     var cur: Throwable? = failure
     while (cur != null) {

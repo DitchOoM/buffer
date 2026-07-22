@@ -51,11 +51,17 @@ class Tpm2Pkcs11ProviderTest {
                 val custody = signing.custody
                 assertIs<KeyCustody.NonExportable.Hardware>(custody)
                 // PKCS#11 cannot confirm a discrete vs. firmware TPM; the claim stays conservative.
-                assertFalse(custody.dedicatedSecureElement, "the TPM backend must not claim a confirmed dedicated element")
+                assertFalse(
+                    custody.dedicatedSecureElement,
+                    "the TPM backend must not claim a confirmed dedicated element",
+                )
                 val ops = assertNotNull(signatureAsyncOrNull(SignatureScheme.EcdsaP256))
                 val message = ascii("tpm2-backed identity signature")
                 val signature = ops.sign(signing, message)
-                assertTrue(ops.verify(signing.verifyKey, message, signature), "token-sign must verify under its public key")
+                assertTrue(
+                    ops.verify(signing.verifyKey, message, signature),
+                    "token-sign must verify under its public key",
+                )
             } finally {
                 signing.close()
             }

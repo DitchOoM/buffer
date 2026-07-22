@@ -461,7 +461,10 @@ private fun enclaveSignP256Into(
 private val appleResolution: ProtectedKeyResolution by lazy {
     if (bcks_secure_enclave_available() == 0) {
         // CryptoKit reports no Enclave on this hardware (or the simulator).
-        ProtectedKeyResolution.Refused(ProtectedKeyBackend.AppleSecureEnclave, CapabilityFinding.Enclave.NotPresent)
+        ProtectedKeyResolution.Refused(
+            ProtectedKeyBackend.AppleSecureEnclave,
+            CapabilityFinding.Enclave.NotPresent,
+        )
     } else {
         val usable =
             try {
