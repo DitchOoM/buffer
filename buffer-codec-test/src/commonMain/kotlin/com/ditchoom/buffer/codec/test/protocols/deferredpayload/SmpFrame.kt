@@ -139,6 +139,28 @@ data class ShortReadFrame(
 )
 
 /**
+ * Hostile-length probe for the deferred shape —
+ * [com.ditchoom.buffer.codec.test.protocols.simple.WideLengthFrame]'s
+ * full-width `UInt` carrier with the `String` payload swapped for a
+ * codec-deferred one.
+ *
+ * A full-width carrier is the only shape where a wire-supplied length can
+ * reach `Int.MAX_VALUE` and overflow `peekFrameSize`'s running offset
+ * (`__offset + payloadBytes`). The `UShort` fixtures above cannot express
+ * that value, so without this fixture the overflow guard would exist in
+ * the deferred peeks but never execute. Non-adjacent carrier (`flags`
+ * separates it from the body) for the same reason as `WideLengthFrame`.
+ */
+@ProtocolMessage
+data class WideLengthDeferredFrame(
+    val payloadLength: UInt,
+    val flags: UByte,
+    @LengthFrom("payloadLength")
+    @UseCodec(TextPayloadCodec::class)
+    val payload: TextPayload,
+)
+
+/**
  * The reporter's *second* shape from issue #168, migrated to `@LengthFrom`.
  *
  * #168 asked why `Partial` was generated for `SmpPacket` but not for a sealed

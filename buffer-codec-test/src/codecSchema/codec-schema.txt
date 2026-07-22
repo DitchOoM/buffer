@@ -214,6 +214,10 @@ message com.ditchoom.buffer.codec.test.protocols.deferredpayload.SmpGenericFrame
   4 sequence scalar:UByte wire=1B order=Default
   5 commandId scalar:UByte wire=1B order=Default
   6 payload payload:P len-from=sibling:payloadLength codec=injected:payloadCodec
+message com.ditchoom.buffer.codec.test.protocols.deferredpayload.WideLengthDeferredFrame
+  0 payloadLength scalar:UInt wire=4B order=Default
+  1 flags scalar:UByte wire=1B order=Default
+  2 payload payload:com.ditchoom.buffer.codec.test.protocols.payload.TextPayload len-from=sibling:payloadLength codec=com.ditchoom.buffer.codec.test.protocols.payload.TextPayloadCodec
 message com.ditchoom.buffer.codec.test.protocols.dns.DnsHeader
   0 id scalar:UShort wire=2B order=Big
   1 flags scalar:UShort wire=2B order=Big
