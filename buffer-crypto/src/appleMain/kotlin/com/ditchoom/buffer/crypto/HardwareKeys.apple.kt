@@ -458,9 +458,10 @@ private fun enclaveSignP256Into(
  * fails closed on an unentitled/unsigned binary (e.g. the macOS CLI test runner) or the simulator,
  * keeping [CryptoCapabilities.hardware] honestly [HardwareSupport.Unavailable] there.
  */
-private val appleProvider: HardwareKeyProvider? by lazy {
+private val appleResolution: ProtectedKeyResolution by lazy {
     if (bcks_secure_enclave_available() == 0) {
-        null
+        // CryptoKit reports no Enclave on this hardware (or the simulator).
+        ProtectedKeyResolution.Refused(ProtectedKeyBackend.AppleSecureEnclave, CapabilityFinding.Enclave.NotPresent)
     } else {
         val usable =
             try {
@@ -469,11 +470,21 @@ private val appleProvider: HardwareKeyProvider? by lazy {
             } catch (_: Throwable) {
                 false
             }
-        if (usable) SecureEnclaveHardwareKeyProvider() else null
+        if (usable) {
+            ProtectedKeyResolution.Available(ProtectedKeyBackend.AppleSecureEnclave, SecureEnclaveHardwareKeyProvider())
+        } else {
+            // Present but the generate-and-discard probe failed — typically an unentitled binary
+            // (the macOS CLI test runner).
+            ProtectedKeyResolution.Refused(ProtectedKeyBackend.AppleSecureEnclave, CapabilityFinding.Enclave.ProbeFailed)
+        }
     }
 }
 
-internal actual fun platformProtectedKeyProvider(): ProtectedKeyProvider? = appleProvider
+private val appleProvider: HardwareKeyProvider? by lazy {
+    (appleResolution as? ProtectedKeyResolution.Available)?.provider as? HardwareKeyProvider
+}
+
+internal actual fun platformProtectedKeyResolution(): ProtectedKeyResolution = appleResolution
 
 /**
  * The Secure Enclave provider narrowed to its concrete type, or `null` where the Enclave is

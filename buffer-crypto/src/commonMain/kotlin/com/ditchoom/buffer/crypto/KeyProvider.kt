@@ -75,12 +75,14 @@ sealed interface ProtectedKeySupport {
 }
 
 /**
- * The platform's strongest non-exportable key provider, or `null` when this platform wires none.
- * `internal` + `expect`/`actual` so it stays out of the public ABI while the public accessors
- * ([CryptoCapabilities.protectedKeys], [CryptoCapabilities.hardware]) keep their frozen signatures.
- * This one internal seam replaces the 6.0 `platformHardwareKeyProvider()`.
+ * The platform's strongest non-exportable key provider, or `null` when none is usable. Derived from
+ * the typed [platformProtectedKeyResolution] seam — the `null` here is a *derivation* for the frozen
+ * accessors ([CryptoCapabilities.protectedKeys], [CryptoCapabilities.hardware]), not a state of its
+ * own: the distinction between "no backend wired" and "wired but refused (and why)" lives in
+ * [ProtectedKeyResolution], never overloaded onto this nullable.
  */
-internal expect fun platformProtectedKeyProvider(): ProtectedKeyProvider?
+internal fun platformProtectedKeyProvider(): ProtectedKeyProvider? =
+    (platformProtectedKeyResolution() as? ProtectedKeyResolution.Available)?.provider
 
 /**
  * The non-exportable key capability on this platform: [ProtectedKeySupport.Available] where either a
