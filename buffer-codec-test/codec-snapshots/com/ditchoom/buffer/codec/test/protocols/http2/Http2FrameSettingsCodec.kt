@@ -20,6 +20,14 @@ public object Http2FrameSettingsCodec : Codec<Http2Frame.Settings> {
     val flags = buffer.readUByte()
     val streamId = Http2StreamId(buffer.readUInt())
     val entriesBytes = header.length
+    if (entriesBytes > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "Settings.entries",
+            bufferPosition = buffer.position(),
+            expected = "a " + entriesBytes + "-byte bounded region within the enclosing limit",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     val entriesOuterLimit = buffer.limit()
     buffer.setLimit(buffer.position() + entriesBytes)
     val entries = mutableListOf<Http2Setting>()

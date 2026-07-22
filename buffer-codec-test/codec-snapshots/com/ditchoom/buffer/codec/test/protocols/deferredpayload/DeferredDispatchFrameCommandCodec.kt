@@ -30,6 +30,14 @@ public class DeferredDispatchFrameCommandCodec<P : Payload>(
       payloadLength = (__batch1 ushr 16 and 0xFFFF).toUShort()
     }
     val payloadBytes = payloadLength.toInt()
+    if (payloadBytes > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "Command.payload",
+            bufferPosition = buffer.position(),
+            expected = "a " + payloadBytes + "-byte bounded region within the enclosing limit",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     val payloadOuterLimit = buffer.limit()
     val payloadEnd = buffer.position() + payloadBytes
     buffer.setLimit(payloadEnd)
@@ -131,6 +139,14 @@ public class DeferredDispatchFrameCommandCodec<P : Payload>(
         payloadLength = (__batch2 ushr 16 and 0xFFFF).toUShort()
       }
       val __payloadStart = buffer.position()
+      if (payloadLength.toInt() > buffer.remaining()) {
+        throw DecodeException(
+              fieldPath = "Command.payload",
+              bufferPosition = buffer.position(),
+              expected = "a " + payloadLength.toInt() + "-byte bounded region within the enclosing limit",
+              actual = buffer.remaining().toString() + " bytes available",
+            )
+      }
       val __payloadEnd = __payloadStart + payloadLength.toInt()
       buffer.position(__payloadEnd)
       val checksum = buffer.readUShort()

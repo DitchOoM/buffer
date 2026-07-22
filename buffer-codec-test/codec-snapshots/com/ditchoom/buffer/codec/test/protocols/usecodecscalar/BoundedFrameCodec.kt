@@ -5,6 +5,7 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
+import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
@@ -21,6 +22,16 @@ public object BoundedFrameCodec : Codec<BoundedFrame> {
     val __lengthOuterLimit = buffer.limit()
     val length = Le32LengthCodec.decode(buffer, context)
     Le32LengthCodec.applyBound(buffer, length)
+    if (buffer.limit() > __lengthOuterLimit) {
+      val __widenedLimit = buffer.limit()
+      buffer.setLimit(__lengthOuterLimit)
+      throw DecodeException(
+            fieldPath = "BoundedFrame.length",
+            bufferPosition = buffer.position(),
+            expected = "applyBound to narrow within the enclosing limit " + __lengthOuterLimit,
+            actual = "limit " + __widenedLimit,
+          )
+    }
     return try {
       val payload = BinaryDataCodec.decode(buffer, context)
       BoundedFrame(tag = tag, length = length, payload = payload)
@@ -69,6 +80,16 @@ public object BoundedFrameCodec : Codec<BoundedFrame> {
     val __lengthOuterLimit = buffer.limit()
     val length = Le32LengthCodec.decode(buffer, context)
     Le32LengthCodec.applyBound(buffer, length)
+    if (buffer.limit() > __lengthOuterLimit) {
+      val __widenedLimit = buffer.limit()
+      buffer.setLimit(__lengthOuterLimit)
+      throw DecodeException(
+            fieldPath = "BoundedFrame.length",
+            bufferPosition = buffer.position(),
+            expected = "applyBound to narrow within the enclosing limit " + __lengthOuterLimit,
+            actual = "limit " + __widenedLimit,
+          )
+    }
     return Partial(tag = tag, length = length, outerLimit = __lengthOuterLimit, buffer = buffer, context = context)
   }
 

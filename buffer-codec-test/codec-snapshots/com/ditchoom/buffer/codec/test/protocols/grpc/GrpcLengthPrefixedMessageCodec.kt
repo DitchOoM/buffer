@@ -24,6 +24,14 @@ public object GrpcLengthPrefixedMessageCodec : Codec<GrpcLengthPrefixedMessage> 
       throw DecodeException(fieldPath = "GrpcLengthPrefixedMessage.message", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = messagePrefix.toString())
     }
     val messageLength = messagePrefix.toInt()
+    if (messageLength > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "GrpcLengthPrefixedMessage.message",
+            bufferPosition = buffer.position(),
+            expected = "a " + messageLength + "-byte bounded region within the enclosing limit",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     val __messageOuterLimit = buffer.limit()
     buffer.setLimit(buffer.position() + messageLength)
     val message = try {

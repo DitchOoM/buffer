@@ -562,6 +562,7 @@ internal fun appendDecodeConditional(
                 spec = inner.spec,
                 listLocalName = "${field.name}Value",
                 namespacePrefix = field.name,
+                fieldPath = "${field.ownerSimpleName}.${field.name}",
             )
             body.addStatement("%LValue", field.name)
             body.nextControlFlow("else")
@@ -588,6 +589,7 @@ internal fun appendDecodeConditional(
                     prefixWidth = inner.prefixWidth,
                     prefixWireOrder = inner.prefixWireOrder,
                 )
+            appendOuterBoundWidenGuard(body, lengthVar, "${field.ownerSimpleName}.${field.name}")
             val outerLimitVar = "__${field.name}OuterLimit"
             body.addStatement("val %L = buffer.limit()", outerLimitVar)
             body.addStatement("buffer.setLimit(buffer.position() + %L)", lengthVar)
@@ -1038,6 +1040,7 @@ internal fun appendDecodeLengthPrefixed(
     body.endControlFlow()
     val resolvedVar = "${field.name}Length"
     body.addStatement("val %L = %L.toInt()", resolvedVar, prefixVar)
+    appendOuterBoundWidenGuard(body, resolvedVar, "${field.ownerSimpleName}.${field.name}")
     val outerVar = "${field.name}OuterLimit"
     body.addStatement("val %L = buffer.limit()", outerVar)
     body.addStatement("buffer.setLimit(buffer.position() + %L)", resolvedVar)
@@ -1455,6 +1458,7 @@ internal fun appendDecodeLengthFromList(
     val bytesVar = "${field.name}Bytes"
     val outerLimitVar = "${field.name}OuterLimit"
     body.addStatement("val %L = %L", bytesVar, field.source.decodeAccessor())
+    appendOuterBoundWidenGuard(body, bytesVar, "${field.ownerSimpleName}.${field.name}")
     body.addStatement("val %L = buffer.limit()", outerLimitVar)
     body.addStatement("buffer.setLimit(buffer.position() + %L)", bytesVar)
     body.addStatement("val %L = mutableListOf<%T>()", field.name, field.elementClassName)
@@ -1521,6 +1525,7 @@ internal fun appendDecodeLengthFromMessage(
     val bytesVar = "${field.name}Bytes"
     val outerLimitVar = "${field.name}OuterLimit"
     body.addStatement("val %L = %L", bytesVar, field.source.decodeAccessor())
+    appendOuterBoundWidenGuard(body, bytesVar, "${field.ownerSimpleName}.${field.name}")
     body.addStatement("val %L = buffer.limit()", outerLimitVar)
     body.addStatement("buffer.setLimit(buffer.position() + %L)", bytesVar)
     body.beginControlFlow("val %L = try", field.name)
@@ -1652,6 +1657,7 @@ private fun appendDecodeDeferredPayloadSibling(
     val outerLimitVar = "${field.name}OuterLimit"
     val endVar = "${field.name}End"
     body.addStatement("val %L = %L", bytesVar, extent.source.decodeAccessor())
+    appendOuterBoundWidenGuard(body, bytesVar, "${field.ownerSimpleName}.${field.name}")
     body.addStatement("val %L = buffer.limit()", outerLimitVar)
     body.addStatement("val %L = buffer.position() + %L", endVar, bytesVar)
     body.addStatement("buffer.setLimit(%L)", endVar)
@@ -1895,6 +1901,11 @@ internal fun appendDecodeUseCodecScalar(
     body.addStatement("val %L = %T.decode(buffer, context)", field.name, field.codecType)
     if (field.isBounding) {
         body.addStatement("%T.applyBound(buffer, %L)", field.codecType, field.name)
+        appendApplyBoundWidenGuard(
+            body,
+            "__${field.name}OuterLimit",
+            "${field.ownerSimpleName}.${field.name}",
+        )
     }
 }
 
@@ -2009,6 +2020,7 @@ internal fun appendDecodeLengthPrefixedUseCodecList(
         spec = field.spec,
         listLocalName = field.name,
         namespacePrefix = field.name,
+        fieldPath = "${field.ownerSimpleName}.${field.name}",
     )
 }
 
@@ -2045,6 +2057,7 @@ internal fun appendDecodeLengthPrefixedUseCodecPayload(
             prefixWidth = field.prefixWidth,
             prefixWireOrder = field.prefixWireOrder,
         )
+    appendOuterBoundWidenGuard(body, lengthVar, "${field.ownerSimpleName}.${field.name}")
     val outerLimitVar = "__${field.name}OuterLimit"
     body.addStatement("val %L = buffer.limit()", outerLimitVar)
     body.addStatement("buffer.setLimit(buffer.position() + %L)", lengthVar)
@@ -2080,12 +2093,14 @@ internal fun appendDecodeLengthPrefixedListBody(
     spec: LengthPrefixedListSpec,
     listLocalName: String,
     namespacePrefix: String,
+    fieldPath: String,
 ) {
     val outerLimitVar = "__${namespacePrefix}OuterLimit"
     val lengthVar = "__${namespacePrefix}Length"
     body.addStatement("val %L = buffer.limit()", outerLimitVar)
     body.addStatement("val %L = %T.decode(buffer, context)", lengthVar, spec.codecType)
     body.addStatement("%T.applyBound(buffer, %L)", spec.codecType, lengthVar)
+    appendApplyBoundWidenGuard(body, outerLimitVar, fieldPath)
     body.addStatement("val %L = mutableListOf<%T>()", listLocalName, spec.elementClassName)
     body.beginControlFlow("try")
     body.beginControlFlow("while (buffer.position() < buffer.limit())")

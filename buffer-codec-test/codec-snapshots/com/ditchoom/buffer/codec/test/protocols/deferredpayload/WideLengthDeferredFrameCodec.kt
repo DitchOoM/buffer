@@ -22,6 +22,14 @@ public object WideLengthDeferredFrameCodec : Codec<WideLengthDeferredFrame> {
       throw DecodeException(fieldPath = "WideLengthDeferredFrame.payload", bufferPosition = -1, expected = "@LengthFrom source <= ${'$'}{Int.MAX_VALUE}", actual = payloadLength.toString())
     }
     val payloadBytes = payloadLength.toInt()
+    if (payloadBytes > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "WideLengthDeferredFrame.payload",
+            bufferPosition = buffer.position(),
+            expected = "a " + payloadBytes + "-byte bounded region within the enclosing limit",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     val payloadOuterLimit = buffer.limit()
     val payloadEnd = buffer.position() + payloadBytes
     buffer.setLimit(payloadEnd)
@@ -84,6 +92,14 @@ public object WideLengthDeferredFrameCodec : Codec<WideLengthDeferredFrame> {
     val __payloadStart = buffer.position()
     if (payloadLength > Int.MAX_VALUE.toUInt()) {
       throw DecodeException(fieldPath = "WideLengthDeferredFrame.payload", bufferPosition = -1, expected = "@LengthFrom source <= ${'$'}{Int.MAX_VALUE}", actual = payloadLength.toString())
+    }
+    if (payloadLength.toInt() > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "WideLengthDeferredFrame.payload",
+            bufferPosition = buffer.position(),
+            expected = "a " + payloadLength.toInt() + "-byte bounded region within the enclosing limit",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
     }
     val __payloadEnd = __payloadStart + payloadLength.toInt()
     buffer.position(__payloadEnd)

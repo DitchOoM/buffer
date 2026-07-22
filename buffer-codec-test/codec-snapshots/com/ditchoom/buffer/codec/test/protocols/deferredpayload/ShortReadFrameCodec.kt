@@ -16,6 +16,14 @@ public object ShortReadFrameCodec : Codec<ShortReadFrame> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): ShortReadFrame {
     val payloadLength = buffer.readUShort()
     val payloadBytes = payloadLength.toInt()
+    if (payloadBytes > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "ShortReadFrame.payload",
+            bufferPosition = buffer.position(),
+            expected = "a " + payloadBytes + "-byte bounded region within the enclosing limit",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     val payloadOuterLimit = buffer.limit()
     val payloadEnd = buffer.position() + payloadBytes
     buffer.setLimit(payloadEnd)
@@ -67,6 +75,14 @@ public object ShortReadFrameCodec : Codec<ShortReadFrame> {
   public fun partial(buffer: ReadBuffer, context: DecodeContext): Partial {
     val payloadLength = buffer.readUShort()
     val __payloadStart = buffer.position()
+    if (payloadLength.toInt() > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "ShortReadFrame.payload",
+            bufferPosition = buffer.position(),
+            expected = "a " + payloadLength.toInt() + "-byte bounded region within the enclosing limit",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     val __payloadEnd = __payloadStart + payloadLength.toInt()
     buffer.position(__payloadEnd)
     return Partial(payloadLength = payloadLength, payloadStart = __payloadStart, payloadEnd = __payloadEnd, buffer = buffer, context = context)

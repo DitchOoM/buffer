@@ -1161,6 +1161,10 @@ message com.ditchoom.buffer.codec.test.protocols.tls.TlsHandshakeWithSealedBody
   0 msgType scalar:UByte wire=1B order=Big
   1 length scalar:UInt wire=3B order=Big
   2 body msg:com.ditchoom.buffer.codec.test.protocols.tls.TlsHandshakeSealedBody len-from=sibling:length
+message com.ditchoom.buffer.codec.test.protocols.tls.TlsRecord
+  0 contentType scalar:UByte wire=1B order=Big
+  1 legacyRecordVersion scalar:UShort wire=2B order=Big
+  2 fragment msg:com.ditchoom.buffer.codec.test.protocols.tls.TlsHandshake len-prefix=2B/Big
 message com.ditchoom.buffer.codec.test.protocols.usecodecscalar.BoundedFrame
   0 tag scalar:Short wire=2B order=Default
   1 length codec:com.ditchoom.buffer.codec.test.protocols.usecodecscalar.Le32LengthCodec bounding=true variable=false

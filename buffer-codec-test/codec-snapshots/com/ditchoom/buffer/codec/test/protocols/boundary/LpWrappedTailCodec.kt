@@ -22,6 +22,14 @@ public object LpWrappedTailCodec : Codec<LpWrappedTail> {
       throw DecodeException(fieldPath = "LpWrappedTail.body", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = bodyPrefix.toString())
     }
     val bodyLength = bodyPrefix.toInt()
+    if (bodyLength > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "LpWrappedTail.body",
+            bufferPosition = buffer.position(),
+            expected = "a " + bodyLength + "-byte bounded region within the enclosing limit",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     val bodyOuterLimit = buffer.limit()
     buffer.setLimit(buffer.position() + bodyLength)
     val body = try {

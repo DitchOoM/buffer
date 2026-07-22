@@ -22,6 +22,14 @@ public object AsciiGreetingCodec : Codec<AsciiGreeting> {
       throw DecodeException(fieldPath = "AsciiGreeting.command", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = commandPrefix.toString())
     }
     val commandLength = commandPrefix.toInt()
+    if (commandLength > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "AsciiGreeting.command",
+            bufferPosition = buffer.position(),
+            expected = "a " + commandLength + "-byte bounded region within the enclosing limit",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     val __commandOuterLimit = buffer.limit()
     buffer.setLimit(buffer.position() + commandLength)
     val command = try {
