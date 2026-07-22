@@ -22,6 +22,14 @@ public object MisdeclaredHostCodec : Codec<MisdeclaredHost> {
       throw DecodeException(fieldPath = "MisdeclaredHost.inner", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = innerPrefix.toString())
     }
     val innerLength = innerPrefix.toInt()
+    if (innerLength > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "MisdeclaredHost.inner",
+            bufferPosition = buffer.position(),
+            expected = "a " + innerLength + "-byte bounded region within the enclosing limit",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     val innerOuterLimit = buffer.limit()
     buffer.setLimit(buffer.position() + innerLength)
     val inner = try {

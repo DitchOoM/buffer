@@ -40,6 +40,14 @@ public object SmpFrameCodec : Codec<SmpFrame> {
       commandId = (__batch1 ushr 56 and 0xFFL).toUByte()
     }
     val payloadBytes = payloadLength.toInt()
+    if (payloadBytes > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "SmpFrame.payload",
+            bufferPosition = buffer.position(),
+            expected = "a " + payloadBytes + "-byte bounded region within the enclosing limit",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     val payloadOuterLimit = buffer.limit()
     val payloadEnd = buffer.position() + payloadBytes
     buffer.setLimit(payloadEnd)
@@ -126,6 +134,14 @@ public object SmpFrameCodec : Codec<SmpFrame> {
       commandId = (__batch2 ushr 56 and 0xFFL).toUByte()
     }
     val __payloadStart = buffer.position()
+    if (payloadLength.toInt() > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "SmpFrame.payload",
+            bufferPosition = buffer.position(),
+            expected = "a " + payloadLength.toInt() + "-byte bounded region within the enclosing limit",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     val __payloadEnd = __payloadStart + payloadLength.toInt()
     buffer.position(__payloadEnd)
     return Partial(op = op, flags = flags, payloadLength = payloadLength, group = group, sequence = sequence, commandId = commandId, payloadStart = __payloadStart, payloadEnd = __payloadEnd, buffer = buffer, context = context)

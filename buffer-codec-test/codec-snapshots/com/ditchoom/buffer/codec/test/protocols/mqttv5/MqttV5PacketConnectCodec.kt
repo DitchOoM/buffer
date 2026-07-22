@@ -81,6 +81,14 @@ public object MqttV5PacketConnectCodec {
           throw DecodeException(fieldPath = "Connect.willPayload", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = willPayloadPrefix.toString())
         }
         val willPayloadLength = willPayloadPrefix.toInt()
+        if (willPayloadLength > buffer.remaining()) {
+          throw DecodeException(
+                fieldPath = "Connect.willPayload",
+                bufferPosition = buffer.position(),
+                expected = "a " + willPayloadLength + "-byte bounded region within the enclosing limit",
+                actual = buffer.remaining().toString() + " bytes available",
+              )
+        }
         val __willPayloadOuterLimit = buffer.limit()
         buffer.setLimit(buffer.position() + willPayloadLength)
         try {
@@ -111,6 +119,14 @@ public object MqttV5PacketConnectCodec {
           throw DecodeException(fieldPath = "Connect.password", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = passwordPrefix.toString())
         }
         val passwordLength = passwordPrefix.toInt()
+        if (passwordLength > buffer.remaining()) {
+          throw DecodeException(
+                fieldPath = "Connect.password",
+                bufferPosition = buffer.position(),
+                expected = "a " + passwordLength + "-byte bounded region within the enclosing limit",
+                actual = buffer.remaining().toString() + " bytes available",
+              )
+        }
         val __passwordOuterLimit = buffer.limit()
         buffer.setLimit(buffer.position() + passwordLength)
         try {

@@ -5,6 +5,7 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
+import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
@@ -20,6 +21,16 @@ public object Http3FrameSettingsCodec : Codec<Http3Frame.Settings> {
     val __lengthOuterLimit = buffer.limit()
     val length = Http3LengthCodec.decode(buffer, context)
     Http3LengthCodec.applyBound(buffer, length)
+    if (buffer.limit() > __lengthOuterLimit) {
+      val __widenedLimit = buffer.limit()
+      buffer.setLimit(__lengthOuterLimit)
+      throw DecodeException(
+            fieldPath = "Settings.length",
+            bufferPosition = buffer.position(),
+            expected = "applyBound to narrow within the enclosing limit " + __lengthOuterLimit,
+            actual = "limit " + __widenedLimit,
+          )
+    }
     return try {
       val parameters = BinaryDataCodec.decode(buffer, context)
       Http3Frame.Settings(frameType = frameType, length = length, parameters = parameters)
@@ -74,6 +85,16 @@ public object Http3FrameSettingsCodec : Codec<Http3Frame.Settings> {
     val __lengthOuterLimit = buffer.limit()
     val length = Http3LengthCodec.decode(buffer, context)
     Http3LengthCodec.applyBound(buffer, length)
+    if (buffer.limit() > __lengthOuterLimit) {
+      val __widenedLimit = buffer.limit()
+      buffer.setLimit(__lengthOuterLimit)
+      throw DecodeException(
+            fieldPath = "Settings.length",
+            bufferPosition = buffer.position(),
+            expected = "applyBound to narrow within the enclosing limit " + __lengthOuterLimit,
+            actual = "limit " + __widenedLimit,
+          )
+    }
     return Partial(frameType = frameType, length = length, outerLimit = __lengthOuterLimit, buffer = buffer, context = context)
   }
 

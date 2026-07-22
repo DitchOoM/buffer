@@ -7,6 +7,7 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
+import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.LengthPrefixedListEncoder
 import com.ditchoom.buffer.codec.PeekResult
@@ -21,6 +22,16 @@ public object StringTaggedPropertyBagCodec : Codec<StringTaggedPropertyBag> {
     val __propertiesOuterLimit = buffer.limit()
     val __propertiesLength = MqttRemainingLengthCodec.decode(buffer, context)
     MqttRemainingLengthCodec.applyBound(buffer, __propertiesLength)
+    if (buffer.limit() > __propertiesOuterLimit) {
+      val __widenedLimit = buffer.limit()
+      buffer.setLimit(__propertiesOuterLimit)
+      throw DecodeException(
+            fieldPath = "StringTaggedPropertyBag.properties",
+            bufferPosition = buffer.position(),
+            expected = "applyBound to narrow within the enclosing limit " + __propertiesOuterLimit,
+            actual = "limit " + __widenedLimit,
+          )
+    }
     val properties = mutableListOf<StringTaggedProperty>()
     try {
       while (buffer.position() < buffer.limit()) {

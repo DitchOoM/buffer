@@ -23,6 +23,14 @@ public object MqttV5PropertyCorrelationDataCodec : Codec<MqttV5Property.Correlat
       throw DecodeException(fieldPath = "CorrelationData.data", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = dataPrefix.toString())
     }
     val dataLength = dataPrefix.toInt()
+    if (dataLength > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "CorrelationData.data",
+            bufferPosition = buffer.position(),
+            expected = "a " + dataLength + "-byte bounded region within the enclosing limit",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     val __dataOuterLimit = buffer.limit()
     buffer.setLimit(buffer.position() + dataLength)
     val data = try {

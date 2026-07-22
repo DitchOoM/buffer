@@ -1764,6 +1764,11 @@ internal class CodecEmitter(
                             fieldName = payloadField.name,
                         )
                     }
+                    appendOuterBoundWidenGuard(
+                        body,
+                        extent.source.decodeAccessor(),
+                        "${payloadField.ownerSimpleName}.${payloadField.name}",
+                    )
                     body.addStatement("val __payloadEnd = __payloadStart + %L", extent.source.decodeAccessor())
                 }
             }
@@ -1953,6 +1958,64 @@ internal fun appendFramedBodyTruncationGuard(
         DECODE_EXCEPTION_CN,
         fieldPath,
         lengthLocal,
+    )
+    body.endControlFlow()
+}
+
+/**
+ * Emits the outer-bound widen guard before a narrowing `setLimit`: the
+ * wire-supplied region length must fit inside the current bound.
+ * `ReadBuffer.setLimit` WIDENS unchecked on every platform, so without
+ * this check a codec running under an outer narrowed limit (a sealed
+ * dispatcher's carve, `@FramedBy`, a bounding `@UseCodec` region, or an
+ * enclosing `@LengthPrefixed`/`@LengthFrom` body) would silently read
+ * adjacent bytes past its bound from a lying length field — and still
+ * pass strict consumption, having consumed exactly the lying region.
+ * At the top level the same comparison doubles as a truncation check
+ * against the caller's limit. Decode-side sibling of the #306/#309
+ * encode/peek fixes; `lengthExpr` must be an `Int`-typed expression.
+ */
+internal fun appendOuterBoundWidenGuard(
+    body: CodeBlock.Builder,
+    lengthExpr: String,
+    fieldPath: String,
+) {
+    body.beginControlFlow("if (%L > buffer.remaining())", lengthExpr)
+    body.addStatement(
+        "throw %T(\n  fieldPath = %S,\n  bufferPosition = buffer.position(),\n" +
+            "  expected = \"a \" + %L + \"-byte bounded region within the enclosing limit\",\n" +
+            "  actual = buffer.remaining().toString() + \" bytes available\",\n)",
+        DECODE_EXCEPTION_CN,
+        fieldPath,
+        lengthExpr,
+    )
+    body.endControlFlow()
+}
+
+/**
+ * Emits the post-`applyBound` widen guard for `BoundingLengthCodec`
+ * regions. The narrowing `setLimit` happens inside user code, so the
+ * generated decode verifies the outcome instead of the input: a bound
+ * that lands past the captured outer limit means the decoded length lied
+ * about a region the enclosing bound does not contain. The widened limit
+ * is rolled back before throwing so a catching caller never observes
+ * adjacent bytes exposed past its own bound.
+ */
+internal fun appendApplyBoundWidenGuard(
+    body: CodeBlock.Builder,
+    outerLimitLocal: String,
+    fieldPath: String,
+) {
+    body.beginControlFlow("if (buffer.limit() > %L)", outerLimitLocal)
+    body.addStatement("val __widenedLimit = buffer.limit()")
+    body.addStatement("buffer.setLimit(%L)", outerLimitLocal)
+    body.addStatement(
+        "throw %T(\n  fieldPath = %S,\n  bufferPosition = buffer.position(),\n" +
+            "  expected = \"applyBound to narrow within the enclosing limit \" + %L,\n" +
+            "  actual = \"limit \" + __widenedLimit,\n)",
+        DECODE_EXCEPTION_CN,
+        fieldPath,
+        outerLimitLocal,
     )
     body.endControlFlow()
 }

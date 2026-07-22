@@ -23,6 +23,14 @@ public object TlsHandshakeWithSealedBodyCodec : Codec<TlsHandshakeWithSealedBody
       throw DecodeException(fieldPath = "TlsHandshakeWithSealedBody.body", bufferPosition = -1, expected = "@LengthFrom source <= ${'$'}{Int.MAX_VALUE}", actual = length.toString())
     }
     val bodyBytes = length.toInt()
+    if (bodyBytes > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "TlsHandshakeWithSealedBody.body",
+            bufferPosition = buffer.position(),
+            expected = "a " + bodyBytes + "-byte bounded region within the enclosing limit",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     val bodyOuterLimit = buffer.limit()
     buffer.setLimit(buffer.position() + bodyBytes)
     val body = try {

@@ -2,6 +2,7 @@ package com.ditchoom.buffer.codec.test.protocols.tls
 
 import com.ditchoom.buffer.codec.annotations.Endianness
 import com.ditchoom.buffer.codec.annotations.LengthFrom
+import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
@@ -66,6 +67,21 @@ data class TlsHandshakeWithSealedBody(
     val msgType: UByte,
     @WireBytes(3) val length: UInt,
     @LengthFrom("length") val body: TlsHandshakeSealedBody,
+)
+
+/**
+ * RFC 8446 §5.1 record envelope (minimal): the handshake fragment is
+ * bounded by the record's own uint16 length. Nesting [TlsHandshake]
+ * under this outer bound is the hostile-length vector: the inner
+ * `@LengthFrom("length")` region must never widen `buffer.limit()`
+ * past the record's `@LengthPrefixed` bound, no matter what the inner
+ * uint24 claims.
+ */
+@ProtocolMessage(wireOrder = Endianness.Big)
+data class TlsRecord(
+    val contentType: UByte,
+    val legacyRecordVersion: UShort,
+    @LengthPrefixed val fragment: TlsHandshake,
 )
 
 @ProtocolMessage(wireOrder = Endianness.Big)
