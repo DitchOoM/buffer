@@ -27,10 +27,12 @@ import kotlin.time.Duration.Companion.seconds
  *
  * In 6.0 no platform constructs a hardware key — [CryptoCapabilities.hardware] is always
  * [HardwareSupport.Unavailable] — but the machinery (SPI, gated keys, witness dispatch) is real and
- * exercised by a fake provider in the test suite. Only the two families a secure element actually
- * holds are wired: **AES-GCM** and **signatures**. ChaCha20-Poly1305 is excluded (Enclave/StrongBox
- * do not implement it) and verify keys are public (no secret to protect), so neither gets a hardware
- * variant; their sealed types are nonetheless already shaped to accept one without a break.
+ * exercised by a fake provider in the test suite. The families a secure element actually holds are
+ * wired: **AES-GCM**, **signatures**, and — where the element backs it (Android Keystore
+ * `PURPOSE_AGREE_KEY`, API 31+) — **ECDH key agreement**. ChaCha20-Poly1305 is excluded
+ * (Enclave/StrongBox do not implement it) and verify keys are public (no secret to protect), so
+ * neither gets a hardware variant; their sealed types are nonetheless already shaped to accept one
+ * without a break.
  */
 
 /**
