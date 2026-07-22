@@ -104,7 +104,11 @@ class HardwareKeyConformanceTest {
                         val info = Info.Of(ascii("hw-ka-conformance"))
                         val viaHardware = ops.deriveSharedSecret(pair.privateKey, peer.publicKey, info, length = 32)
                         val viaPeer = ops.deriveSharedSecret(peer.privateKey, pair.publicKey, info, length = 32)
-                        assertEquals(viaPeer.toHex(), viaHardware.toHex(), "real hw ECDH must agree with a software peer")
+                        assertEquals(
+                            viaPeer.toHex(),
+                            viaHardware.toHex(),
+                            "real hw ECDH must agree with a software peer",
+                        )
                     } finally {
                         peer.close()
                     }
@@ -233,7 +237,7 @@ class HardwareKeyConformanceTest {
         runTest {
             val pair = provider.generateKeyAgreement(KeyAgreementCurve.P256, grant)
             assertEquals(KeyProvenance.Hardware, pair.privateKey.provenance)
-            assertFailsWith<UnsupportedOperationException>("a non-exportable agreement key has no exportable material") {
+            assertFailsWith<UnsupportedOperationException>("a non-exportable agreement key must not export") {
                 pair.privateKey.exportEncoded()
             }
         }
