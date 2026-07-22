@@ -14,9 +14,12 @@ import kotlin.test.assertTrue
 /**
  * `@UseCodec` validator coverage for the bare-scalar shape (no framing
  * annotation). The bare shape unblocks user-supplied length codecs like
- * `MqttRemainingLengthCodec`. The `@RemainingBytes @UseCodec val: P` shape
- * and the deferred `@LengthPrefixed @UseCodec` / `@LengthFrom @UseCodec`
- * shapes still produce the same diagnostics as before.
+ * `MqttRemainingLengthCodec`.
+ *
+ * `@RemainingBytes @UseCodec val: P` is unchanged. `@LengthFrom @UseCodec`
+ * is now the supported deferred-payload shape (issue #293) and is covered in
+ * `LengthFromValidatorTest`; what remains here is the rejection of bound
+ * types that shape does not reach.
  */
 class UseCodecScalarValidatorTest {
     @Test
@@ -699,7 +702,7 @@ class UseCodecScalarValidatorTest {
     }
 
     @Test
-    fun rejectsLengthFromUseCodecAsDeferred() {
+    fun rejectsLengthFromUseCodecOnNonPayloadScalar() {
         val result =
             compile(
                 """
@@ -731,9 +734,12 @@ class UseCodecScalarValidatorTest {
                 """.trimIndent(),
             )
         assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        // Since #293 `@LengthFrom @UseCodec` IS supported — but only for a
+        // deferred payload. A `UInt` bound type has no emit path, so it keeps a
+        // focused diagnostic instead of the old blanket "not yet supported".
         assertTrue(
-            result.messages.contains("not yet supported"),
-            "@LengthFrom @UseCodec should still produce the deferred diagnostic. Messages:\n${result.messages}",
+            result.messages.contains("@LengthFrom @UseCodec on test.HeaderWithLengthFromUseCodec.payload"),
+            "expected the focused non-Payload diagnostic. Messages:\n${result.messages}",
         )
     }
 

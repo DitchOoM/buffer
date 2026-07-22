@@ -1549,6 +1549,23 @@ internal fun appendEncodeLengthFromMessage(
 }
 
 /**
+ * Emit decode for a payload whose codec is not owned by the generated
+ * codec, dispatching on how its region is bounded. Each
+ * [PayloadExtent] arm owns a whole emit strategy — the bound is the
+ * only thing the generated code contributes, so it is the thing that
+ * differs.
+ */
+internal fun appendDecodeDeferredPayload(
+    body: CodeBlock.Builder,
+    field: FieldSpec.DeferredPayload,
+) {
+    when (val extent = field.extent) {
+        is PayloadExtent.ToLimit -> appendDecodeDeferredPayloadToLimit(body, field, extent)
+        is PayloadExtent.Sibling -> appendDecodeDeferredPayloadSibling(body, field, extent)
+    }
+}
+
+/**
  * Emit decode for
  * `@RemainingBytes @UseCodec(C::class) val: P`. Delegates to the
  * user-supplied `C.decode(buffer, context)` against whatever
@@ -1556,11 +1573,12 @@ internal fun appendEncodeLengthFromMessage(
  * as the other `@RemainingBytes` shapes. The outer dispatcher (slice
  * 10d for MQTT) sets the limit before calling this codec.
  */
-internal fun appendDecodeRemainingBytesPayload(
+private fun appendDecodeDeferredPayloadToLimit(
     body: CodeBlock.Builder,
-    field: FieldSpec.RemainingBytesPayload,
+    field: FieldSpec.DeferredPayload,
+    extent: PayloadExtent.ToLimit,
 ) {
-    if (field.reservedTrailingBytes == 0) {
+    if (extent.reservedTrailingBytes == 0) {
         body.addStatement(
             "val %L = %L.decode(buffer, context)",
             field.name,
@@ -1568,7 +1586,7 @@ internal fun appendDecodeRemainingBytesPayload(
         )
         return
     }
-    // Non-terminal RemainingBytesPayload. Narrow the
+    // Non-terminal DeferredPayload. Narrow the
     // buffer's limit to leave the trailing FixedSize fields in the
     // outer-limit region; restore the outer limit in a try/finally
     // so the trailing field emits run against the original limit.
@@ -1577,12 +1595,100 @@ internal fun appendDecodeRemainingBytesPayload(
     body.addStatement(
         "buffer.setLimit(%L - %L)",
         outerLimitVar,
-        field.reservedTrailingBytes,
+        extent.reservedTrailingBytes,
     )
     body.beginControlFlow("val %L = try", field.name)
     body.addStatement("%L.decode(buffer, context)", field.source.codecReceiver())
     body.nextControlFlow("finally")
     body.addStatement("buffer.setLimit(%L)", outerLimitVar)
+    body.endControlFlow()
+}
+
+/**
+ * (issue #293) — emit decode for `@LengthFrom("n") val: P`, the
+ * sibling-sized deferred payload. Union of
+ * [appendDecodeLengthFromMessage]'s bound (sibling → `setLimit`, outer
+ * limit restored in a `finally`) and [appendDecodeDeferredPayloadToLimit]'s
+ * delegation to a codec the generated code does not own.
+ *
+ * Adds one thing neither parent has: a strict-consumption check. The
+ * bound tells us exactly where the payload ends, so a codec that stops
+ * short has desynchronised the stream for every field after it. The
+ * `@LengthFrom @ProtocolMessage` path can trust-and-restore instead
+ * because its codec is generated from the same schema; a runtime-supplied
+ * `Codec<P>` is arbitrary user code and gets no such benefit of the
+ * doubt. Over-reading is already impossible — the narrowed limit stops it.
+ *
+ * Generated shape:
+ * ```
+ * <Int.MAX_VALUE guard for the sibling kind, if needed>
+ * val <name>Bytes = <sibling>.toInt()
+ * val <name>OuterLimit = buffer.limit()
+ * val <name>End = buffer.position() + <name>Bytes
+ * buffer.setLimit(<name>End)
+ * val <name> = try {
+ *     <codec>.decode(buffer, context)
+ * } finally {
+ *     buffer.setLimit(<name>OuterLimit)
+ * }
+ * if (buffer.position() != <name>End) throw DecodeException(...)
+ * ```
+ */
+private fun appendDecodeDeferredPayloadSibling(
+    body: CodeBlock.Builder,
+    field: FieldSpec.DeferredPayload,
+    extent: PayloadExtent.Sibling,
+) {
+    if (extent.source is LengthSource.Sibling) {
+        appendLengthFromIntMaxGuard(
+            body = body,
+            siblingAccessor = extent.source.siblingName,
+            siblingKind = extent.source.siblingKind,
+            ownerSimpleName = field.ownerSimpleName,
+            fieldName = field.name,
+        )
+    }
+    val bytesVar = "${field.name}Bytes"
+    val outerLimitVar = "${field.name}OuterLimit"
+    val endVar = "${field.name}End"
+    body.addStatement("val %L = %L", bytesVar, extent.source.decodeAccessor())
+    body.addStatement("val %L = buffer.limit()", outerLimitVar)
+    body.addStatement("val %L = buffer.position() + %L", endVar, bytesVar)
+    body.addStatement("buffer.setLimit(%L)", endVar)
+    body.beginControlFlow("val %L = try", field.name)
+    body.addStatement("%L.decode(buffer, context)", field.source.codecReceiver())
+    body.nextControlFlow("finally")
+    body.addStatement("buffer.setLimit(%L)", outerLimitVar)
+    body.endControlFlow()
+    appendPayloadConsumptionCheck(body, field, endExpr = endVar, bytesExpr = bytesVar)
+}
+
+/**
+ * Emit the strict-consumption guard for a sibling-sized deferred payload: the
+ * wire declared the region, so a codec that stops short of it has left every
+ * following field reading from the wrong offset.
+ *
+ * Shared by the two places that know the region — the inline decode path and
+ * `Partial.complete()` — so both report the same failure the same way. Only
+ * reachable for [PayloadExtent.Sibling]; a to-limit payload's region *is*
+ * whatever its codec reads, so there is no shortfall to detect.
+ */
+internal fun appendPayloadConsumptionCheck(
+    body: CodeBlock.Builder,
+    field: FieldSpec.DeferredPayload,
+    endExpr: String,
+    bytesExpr: String,
+) {
+    body.beginControlFlow("if (buffer.position() != %L)", endExpr)
+    body.addStatement(
+        "throw %T(\n  fieldPath = %S,\n  bufferPosition = buffer.position(),\n" +
+            "  expected = \"the payload codec to consume all \" + %L + \" bytes\",\n" +
+            "  actual = (%L - buffer.position()).toString() + \" bytes left unread\",\n)",
+        DECODE_EXCEPTION_CN,
+        "${field.ownerSimpleName}.${field.name}",
+        bytesExpr,
+        endExpr,
+    )
     body.endControlFlow()
 }
 
@@ -1593,10 +1699,16 @@ internal fun appendDecodeRemainingBytesPayload(
  * carrier on the wire — the user codec writes its bytes against the
  * buffer's current position and the trust contract (row 16) leaves
  * total-byte-count consistency to the outer dispatcher.
+ *
+ * Shared by both extents. Under [PayloadExtent.Sibling] the length
+ * carrier is an ordinary prior field encoded by its own emit step, so
+ * the same row-16 trust contract as `@LengthFrom @ProtocolMessage`
+ * applies: keeping `value.<sibling>` consistent with the bytes the
+ * payload codec writes is the caller's job.
  */
-internal fun appendEncodeRemainingBytesPayload(
+internal fun appendEncodeDeferredPayload(
     body: CodeBlock.Builder,
-    field: FieldSpec.RemainingBytesPayload,
+    field: FieldSpec.DeferredPayload,
 ) {
     body.addStatement(
         "%L.encode(buffer, value.%L, context)",
@@ -1610,7 +1722,7 @@ internal fun appendEncodeRemainingBytesPayload(
  * position to `buffer.limit()`. The caller (or an outer dispatcher) is
  * responsible for narrowing `buffer.limit()` to the bounded extent before
  * invoking decode; same caller-bounds-buffer contract as
- * [appendDecodeRemainingBytesPayload].
+ * [appendDecodeDeferredPayload].
  */
 internal fun appendDecodeRemainingBytesString(
     body: CodeBlock.Builder,

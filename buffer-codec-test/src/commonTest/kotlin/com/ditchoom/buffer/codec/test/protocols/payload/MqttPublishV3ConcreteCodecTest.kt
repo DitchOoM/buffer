@@ -134,7 +134,7 @@ class MqttPublishV3ConcreteCodecTest {
                 payload = JpegImage(0u, 0u, ByteArray(0)),
             )
         // Unconditionally returns BackPatch when a
-        // RemainingBytesPayload field is present, regardless of whether
+        // DeferredPayload field is present, regardless of whether
         // the user codec itself returns Exact (JpegImageCodec does).
         // Promotion to runtime-Exact is a follow-on with a vector that
         // measurably benefits.

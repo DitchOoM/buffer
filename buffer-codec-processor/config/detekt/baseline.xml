@@ -102,6 +102,7 @@
     <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeConditionalProtocolMessageInner: ConditionalInner.ProtocolMessageScalar?</ID>
     <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeConditionalUseCodecInner: ConditionalInner.UseCodecScalar?</ID>
     <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeConditionalValueClassInner: ConditionalInner.ValueClassScalar?</ID>
+    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeDeferredPayloadField: FieldAnalysis</ID>
     <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeDispatchOnSealedDispatcher: DispatchAnalysisResult</ID>
     <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeEnumField: FieldAnalysis</ID>
     <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeField: FieldAnalysis</ID>
@@ -112,7 +113,6 @@
     <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeLengthPrefixedUseCodecListField: FieldAnalysis</ID>
     <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeLengthPrefixedUseCodecPayloadField: FieldAnalysis</ID>
     <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeLengthSource: LengthSource?</ID>
-    <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeRemainingBytesPayloadField: FieldAnalysis</ID>
     <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeRemainingBytesProtocolMessageListField: FieldAnalysis</ID>
     <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeSealedDispatcher: DispatchAnalysisResult</ID>
     <ID>ReturnCount:CodecAnalyzer.kt:internal fun analyzeUseCodecScalarField: FieldAnalysis</ID>

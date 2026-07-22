@@ -83,6 +83,34 @@ class CodecSchemaDescriptorTest {
         }
     }
 
+    /**
+     * The extent is wire-significant: two payload fields that differ *only* in how their region is
+     * bounded must not describe identically, or the drift gate would greenlight swapping one for
+     * the other. Issue #293's `@LengthFrom` extent has identical wire bytes to `@RemainingBytes`
+     * whenever the caller's limit already equals the sibling length — but its length carrier
+     * becomes load-bearing for framing, so the change must still be visible.
+     *
+     * With a single extent arm this asserts only exhaustiveness plus a non-empty descriptor; it
+     * starts discriminating the moment a second arm exists.
+     */
+    @Test
+    fun `every PayloadExtent leaf produces a distinct payload descriptor`() {
+        assertExhaustive(PayloadExtent::class, samplePayloadExtents.map { it::class }.toSet())
+        val byDescriptor =
+            samplePayloadExtents.groupBy { extent ->
+                CodecSchemaDescriptor.describeField(payloadFieldWith(extent))
+            }
+        for ((descriptor, extents) in byDescriptor) {
+            assertNonEmptyLine(descriptor, "PayloadExtent ${extents.first()::class.simpleName}")
+            assertEquals(
+                1,
+                extents.size,
+                "extents ${extents.map { it::class.simpleName }} share descriptor \"$descriptor\" — " +
+                    "a schema-invisible extent lets the drift gate miss a framing-relevant change",
+            )
+        }
+    }
+
     // ---- determinism ------------------------------------------------------
 
     @Test
@@ -346,6 +374,22 @@ class CodecSchemaDescriptorTest {
             PayloadCodecSource.ConstructorInjected("payloadCodec"),
         )
 
+    private val samplePayloadExtents: List<PayloadExtent> =
+        listOf(
+            PayloadExtent.ToLimit(0),
+            PayloadExtent.Sibling(LengthSource.Sibling("len", ScalarKind.UShort)),
+        )
+
+    /** A payload field that varies only in [extent] — the fixture for the distinctness check. */
+    private fun payloadFieldWith(extent: PayloadExtent): FieldSpec.DeferredPayload =
+        FieldSpec.DeferredPayload(
+            name = "payload",
+            ownerSimpleName = "Owner",
+            payloadType = cn,
+            source = PayloadCodecSource.UserCodecObject(codec),
+            extent = extent,
+        )
+
     private val sampleConditionalInners: List<ConditionalInner> =
         listOf(
             ConditionalInner.Scalar(ScalarKind.UInt, Endianness.Big),
@@ -388,7 +432,13 @@ class CodecSchemaDescriptorTest {
             FieldSpec.ProtocolMessageScalar("nested", "Owner", cn, codec),
             FieldSpec.UseCodecScalar("v", "Owner", cn, codec, isBounding = false, isVariableLength = true),
             FieldSpec.RemainingBytesString("rest", "Owner", reservedTrailingBytes = 0),
-            FieldSpec.RemainingBytesPayload("payload", "Owner", cn, PayloadCodecSource.UserCodecObject(codec), 0),
+            FieldSpec.DeferredPayload(
+                "payload",
+                "Owner",
+                cn,
+                PayloadCodecSource.UserCodecObject(codec),
+                PayloadExtent.ToLimit(0),
+            ),
             FieldSpec.LengthPrefixedUseCodecList("props", "Owner", listSpec),
             FieldSpec.LengthPrefixedUseCodecPayload("blob", "Owner", cn, codec, 2, Endianness.Big),
             FieldSpec.RemainingBytesProtocolMessageList("topics", "Owner", cn, codec, elementIsBackPatch = false),

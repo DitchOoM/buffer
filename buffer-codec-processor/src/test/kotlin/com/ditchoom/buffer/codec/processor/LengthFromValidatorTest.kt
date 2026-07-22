@@ -377,6 +377,110 @@ class LengthFromValidatorTest {
         )
     }
 
+    // ---- deferred payload extent (issue #293) -----------------------------
+
+    @Test
+    fun acceptsLengthFromUseCodecPayload() {
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.ReadBuffer
+                import com.ditchoom.buffer.WriteBuffer
+                import com.ditchoom.buffer.codec.Codec
+                import com.ditchoom.buffer.codec.DecodeContext
+                import com.ditchoom.buffer.codec.EncodeContext
+                import com.ditchoom.buffer.codec.Payload
+                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.annotations.LengthFrom
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.UseCodec
+
+                data class Blob(val n: Int) : Payload
+
+                object BlobCodec : Codec<Blob> {
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): Blob = Blob(0)
+                    override fun encode(buffer: WriteBuffer, value: Blob, context: EncodeContext) {}
+                    override fun wireSize(value: Blob, context: EncodeContext): WireSize = WireSize.BackPatch
+                }
+
+                @ProtocolMessage
+                data class Frame(
+                    val length: UShort,
+                    val flags: UByte,
+                    @LengthFrom("length") @UseCodec(BlobCodec::class) val body: Blob,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
+    }
+
+    @Test
+    fun acceptsLengthFromOnGenericPayloadTypeParameter() {
+        // The `<P : Payload>` declared-but-unused check keys on a field that
+        // *bounds* P. Before #293 only `@RemainingBytes` counted, so this
+        // otherwise-valid message was rejected as having an unused parameter.
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.codec.Payload
+                import com.ditchoom.buffer.codec.annotations.LengthFrom
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+
+                @ProtocolMessage
+                data class Frame<P : Payload>(
+                    val length: UShort,
+                    val flags: UByte,
+                    @LengthFrom("length") val body: P,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
+    }
+
+    @Test
+    fun rejectsLengthFromUseCodecOnNonPayloadBoundType() {
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.ReadBuffer
+                import com.ditchoom.buffer.WriteBuffer
+                import com.ditchoom.buffer.codec.Codec
+                import com.ditchoom.buffer.codec.DecodeContext
+                import com.ditchoom.buffer.codec.EncodeContext
+                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.annotations.LengthFrom
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.UseCodec
+
+                data class Plain(val n: Int)
+
+                object PlainCodec : Codec<Plain> {
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): Plain = Plain(0)
+                    override fun encode(buffer: WriteBuffer, value: Plain, context: EncodeContext) {}
+                    override fun wireSize(value: Plain, context: EncodeContext): WireSize = WireSize.BackPatch
+                }
+
+                @ProtocolMessage
+                data class Frame(
+                    val length: UShort,
+                    val flags: UByte,
+                    @LengthFrom("length") @UseCodec(PlainCodec::class) val body: Plain,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
+        assertTrue(
+            result.messages.contains("@LengthFrom @UseCodec on test.Frame.body requires the bound field's type"),
+            "expected the focused non-Payload diagnostic. Messages:\n${result.messages}",
+        )
+    }
+
     private fun compile(
         @Language("kotlin") source: String,
     ): JvmCompilationResult =

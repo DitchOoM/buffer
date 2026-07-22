@@ -128,10 +128,26 @@ internal object CodecSchemaDescriptor {
                     "bounding=${field.isBounding} variable=${field.isVariableLength}"
             is FieldSpec.RemainingBytesString ->
                 "string remaining reserved=${field.reservedTrailingBytes}B"
-            is FieldSpec.RemainingBytesPayload ->
-                "payload:${field.payloadType} remaining " +
-                    "codec=${describePayloadCodecSource(field.source)} " +
-                    "reserved=${field.reservedTrailingBytes}B"
+            is FieldSpec.DeferredPayload ->
+                // Exhaustive over PayloadExtent: the extent is wire-significant,
+                // so each arm spells out its own token layout rather than sharing
+                // one. `remaining`/`reserved=` are the historical tokens and must
+                // stay exactly where they are — moving them is drift on every
+                // message that already carries this shape.
+                when (val extent = field.extent) {
+                    is PayloadExtent.ToLimit ->
+                        "payload:${field.payloadType} remaining " +
+                            "codec=${describePayloadCodecSource(field.source)} " +
+                            "reserved=${extent.reservedTrailingBytes}B"
+                    // Mirrors the `len-from=` token the other @LengthFrom shapes use.
+                    // Deliberately shares no tokens with the ToLimit arm: swapping
+                    // @RemainingBytes for @LengthFrom must read as drift even though
+                    // the bytes can coincide, because the named sibling becomes
+                    // load-bearing for framing the moment the payload reads it.
+                    is PayloadExtent.Sibling ->
+                        "payload:${field.payloadType} len-from=${describeLengthSource(extent.source)} " +
+                            "codec=${describePayloadCodecSource(field.source)}"
+                }
             is FieldSpec.LengthPrefixedUseCodecList ->
                 "list:${field.elementClassName.canonicalName} len-prefix-codec=${field.codecType.canonicalName}"
             is FieldSpec.LengthPrefixedUseCodecPayload ->

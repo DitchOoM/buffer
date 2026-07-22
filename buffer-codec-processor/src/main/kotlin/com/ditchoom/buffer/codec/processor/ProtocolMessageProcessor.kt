@@ -1034,9 +1034,11 @@ class ProtocolMessageProcessor(
      * `@LengthFrom` shape validation.
      *
      * Independent from R1 (adjacent-`@LengthFrom` migration suggestion):
-     * Bound field type must be `String` — 's field-type
-     *     universe (row 18). `ByteArray`, nested `@ProtocolMessage`,
-     *     and `@Payload` slots widen this in later stages.
+     * Bound field type must be `String`, `List<@ProtocolMessage>`, a
+     *     nested `@ProtocolMessage`, or a deferred payload — a
+     *     `Payload`-typed field with `@UseCodec`, or the enclosing
+     *     message's `<P : Payload>` type parameter (issue #293).
+     *     `ByteArray` slots widen this in a later stage.
      *   - Referenced sibling must exist as a sibling of the bound
      *     parameter; diagnostics list available numeric siblings
      *     declared before the bound field.
@@ -1052,6 +1054,20 @@ class ProtocolMessageProcessor(
         parameters: List<KSValueParameter>,
     ) {
         val ownerName = owner.qualifiedName?.asString() ?: owner.simpleName.asString()
+        // Names of `<P : Payload>` type parameters on the owner. A field typed
+        // as one of these is resolved by the constructor-injected codec, so it
+        // is a legal `@LengthFrom` bound type even though it is no class at all.
+        val payloadTypeParameterNames =
+            owner.typeParameters
+                .filter { tp ->
+                    val bounds = tp.bounds.toList()
+                    bounds.size == 1 &&
+                        bounds[0]
+                            .resolve()
+                            .declaration.qualifiedName
+                            ?.asString() == PAYLOAD_QNAME
+                }.map { it.name.asString() }
+                .toSet()
         for ((index, param) in parameters.withIndex()) {
             val ann =
                 param.annotations.firstOrNull { a ->
@@ -1088,16 +1104,44 @@ class ProtocolMessageProcessor(
             val isNestedProtocolMessage =
                 nestedProtocolMessageDecl != null &&
                     isNestedProtocolMessageType(nestedProtocolMessageDecl)
-            if (!isStringType && !isListOfProtocolMessage && !isNestedProtocolMessage) {
+            // Deferred payload sized by the sibling (issue #293). Two forms,
+            // matching the two `PayloadCodecSource`s: a `Payload`-typed field
+            // (or a borrowed view opting in via `ViewCodec`) whose codec is
+            // named by `@UseCodec`, or the owner's `<P : Payload>` parameter
+            // whose codec arrives through the constructor. `validateUseCodec`
+            // owns the codec-side checks; this only decides bound-type legality.
+            val hasUseCodec =
+                param.annotations.any { a ->
+                    a.shortName.asString() == USE_CODEC_SHORT &&
+                        a.annotationType
+                            .resolve()
+                            .declaration.qualifiedName
+                            ?.asString() == USE_CODEC_QNAME
+                }
+            val fieldDecl = type.declaration
+            val isInjectedPayloadParameter =
+                !hasUseCodec &&
+                    fieldDecl is com.google.devtools.ksp.symbol.KSTypeParameter &&
+                    fieldDecl.name.asString() in payloadTypeParameterNames
+            val isDeferredPayload =
+                !type.isMarkedNullable &&
+                    (
+                        isInjectedPayloadParameter ||
+                            (hasUseCodec && (type.implementsPayload() || param.hasViewUseCodec()))
+                    )
+            val isSupportedBoundType =
+                isStringType || isListOfProtocolMessage || isNestedProtocolMessage || isDeferredPayload
+            if (!isSupportedBoundType) {
                 val displayed = typeQname ?: "<unresolved>"
                 val nullableSuffix = if (type.isMarkedNullable) "?" else ""
                 logger.error(
                     "@LengthFrom(\"$referenced\") on $ownerName.$fieldName requires the bound " +
                         "field to be a non-nullable `String`, a non-nullable `List<T>` where " +
-                        "`T` is a `@ProtocolMessage data class`, or a non-nullable nested " +
-                        "`@ProtocolMessage` data class / sealed parent, but it is " +
-                        "`$displayed$nullableSuffix`. `ByteArray` and `@Payload` slots are " +
-                        "deferred to later stages.",
+                        "`T` is a `@ProtocolMessage data class`, a non-nullable nested " +
+                        "`@ProtocolMessage` data class / sealed parent, or a deferred payload " +
+                        "(`@UseCodec val: P` where `P : Payload`, or the enclosing message's " +
+                        "`<P : Payload>` type parameter), but it is `$displayed$nullableSuffix`. " +
+                        "`ByteArray` slots are deferred to a later stage.",
                     param,
                 )
                 continue
@@ -1351,13 +1395,23 @@ class ProtocolMessageProcessor(
                 }
             val hasLengthPrefixed =
                 param.annotations.any { ann -> ann.shortName.asString() == "LengthPrefixed" }
-            if (hasLengthFrom) {
+            if (hasLengthFrom && !isPayloadField && !param.hasViewUseCodec()) {
+                // `@LengthFrom @UseCodec` is supported only for the deferred-payload
+                // shape (issue #293) — the sibling gives the byte count, the codec
+                // decodes that region. Other bound types (a list, a scalar) have no
+                // emit path, so they keep the focused diagnostic rather than falling
+                // through to the `Codec<fieldType>` checks below and failing obscurely.
+                val displayed = fieldType.declaration.qualifiedName?.asString() ?: "<unresolved>"
                 logger.error(
-                    "@UseCodec on $ownerName.$fieldName composed with `@LengthFrom` is not yet " +
-                        "supported. Currently emitted compositions are `@RemainingBytes @UseCodec " +
-                        "val: P` (P : Payload), bare `@UseCodec val: <scalar>`, and " +
-                        "`@LengthPrefixed @UseCodec(BoundingLengthCodec) val: List<E>`. " +
-                        "The `@LengthFrom @UseCodec` shape is deferred to a future release.",
+                    "@LengthFrom @UseCodec on $ownerName.$fieldName requires the bound field's " +
+                        "type to extend `com.ditchoom.buffer.codec.Payload`, but it is " +
+                        "`$displayed`. The supported `@UseCodec` compositions are " +
+                        "`@LengthFrom(\"len\") @UseCodec val: P` and `@RemainingBytes @UseCodec " +
+                        "val: P` (both P : Payload), bare `@UseCodec val: <scalar>`, and " +
+                        "`@LengthPrefixed @UseCodec(BoundingLengthCodec) val: List<E>`. Either " +
+                        "wrap the value in a `Payload`-tagged type, or — for a zero-copy " +
+                        "borrowed view whose lifetime is tied to the source buffer — make the " +
+                        "codec implement `com.ditchoom.buffer.codec.ViewCodec`.",
                     param,
                 )
                 continue
@@ -1378,12 +1432,15 @@ class ProtocolMessageProcessor(
                 )
                 continue
             }
-            if (!hasRemainingBytes && isPayloadField) {
+            if (!hasRemainingBytes && !hasLengthFrom && isPayloadField) {
                 logger.error(
                     "@UseCodec on $ownerName.$fieldName must be paired with `@RemainingBytes` " +
-                        "when the field's type extends `com.ditchoom.buffer.codec.Payload`. The " +
-                        "current `@UseCodec` shapes are `@RemainingBytes @UseCodec val: P` " +
-                        "(P : Payload) and bare `@UseCodec val: <scalar>`.",
+                        "or `@LengthFrom` when the field's type extends " +
+                        "`com.ditchoom.buffer.codec.Payload` — the codec is handed a bounded " +
+                        "region, and without one of those the bound is undefined. The current " +
+                        "`@UseCodec` shapes are `@RemainingBytes @UseCodec val: P`, " +
+                        "`@LengthFrom(\"len\") @UseCodec val: P` (both P : Payload), and bare " +
+                        "`@UseCodec val: <scalar>`.",
                     param,
                 )
                 continue
@@ -2148,8 +2205,10 @@ class ProtocolMessageProcessor(
             )
             return
         }
-        // Bound is Payload — confirm at least one parameter has type
-        // P AND `@RemainingBytes`.
+        // Bound is Payload — confirm at least one parameter has type P AND an
+        // annotation that bounds it: `@RemainingBytes` (to the caller's limit)
+        // or `@LengthFrom` (to a sibling byte count, issue #293). Either one
+        // consumes the injected codec, which is what the parameter exists for.
         val anyMatching =
             parameters.any { p ->
                 val ftype = p.type.resolve()
@@ -2158,22 +2217,26 @@ class ProtocolMessageProcessor(
                 if (fdecl !is com.google.devtools.ksp.symbol.KSTypeParameter) return@any false
                 if (fdecl.name.asString() != tpName) return@any false
                 p.annotations.any { ann ->
-                    ann.shortName.asString() == REMAINING_BYTES_SHORT &&
+                    val short = ann.shortName.asString()
+                    val qname =
                         ann.annotationType
                             .resolve()
                             .declaration.qualifiedName
-                            ?.asString() == REMAINING_BYTES_QNAME
+                            ?.asString()
+                    (short == REMAINING_BYTES_SHORT && qname == REMAINING_BYTES_QNAME) ||
+                        (short == LENGTH_FROM_SHORT && qname == LENGTH_FROM_QNAME)
                 }
             }
         if (!anyMatching) {
             logger.error(
                 "@ProtocolMessage `$ownerName` declares type parameter `<$tpName : Payload>` but " +
-                    "no `@RemainingBytes val: $tpName` field uses it. The generic emit path " +
-                    "exists to surface a constructor-injected `Codec<$tpName>` parameter — " +
-                    "without a field consuming it, the parameter is unused. Either add " +
-                    "`@RemainingBytes val payload: $tpName` or drop the " +
-                    "type parameter and use `@UseCodec(...)` against a concrete `Payload` " +
-                    "subtype.",
+                    "no `@RemainingBytes val: $tpName` or `@LengthFrom val: $tpName` field uses " +
+                    "it. The generic emit path exists to surface a constructor-injected " +
+                    "`Codec<$tpName>` parameter — without a field consuming it, the parameter " +
+                    "is unused. Either add `@RemainingBytes val payload: $tpName` (payload runs " +
+                    "to the caller-set limit), `@LengthFrom(\"len\") val payload: $tpName` " +
+                    "(payload is sized by a sibling), or drop the type parameter and use " +
+                    "`@UseCodec(...)` against a concrete `Payload` subtype.",
                 owner,
             )
         }

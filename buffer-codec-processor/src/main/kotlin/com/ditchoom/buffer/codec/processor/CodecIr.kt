@@ -295,7 +295,7 @@ internal data class CodecShape(
     /**
      * When the @ProtocolMessage data class
      * carries a `<P : Payload>` type parameter and a
-     * `RemainingBytesPayload` field whose source is
+     * `DeferredPayload` field whose source is
      * `ConstructorInjected`, this is the type-parameter name
      * (`P`) and the constructor-injected codec parameter name
      * (`payloadCodec`). When non-null, the emitter generates
@@ -643,7 +643,7 @@ internal sealed interface FieldSpec {
      * `@RemainingBytes val: String` — UTF-8 string consuming the rest of the
      * buffer. Decode reads `buffer.readString(buffer.remaining(), Charset.UTF8)`;
      * encode writes the value's UTF-8 bytes. Same caller-bounds-buffer contract
-     * as [RemainingBytesPayload]: an outer dispatcher
+     * as [DeferredPayload]: an outer dispatcher
      * sets `buffer.limit()` before this codec runs.
      *
      * Terminal-only (must be the last non-conditional field). The annotation
@@ -671,14 +671,23 @@ internal sealed interface FieldSpec {
     ) : FieldSpec
 
     /**
-     * `@RemainingBytes @UseCodec(C::class) val:
-     * P` where `P` extends `com.ditchoom.buffer.codec.Payload` and
-     * `C` is a Kotlin `object` implementing `Codec<P>`. Decode
-     * delegates to `C.decode(buffer, context)` against the bounded
-     * buffer; encode delegates to `C.encode(buffer, value.<name>,
-     * context)`. Caller-bounds-buffer contract: an outer dispatcher
-     * (for example MQTT) sets `buffer.limit` to bound the
-     * payload region before this codec runs.
+     * A payload field whose decode is *deferred* to a `Codec<P>` the
+     * generated codec does not itself own — either a user `object`
+     * named by `@UseCodec(C::class)` or a codec injected through the
+     * constructor for a `<P : Payload>` type parameter (see
+     * [PayloadCodecSource]). The generated codec's only job is to hand
+     * that codec a correctly bounded region.
+     *
+     * Today the region is always "the rest of the bounded buffer":
+     * `@RemainingBytes @UseCodec(C::class) val: P` where `P` extends
+     * `com.ditchoom.buffer.codec.Payload`. Decode delegates to
+     * `C.decode(buffer, context)` against the bounded buffer; encode
+     * delegates to `C.encode(buffer, value.<name>, context)`.
+     * Caller-bounds-buffer contract: an outer dispatcher (for example
+     * MQTT) sets `buffer.limit` to bound the payload region before this
+     * codec runs. Issue #293 widens the shape to a payload sized by a
+     * sibling length field (`@LengthFrom`), which is why the spec is
+     * named for the deferral rather than for `@RemainingBytes`.
      *
      * Narrow: terminal-only (no fields after the
      * payload), no generics on the outer message,
@@ -688,13 +697,14 @@ internal sealed interface FieldSpec {
      * across platforms (single-platform `object`
      * declaration only).
      */
-    data class RemainingBytesPayload(
+    data class DeferredPayload(
         override val name: String,
         val ownerSimpleName: String,
         val payloadType: TypeName,
+        /** *Whose* codec decodes the region. */
         val source: PayloadCodecSource,
-        /** See [RemainingBytesString.reservedTrailingBytes]. */
-        val reservedTrailingBytes: Int = 0,
+        /** *How* the region handed to that codec is bounded. */
+        val extent: PayloadExtent,
     ) : FieldSpec
 
     /**
@@ -1269,7 +1279,7 @@ internal sealed interface LengthSource {
 
 /**
  * Typed source of a `Codec<T>` instance for a
- * `RemainingBytesPayload` field. Mirrors the `LengthSource`
+ * `DeferredPayload` field. Mirrors the `LengthSource`
  * pattern (doctrine #2: no nullable fields representing form
  * distinction; the type system enforces exhaustive `when`).
  *
@@ -1298,6 +1308,70 @@ internal sealed interface PayloadCodecSource {
     data class ConstructorInjected(
         val parameterName: String,
     ) : PayloadCodecSource
+}
+
+/**
+ * How the wire region handed to a [FieldSpec.DeferredPayload]'s codec
+ * is bounded — the second of the shape's two axes, fully orthogonal to
+ * [PayloadCodecSource] (which says *whose* codec reads that region).
+ * Every combination of the two is legal; conflating them is what made
+ * `@LengthFrom` payloads unrepresentable before issue #293.
+ *
+ * Same `LengthSource` / [PayloadCodecSource] pattern (doctrine #2): the
+ * form distinction is a type, not a nullable field or a sentinel `Int`,
+ * so every consumer is forced through an exhaustive `when`.
+ *
+ * Wire-significant: the extent is recorded in the schema descriptor and
+ * a change to it is drift, even when a given message's bytes happen to
+ * be identical under both arms. Once the `@LengthFrom` arm lands (#293
+ * phase 3) its length carrier is load-bearing for framing — it can no
+ * longer be resized, reordered, or dropped without breaking decode of
+ * the payload that reads it, which is precisely what the drift gate is
+ * there to catch.
+ */
+internal sealed interface PayloadExtent {
+    /**
+     * The region runs to `buffer.limit()` — the caller-bounds-buffer
+     * contract of `@RemainingBytes`. An outer dispatcher (for example
+     * MQTT's remaining-length) narrowed the limit before this codec ran;
+     * the payload gets whatever is left.
+     */
+    data class ToLimit(
+        /**
+         * Sum of `wireBytes` for trailing FixedSize fields after the
+         * payload — see [FieldSpec.RemainingBytesString.reservedTrailingBytes].
+         * 0 when the payload is terminal.
+         *
+         * This lives here rather than on [FieldSpec.DeferredPayload]
+         * because it exists solely to emulate an explicit length: it is
+         * the only way a to-limit payload can know where it ends when
+         * something follows it. A payload sized by a sibling length
+         * (#293 phase 3) is told its extent outright, so a reservation
+         * would be meaningless there.
+         */
+        val reservedTrailingBytes: Int = 0,
+    ) : PayloadExtent
+
+    /**
+     * `@LengthFrom("n") val: P` — the region is exactly the `n` bytes
+     * named by a prior sibling field (issue #293). The payload is told
+     * its extent outright, which is what makes the shape framable: peek
+     * can walk the sibling and add its value without running the
+     * deferred codec, so `peekFrameSize` returns a real byte count
+     * instead of collapsing the message to `NoFraming`.
+     *
+     * Unlike [ToLimit] this does not require the payload to be terminal
+     * or to reserve trailing bytes — the bound is explicit, so ordinary
+     * fields may follow it.
+     *
+     * The [source] mirrors `LengthFromString` / `LengthFromList` /
+     * `LengthFromMessage`, so the same sibling forms are accepted (a
+     * peekable unsigned scalar, or a `value class` property returning
+     * `Int`) and the same peek walker applies.
+     */
+    data class Sibling(
+        val source: LengthSource,
+    ) : PayloadExtent
 }
 
 /**
