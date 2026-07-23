@@ -20,6 +20,7 @@
 #define BCKS_ERR_AUTH (-2)
 #define BCKS_ERR_BUFFER (-3)
 #define BCKS_ERR_INTERNAL (-4)
+#define BCKS_ERR_PEER (-5)
 
 // ChaCha20-Poly1305.
 int32_t bcks_chachapoly_seal(
@@ -144,6 +145,28 @@ int32_t bcks_secure_enclave_p256_sign_ctx(
     const uint8_t *msgPtr, size_t msgLen,
     uint8_t *sigOut, size_t sigCap,
     size_t *sigLenOut);
+
+// Secure Enclave key agreement (hardware-backed P-256 ECDH). Same custody model as the signing
+// keys: the Enclave holds the private scalar, the blob is an encrypted representation only that
+// Enclave can restore, and the Diffie-Hellman runs inside the element — only the raw shared secret
+// crosses back. No SecAccessControl variant exists: the user-authenticated SPI exposes no key
+// agreement, so agreement keys carry the library's advisory gate only.
+
+// Generates a P-256 key-agreement key inside the Secure Enclave. Outputs match
+// bcks_secure_enclave_p256_generate (encrypted blob + uncompressed SEC1 public point).
+int32_t bcks_secure_enclave_p256_ka_generate(
+    uint8_t *blobOut, size_t blobCap, size_t *blobLenOut,
+    uint8_t *pointOut, size_t pointCap, size_t *pointLenOut);
+
+// Computes DH(enclaveKey, peer) inside the Enclave, emitting the raw 32-byte shared secret. `peer`
+// is the uncompressed SEC1 point (04 || X || Y), validated on-curve by CryptoKit. BCKS_ERR_PEER when
+// the peer point is malformed / off-curve / rejected (one uniform code — no oracle), BCKS_ERR_INPUT
+// when the blob is not restorable by this Enclave, BCKS_ERR_AUTH on a denied user authentication.
+int32_t bcks_secure_enclave_p256_ka_agree(
+    const uint8_t *blobPtr, size_t blobLen,
+    const uint8_t *peerPtr, size_t peerLen,
+    uint8_t *secretOut, size_t secretCap,
+    size_t *secretLenOut);
 
 // Keychain persistence — durable generic-password items for the alias-addressable key store.
 // `service` and `account` are NUL-terminated UTF-8 C strings (account == the caller's alias). The

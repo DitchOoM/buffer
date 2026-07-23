@@ -29,6 +29,7 @@ private let BCKS_ERR_INPUT: Int32 = -1 // malformed key / nonce / point / signat
 private let BCKS_ERR_AUTH: Int32 = -2 // AEAD tag mismatch / signature did not verify
 private let BCKS_ERR_BUFFER: Int32 = -3 // output buffer too small
 private let BCKS_ERR_INTERNAL: Int32 = -4 // unexpected CryptoKit failure
+private let BCKS_ERR_PEER: Int32 = -5 // peer public key rejected (malformed / off-curve)
 
 // Copy a CryptoKit Data result into a caller-provided output buffer, writing the length out.
 private func emit(_ data: Data, _ out: UnsafeMutablePointer<UInt8>?, _ outCap: Int, _ outLen: UnsafeMutablePointer<Int>?) -> Int32 {
@@ -542,6 +543,70 @@ public func bcks_secure_enclave_p256_sign_ctx(
         return emit(sig.derRepresentation, sigOut, sigCap, sigLenOut)
     } catch {
         return classifySignFailure(error)
+    }
+}
+
+// =============================================================================
+// Secure Enclave key agreement (hardware-backed P-256 ECDH) — CryptoKit
+// SecureEnclave.P256.KeyAgreement
+// =============================================================================
+//
+// The same custody model as the signing keys above: the Enclave generates and holds the P-256
+// private scalar, `dataRepresentation` is an *encrypted* blob only this Enclave can restore, and the
+// Diffie–Hellman itself runs inside the element. Only the raw 32-byte shared secret crosses back —
+// the caller runs the all-zero check / HKDF above it, so the scalar never enters process memory.
+//
+// No access-controlled (`SecAccessControl`) variant is offered, deliberately: the module's
+// user-authenticated SPI exposes no key-agreement surface, so an OS-bound agreement key would have
+// no caller and no test. Agreement keys therefore carry only the library's advisory gate.
+
+// Generate a P-256 *key agreement* key inside the Secure Enclave. Writes the persistent encrypted
+// key blob into blobOut and the uncompressed SEC1 public point (04 ‖ X ‖ Y) into pointOut.
+@_cdecl("bcks_secure_enclave_p256_ka_generate")
+public func bcks_secure_enclave_p256_ka_generate(
+    _ blobOut: UnsafeMutablePointer<UInt8>?, _ blobCap: Int,
+    _ blobLenOut: UnsafeMutablePointer<Int>?,
+    _ pointOut: UnsafeMutablePointer<UInt8>?, _ pointCap: Int,
+    _ pointLenOut: UnsafeMutablePointer<Int>?
+) -> Int32 {
+    guard SecureEnclave.isAvailable else { return BCKS_ERR_INTERNAL }
+    guard let key = try? SecureEnclave.P256.KeyAgreement.PrivateKey() else { return BCKS_ERR_INTERNAL }
+    let s = emit(key.dataRepresentation, blobOut, blobCap, blobLenOut)
+    if s != BCKS_OK { return s }
+    return emit(key.publicKey.x963Representation, pointOut, pointCap, pointLenOut)
+}
+
+// Classify a failure of the agreement itself (the peer point already decoded, so it is on-curve).
+// A CryptoKit parameter rejection is still peer-shaped; anything else is an auth denial or an
+// element failure, per classifySignFailure.
+private func classifyAgreeFailure(_ error: Error) -> Int32 {
+    if error is CryptoKitError { return BCKS_ERR_PEER }
+    return classifySignFailure(error)
+}
+
+// Compute DH(enclaveKey, peer) inside the Secure Enclave, emitting the raw 32-byte shared secret.
+// The peer point is the uncompressed SEC1 encoding (04 ‖ X ‖ Y); CryptoKit validates it is on-curve.
+// BCKS_ERR_PEER: peer point malformed / off-curve / rejected. BCKS_ERR_INPUT: the blob is not
+// restorable by this Enclave. BCKS_ERR_AUTH: user authentication denied.
+@_cdecl("bcks_secure_enclave_p256_ka_agree")
+public func bcks_secure_enclave_p256_ka_agree(
+    _ blobPtr: UnsafePointer<UInt8>?, _ blobLen: Int,
+    _ peerPtr: UnsafePointer<UInt8>?, _ peerLen: Int,
+    _ secretOut: UnsafeMutablePointer<UInt8>?, _ secretCap: Int,
+    _ secretLenOut: UnsafeMutablePointer<Int>?
+) -> Int32 {
+    guard let key = try? SecureEnclave.P256.KeyAgreement.PrivateKey(
+        dataRepresentation: bytes(blobPtr, blobLen)
+    ) else { return BCKS_ERR_INPUT }
+    guard let peer = try? P256.KeyAgreement.PublicKey(x963Representation: bytes(peerPtr, peerLen)) else {
+        return BCKS_ERR_PEER
+    }
+    do {
+        let shared = try key.sharedSecretFromKeyAgreement(with: peer)
+        let raw = shared.withUnsafeBytes { Data($0) }
+        return emit(raw, secretOut, secretCap, secretLenOut)
+    } catch {
+        return classifyAgreeFailure(error)
     }
 }
 

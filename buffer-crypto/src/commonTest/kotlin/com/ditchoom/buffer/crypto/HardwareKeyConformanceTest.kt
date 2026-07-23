@@ -87,8 +87,9 @@ class HardwareKeyConformanceTest {
             }
         }
 
-        // ECDH P-256 key agreement is probed per device (Android API 31+ Keystore) — gate on
-        // eligibility. Where it holds, a real element-held key must agree with a software peer:
+        // ECDH P-256 key agreement is probed per device (Android API 31+ Keystore, Apple Secure
+        // Enclave) — gate on eligibility. Where it holds, a real element-held key must agree with a
+        // software peer:
         // both sides derive the same secret, proving the keystore DH produced standard ECDH.
         if (provider.eligible(ProtectedKeyAlgorithm.EcdhP256)) {
             val pair = provider.generateKeyAgreement(KeyAgreementCurve.P256, grant)
