@@ -66,6 +66,7 @@ jobs:
         run: |
           ./gradlew :buffer-crypto:jvmTest \
             --tests "com.ditchoom.buffer.crypto.Tpm2Pkcs11ProviderTest" \
+            --tests "com.ditchoom.buffer.crypto.Tpm2Pkcs11KeyStoreTest" \
             --tests "com.ditchoom.buffer.crypto.ProtectedKeyResolutionTest" \
             -P"buffer.crypto.tpm2.pkcs11.module=/usr/lib/x86_64-linux-gnu/libtpm2_pkcs11.so.1" \
             -P"buffer.crypto.tpm2.pkcs11.pin=1234" \
@@ -76,5 +77,51 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: tpm2-jvm-test-results
+          path: buffer-crypto/build/reports/tests/jvmTest/
+          if-no-files-found: ignore
+
+  # tpm2-pkcs11 1.9 lacks CKM_ECDH1_DERIVE, so the swtpm job can only pin agreement's honest
+  # refusal. SoftHSM is a derive-capable PKCS#11 module, so this job proves the dormant agreement
+  # path - eligibility probe, ephemeral ECDH, and cert-wrapped persistent agreement aliases - through
+  # the exact same SunPKCS11 bridge a future tpm2-pkcs11 release will light up.
+  softhsm:
+    name: "JVM key store against SoftHSM (agreement contract)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: gradle
+
+      - name: Install and initialize SoftHSM
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y softhsm2
+          RIG="$RUNNER_TEMP/softhsm"
+          mkdir -p "$RIG/tokens"
+          printf 'directories.tokendir = %s\nobjectstore.backend = file\n' "$RIG/tokens" \
+            > "$RIG/softhsm2.conf"
+          export SOFTHSM2_CONF="$RIG/softhsm2.conf"
+          softhsm2-util --init-token --slot 0 --label buffer-crypto --pin 1234 --so-pin 5678
+          echo "SOFTHSM2_CONF=$RIG/softhsm2.conf" >> "$GITHUB_ENV"
+
+      - name: Run agreement-required JVM tests
+        run: |
+          ./gradlew :buffer-crypto:jvmTest \
+            --tests "com.ditchoom.buffer.crypto.Tpm2Pkcs11KeyStoreTest" \
+            -P"buffer.crypto.tpm2.pkcs11.module=/usr/lib/softhsm/libsofthsm2.so" \
+            -P"buffer.crypto.tpm2.pkcs11.pin=1234" \
+            -P"buffer.crypto.require.p11.agreement=true"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: softhsm-jvm-test-results
           path: buffer-crypto/build/reports/tests/jvmTest/
           if-no-files-found: ignore

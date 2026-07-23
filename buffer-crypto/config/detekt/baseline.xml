@@ -113,6 +113,7 @@
     <ID>TooManyFunctions:EcInterop.kt:com.ditchoom.buffer.crypto.EcInterop.kt</ID>
     <ID>TooManyFunctions:HardwareKeys.android.kt:AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider</ID>
     <ID>TooManyFunctions:HardwareKeys.apple.kt:SecureEnclaveHardwareKeyProvider : HardwareKeyProvider</ID>
+    <ID>TooManyFunctions:HardwareKeys.jvm.kt:Tpm2Pkcs11HardwareKeyProvider : HardwareKeyProvider</ID>
     <ID>TooManyFunctions:HardwareKeys.js.kt:com.ditchoom.buffer.crypto.HardwareKeys.js.kt</ID>
     <ID>TooManyFunctions:HardwareKeys.jsAndWasmJs.kt:WebCryptoKeyStore : KeyStore</ID>
     <ID>TooManyFunctions:HardwareKeys.jsAndWasmJs.kt:com.ditchoom.buffer.crypto.HardwareKeys.jsAndWasmJs.kt</ID>
@@ -125,6 +126,7 @@
     <ID>TooManyFunctions:KeyAgreement.linux.kt:com.ditchoom.buffer.crypto.KeyAgreement.linux.kt</ID>
     <ID>TooManyFunctions:KeyStore.android.kt:AndroidKeystoreKeyStore : KeyStore</ID>
     <ID>TooManyFunctions:KeyStore.apple.kt:AppleKeychainKeyStore : KeyStore</ID>
+    <ID>TooManyFunctions:Tpm2Pkcs11KeyStore.jvm.kt:Tpm2Pkcs11KeyStore : KeyStore</ID>
     <ID>TooManyFunctions:KeyStore.kt:SoftwareKeyStore : KeyStore</ID>
     <ID>TooManyFunctions:KeyStore.kt:com.ditchoom.buffer.crypto.KeyStore.kt</ID>
     <ID>TooManyFunctions:Signatures.apple.kt:com.ditchoom.buffer.crypto.Signatures.apple.kt</ID>
