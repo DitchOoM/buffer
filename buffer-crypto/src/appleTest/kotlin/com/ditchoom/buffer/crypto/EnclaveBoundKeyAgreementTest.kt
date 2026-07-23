@@ -15,6 +15,12 @@ import kotlin.time.Duration.Companion.minutes
  * generates and reports hardware custody. Generation does not prompt — only a derive does — so these
  * need no human.
  *
+ * Generation of an access-controlled key still depends on the *enrollment* the policy demands:
+ * `Session`/`userPresence` is satisfied by a device passcode, but `PerUse`/`biometryCurrentSet`
+ * needs an enrolled biometric, and the Enclave declines to mint the key without one
+ * ([HardwareKeyException.SecureElementUnavailable]). A runner without that enrollment (CI, a device
+ * with no fingerprint set) is not a failure — the test skips, exactly as it does without an Enclave.
+ *
  * The **positive** path (authenticate → derive succeeds; per-use prompts every time; session prompts
  * once per window) drives a real Touch ID / Face ID prompt and is therefore attended: it is covered
  * in the manual device session, not here. This test never triggers a prompt.
@@ -27,6 +33,21 @@ class EnclaveBoundKeyAgreementTest {
         val auth = authenticator().takeIf { it.available } ?: return null
         return appleEnclaveProviderOrNull()?.userAuthenticated(auth) as? PerUseAgreementCapable
     }
+
+    /**
+     * Generates a bound agreement key, or `null` when this environment's enrollment cannot mint one
+     * for [policy] (no passcode / no enrolled biometric) — the element's honest refusal, which the
+     * caller treats as a skip rather than a failure.
+     */
+    private suspend fun PerUseAgreementCapable.generateOrSkip(policy: UserAuthenticationPolicy): KeyAgreementKeyPair? =
+        try {
+            when (policy) {
+                is UserAuthenticationPolicy.Windowed -> generateKeyAgreement(KeyAgreementCurve.P256, policy)
+                is UserAuthenticationPolicy.PerUse -> generateKeyAgreement(KeyAgreementCurve.P256, policy)
+            }
+        } catch (_: HardwareKeyException.SecureElementUnavailable) {
+            null
+        }
 
     @Test
     fun enclaveProviderAdvertisesPerDeriveAgreement() {
@@ -48,8 +69,7 @@ class EnclaveBoundKeyAgreementTest {
             if (!provider.eligible(ProtectedKeyAlgorithm.EcdhP256)) return@runTest
             // Generating an access-controlled Enclave agreement key does not prompt (only a derive
             // does), so this exercises enclaveGenerateKaP256AccessControlled on real hardware headless.
-            val policy = UserAuthenticationPolicy.Session(5.minutes)
-            val pair = provider.generateKeyAgreement(KeyAgreementCurve.P256, policy)
+            val pair = provider.generateOrSkip(UserAuthenticationPolicy.Session(5.minutes)) ?: return@runTest
             try {
                 assertEquals(KeyProvenance.Hardware, pair.privateKey.provenance)
                 assertFailsWith<UnsupportedOperationException>("an Enclave scalar is never exportable") {
@@ -65,7 +85,9 @@ class EnclaveBoundKeyAgreementTest {
         runTest {
             val provider = boundProvider() ?: return@runTest
             if (!provider.eligible(ProtectedKeyAlgorithm.EcdhP256)) return@runTest
-            val pair = provider.generateKeyAgreement(KeyAgreementCurve.P256, UserAuthenticationPolicy.PerUse())
+            // PerUse ⇒ biometryCurrentSet, which needs an enrolled biometric; without one the element
+            // declines and generateOrSkip returns null (skip). Verified minting on a Mac with a print.
+            val pair = provider.generateOrSkip(UserAuthenticationPolicy.PerUse()) ?: return@runTest
             try {
                 assertEquals(KeyProvenance.Hardware, pair.privateKey.provenance)
             } finally {
