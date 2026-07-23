@@ -1341,6 +1341,10 @@ public final class com/ditchoom/buffer/crypto/OptionalAead$Unavailable : com/dit
 	public fun toString ()Ljava/lang/String;
 }
 
+public abstract interface class com/ditchoom/buffer/crypto/PerUseAgreementCapable : com/ditchoom/buffer/crypto/UserAuthenticatedKeyProvider {
+	public abstract fun generateKeyAgreement (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy$PerUse;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
 public final class com/ditchoom/buffer/crypto/ProtectedKeyAlgorithm : java/lang/Enum {
 	public static final field AesGcm Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
 	public static final field EcdhP256 Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
@@ -1831,6 +1835,7 @@ public abstract interface class com/ditchoom/buffer/crypto/UserAuthenticatedKeyP
 	public abstract fun eligible (Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;)Z
 	public abstract fun generateAesGcm (Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public static synthetic fun generateAesGcm$default (Lcom/ditchoom/buffer/crypto/UserAuthenticatedKeyProvider;Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun generateKeyAgreement (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy$Windowed;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public abstract fun generateSigning (Lcom/ditchoom/buffer/crypto/SignatureScheme;Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
@@ -1862,7 +1867,7 @@ public final class com/ditchoom/buffer/crypto/UserAuthenticationPolicy$PerUse : 
 	public fun toString ()Ljava/lang/String;
 }
 
-public final class com/ditchoom/buffer/crypto/UserAuthenticationPolicy$Session : com/ditchoom/buffer/crypto/UserAuthenticationPolicy {
+public final class com/ditchoom/buffer/crypto/UserAuthenticationPolicy$Session : com/ditchoom/buffer/crypto/UserAuthenticationPolicy$Windowed {
 	public synthetic fun <init> (JLcom/ditchoom/buffer/crypto/UserAuthenticationMethod;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public synthetic fun <init> (JLcom/ditchoom/buffer/crypto/UserAuthenticationMethod;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1-UwyO8pc ()J
@@ -1874,6 +1879,9 @@ public final class com/ditchoom/buffer/crypto/UserAuthenticationPolicy$Session :
 	public final fun getValidity-UwyO8pc ()J
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/UserAuthenticationPolicy$Windowed : com/ditchoom/buffer/crypto/UserAuthenticationPolicy {
 }
 
 public final class com/ditchoom/buffer/crypto/VerificationFailed : com/ditchoom/buffer/crypto/CryptoException {

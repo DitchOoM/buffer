@@ -11,6 +11,7 @@ import kotlin.test.Test
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -74,6 +75,46 @@ class UserAuthBindingInstrumentedTest {
                 key.close()
             }
         }
+
+    @Test
+    fun sessionBoundAgreementIsRefusedByTheKeystoreWithoutAuthentication() =
+        runTest {
+            assumeTrue("requires a secure lock screen", keyguard.isDeviceSecure)
+            val provider = authenticatedProvider()
+            assumeTrue("device KeyMint must back PURPOSE_AGREE_KEY", provider.eligible(ProtectedKeyAlgorithm.EcdhP256))
+            val pair =
+                provider.generateKeyAgreement(KeyAgreementCurve.P256, UserAuthenticationPolicy.Session(5.seconds))
+            try {
+                val ops = assertNotNull(keyAgreementAsyncOrNull(KeyAgreementCurve.P256))
+                val peer = ops.generateKeyPair()
+                try {
+                    // The stale-window derive throws UserAuthenticationRequired; the gate re-prompts
+                    // once via the LyingPrompt (which never really authenticates), so the retry is
+                    // refused again and the terminal state propagates — proving the keystore, not the
+                    // library, enforces the binding on ECDH.
+                    assertFailsWith<HardwareKeyException.UserAuthenticationRequired>(
+                        "an auth-bound agreement key must be unusable without a real device unlock",
+                    ) {
+                        ops.deriveSharedSecret(pair.privateKey, peer.publicKey, Info.Of(ascii("nope")), length = 32)
+                    }
+                } finally {
+                    peer.close()
+                }
+            } finally {
+                pair.close()
+            }
+        }
+
+    @Test
+    fun androidProviderIsNotPerUseAgreementCapable() {
+        // The type-level guarantee, checked on real silicon: Android has no CryptoObject overload for
+        // KeyAgreement, so its provider must NOT advertise per-derive agreement — a caller's
+        // `is PerUseAgreementCapable` narrowing correctly falls through to the Session path here.
+        assertTrue(
+            authenticatedProvider() !is PerUseAgreementCapable,
+            "the Android keystore provider cannot bind per-derive agreement",
+        )
+    }
 
     @Test
     fun perUseKeyIsRefusedWhenTheCryptoObjectWasNeverAuthorized() =

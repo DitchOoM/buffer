@@ -66,7 +66,10 @@ internal class FakeHardware(
      * a bound key without a prompt host is unrepresentable.
      */
     fun userAuthenticated(gate: HardwareAuthorization): UserAuthenticatedKeyProvider =
-        object : UserAuthenticatedKeyProvider {
+        // Implements PerUseAgreementCapable so the common conformance test exercises BOTH the
+        // Windowed-agreement path and the per-derive path against the same production dispatch — the
+        // fake models a dedicated element (Apple), which is the tier that binds per-derive agreement.
+        object : PerUseAgreementCapable {
             override fun eligible(alg: ProtectedKeyAlgorithm): Boolean = this@FakeHardware.eligible(alg)
 
             override suspend fun generateAesGcm(
@@ -81,7 +84,29 @@ internal class FakeHardware(
                 if (!eligible(scheme.toProtectedKeyAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
                 return signingPair(ProtectedKeySpec(gate), policy).hardware
             }
+
+            override suspend fun generateKeyAgreement(
+                curve: KeyAgreementCurve,
+                policy: UserAuthenticationPolicy.Windowed,
+            ): KeyAgreementKeyPair = boundKeyAgreement(curve, gate, policy)
+
+            override suspend fun generateKeyAgreement(
+                curve: KeyAgreementCurve,
+                policy: UserAuthenticationPolicy.PerUse,
+            ): KeyAgreementKeyPair = boundKeyAgreement(curve, gate, policy)
         }
+
+    /** Shared body for both OS-bound agreement overloads: eligibility gate + the fake's gated closure. */
+    private suspend fun boundKeyAgreement(
+        curve: KeyAgreementCurve,
+        gate: HardwareAuthorization,
+        policy: UserAuthenticationPolicy,
+    ): KeyAgreementKeyPair {
+        if (curve != KeyAgreementCurve.P256 || !eligible(curve.toProtectedKeyAlgorithm())) {
+            throw HardwareKeyException.AlgorithmNotEligible()
+        }
+        return keyAgreementPair(ProtectedKeySpec(gate), policy).hardware
+    }
 
     /** A hardware AES-GCM key plus the software twin (same material) the test opens with to cross-check. */
     class AesGcmPair(

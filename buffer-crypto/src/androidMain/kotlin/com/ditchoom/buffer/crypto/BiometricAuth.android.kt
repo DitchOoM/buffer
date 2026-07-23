@@ -180,6 +180,19 @@ internal class AndroidUserAuthenticatedKeyProvider(
         policy: UserAuthenticationPolicy,
     ): SigningKey = base.generateSigningBound(policy.resolve(), scheme)
 
+    // Deliberately NOT a PerUseAgreementCapable: Android's keystore has no CryptoObject overload for
+    // KeyAgreement, so it can gate ECDH by the auth window (Session) but never per-derive (PerUse).
+    // The Windowed parameter type makes that limit a compile-time fact rather than a runtime throw.
+    override suspend fun generateKeyAgreement(
+        curve: KeyAgreementCurve,
+        policy: UserAuthenticationPolicy.Windowed,
+    ): KeyAgreementKeyPair {
+        if (curve != KeyAgreementCurve.P256 || !base.eligible(ProtectedKeyAlgorithm.EcdhP256)) {
+            throw HardwareKeyException.AlgorithmNotEligible()
+        }
+        return base.generateKeyAgreementBound(policy.resolve())
+    }
+
     private fun UserAuthenticationPolicy.resolve(): ResolvedAndroidPolicy =
         when (this) {
             is UserAuthenticationPolicy.Session -> ResolvedAndroidPolicy.Session(validity, method, prompt)

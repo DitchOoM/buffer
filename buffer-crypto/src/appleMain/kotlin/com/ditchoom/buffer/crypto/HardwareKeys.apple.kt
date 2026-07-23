@@ -116,36 +116,130 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
     }
 
     /**
-     * Wraps an Enclave restore [blob] + public [point] as a [KeyAgreementKeyPair] whose DH runs
-     * inside the element. Shared by the ephemeral [generateKeyAgreement] and the persistent
-     * [AppleKeychainKeyStore] paths — the only difference between them is who holds the record.
-     *
-     * The [gate] is the advisory [ProtectedKeySpec.authorization]: agreement keys carry no
-     * `SecAccessControl` (see HardwareKeyAgreement.apple.kt), so the gate is evaluated by library
-     * code before each derive, and the raw secret goes straight to the common validate/HKDF seam.
+     * Wraps an Enclave restore [blob] + public [point] as an **advisory**-gated [KeyAgreementKeyPair]
+     * whose DH runs inside the element. Shared by the ephemeral [generateKeyAgreement] and the
+     * persistent [AppleKeychainKeyStore] paths. The [gate] is the advisory
+     * [ProtectedKeySpec.authorization]; the key carries no `SecAccessControl`, so the OS never
+     * prompts and an auth-denied status is unreachable (surfaced as the closest structured outcome).
+     * OS-bound agreement keys take [buildBoundKeyAgreement] instead.
      */
     internal fun buildKeyAgreementPair(
         blob: PlatformBuffer,
         point: ReadBuffer,
         gate: HardwareAuthorization,
+    ): KeyAgreementKeyPair = buildBoundKeyAgreement(ResolvedApplePolicy.Advisory(gate), blob, point)
+
+    /**
+     * Wraps an Enclave restore [blob] + public [point] as a [KeyAgreementKeyPair] gated by [policy].
+     * The gated DH dispatches exactly like [gatedSign]: advisory (library gate, `laHandle = 0`),
+     * session (a library-enforced validity window over one long-lived LAContext, re-prompting once on
+     * an OS-invalidated window), or per-use (a fresh LAContext per derive). The raw secret goes
+     * straight to the common validate/HKDF seam; the scalar never enters process memory.
+     */
+    internal fun buildBoundKeyAgreement(
+        policy: ResolvedApplePolicy,
+        blob: PlatformBuffer,
+        point: ReadBuffer,
     ): KeyAgreementKeyPair {
         val curve = KeyAgreementCurve.P256
         val privateKey =
             ProtectedKeyAgreementPrivateKey(
                 curve = curve,
                 custody = custody,
-                gatedDh = { peer ->
-                    if (!gate.authorize()) throw AuthorizationFailed()
-                    require(peer.curve == curve) { "private/public key curve mismatch" }
-                    enclaveAgreeP256(blob, peer.encoded)
-                },
+                gatedDh = gatedAgreementDh(policy, blob),
             )
         return keyAgreementKeyPairOf(curve, privateKey, KeyAgreementPublicKey.of(curve, point))
     }
 
+    /** The [HardwareDh] closure for [policy] — the agreement analogue of [gatedSign]. */
+    private fun gatedAgreementDh(
+        policy: ResolvedApplePolicy,
+        blob: PlatformBuffer,
+    ): HardwareDh =
+        when (policy) {
+            is ResolvedApplePolicy.Advisory -> advisoryAgree(policy.gate, blob)
+            is ResolvedApplePolicy.Session -> sessionAgree(policy, blob)
+            is ResolvedApplePolicy.PerUse -> perUseAgree(policy.authenticator, blob)
+        }
+
+    private fun advisoryAgree(
+        gate: HardwareAuthorization,
+        blob: PlatformBuffer,
+    ): HardwareDh =
+        { peer ->
+            if (!gate.authorize()) throw AuthorizationFailed()
+            requireP256(peer)
+            // No SecAccessControl, so an auth-denied status is unreachable; the impossible `null`
+            // surfaces as the closest structured outcome rather than a silent success.
+            enclaveAgreeP256(blob, peer.encoded, laHandle = 0L) ?: throw AuthorizationFailed()
+        }
+
+    private fun sessionAgree(
+        policy: ResolvedApplePolicy.Session,
+        blob: PlatformBuffer,
+    ): HardwareDh {
+        val authenticator = policy.authenticator
+        val window = SessionWindow(policy.validity, policy.method, authenticator)
+        return { peer ->
+            requireP256(peer)
+            // A closed authenticator has released its LAContext; refuse before handing the shim a
+            // stale handle (which the derive would otherwise misreport as KeyInvalidated).
+            if (!authenticator.available) throw AuthorizationFailed()
+            window.ensureAuthenticated()
+            val first =
+                withContext(Dispatchers.Default) {
+                    enclaveAgreeP256(blob, peer.encoded, authenticator.contextHandle)
+                }
+            first ?: run {
+                // The OS refused a derive on a window we believed fresh — the LAContext was
+                // invalidated out from under us. Reset, re-prompt exactly once, retry; only a second
+                // refusal is the terminal state. Mirrors [sessionSign].
+                window.invalidate()
+                window.ensureAuthenticated()
+                withContext(Dispatchers.Default) {
+                    enclaveAgreeP256(blob, peer.encoded, authenticator.contextHandle)
+                } ?: throw HardwareKeyException.UserAuthenticationRequired()
+            }
+        }
+    }
+
+    private fun perUseAgree(
+        authenticator: LocalAuthAuthenticator,
+        blob: PlatformBuffer,
+    ): HardwareDh =
+        { peer ->
+            requireP256(peer)
+            // A fresh, un-evaluated context per derive: the OS prompts during the agreement itself,
+            // binding the authentication to exactly this operation. Blocking prompt ⇒ off-thread.
+            val fresh = authenticator.newContextHandle()
+            try {
+                withContext(Dispatchers.Default) {
+                    enclaveAgreeP256(blob, peer.encoded, fresh)
+                } ?: throw AuthorizationFailed()
+            } finally {
+                releaseContextHandle(fresh)
+            }
+        }
+
     /**
-     * Probes the Enclave's ECDH support end to end: generate a throwaway agreement key, then run one
-     * real agreement against a freshly generated software peer through the production
+     * Generates an OS-bound Enclave P-256 agreement key under [policy] (access-controlled: the
+     * element refuses an unauthenticated derive). Ephemeral — the blob is in-process bytes, not a
+     * Keychain item, so close releases nothing out of process.
+     */
+    internal fun generateKeyAgreementBound(policy: ResolvedApplePolicy): KeyAgreementKeyPair {
+        if (!eligible(ProtectedKeyAlgorithm.EcdhP256)) throw HardwareKeyException.AlgorithmNotEligible()
+        val generated =
+            when (policy) {
+                is ResolvedApplePolicy.Advisory -> enclaveGenerateKaP256()
+                is ResolvedApplePolicy.Session -> enclaveGenerateKaP256AccessControlled(policy.method)
+                is ResolvedApplePolicy.PerUse -> enclaveGenerateKaP256AccessControlled(policy.method)
+            }
+        return buildBoundKeyAgreement(policy, generated.blob, generated.point)
+    }
+
+    /**
+     * Probes the Enclave's ECDH support end to end: generate a throwaway advisory agreement key, then
+     * run one real agreement against a freshly generated software peer through the production
      * [enclaveAgreeP256] path. Generation alone would over-promise — an element that mints the key
      * and then refuses the DH must route to the software floor, not report hardware custody.
      */
@@ -155,9 +249,9 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
             try {
                 val peer = generateKeyPairPlatform(KeyAgreementCurve.P256)
                 try {
-                    val secret = enclaveAgreeP256(key.blob, peer.publicKey.encoded)
-                    val ok = secret.remaining() == KeyAgreementCurve.P256.sharedSecretBytes
-                    secret.freeNativeMemory()
+                    val secret = enclaveAgreeP256(key.blob, peer.publicKey.encoded, laHandle = 0L)
+                    val ok = secret != null && secret.remaining() == KeyAgreementCurve.P256.sharedSecretBytes
+                    secret?.freeNativeMemory()
                     ok
                 } finally {
                     peer.close()
@@ -170,6 +264,9 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
             // No Enclave, no entitlement, or an element that declines agreement keys.
             false
         }
+
+    private fun requireP256(peer: KeyAgreementPublicKey) =
+        require(peer.curve == KeyAgreementCurve.P256) { "private/public key curve mismatch" }
 
     /** Generates an Enclave P-256 key under [policy] — the shared path for unbound and OS-bound keys. */
     internal suspend fun generateSigningBound(
@@ -360,7 +457,9 @@ internal sealed interface ResolvedApplePolicy {
 internal class AppleUserAuthenticatedKeyProvider(
     private val base: SecureEnclaveHardwareKeyProvider,
     private val authenticator: LocalAuthAuthenticator,
-) : UserAuthenticatedKeyProvider {
+) : PerUseAgreementCapable {
+    // PerUseAgreementCapable: the Enclave binds authentication to the exact derive op (a fresh
+    // LAContext per agreement), so per-use ECDH is real here — unlike Android's window-only binding.
     override fun eligible(alg: ProtectedKeyAlgorithm): Boolean = base.eligible(alg)
 
     override suspend fun generateAesGcm(
@@ -372,6 +471,26 @@ internal class AppleUserAuthenticatedKeyProvider(
         scheme: SignatureScheme,
         policy: UserAuthenticationPolicy,
     ): SigningKey = base.generateSigningBound(policy.resolve(), scheme)
+
+    override suspend fun generateKeyAgreement(
+        curve: KeyAgreementCurve,
+        policy: UserAuthenticationPolicy.Windowed,
+    ): KeyAgreementKeyPair = boundKeyAgreement(curve, policy)
+
+    override suspend fun generateKeyAgreement(
+        curve: KeyAgreementCurve,
+        policy: UserAuthenticationPolicy.PerUse,
+    ): KeyAgreementKeyPair = boundKeyAgreement(curve, policy)
+
+    private fun boundKeyAgreement(
+        curve: KeyAgreementCurve,
+        policy: UserAuthenticationPolicy,
+    ): KeyAgreementKeyPair {
+        if (curve != KeyAgreementCurve.P256 || !base.eligible(ProtectedKeyAlgorithm.EcdhP256)) {
+            throw HardwareKeyException.AlgorithmNotEligible()
+        }
+        return base.generateKeyAgreementBound(policy.resolve())
+    }
 
     private fun UserAuthenticationPolicy.resolve(): ResolvedApplePolicy =
         when (this) {

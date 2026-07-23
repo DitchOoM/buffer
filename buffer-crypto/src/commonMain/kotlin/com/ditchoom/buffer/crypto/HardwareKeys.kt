@@ -127,6 +127,18 @@ enum class UserAuthenticationMethod {
  */
 sealed interface UserAuthenticationPolicy {
     /**
+     * The policies an element enforces with a **validity-window / timestamp** check rather than by
+     * binding authentication to one exact operation. This is the subset that composes with *every*
+     * key kind on every OS-binding platform — including operations no per-operation auth object can
+     * wrap. Key agreement is the motivating case: Android's `BiometricPrompt.CryptoObject` has no
+     * `KeyAgreement` overload, so a keystore ECDH key can only be gated by the auth window, never
+     * per-derive — [UserAuthenticatedKeyProvider.generateKeyAgreement] therefore accepts only a
+     * [Windowed] policy, and per-derive agreement is offered separately through
+     * [PerUseAgreementCapable] where the element actually binds it (Apple Secure Enclave).
+     */
+    sealed interface Windowed : UserAuthenticationPolicy
+
+    /**
      * One successful user authentication unlocks the key for [validity]; ops inside the window do
      * not re-prompt. The provider prompts lazily — it attempts the op and only prompts when the
      * OS reports the window stale — so an already-authenticated user is never re-prompted.
@@ -138,7 +150,7 @@ sealed interface UserAuthenticationPolicy {
     data class Session(
         val validity: Duration,
         val method: UserAuthenticationMethod = UserAuthenticationMethod.BiometricOrCredential,
-    ) : UserAuthenticationPolicy {
+    ) : Windowed {
         init {
             require(validity >= 1.seconds) { "session validity must be at least 1 second, was $validity" }
         }
@@ -148,6 +160,10 @@ sealed interface UserAuthenticationPolicy {
      * Every operation requires a fresh user authentication bound to that exact operation (Android:
      * auth-per-use key + `BiometricPrompt.CryptoObject` wrapping the exact `Cipher`/`Signature`;
      * Apple: a fresh, un-evaluated `LAContext` per sign, so the Enclave prompts each time).
+     *
+     * Not a [Windowed] policy: per-op binding needs an auth object wrapping the exact operation,
+     * which does not exist for JCA `KeyAgreement`. So a `PerUse` **key agreement** key is reachable
+     * only through [PerUseAgreementCapable]; `PerUse` signing / AES-GCM stay on the base provider.
      */
     data class PerUse(
         val method: UserAuthenticationMethod = UserAuthenticationMethod.BiometricOnly,
@@ -192,6 +208,53 @@ interface UserAuthenticatedKeyProvider {
         scheme: SignatureScheme,
         policy: UserAuthenticationPolicy,
     ): SigningKey
+
+    /**
+     * Generates a fresh key-agreement key pair for [curve] inside the secure element, OS-bound to a
+     * [UserAuthenticationPolicy.Windowed] policy (the element gates each derive by its auth window).
+     *
+     * The parameter is `Windowed`, not the full policy, on purpose: a per-derive-bound agreement key
+     * needs an auth object wrapping the exact `KeyAgreement` op, which Android cannot express — so
+     * `PerUse` agreement is not offered here at all. Where the element *can* bind per-derive (Apple
+     * Secure Enclave), the provider additionally implements [PerUseAgreementCapable]; narrow to it to
+     * request [UserAuthenticationPolicy.PerUse]. An ineligible [curve] throws
+     * [HardwareKeyException.AlgorithmNotEligible].
+     */
+    suspend fun generateKeyAgreement(
+        curve: KeyAgreementCurve,
+        policy: UserAuthenticationPolicy.Windowed,
+    ): KeyAgreementKeyPair
+}
+
+/**
+ * A [UserAuthenticatedKeyProvider] whose secure element binds authentication to the **exact derive
+ * operation** for key agreement — so a fresh user authentication is required for every derive, not
+ * merely a recent one within a window. Only the Apple Secure Enclave qualifies: it drives a fresh
+ * `LAContext` per agreement, whereas Android's keystore has no `CryptoObject` overload for
+ * `KeyAgreement` and can gate ECDH by the auth window only.
+ *
+ * Obtained by narrowing the provider from `userAuthenticated(...)`:
+ * ```kotlin
+ * val kex = when (val p = provider.userAuthenticated(prompt)) {
+ *     is PerUseAgreementCapable -> p.generateKeyAgreement(P256, UserAuthenticationPolicy.PerUse())
+ *     else                      -> p.generateKeyAgreement(P256, UserAuthenticationPolicy.Session(5.minutes))
+ * }
+ * ```
+ * A platform that gains per-derive agreement later implements this interface additively — no ABI
+ * break, no deprecation. It is deliberately **not** sealed: the test fake implements it too, and the
+ * only compile-time guarantee this design needs (no `PerUse` on the base agreement method) already
+ * comes from [UserAuthenticationPolicy.Windowed].
+ */
+interface PerUseAgreementCapable : UserAuthenticatedKeyProvider {
+    /**
+     * Generates a key-agreement key pair for [curve] whose every derive requires a fresh user
+     * authentication bound to that exact operation. An ineligible [curve] throws
+     * [HardwareKeyException.AlgorithmNotEligible].
+     */
+    suspend fun generateKeyAgreement(
+        curve: KeyAgreementCurve,
+        policy: UserAuthenticationPolicy.PerUse,
+    ): KeyAgreementKeyPair
 }
 
 /**

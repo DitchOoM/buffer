@@ -158,12 +158,22 @@ int32_t bcks_secure_enclave_p256_ka_generate(
     uint8_t *blobOut, size_t blobCap, size_t *blobLenOut,
     uint8_t *pointOut, size_t pointCap, size_t *pointLenOut);
 
-// Computes DH(enclaveKey, peer) inside the Enclave, emitting the raw 32-byte shared secret. `peer`
-// is the uncompressed SEC1 point (04 || X || Y), validated on-curve by CryptoKit. BCKS_ERR_PEER when
-// the peer point is malformed / off-curve / rejected (one uniform code — no oracle), BCKS_ERR_INPUT
-// when the blob is not restorable by this Enclave, BCKS_ERR_AUTH on a denied user authentication.
-int32_t bcks_secure_enclave_p256_ka_agree(
+// Generates a Secure Enclave P-256 key-agreement key bound to user authentication via
+// SecAccessControl (authReq: 1 = userPresence, 2 = biometryCurrentSet); the element then refuses an
+// unauthenticated derive. Outputs match bcks_secure_enclave_p256_ka_generate.
+int32_t bcks_secure_enclave_p256_ka_generate_ac(
+    int32_t authReq,
+    uint8_t *blobOut, size_t blobCap, size_t *blobLenOut,
+    uint8_t *pointOut, size_t pointCap, size_t *pointLenOut);
+
+// Computes DH(enclaveKey, peer) authorizing through the LAContext behind laHandle (0 = no context:
+// the OS drives any prompt itself, or refuses when it cannot). `peer` is the uncompressed SEC1 point
+// (04 || X || Y), validated on-curve by CryptoKit. BCKS_ERR_PEER when the peer point is malformed /
+// off-curve / rejected (one uniform code — no oracle), BCKS_ERR_INPUT when the blob is not
+// restorable by this Enclave, BCKS_ERR_AUTH on a denied user authentication.
+int32_t bcks_secure_enclave_p256_ka_agree_ctx(
     const uint8_t *blobPtr, size_t blobLen,
+    int64_t laHandle,
     const uint8_t *peerPtr, size_t peerLen,
     uint8_t *secretOut, size_t secretCap,
     size_t *secretLenOut);
