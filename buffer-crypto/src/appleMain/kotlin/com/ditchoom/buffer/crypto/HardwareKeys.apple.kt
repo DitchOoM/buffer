@@ -31,8 +31,8 @@ import kotlin.time.TimeMark
 import kotlin.time.TimeSource
 
 /*
- * Apple Secure Enclave hardware-backed key provider (CryptoKit `SecureEnclave.P256.Signing`, via the
- * CryptoKitShim).
+ * Apple Secure Enclave hardware-backed key provider (CryptoKit `SecureEnclave.P256.Signing` and
+ * `SecureEnclave.P256.KeyAgreement`, via the CryptoKitShim).
  *
  * The Enclave generates and holds a P-256 private key that never leaves the element; signing routes
  * through the shim, which reconstructs the key from its opaque encrypted blob and signs *inside* the
@@ -41,8 +41,10 @@ import kotlin.time.TimeSource
  * published. All byte transport is buffer-native: the shim reads from / writes into buffer memory
  * directly ([withRemainingBytes] / [withWritablePointer]); no ByteArray round-trips.
  *
- * **Only ECDSA P-256 is backed.** AES-GCM is not eligible: CryptoKit exposes no symmetric Secure
- * Enclave key, and the only "Enclave-tied" AES one could build (ECDH a P-256 Enclave key → derive a
+ * **ECDSA P-256 signing and ECDH P-256 key agreement are backed** (the agreement half lives in
+ * HardwareKeyAgreement.apple.kt and is gated on a real generate-and-agree probe, never inferred).
+ * AES-GCM is not eligible: CryptoKit exposes no symmetric Secure Enclave key, and the only
+ * "Enclave-tied" AES one could build (ECDH a P-256 Enclave key → derive a
  * symmetric key → run AES.GCM in software) would put the AES key in process memory, violating the
  * non-exportable hardware-key contract. (The Enclave *does* contain an AES engine, but Apple exposes
  * no developer API to drive it as an app-controlled non-exportable AEAD key.)
@@ -71,7 +73,23 @@ import kotlin.time.TimeSource
 internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
     override val dedicatedSecureElement: Boolean get() = true
 
-    override fun eligible(alg: ProtectedKeyAlgorithm): Boolean = alg == ProtectedKeyAlgorithm.EcdsaP256
+    /**
+     * `true` once an Enclave `SecureEnclave.P256.KeyAgreement` key both generates *and* completes one
+     * real agreement against a software peer. Probed (generate-and-agree with a throwaway key)
+     * rather than inferred from OS version or [bcks_secure_enclave_available]: the answer that
+     * matters is whether *this* element performs the DH, which is what an unentitled binary, a
+     * simulator, or a locked device diverge on. Same shape as the signing generate-and-discard probe
+     * in [appleResolution] — a failure routes key agreement to the software floor instead of
+     * over-promising hardware custody.
+     */
+    private val agreementSupported: Boolean by lazy { probeAgreement() }
+
+    override fun eligible(alg: ProtectedKeyAlgorithm): Boolean =
+        when (alg) {
+            ProtectedKeyAlgorithm.EcdsaP256 -> true
+            ProtectedKeyAlgorithm.EcdhP256 -> agreementSupported
+            else -> false
+        }
 
     override suspend fun generateAesGcm(spec: ProtectedKeySpec): AesGcmKey =
         // No app-controlled non-exportable symmetric Enclave key exists on Apple.
@@ -85,9 +103,73 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
     override suspend fun generateKeyAgreement(
         curve: KeyAgreementCurve,
         spec: ProtectedKeySpec,
-    ): KeyAgreementKeyPair =
-        // The Secure Enclave backs no app-controlled ECDH agreement key through this SPI; not eligible.
-        throw HardwareKeyException.AlgorithmNotEligible()
+    ): KeyAgreementKeyPair {
+        // Only ECDH P-256, and only where the probed Enclave agreement support holds. X25519 and the
+        // larger NIST curves have no Secure Enclave backing on any OS version.
+        if (curve != KeyAgreementCurve.P256 || !eligible(ProtectedKeyAlgorithm.EcdhP256)) {
+            throw HardwareKeyException.AlgorithmNotEligible()
+        }
+        val generated = enclaveGenerateKaP256()
+        // Ephemeral: nothing was persisted (the blob is in-process bytes, not a Keychain item), so
+        // there is no out-of-process resource for close to release.
+        return buildKeyAgreementPair(generated.blob, generated.point, spec.authorization)
+    }
+
+    /**
+     * Wraps an Enclave restore [blob] + public [point] as a [KeyAgreementKeyPair] whose DH runs
+     * inside the element. Shared by the ephemeral [generateKeyAgreement] and the persistent
+     * [AppleKeychainKeyStore] paths — the only difference between them is who holds the record.
+     *
+     * The [gate] is the advisory [ProtectedKeySpec.authorization]: agreement keys carry no
+     * `SecAccessControl` (see HardwareKeyAgreement.apple.kt), so the gate is evaluated by library
+     * code before each derive, and the raw secret goes straight to the common validate/HKDF seam.
+     */
+    internal fun buildKeyAgreementPair(
+        blob: PlatformBuffer,
+        point: ReadBuffer,
+        gate: HardwareAuthorization,
+    ): KeyAgreementKeyPair {
+        val curve = KeyAgreementCurve.P256
+        val privateKey =
+            ProtectedKeyAgreementPrivateKey(
+                curve = curve,
+                custody = custody,
+                gatedDh = { peer ->
+                    if (!gate.authorize()) throw AuthorizationFailed()
+                    require(peer.curve == curve) { "private/public key curve mismatch" }
+                    enclaveAgreeP256(blob, peer.encoded)
+                },
+            )
+        return keyAgreementKeyPairOf(curve, privateKey, KeyAgreementPublicKey.of(curve, point))
+    }
+
+    /**
+     * Probes the Enclave's ECDH support end to end: generate a throwaway agreement key, then run one
+     * real agreement against a freshly generated software peer through the production
+     * [enclaveAgreeP256] path. Generation alone would over-promise — an element that mints the key
+     * and then refuses the DH must route to the software floor, not report hardware custody.
+     */
+    private fun probeAgreement(): Boolean =
+        try {
+            val key = enclaveGenerateKaP256()
+            try {
+                val peer = generateKeyPairPlatform(KeyAgreementCurve.P256)
+                try {
+                    val secret = enclaveAgreeP256(key.blob, peer.publicKey.encoded)
+                    val ok = secret.remaining() == KeyAgreementCurve.P256.sharedSecretBytes
+                    secret.freeNativeMemory()
+                    ok
+                } finally {
+                    peer.close()
+                }
+            } finally {
+                key.blob.freeNativeMemory()
+                key.point.freeNativeMemory()
+            }
+        } catch (_: Throwable) {
+            // No Enclave, no entitlement, or an element that declines agreement keys.
+            false
+        }
 
     /** Generates an Enclave P-256 key under [policy] — the shared path for unbound and OS-bound keys. */
     internal suspend fun generateSigningBound(
@@ -198,7 +280,7 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
      */
     internal fun generatePersistentSigning(spec: ProtectedKeySpec): Pair<SigningKey, PlatformBuffer> {
         val generated = enclaveGenerateP256()
-        val record = frameEnclaveRecord(generated.point, generated.blob)
+        val record = frameEnclaveRecord(EnclaveKeyKind.Signing, generated.point, generated.blob)
         val key = buildPersistentSigning(generated.blob, generated.point, spec)
         return key to record
     }
@@ -208,8 +290,28 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
         record: ReadBuffer,
         spec: ProtectedKeySpec,
     ): SigningKey {
-        val (blob, point) = parseEnclaveRecord(record)
-        return buildPersistentSigning(blob, point, spec)
+        val parsed = parseEnclaveRecord(record)
+        return buildPersistentSigning(parsed.blob, parsed.point, spec)
+    }
+
+    /**
+     * Generates a persistent Enclave P-256 agreement key. Returns the [KeyAgreementKeyPair] plus its
+     * durable record (kind + public point + restore blob) for the store to persist under an alias.
+     */
+    internal fun generatePersistentKeyAgreement(spec: ProtectedKeySpec): Pair<KeyAgreementKeyPair, PlatformBuffer> {
+        val generated = enclaveGenerateKaP256()
+        val record = frameEnclaveRecord(EnclaveKeyKind.Agreement, generated.point, generated.blob)
+        val key = buildKeyAgreementPair(generated.blob, generated.point, spec.authorization)
+        return key to record
+    }
+
+    /** Re-attaches a persistent Enclave agreement key from a durable [record] (see [frameEnclaveRecord]). */
+    internal fun keyAgreementFromRecord(
+        record: ReadBuffer,
+        spec: ProtectedKeySpec,
+    ): KeyAgreementKeyPair {
+        val parsed = parseEnclaveRecord(record)
+        return buildKeyAgreementPair(parsed.blob, parsed.point, spec.authorization)
     }
 
     /** Wraps an Enclave restore [blob] + public [point] as an advisory-gated persistent [SigningKey]. */
@@ -328,16 +430,19 @@ private class SessionWindow(
 }
 
 /** A freshly generated Enclave key: the opaque restore [blob] and its uncompressed SEC1 [point]. */
-private class EnclaveP256Key(
+internal class EnclaveP256Key(
     val blob: PlatformBuffer,
     val point: PlatformBuffer,
 )
 
-// A Secure Enclave P-256 signing key's `dataRepresentation` is ~284 bytes (observed); 1024 gives
-// comfortable margin against OS-version variation. Too-small a buffer makes generate return
-// BCKS_ERR_BUFFER, which would make the provider silently fail to resolve — so keep this generous.
-private const val ENCLAVE_BLOB_CAP = 1024
-private const val P256_POINT_BYTES = 65
+// A Secure Enclave P-256 key's `dataRepresentation` is ~284 bytes (observed); 1024 gives comfortable
+// margin against OS-version variation. Too-small a buffer makes generate return BCKS_ERR_BUFFER,
+// which would make the provider silently fail to resolve — so keep this generous.
+//
+// internal (not private) so the agreement generate in HardwareKeyAgreement.apple.kt shares the same
+// [enclaveGenerate] plumbing; an internal inline function cannot reach private declarations.
+internal const val ENCLAVE_BLOB_CAP = 1024
+internal const val P256_POINT_BYTES = 65
 
 private fun enclaveGenerateP256(): EnclaveP256Key =
     enclaveGenerate { blobPtr, blobCap, blobLen, pointPtr, pointCap, pointLen ->
@@ -356,7 +461,7 @@ private fun enclaveGenerateP256AccessControlled(method: UserAuthenticationMethod
  * [HardwareKeyException.SecureElementUnavailable]: the element would not mint the key (absent,
  * unentitled, or — for the access-controlled variant — no passcode/biometric enrolled).
  */
-private inline fun enclaveGenerate(
+internal inline fun enclaveGenerate(
     call: (
         blobPtr: kotlinx.cinterop.CPointer<kotlinx.cinterop.UByteVar>,
         blobCap: platform.posix.size_t,
@@ -498,46 +603,3 @@ internal actual fun platformProtectedKeyResolution(): ProtectedKeyResolution = a
  * Keychain-backed [AppleKeychainKeyStore], falling back to a software store otherwise.
  */
 internal fun appleEnclaveProviderOrNull(): SecureEnclaveHardwareKeyProvider? = appleProvider as? SecureEnclaveHardwareKeyProvider
-
-// =============================================================================
-// Durable Enclave key record — `u16 pointLen | point | blob`
-// =============================================================================
-//
-// The public point and the Enclave restore blob together fully describe a persistent signing key
-// (the point builds the VerifyKey; the blob reconstructs the signer inside the Enclave). They are
-// framed into one opaque buffer the store persists verbatim in a Keychain item.
-
-private const val RECORD_POINT_LEN_BYTES = 2
-
-/** Frames [point] + [blob] into a durable record, without disturbing either source's position. */
-private fun frameEnclaveRecord(
-    point: ReadBuffer,
-    blob: ReadBuffer,
-): PlatformBuffer {
-    val pointLen = point.remaining()
-    val out = BufferFactory.Default.allocate(RECORD_POINT_LEN_BYTES + pointLen + blob.remaining())
-    out.writeShort(pointLen.toShort())
-    appendPreservingPosition(out, point)
-    appendPreservingPosition(out, blob)
-    out.resetForRead()
-    return out
-}
-
-/** Splits a durable record back into freshly-owned (blob, point) buffers. */
-private fun parseEnclaveRecord(record: ReadBuffer): Pair<PlatformBuffer, PlatformBuffer> {
-    val pointLen = record.readShort().toInt() and 0xFFFF
-    val point = copyBuffer(record.readBytes(pointLen), BufferFactory.Default)
-    val blob = copyBuffer(record.readBytes(record.remaining()), BufferFactory.Default)
-    return blob to point
-}
-
-/** Appends [src]'s remaining bytes to [dst] without advancing [src]'s position (it may be a live key buffer). */
-private fun appendPreservingPosition(
-    dst: PlatformBuffer,
-    src: ReadBuffer,
-) {
-    if (src.remaining() == 0) return
-    val mark = src.position()
-    dst.write(src)
-    src.position(mark)
-}

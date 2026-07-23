@@ -57,10 +57,15 @@ internal actual fun platformKeyStore(config: KeyStoreConfig): KeyStore =
  * persist — a key from [getOrGenerateSigning] / [loadSigning] survives `close()` and process restart
  * until [delete]d (a persistent key's `close()` does not touch the Keychain).
  *
- * Serves only what the Enclave backs non-exportably: ECDSA P-256 signing. A get-or-generate for
- * anything else (other schemes, AES-GCM, key agreement) throws
- * [HardwareKeyException.AlgorithmNotEligible] — consult [custodyFor] / [eligible] first, or supply a
- * software [KeyStoreConfig.storage] for a persistent key the Enclave cannot hold.
+ * Serves what the Enclave backs non-exportably: ECDSA P-256 signing and — where the generate-and-agree
+ * probe holds — ECDH P-256 key agreement. A get-or-generate for anything else (other schemes,
+ * AES-GCM, X25519) throws [HardwareKeyException.AlgorithmNotEligible] — consult [custodyFor] /
+ * [eligible] first, or supply a software [KeyStoreConfig.storage] for a persistent key the Enclave
+ * cannot hold.
+ *
+ * Both key kinds are (public point + restore blob) records, so the record's kind byte is what keeps
+ * them apart: a kind-mismatched load answers `null` and a kind-mismatched get-or-generate raises
+ * [KeyStoreException.AliasMismatch], never a mistyped handle.
  */
 internal class AppleKeychainKeyStore(
     private val provider: SecureEnclaveHardwareKeyProvider,
@@ -96,9 +101,12 @@ internal class AppleKeychainKeyStore(
         return withContext(Dispatchers.Default) {
             keychainGet(alias)?.let { record ->
                 try {
-                    // Only Enclave P-256 signing keys are ever persisted here, so a present record is
-                    // always a signing key of the requested scheme — no AliasMismatch is reachable.
-                    provider.signingFromRecord(record, spec)
+                    // Signing and agreement records are structurally alike; the kind byte decides.
+                    when (val stored = enclaveRecordAlgorithm(record)) {
+                        ProtectedKeyAlgorithm.EcdsaP256 -> provider.signingFromRecord(record, spec)
+                        else ->
+                            throw KeyStoreException.AliasMismatch(alias, stored, scheme.toProtectedKeyAlgorithm())
+                    }
                 } finally {
                     record.freeNativeMemory()
                 }
@@ -129,20 +137,38 @@ internal class AppleKeychainKeyStore(
         spec: ProtectedKeySpec,
     ): KeyAgreementKeyPair {
         requireValidAlias(alias)
-        // The Secure Enclave backs no app-controlled ECDH / X25519 agreement key.
-        throw HardwareKeyException.AlgorithmNotEligible()
+        // Only ECDH P-256, and only where the probed Enclave agreement support holds; X25519 has no
+        // Secure Enclave backing on any OS version.
+        if (curve != KeyAgreementCurve.P256 || !provider.eligible(ProtectedKeyAlgorithm.EcdhP256)) {
+            throw HardwareKeyException.AlgorithmNotEligible()
+        }
+        return withContext(Dispatchers.Default) {
+            keychainGet(alias)?.let { record ->
+                try {
+                    when (val stored = enclaveRecordAlgorithm(record)) {
+                        ProtectedKeyAlgorithm.EcdhP256 -> provider.keyAgreementFromRecord(record, spec)
+                        else ->
+                            throw KeyStoreException.AliasMismatch(alias, stored, curve.toProtectedKeyAlgorithm())
+                    }
+                } finally {
+                    record.freeNativeMemory()
+                }
+            } ?: run {
+                val (key, record) = provider.generatePersistentKeyAgreement(spec)
+                try {
+                    keychainPut(alias, record)
+                } finally {
+                    record.freeNativeMemory()
+                }
+                key
+            }
+        }
     }
 
     override suspend fun loadSigning(alias: String): SigningKey? {
         requireValidAlias(alias)
-        return withContext(Dispatchers.Default) {
-            keychainGet(alias)?.let { record ->
-                try {
-                    provider.signingFromRecord(record, ProtectedKeySpec())
-                } finally {
-                    record.freeNativeMemory()
-                }
-            }
+        return loadRecord(alias, ProtectedKeyAlgorithm.EcdsaP256) { record ->
+            provider.signingFromRecord(record, ProtectedKeySpec())
         }
     }
 
@@ -154,9 +180,30 @@ internal class AppleKeychainKeyStore(
 
     override suspend fun loadKeyAgreement(alias: String): KeyAgreementKeyPair? {
         requireValidAlias(alias)
-        // No agreement key is ever persisted here (see getOrGenerateKeyAgreement).
-        return null
+        return loadRecord(alias, ProtectedKeyAlgorithm.EcdhP256) { record ->
+            provider.keyAgreementFromRecord(record, ProtectedKeySpec())
+        }
     }
+
+    /**
+     * The shared load path: reads the record under [alias] and re-attaches it through [attach] only
+     * when its kind byte says [expected]. A record of the other kind answers `null` — the load
+     * contract is "absent or a different kind", never a mistyped handle.
+     */
+    private suspend fun <T> loadRecord(
+        alias: String,
+        expected: ProtectedKeyAlgorithm,
+        attach: (ReadBuffer) -> T,
+    ): T? =
+        withContext(Dispatchers.Default) {
+            keychainGet(alias)?.let { record ->
+                try {
+                    if (enclaveRecordAlgorithm(record) == expected) attach(record) else null
+                } finally {
+                    record.freeNativeMemory()
+                }
+            }
+        }
 
     override suspend fun contains(alias: String): Boolean {
         requireValidAlias(alias)
@@ -244,7 +291,7 @@ internal class AppleKeychainKeyStore(
         }
 
     private companion object {
-        // A record is `u16 pointLen | point(65) | Enclave blob(~284)` — well under 4 KiB.
+        // A record is `u8 kind | u16 pointLen | point(65) | Enclave blob(~284)` — well under 4 KiB.
         const val RECORD_CAP = 4096
 
         // Newline-joined account names; a device identity store holds few keys, so 64 KiB is ample.
