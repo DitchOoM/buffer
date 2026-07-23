@@ -193,12 +193,16 @@ internal fun buildWebCryptoKeyAgreementPair(
 
 /**
  * Browser/Node and WASM expose non-exportable WebCrypto software keys but no dedicated secure element,
- * so [platformProtectedKeyProvider] returns the [WebCryptoProtectedKeyProvider] (a
- * [ProtectedKeyProvider], **not** a [HardwareKeyProvider]) only when `subtle.generateKey` is present;
- * [CryptoCapabilities.hardware] stays [HardwareSupport.Unavailable].
+ * so the resolution offers [WebCryptoProtectedKeyProvider] (a [ProtectedKeyProvider], **not** a
+ * [HardwareKeyProvider]) only when `subtle.generateKey` is present; [CryptoCapabilities.hardware]
+ * stays [HardwareSupport.Unavailable] either way.
  */
-internal actual fun platformProtectedKeyProvider(): ProtectedKeyProvider? =
-    if (subtleGenerateKeyAvailable) WebCryptoProtectedKeyProvider else null
+internal actual fun platformProtectedKeyResolution(): ProtectedKeyResolution =
+    if (subtleGenerateKeyAvailable) {
+        ProtectedKeyResolution.Available(ProtectedKeyBackend.WebCrypto, WebCryptoProtectedKeyProvider)
+    } else {
+        ProtectedKeyResolution.Refused(ProtectedKeyBackend.WebCrypto, CapabilityFinding.Web.SubtleCryptoUnavailable)
+    }
 
 // =============================================================================
 // helpers (shared js/wasmJs)

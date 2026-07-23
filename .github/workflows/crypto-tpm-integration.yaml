@@ -1,0 +1,80 @@
+name: "TPM2 Integration Test (swtpm)"
+
+# Deterministic hardware-free verification of the tpm2-pkcs11-backed JVM key provider:
+# a software TPM (swtpm) + tpm2-abrmd resource broker + an initialized tpm2-pkcs11 token
+# reproduce the exact stack a real Linux TPM 2.0 deployment exercises (where the kernel's
+# /dev/tpmrm0 plays the broker role). The test run is REQUIRED mode: the provider must
+# resolve Available and pass the full sign/agreement contract, so a regression can never
+# hide behind a silent capability refusal.
+
+on:
+  pull_request:
+    paths:
+      - 'buffer-crypto/**'
+      - '.github/workflows/crypto-tpm-integration.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  swtpm:
+    name: "JVM provider against swtpm token"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: gradle
+
+      - name: Install swtpm + tpm2-pkcs11 stack
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y swtpm swtpm-tools tpm2-tools tpm2-abrmd \
+            libtpm2-pkcs11-1 libtpm2-pkcs11-tools libtss2-tcti-tabrmd0 dbus
+
+      - name: Start swtpm, session D-Bus, and tpm2-abrmd; initialize the PKCS#11 token
+        run: |
+          RIG="$RUNNER_TEMP/tpm-rig"
+          mkdir -p "$RIG/tpmstate" "$RIG/pkcs11store"
+          swtpm socket --tpm2 --tpmstate dir="$RIG/tpmstate" \
+            --server type=tcp,port=2321 --ctrl type=tcp,port=2322 \
+            --flags not-need-init,startup-clear --daemon
+          dbus-daemon --session --address="unix:path=$RIG/dbus.sock" --fork
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$RIG/dbus.sock"
+          tpm2-abrmd --tcti=swtpm:host=127.0.0.1,port=2321 --session &
+          sleep 2
+          export TPM2TOOLS_TCTI="tabrmd:bus_type=session"
+          export TPM2_PKCS11_TCTI="tabrmd:bus_type=session"
+          export TPM2_PKCS11_STORE="$RIG/pkcs11store"
+          tpm2_getcap properties-fixed | head -2
+          tpm2_ptool init --path "$TPM2_PKCS11_STORE"
+          tpm2_ptool addtoken --pid 1 --label buffer-crypto \
+            --userpin 1234 --sopin 5678 --path "$TPM2_PKCS11_STORE"
+          # Expose the rig to the test step (fresh Gradle daemon there inherits this env).
+          {
+            echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$RIG/dbus.sock"
+            echo "TPM2_PKCS11_TCTI=tabrmd:bus_type=session"
+            echo "TPM2_PKCS11_STORE=$RIG/pkcs11store"
+          } >> "$GITHUB_ENV"
+
+      - name: Run TPM-required JVM tests
+        run: |
+          ./gradlew :buffer-crypto:jvmTest \
+            --tests "com.ditchoom.buffer.crypto.Tpm2Pkcs11ProviderTest" \
+            --tests "com.ditchoom.buffer.crypto.ProtectedKeyResolutionTest" \
+            -P"buffer.crypto.tpm2.pkcs11.module=/usr/lib/x86_64-linux-gnu/libtpm2_pkcs11.so.1" \
+            -P"buffer.crypto.tpm2.pkcs11.pin=1234" \
+            -P"buffer.crypto.require.tpm2=true"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tpm2-jvm-test-results
+          path: buffer-crypto/build/reports/tests/jvmTest/
+          if-no-files-found: ignore

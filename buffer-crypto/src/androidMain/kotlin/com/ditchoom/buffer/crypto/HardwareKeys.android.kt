@@ -783,7 +783,18 @@ private val androidProvider: HardwareKeyProvider? by lazy {
     }
 }
 
-internal actual fun platformProtectedKeyProvider(): ProtectedKeyProvider? = androidProvider
+private val androidResolution: ProtectedKeyResolution by lazy {
+    androidProvider
+        ?.let { ProtectedKeyResolution.Available(ProtectedKeyBackend.AndroidKeystore, it) }
+        // Construction only fails where there is no AndroidKeyStore JCA provider at all — a host-JVM
+        // unit-test run, never a device or emulator.
+        ?: ProtectedKeyResolution.Refused(
+            ProtectedKeyBackend.AndroidKeystore,
+            CapabilityFinding.Keystore.ProviderMissing,
+        )
+}
+
+internal actual fun platformProtectedKeyResolution(): ProtectedKeyResolution = androidResolution
 
 /**
  * The AndroidKeystore provider narrowed to its concrete type, or `null` off-device (a host-JVM unit

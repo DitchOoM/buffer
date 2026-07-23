@@ -556,3 +556,21 @@ dokka {
         reportUndocumented.set(false)
     }
 }
+
+// Forward the tpm2-pkcs11 harness configuration into the JVM test process, so the TPM-backed
+// provider tests can reach a real (or swtpm-emulated) token. Gradle -P properties become the
+// library's system properties (fresh per invocation, immune to daemon-env staleness); the
+// TPM2_PKCS11_* / DBUS_* environment is what the native tpm2-pkcs11 module itself reads.
+tasks.withType<Test>().configureEach {
+    listOf(
+        "buffer.crypto.tpm2.pkcs11.module",
+        "buffer.crypto.tpm2.pkcs11.pin",
+        "buffer.crypto.tpm2.pkcs11.slotIndex",
+        "buffer.crypto.require.tpm2",
+    ).forEach { key ->
+        (project.findProperty(key) as? String)?.let { systemProperty(key, it) }
+    }
+    listOf("TPM2_PKCS11_TCTI", "TPM2_PKCS11_STORE", "DBUS_SESSION_BUS_ADDRESS").forEach { key ->
+        System.getenv(key)?.let { environment(key, it) }
+    }
+}
