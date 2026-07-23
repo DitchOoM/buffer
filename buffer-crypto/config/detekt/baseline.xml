@@ -27,6 +27,7 @@
     <ID>MatchingDeclarationName:NativeCryptoException.jsAndWasmJs.kt:NativeCryptoException : Exception</ID>
     <ID>MatchingDeclarationName:NativeCryptoException.linux.kt:NativeCryptoException : Exception</ID>
     <ID>MatchingDeclarationName:PosixFileKeyStoreTest.linux.kt:PosixFileKeyStoreTest</ID>
+    <ID>MatchingDeclarationName:Tpm2Pkcs11NativeProviderTest.linux.kt:Tpm2Pkcs11NativeProviderTest</ID>
     <ID>MaxLineLength:AeadTamperTest.kt:AeadTamperTest$assertFailsWith&lt;VerificationFailed> { ops.open(sealed, wrongKey, Aad.Of(ascii(aad)), BufferFactory.Default) }</ID>
     <ID>MaxLineLength:EcInteropTest.kt:EcInteropTest$assertEquals(1 + curve.privateKeyBytes, compressed.remaining(), "${curve.curveName} compressed width")</ID>
     <ID>MaxLineLength:EcInteropTest.kt:EcInteropTest$private fun ByteArray.toHexString: String</ID>
