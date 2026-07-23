@@ -584,27 +584,69 @@ private func classifyAgreeFailure(_ error: Error) -> Int32 {
     return classifySignFailure(error)
 }
 
-// Compute DH(enclaveKey, peer) inside the Secure Enclave, emitting the raw 32-byte shared secret.
-// The peer point is the uncompressed SEC1 encoding (04 ‖ X ‖ Y); CryptoKit validates it is on-curve.
-// BCKS_ERR_PEER: peer point malformed / off-curve / rejected. BCKS_ERR_INPUT: the blob is not
-// restorable by this Enclave. BCKS_ERR_AUTH: user authentication denied.
-@_cdecl("bcks_secure_enclave_p256_ka_agree")
-public func bcks_secure_enclave_p256_ka_agree(
+// Generate a Secure Enclave P-256 *key agreement* key bound to user authentication via
+// SecAccessControl (authReq: 1 = userPresence, 2 = biometryCurrentSet). The Enclave then refuses an
+// unauthenticated derive. Outputs match bcks_secure_enclave_p256_ka_generate.
+@_cdecl("bcks_secure_enclave_p256_ka_generate_ac")
+public func bcks_secure_enclave_p256_ka_generate_ac(
+    _ authReq: Int32,
+    _ blobOut: UnsafeMutablePointer<UInt8>?, _ blobCap: Int,
+    _ blobLenOut: UnsafeMutablePointer<Int>?,
+    _ pointOut: UnsafeMutablePointer<UInt8>?, _ pointCap: Int,
+    _ pointLenOut: UnsafeMutablePointer<Int>?
+) -> Int32 {
+    guard SecureEnclave.isAvailable else { return BCKS_ERR_INTERNAL }
+    var flags: SecAccessControlCreateFlags = [.privateKeyUsage]
+    switch authReq {
+    case 1: flags.insert(.userPresence)
+    case 2: flags.insert(.biometryCurrentSet)
+    default: return BCKS_ERR_INPUT
+    }
+    var acError: Unmanaged<CFError>?
+    guard let ac = SecAccessControlCreateWithFlags(
+        kCFAllocatorDefault, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, flags, &acError
+    ) else { return BCKS_ERR_INTERNAL }
+    guard let key = try? SecureEnclave.P256.KeyAgreement.PrivateKey(accessControl: ac) else {
+        return BCKS_ERR_INTERNAL
+    }
+    let s = emit(key.dataRepresentation, blobOut, blobCap, blobLenOut)
+    if s != BCKS_OK { return s }
+    return emit(key.publicKey.x963Representation, pointOut, pointCap, pointLenOut)
+}
+
+// Compute DH(enclaveKey, peer) authorizing through the LAContext behind laHandle (0 = no context:
+// the OS drives any required prompt itself, or refuses when it cannot). Same status contract as
+// bcks_secure_enclave_p256_ka_agree, plus BCKS_ERR_AUTH when user authentication was denied.
+@_cdecl("bcks_secure_enclave_p256_ka_agree_ctx")
+public func bcks_secure_enclave_p256_ka_agree_ctx(
     _ blobPtr: UnsafePointer<UInt8>?, _ blobLen: Int,
+    _ laHandle: Int64,
     _ peerPtr: UnsafePointer<UInt8>?, _ peerLen: Int,
     _ secretOut: UnsafeMutablePointer<UInt8>?, _ secretCap: Int,
     _ secretLenOut: UnsafeMutablePointer<Int>?
 ) -> Int32 {
-    guard let key = try? SecureEnclave.P256.KeyAgreement.PrivateKey(
-        dataRepresentation: bytes(blobPtr, blobLen)
-    ) else { return BCKS_ERR_INPUT }
     guard let peer = try? P256.KeyAgreement.PublicKey(x963Representation: bytes(peerPtr, peerLen)) else {
         return BCKS_ERR_PEER
     }
+    let blob = bytes(blobPtr, blobLen)
+    #if canImport(LocalAuthentication) && !os(tvOS)
+    let ctx: LAContext? = laHandle == 0 ? nil : LAContextRegistry.shared.get(laHandle)?.0
+    if laHandle != 0 && ctx == nil { return BCKS_ERR_INPUT }
+    // The context-carrying init needs watchOS 9; below that (floor: 7) restore without one — the
+    // access control still holds, the OS just drives any prompt itself.
+    let key: SecureEnclave.P256.KeyAgreement.PrivateKey?
+    if #available(watchOS 9.0, iOS 13.0, macOS 10.15, *) {
+        key = try? SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: blob, authenticationContext: ctx)
+    } else {
+        key = try? SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: blob)
+    }
+    #else
+    let key = try? SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: blob)
+    #endif
+    guard let key = key else { return BCKS_ERR_INPUT }
     do {
         let shared = try key.sharedSecretFromKeyAgreement(with: peer)
-        let raw = shared.withUnsafeBytes { Data($0) }
-        return emit(raw, secretOut, secretCap, secretLenOut)
+        return emit(shared.withUnsafeBytes { Data($0) }, secretOut, secretCap, secretLenOut)
     } catch {
         return classifyAgreeFailure(error)
     }

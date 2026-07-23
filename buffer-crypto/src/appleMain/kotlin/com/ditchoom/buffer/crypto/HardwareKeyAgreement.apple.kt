@@ -11,8 +11,9 @@ import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_AUTH
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_INPUT
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_PEER
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
-import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_p256_ka_agree
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_p256_ka_agree_ctx
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_p256_ka_generate
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_p256_ka_generate_ac
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.convert
@@ -39,25 +40,49 @@ import platform.posix.size_tVar
  * [ProtectedKeySpec.authorization], evaluated before every derive.
  */
 
-/** Generates a P-256 key-agreement key inside the Secure Enclave (restore blob + public point). */
+/** Generates an advisory-gated P-256 key-agreement key inside the Secure Enclave (blob + point). */
 internal fun enclaveGenerateKaP256(): EnclaveP256Key =
     enclaveGenerate { blobPtr, blobCap, blobLen, pointPtr, pointCap, pointLen ->
         bcks_secure_enclave_p256_ka_generate(blobPtr, blobCap, blobLen, pointPtr, pointCap, pointLen)
     }
 
 /**
- * Runs `DH(enclaveKey, peer)` inside the Enclave — the key restored from [blob], the peer supplied
- * as its uncompressed SEC1 point — and returns the raw 32-byte shared secret in a wiped
- * [SecureBuffer] (the common seam applies the KDF / validation above it).
+ * Generates an **access-controlled** P-256 key-agreement key inside the Secure Enclave — the element
+ * itself refuses a derive without a satisfied [SecAccessControl] authentication ([method]: userPresence
+ * or biometryCurrentSet). Used for [UserAuthenticationPolicy] agreement keys; the returned blob
+ * restores only under an authenticated LAContext (see [enclaveAgreeP256]).
+ */
+internal fun enclaveGenerateKaP256AccessControlled(method: UserAuthenticationMethod): EnclaveP256Key =
+    enclaveGenerate { blobPtr, blobCap, blobLen, pointPtr, pointCap, pointLen ->
+        // The shim's authReq selector matches laMethod(): 1 = userPresence, 2 = biometryCurrentSet.
+        bcks_secure_enclave_p256_ka_generate_ac(
+            method.laMethod(),
+            blobPtr,
+            blobCap,
+            blobLen,
+            pointPtr,
+            pointCap,
+            pointLen,
+        )
+    }
+
+/**
+ * Runs `DH(enclaveKey, peer)` inside the Enclave — the key restored from [blob], authorized through
+ * the LAContext behind [laHandle] (`0` = none), the peer supplied as its uncompressed SEC1 point —
+ * and returns the raw 32-byte shared secret in a wiped [SecureBuffer] (the common seam applies the
+ * KDF / validation above it).
  *
  * A rejected peer point (malformed, wrong length, off-curve) surfaces as the uniform
  * [InvalidPublicKey] with the shim's cause dropped — the same no-oracle contract as the software
- * agreement glue. A blob this Enclave can no longer restore is [HardwareKeyException.KeyInvalidated].
+ * agreement glue. Returns `null` when the OS denied user authentication (the caller maps it to the
+ * policy-appropriate typed exception). A blob this Enclave can no longer restore is
+ * [HardwareKeyException.KeyInvalidated].
  */
 internal fun enclaveAgreeP256(
     blob: ReadBuffer,
     peerPoint: ReadBuffer,
-): PlatformBuffer {
+    laHandle: Long = 0L,
+): PlatformBuffer? {
     val cap = KeyAgreementCurve.P256.sharedSecretBytes
     val out = secureScratch.allocate(cap)
     var status = -1
@@ -69,9 +94,10 @@ internal fun enclaveAgreeP256(
             peerPoint.withRemainingBytes2(peerLen) { peerPtr ->
                 out.withWritablePointer(cap) { secretPtr ->
                     status =
-                        bcks_secure_enclave_p256_ka_agree(
+                        bcks_secure_enclave_p256_ka_agree_ctx(
                             blobPtr.reinterpret(),
                             blobLen.convert(),
+                            laHandle,
                             peerPtr.reinterpret(),
                             peerLen.convert(),
                             secretPtr.reinterpret(),
@@ -83,18 +109,21 @@ internal fun enclaveAgreeP256(
         }
         written = secretLen.value.toInt()
     }
-    if (status != BCKS_OK) {
-        out.freeNativeMemory()
-        throw enclaveAgreeFailure(status)
+    if (status == BCKS_OK) {
+        out.position(written)
+        out.resetForRead()
+        return out
     }
-    out.position(written)
-    out.resetForRead()
-    return out
+    out.freeNativeMemory()
+    // A denied user authentication is `null`, not a throw: the gated closure decides the typed
+    // outcome (session re-prompt vs terminal), exactly as the signing path does.
+    if (status == BCKS_ERR_AUTH) return null
+    throw enclaveAgreeFailure(status)
 }
 
 /**
- * The typed failure a non-OK agreement status stands for. Returned rather than thrown so the caller
- * frees the secret buffer first and keeps a single throw site.
+ * The typed failure a non-OK, non-auth agreement status stands for. Returned rather than thrown so
+ * the caller frees the secret buffer first and keeps a single throw site.
  */
 private fun enclaveAgreeFailure(status: Int): Throwable =
     when (status) {
@@ -103,9 +132,6 @@ private fun enclaveAgreeFailure(status: Int): Throwable =
         BCKS_ERR_PEER -> InvalidPublicKey(KeyAgreementCurve.P256)
         // The Enclave cannot restore this blob (wrong device, or an OS-invalidated key).
         BCKS_ERR_INPUT -> HardwareKeyException.KeyInvalidated()
-        // Unreachable today (no agreement key is access-controlled), kept typed rather than folded
-        // into the generic hardware failure so an OS-bound key would surface honestly.
-        BCKS_ERR_AUTH -> AuthorizationFailed()
         else -> HardwareKeyException.TransientHardwareFailure(retryable = false)
     }
 

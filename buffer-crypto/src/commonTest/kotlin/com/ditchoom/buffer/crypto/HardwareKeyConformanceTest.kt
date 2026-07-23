@@ -274,6 +274,79 @@ class HardwareKeyConformanceTest {
             }
         }
 
+    // ---- User-authentication-bound key agreement (Session on the base, PerUse via capability) ----
+    // The fake models a dedicated element (Apple's tier), so its userAuthenticated() provider IS a
+    // PerUseAgreementCapable — exercising BOTH the Windowed and the per-derive dispatch against the
+    // real ProtectedKeyAgreementPrivateKey machinery, not a stub.
+
+    private suspend fun deriveOnce(
+        kex: KeyAgreementKeyPair,
+        peer: KeyAgreementKeyPair,
+        ops: KeyAgreementAsyncOps,
+    ) = ops.deriveSharedSecret(kex.privateKey, peer.publicKey, Info.Of(ascii("bound-kex")), length = 32)
+
+    @Test
+    fun boundSessionAgreementAuthenticatesOncePerValidityWindow() =
+        runTest {
+            val clock = TestTimeSource()
+            val gate = CountingGate(true)
+            val authed = FakeHardware(timeSource = clock).userAuthenticated(gate)
+            val kex = authed.generateKeyAgreement(KeyAgreementCurve.P256, UserAuthenticationPolicy.Session(5.minutes))
+            val ops = keyAgreementAsyncOrNull(KeyAgreementCurve.P256) ?: return@runTest
+            val peer = ops.generateKeyPair()
+
+            deriveOnce(kex, peer, ops)
+            deriveOnce(kex, peer, ops)
+            assertEquals(1, gate.calls, "derives inside the window must not re-prompt")
+
+            clock += 6.minutes
+            deriveOnce(kex, peer, ops)
+            assertEquals(2, gate.calls, "a stale window must re-prompt exactly once")
+        }
+
+    @Test
+    fun boundPerUseAgreementAuthenticatesEveryDerive() =
+        runTest {
+            val gate = CountingGate(true)
+            val authed = provider.userAuthenticated(gate)
+            // The documented consumer pattern: narrow to the per-derive capability where the element
+            // binds it, else fall back to a Session window.
+            val kex =
+                when (authed) {
+                    is PerUseAgreementCapable ->
+                        authed.generateKeyAgreement(KeyAgreementCurve.P256, UserAuthenticationPolicy.PerUse())
+                    else ->
+                        authed.generateKeyAgreement(KeyAgreementCurve.P256, UserAuthenticationPolicy.Session(5.minutes))
+                }
+            assertTrue(authed is PerUseAgreementCapable, "the fake models a per-derive-capable element")
+            assertEquals(KeyProvenance.Hardware, kex.privateKey.provenance)
+            val ops = keyAgreementAsyncOrNull(KeyAgreementCurve.P256) ?: return@runTest
+            val peer = ops.generateKeyPair()
+
+            deriveOnce(kex, peer, ops)
+            deriveOnce(kex, peer, ops)
+            assertEquals(2, gate.calls, "per-use must authenticate every derive")
+        }
+
+    @Test
+    fun boundAgreementDeniedAuthorizationFails() =
+        runTest {
+            val authed = provider.userAuthenticated(CountingGate(false, true))
+            val kex = authed.generateKeyAgreement(KeyAgreementCurve.P256, UserAuthenticationPolicy.Session(5.minutes))
+            val ops = keyAgreementAsyncOrNull(KeyAgreementCurve.P256) ?: return@runTest
+            val peer = ops.generateKeyPair()
+            assertFailsWith<AuthorizationFailed> { deriveOnce(kex, peer, ops) }
+        }
+
+    @Test
+    fun boundAgreementRejectsIneligibleCurve() =
+        runTest {
+            val authed = provider.userAuthenticated(CountingGate(true))
+            assertFailsWith<HardwareKeyException.AlgorithmNotEligible> {
+                authed.generateKeyAgreement(KeyAgreementCurve.X25519, UserAuthenticationPolicy.Session(5.minutes))
+            }
+        }
+
     @Test
     fun generateAesGcmRejectsUnsupportedKeySizeTyped() =
         runTest {

@@ -155,19 +155,31 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
     }
 
     /**
-     * Wraps an AndroidKeystore ECDH private-key handle as a [KeyAgreementKeyPair]. Shared by the
-     * ephemeral provider ([generateKeyAgreement], a scratch alias deleted on close) and the
-     * persistent [AndroidKeystoreKeyStore] (a named alias whose [onClose] is a no-op).
-     *
-     * Agreement keys are only ever **advisory**-gated: [UserAuthenticatedKeyProvider] exposes no key
-     * agreement, and `BiometricPrompt.CryptoObject` cannot wrap a JCA `KeyAgreement` on the API
-     * levels this module supports — so the [gate] here is the advisory
-     * [ProtectedKeySpec.authorization], evaluated before every derive (outside the keystore lock).
+     * Wraps an AndroidKeystore ECDH private-key handle as an **advisory**-gated [KeyAgreementKeyPair]
+     * — the [gate] is [ProtectedKeySpec.authorization], evaluated before every derive. This is the
+     * path the unbound provider and the persistent store use; the OS-bound path takes the
+     * [ResolvedAndroidPolicy] overload below.
      */
     internal fun buildKeyAgreementPair(
         privateKey: PrivateKey,
         publicKey: KeyAgreementPublicKey,
         gate: HardwareAuthorization,
+        onClose: () -> Unit,
+    ): KeyAgreementKeyPair = buildKeyAgreementPair(privateKey, publicKey, ResolvedAndroidPolicy.Advisory(gate), onClose)
+
+    /**
+     * Wraps an AndroidKeystore ECDH private-key handle as a [KeyAgreementKeyPair] gated by
+     * [policy]. The [ResolvedAndroidPolicy.Session] arm is the only OS-bound one reachable for key
+     * agreement: `BiometricPrompt.CryptoObject` has no `KeyAgreement` overload, so a per-derive
+     * (`PerUse`) agreement key cannot be bound on Android — the type system already prevents it (the
+     * `UserAuthenticatedKeyProvider.generateKeyAgreement` surface takes only
+     * [UserAuthenticationPolicy.Windowed], and this provider is not a [PerUseAgreementCapable]), and
+     * [gatedAgreementDh] rejects a stray `PerUse` defensively.
+     */
+    internal fun buildKeyAgreementPair(
+        privateKey: PrivateKey,
+        publicKey: KeyAgreementPublicKey,
+        policy: ResolvedAndroidPolicy,
         onClose: () -> Unit,
     ): KeyAgreementKeyPair {
         val curve = publicKey.curve
@@ -176,16 +188,67 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
                 curve = curve,
                 custody = custody,
                 gatedDh = { peer ->
-                    if (!gate.authorize()) throw AuthorizationFailed()
                     require(peer.curve == curve) { "private/public key curve mismatch" }
                     // Peer-point conversion happens outside the keystore lock; a malformed or
                     // off-curve point is rejected before the element is ever touched.
                     val jcaPeer = p256PublicKey(peer.encoded)
-                    keystoreOp { agreeP256(privateKey, jcaPeer) }
+                    gatedAgreementDh(policy) { keystoreOp { agreeP256(privateKey, jcaPeer) } }
                 },
                 onClose = onClose,
             )
         return keyAgreementKeyPairOf(curve, agreementPrivateKey, publicKey)
+    }
+
+    /**
+     * Runs one keystore ECDH [dh] under the key's [policy] — the agreement analogue of [gatedOp],
+     * minus the `CryptoObject` path (a `KeyAgreement` cannot be wrapped, and no per-derive agreement
+     * key exists here):
+     *  - [ResolvedAndroidPolicy.Advisory]: gate first, then one shot.
+     *  - [ResolvedAndroidPolicy.Session]: one shot; on a stale keystore auth window
+     *    ([HardwareKeyException.UserAuthenticationRequired]), prompt once (no `CryptoObject`) and
+     *    retry once — the derive re-runs [agreeP256] fresh.
+     *  - [ResolvedAndroidPolicy.PerUse]: unreachable for agreement; refused rather than silently
+     *    downgraded to an unbound derive.
+     */
+    private suspend fun <T> gatedAgreementDh(
+        policy: ResolvedAndroidPolicy,
+        dh: suspend () -> T,
+    ): T =
+        when (policy) {
+            is ResolvedAndroidPolicy.Advisory -> {
+                if (!policy.gate.authorize()) throw AuthorizationFailed()
+                dh()
+            }
+
+            is ResolvedAndroidPolicy.Session ->
+                try {
+                    dh()
+                } catch (_: HardwareKeyException.UserAuthenticationRequired) {
+                    if (!policy.unlock()) throw AuthorizationFailed()
+                    dh()
+                }
+
+            is ResolvedAndroidPolicy.PerUse -> throw HardwareKeyException.AlgorithmNotEligible()
+        }
+
+    /**
+     * Generates an OS-bound ECDH P-256 agreement key under [policy] (a [UserAuthenticationPolicy.Windowed]
+     * → [ResolvedAndroidPolicy.Session] binding). Ephemeral: the scratch alias is deleted on close.
+     * The `Windowed` bound at the [UserAuthenticatedKeyProvider] surface is what keeps a `PerUse`
+     * agreement request from ever reaching here.
+     */
+    internal suspend fun generateKeyAgreementBound(policy: ResolvedAndroidPolicy): KeyAgreementKeyPair {
+        if (!eligible(ProtectedKeyAlgorithm.EcdhP256)) throw HardwareKeyException.AlgorithmNotEligible()
+        val alias = newAlias("ecdh")
+        val keyPair = keystoreOp { generateAgreementKeyPair(alias, policy) }
+        val publicKey =
+            KeyAgreementPublicKey.of(KeyAgreementCurve.P256, uncompressedPoint(keyPair.public as ECPublicKey))
+        return buildKeyAgreementPair(
+            keyPair.private,
+            publicKey,
+            policy,
+            onClose = { runCatching { keyStore.deleteEntry(alias) } },
+        )
     }
 
     /** Generates an AES-GCM keystore key under [policy] — the shared path for unbound and OS-bound keys. */
