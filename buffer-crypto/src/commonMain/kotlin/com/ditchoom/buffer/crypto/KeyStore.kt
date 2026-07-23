@@ -14,9 +14,9 @@ import com.ditchoom.buffer.ReadBuffer
  * `KeyStore` **is a** [KeyProvider], so the whole custody-tier machinery applies unchanged: query the
  * custody you actually get with [KeyProvider.custodyFor], assert a minimum with
  * [KeyProvider.requireTier]. Custody is per platform — on-disk DER is [KeyCustody.ExportableSoftware]
- * (JVM / Linux), a non-extractable WebCrypto CryptoKey in IndexedDB is
- * [KeyCustody.NonExportable.Software] (JS / WASM), a keystore alias / Keychain tag is
- * [KeyCustody.NonExportable.Hardware] (Android / Apple).
+ * (Linux, and a JVM without a usable TPM token), a non-extractable WebCrypto CryptoKey in IndexedDB
+ * is [KeyCustody.NonExportable.Software] (JS / WASM), a keystore alias / Keychain tag / TPM-backed
+ * PKCS#11 entry is [KeyCustody.NonExportable.Hardware] (Android / Apple / JVM with tpm2-pkcs11).
  *
  * **Regenerate** is [delete] followed by a `getOrGenerate*` call — an honest two-step, since no
  * platform offers an atomic replace.

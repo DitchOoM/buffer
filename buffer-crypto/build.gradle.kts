@@ -567,10 +567,11 @@ tasks.withType<Test>().configureEach {
         "buffer.crypto.tpm2.pkcs11.pin",
         "buffer.crypto.tpm2.pkcs11.slotIndex",
         "buffer.crypto.require.tpm2",
+        "buffer.crypto.require.p11.agreement",
     ).forEach { key ->
         (project.findProperty(key) as? String)?.let { systemProperty(key, it) }
     }
-    listOf("TPM2_PKCS11_TCTI", "TPM2_PKCS11_STORE", "DBUS_SESSION_BUS_ADDRESS").forEach { key ->
+    listOf("TPM2_PKCS11_TCTI", "TPM2_PKCS11_STORE", "DBUS_SESSION_BUS_ADDRESS", "SOFTHSM2_CONF").forEach { key ->
         System.getenv(key)?.let { environment(key, it) }
     }
 }
