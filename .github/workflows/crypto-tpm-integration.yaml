@@ -72,12 +72,26 @@ jobs:
             -P"buffer.crypto.tpm2.pkcs11.pin=1234" \
             -P"buffer.crypto.require.tpm2=true"
 
+      - name: Run TPM-required Kotlin/Native Linux tests
+        run: |
+          # The native backend reads its configuration from the environment; stop the daemon first
+          # so the test task's env forwarding sees these values (daemon env is frozen at launch).
+          ./gradlew --stop
+          export BUFFER_CRYPTO_TPM2_PKCS11_MODULE=/usr/lib/x86_64-linux-gnu/libtpm2_pkcs11.so.1
+          export BUFFER_CRYPTO_TPM2_PKCS11_PIN=1234
+          export BUFFER_CRYPTO_REQUIRE_TPM2=true
+          ./gradlew :buffer-crypto:linuxX64Test \
+            --tests "com.ditchoom.buffer.crypto.Tpm2Pkcs11NativeProviderTest" \
+            --tests "com.ditchoom.buffer.crypto.ProtectedKeyResolutionTest"
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: tpm2-jvm-test-results
-          path: buffer-crypto/build/reports/tests/jvmTest/
+          path: |
+            buffer-crypto/build/reports/tests/jvmTest/
+            buffer-crypto/build/reports/tests/linuxX64Test/
           if-no-files-found: ignore
 
   # tpm2-pkcs11 1.9 lacks CKM_ECDH1_DERIVE, so the swtpm job can only pin agreement's honest
@@ -118,10 +132,21 @@ jobs:
             -P"buffer.crypto.tpm2.pkcs11.pin=1234" \
             -P"buffer.crypto.require.p11.agreement=true"
 
+      - name: Run agreement-required Kotlin/Native Linux tests
+        run: |
+          ./gradlew --stop
+          export BUFFER_CRYPTO_TPM2_PKCS11_MODULE=/usr/lib/softhsm/libsofthsm2.so
+          export BUFFER_CRYPTO_TPM2_PKCS11_PIN=1234
+          export BUFFER_CRYPTO_REQUIRE_P11_AGREEMENT=true
+          ./gradlew :buffer-crypto:linuxX64Test \
+            --tests "com.ditchoom.buffer.crypto.Tpm2Pkcs11NativeProviderTest"
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: softhsm-jvm-test-results
-          path: buffer-crypto/build/reports/tests/jvmTest/
+          path: |
+            buffer-crypto/build/reports/tests/jvmTest/
+            buffer-crypto/build/reports/tests/linuxX64Test/
           if-no-files-found: ignore

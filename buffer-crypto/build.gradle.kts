@@ -276,6 +276,14 @@ kotlin {
     // (com.ditchoom.buffer.crypto.cinterop.boringssl.*, carried by the .def's `package=` line); the
     // default name would rename the cinterop/klib and break those imports. cryptoOnly=true links
     // libcrypto.a alone; the .def declares no linkerOpts so the plugin's `-lpthread -ldl` floor fires.
+    // Linux native: the runtime-dlopen'd PKCS#11 binding for the tpm2-pkcs11 hardware key backend.
+    // Types only - no library is linked (see the .def header).
+    targets.matching { it.name == "linuxX64" || it.name == "linuxArm64" }.configureEach {
+        (this as KotlinNativeTarget).compilations.getByName("main").cinterops.create("tpm2pkcs11") {
+            defFile(project.file("src/nativeInterop/cinterop/tpm2pkcs11.def"))
+        }
+    }
+
     targets.matching { it.name == "linuxX64" || it.name == "linuxArm64" }.configureEach {
         boringssl.cinterop(
             target = this as KotlinNativeTarget,
@@ -572,6 +580,25 @@ tasks.withType<Test>().configureEach {
         (project.findProperty(key) as? String)?.let { systemProperty(key, it) }
     }
     listOf("TPM2_PKCS11_TCTI", "TPM2_PKCS11_STORE", "DBUS_SESSION_BUS_ADDRESS", "SOFTHSM2_CONF").forEach { key ->
+        System.getenv(key)?.let { environment(key, it) }
+    }
+}
+
+// Same forwarding for the Kotlin/Native Linux test binary, which reads BOTH halves from the
+// environment (Kotlin/Native has no system properties): the BUFFER_CRYPTO_* configuration the
+// backend itself resolves, and the rig plumbing the module reads.
+tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest>().configureEach {
+    listOf(
+        "BUFFER_CRYPTO_TPM2_PKCS11_MODULE",
+        "BUFFER_CRYPTO_TPM2_PKCS11_PIN",
+        "BUFFER_CRYPTO_TPM2_PKCS11_SLOT_INDEX",
+        "BUFFER_CRYPTO_REQUIRE_TPM2",
+        "BUFFER_CRYPTO_REQUIRE_P11_AGREEMENT",
+        "TPM2_PKCS11_TCTI",
+        "TPM2_PKCS11_STORE",
+        "DBUS_SESSION_BUS_ADDRESS",
+        "SOFTHSM2_CONF",
+    ).forEach { key ->
         System.getenv(key)?.let { environment(key, it) }
     }
 }
