@@ -172,7 +172,11 @@ kotlin {
                 }
             }
         } else if (HostManager.hostIsLinux) {
-            linuxX64()
+            linuxX64 {
+                compilations.create("benchmark") {
+                    associateWith(this@linuxX64.compilations.getByName("main"))
+                }
+            }
             // Register linuxArm64 on local Linux dev too (was previously CI-only). K/N
             // ships an aarch64 cross-compiler; required for downstream consumers
             // (socket, mqtt) that target linuxArm64 to resolve buffer's umbrella metadata.
@@ -340,6 +344,14 @@ kotlin {
                 }
             }
         }
+        if (HostManager.hostIsLinux && !isRunningOnGithub) {
+            val linuxX64Benchmark by getting {
+                kotlin.srcDir("src/commonBenchmark/kotlin")
+                dependencies {
+                    implementation(libs.kotlinx.benchmark.runtime)
+                }
+            }
+        }
     }
 }
 
@@ -484,6 +496,9 @@ benchmark {
         register("jvmBenchmark")
         register("jsBenchmark")
         register("wasmJsBenchmark")
+        if (HostManager.hostIsLinux && !isRunningOnGithub) {
+            register("linuxX64Benchmark")
+        }
         if (isArm64) {
             register("macosArm64Benchmark")
         }
@@ -537,11 +552,11 @@ benchmark {
             include("(WriteString|ReadString|Utf8Length)")
         }
         register("codec") {
-            warmups = 3
-            iterations = 5
-            iterationTime = 500
+            warmups = 5
+            iterations = 10
+            iterationTime = 1000
             iterationTimeUnit = "ms"
-            include("(Hex|Base64).*")
+            include("HexBenchmark\\.(to|from)HexString.*")
         }
         // Fast configuration for WASM - runs only key benchmarks to avoid long run times
         register("wasmFast") {
@@ -692,11 +707,13 @@ afterEvaluate {
         }
     tasks.withType(kotlinx.benchmark.gradle.NativeSourceGeneratorTask::class.java).configureEach {
         val gradleTarget = name.substringBefore("Benchmark")
-        val cinteropKlib =
-            project.file(
-                "${project.layout.buildDirectory.get()}/classes/kotlin/$gradleTarget/main/cinterop/buffer-cinterop-simd",
-            )
-        inputDependencies = inputDependencies + project.files(cinteropKlib)
+        val cinteropKlibs =
+            listOf("simd", "simdutf").map {
+                project.file(
+                    "${project.layout.buildDirectory.get()}/classes/kotlin/$gradleTarget/main/cinterop/buffer-cinterop-$it",
+                )
+            }
+        inputDependencies = inputDependencies + project.files(cinteropKlibs)
     }
     tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinNativeLink::class.java).configureEach {
         if (name.contains("BenchmarkBenchmark")) {
@@ -708,11 +725,13 @@ afterEvaluate {
                     name.contains("LinuxArm64", ignoreCase = true) -> "linuxArm64"
                     else -> return@configureEach
                 }
-            val cinteropKlib =
-                project.file(
-                    "${project.layout.buildDirectory.get()}/classes/kotlin/$targetName/main/cinterop/buffer-cinterop-simd",
-                )
-            libraries.from(cinteropKlib)
+            val cinteropKlibs =
+                listOf("simd", "simdutf").map {
+                    project.file(
+                        "${project.layout.buildDirectory.get()}/classes/kotlin/$targetName/main/cinterop/buffer-cinterop-$it",
+                    )
+                }
+            libraries.from(cinteropKlibs)
         }
     }
 }

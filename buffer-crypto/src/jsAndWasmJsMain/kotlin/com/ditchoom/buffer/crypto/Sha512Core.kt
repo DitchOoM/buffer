@@ -4,6 +4,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.fromHexString
 import com.ditchoom.buffer.managed
 
 /**
@@ -179,12 +180,9 @@ internal class Sha512Core(
         private const val HIGH_BYTE_SHIFT = 56 // shift to the most-significant byte of a 64-bit word
         private const val BITS_PER_BYTE = 8
         private const val BYTE_INDEX_MASK = 7 // i mod 8 → byte within the word
-        private const val HEX_RADIX = 16
 
-        private fun hexBufferOf(hex: String): ReadBuffer =
-            BufferFactory.managed().allocate(hex.length / 2, ByteOrder.BIG_ENDIAN).apply {
-                for (i in 0 until hex.length / 2) set(i, hex.substring(i * 2, i * 2 + 2).toInt(HEX_RADIX).toByte())
-            }
+        // fromHexString defaults to BIG_ENDIAN, which is what the round-constant table is read as.
+        private fun hexBufferOf(hex: String): ReadBuffer = BufferFactory.managed().fromHexString(hex)
 
         // First 64 bits of the fractional parts of the cube roots of the first 80 primes.
         private const val K_HEX =

@@ -213,4 +213,131 @@ class HexCodecTest {
     }
 
     // endregion
+
+    // region String conversions
+
+    @Test
+    fun toHexStringMatchesTheBufferToBufferEncoder() {
+        val bytes = listOf(0x00, 0x0F, 0xF0, 0xFF, 0x12, 0xAB)
+        val viaBuffer = BufferFactory.Default.allocate(bytes.size * 2)
+        bytesBuffer(bytes).encodeHexInto(viaBuffer)
+        viaBuffer.resetForRead()
+
+        assertEquals(
+            viaBuffer.readString(bytes.size * 2),
+            bytesBuffer(bytes).toHexString(),
+            "the String form must agree with the buffer-to-buffer primitive",
+        )
+    }
+
+    @Test
+    fun toHexStringEncodesKnownVectorInBothCases() {
+        val src = bytesBuffer(listOf(0x00, 0x0F, 0xF0, 0xFF, 0x12, 0xAB))
+        assertEquals("000ff0ff12ab", src.toHexString())
+        assertEquals("000FF0FF12AB", src.toHexString(upperCase = true))
+    }
+
+    /**
+     * A value conversion must not consume its receiver — unlike the relative `encodeHexInto`, which
+     * deliberately advances. Logging a buffer and then reading it is the whole point.
+     */
+    @Test
+    fun toHexStringDoesNotAdvancePosition() {
+        val src = bytesBuffer(listOf(0x01, 0x02, 0x03))
+        val before = src.position()
+        assertEquals("010203", src.toHexString())
+        assertEquals(before, src.position(), "toHexString must not consume the buffer")
+        assertEquals(0x01, src.readByte().toInt() and 0xFF, "the buffer is still fully readable")
+    }
+
+    @Test
+    fun toHexStringHonoursAnAbsoluteRange() {
+        val src = bytesBuffer(listOf(0xDE, 0xAD, 0xBE, 0xEF))
+        assertEquals("adbe", src.toHexString(offset = 1, length = 2))
+    }
+
+    @Test
+    fun toHexStringOfEmptyIsEmpty() {
+        assertEquals("", bytesBuffer(emptyList()).also { it.setLimit(0) }.toHexString())
+    }
+
+    @Test
+    fun toHexStringRejectsAnOutOfRangeWindow() {
+        val src = bytesBuffer(listOf(0x01, 0x02))
+        assertFailsWith<BufferUnderflowException> { src.toHexString(offset = 1, length = 4) }
+    }
+
+    /**
+     * `toHexString` builds the `String` directly and stages nothing, so a caller's allocator is never
+     * touched. Guards the shape: reintroducing an intermediate buffer would either leak it (the
+     * allocator never sees it back) or make this count non-zero.
+     */
+    @Test
+    fun toHexStringAllocatesNoBuffer() {
+        val counting = BufferFactory.Default.counting()
+        val src = counting.allocate(2)
+        src.writeByte(0x01)
+        src.writeByte(0x02)
+        src.resetForRead()
+        val before = counting.allocationCount
+        assertEquals("0102", src.toHexString())
+        assertEquals(before, counting.allocationCount, "toHexString must not allocate a buffer")
+    }
+
+    /**
+     * The factory is the receiver, and the sole allocation is the buffer handed back — so a pooled or
+     * deterministic allocator owns the result, and there is no staged intermediate to leak.
+     */
+    @Test
+    fun fromHexStringAllocatesOnlyTheResultThroughItsReceiver() {
+        val counting = BufferFactory.Default.counting()
+        val decoded = counting.fromHexString("0102")
+        assertEquals(1, counting.allocationCount, "only the returned buffer may be allocated")
+        assertEquals("0102", decoded.toHexString())
+    }
+
+    @Test
+    fun fromHexStringRoundTripsThroughToHexString() {
+        val hex = "000ff0ff12ab"
+        val decoded = BufferFactory.Default.fromHexString(hex)
+        assertEquals(hex.length / 2, decoded.remaining())
+        assertEquals(hex, decoded.toHexString())
+    }
+
+    @Test
+    fun fromHexStringAcceptsUpperCase() {
+        assertEquals("deadbeef", BufferFactory.Default.fromHexString("DEADBEEF").toHexString())
+    }
+
+    @Test
+    fun fromHexStringOfEmptyIsAnEmptyBuffer() {
+        assertEquals(0, BufferFactory.Default.fromHexString("").remaining())
+    }
+
+    @Test
+    fun fromHexStringHonoursTheRequestedByteOrder() {
+        val le = BufferFactory.Default.fromHexString("0102", ByteOrder.LITTLE_ENDIAN)
+        assertEquals(0x0201.toShort(), le.readShort())
+    }
+
+    @Test
+    fun fromHexStringRejectsOddLength() {
+        assertFailsWith<IllegalArgumentException> { BufferFactory.Default.fromHexString("abc") }
+    }
+
+    @Test
+    fun fromHexStringRejectsNonHexCharacter() {
+        assertFailsWith<IllegalArgumentException> { BufferFactory.Default.fromHexString("zz") }
+    }
+
+    /**
+     * Non-ASCII must be rejected as a non-hex character, not narrowed to a byte first: U+0161 truncates
+     * to `'a'` and would otherwise decode as the nibble 10.
+     */
+    @Test
+    fun fromHexStringRejectsNonAsciiThatNarrowsOntoAHexDigit() {
+        assertFailsWith<IllegalArgumentException> { BufferFactory.Default.fromHexString("š0") }
+    }
+
+    // endregion
 }

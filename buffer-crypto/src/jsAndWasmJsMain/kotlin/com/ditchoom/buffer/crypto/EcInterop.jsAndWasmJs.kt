@@ -2,6 +2,8 @@ package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.fromHexString
+import com.ditchoom.buffer.toHexString
 
 /*
  * js / wasmJs EC point decompression marshals through hex, the same convention the WebCrypto glue uses
@@ -11,32 +13,15 @@ import com.ditchoom.buffer.ReadBuffer
  * it runs only on the public X coordinate, so its variable-time math leaks nothing.
  */
 
-private const val HEX_DIGITS = "0123456789abcdef"
-private const val HEX_RADIX = 16
-
 /** Lowercase hex of [len] bytes of [buf] starting at absolute [start]. */
 internal fun readFieldHex(
     buf: ReadBuffer,
     start: Int,
     len: Int,
-): String {
-    val sb = StringBuilder(len * 2)
-    for (i in 0 until len) {
-        val v = buf.get(start + i).toInt() and 0xFF
-        sb.append(HEX_DIGITS[v ushr 4])
-        sb.append(HEX_DIGITS[v and 0xF])
-    }
-    return sb.toString()
-}
+): String = buf.toHexString(start, len)
 
 /** Writes a hex string's bytes into a fresh read-ready buffer from [factory]. */
 internal fun hexToReadBuffer(
     hex: String,
     factory: BufferFactory,
-): ReadBuffer {
-    val n = hex.length / 2
-    val out = factory.allocate(n)
-    for (i in 0 until n) out.writeByte(hex.substring(i * 2, i * 2 + 2).toInt(HEX_RADIX).toByte())
-    out.resetForRead()
-    return out
-}
+): ReadBuffer = factory.fromHexString(hex)

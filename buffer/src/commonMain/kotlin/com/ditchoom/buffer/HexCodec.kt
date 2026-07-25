@@ -30,10 +30,10 @@ private const val ASCII_ZERO = 0x30
 private const val HEX_ALPHA_BASE = 10
 
 /** Mask isolating the low nibble (4 bits) of a byte. */
-private const val LOW_NIBBLE_MASK = 0x0F
+internal const val LOW_NIBBLE_MASK = 0x0F
 
 /** Bit width of a single hex nibble. */
-private const val NIBBLE_BITS = 4
+internal const val NIBBLE_BITS = 4
 
 internal fun hexEncodeNibble(
     nibble: Int,

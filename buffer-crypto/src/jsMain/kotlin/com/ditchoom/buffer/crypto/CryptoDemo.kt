@@ -5,6 +5,8 @@ package com.ditchoom.buffer.crypto
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.fromHexString
+import com.ditchoom.buffer.toHexString
 import com.ditchoom.buffer.toReadBuffer
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
@@ -39,10 +41,10 @@ fun main() = Unit
 @JsName("CryptoDemo")
 object CryptoDemo {
     /** A fresh AES-256 key as 64 lowercase hex chars, drawn from the platform CSPRNG. */
-    fun generateKeyHex(): String = cryptoRandom(AES_256_KEY_BYTES).toHexRemaining()
+    fun generateKeyHex(): String = cryptoRandom(AES_256_KEY_BYTES).toHexString()
 
     /** A fresh 12-byte AES-GCM nonce as 24 lowercase hex chars. */
-    fun generateNonceHex(): String = cryptoRandom(AEAD_NONCE_BYTES).toHexRemaining()
+    fun generateNonceHex(): String = cryptoRandom(AEAD_NONCE_BYTES).toHexString()
 
     /**
      * **Demo-only.** Seals with a *caller-supplied* nonce so the playground can pin the nonce while
@@ -69,7 +71,7 @@ object CryptoDemo {
                 )
             // sealWithNonce returns ciphertext ‖ tag (no nonce prefix); prepend the nonce so the
             // output matches the self-framing layout the rest of the demo inspects.
-            nonceHex + sealed.toHexRemaining()
+            nonceHex + sealed.toHexString()
         }
 
     /**
@@ -85,7 +87,7 @@ object CryptoDemo {
         GlobalScope.promise {
             val key = AesGcmKey.of(keyHex.hexToReadBuffer())
             val sealed = aesGcmOps().seal(key, plaintext.toReadBuffer(), aad.toAad())
-            sealed.toHexRemaining()
+            sealed.toHexString()
         }
 
     /**
@@ -139,9 +141,4 @@ object CryptoDemo {
  * [CryptoAsymDemo] as a top-level (non-member) helper so it doesn't count against either
  * `@JsExport` object's function budget.
  */
-internal fun String.hexToReadBuffer(): ReadBuffer {
-    val out = BufferFactory.Default.allocate(length / 2)
-    out.writeHex(this)
-    out.resetForRead()
-    return out
-}
+internal fun String.hexToReadBuffer(): ReadBuffer = BufferFactory.Default.fromHexString(this)

@@ -2,9 +2,10 @@ package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
+import com.ditchoom.buffer.fromHexString
+import com.ditchoom.buffer.toHexString
 
 /**
  * js/wasmJs signature support.
@@ -89,7 +90,8 @@ internal expect suspend fun webCryptoVerify(
 internal expect suspend fun webCryptoGenerateKeyPair(scheme: SignatureScheme): String
 
 // ---------------------------------------------------------------------------
-// Hex <-> buffer helpers (no ByteArray staging beyond the WebCrypto string boundary).
+// Hex marshalling uses the buffer primitives (ReadBuffer.toHexString /
+// BufferFactory.fromHexString) — no ByteArray staging beyond the WebCrypto string boundary.
 // ---------------------------------------------------------------------------
 
 private const val HEX = "0123456789abcdef"
@@ -107,33 +109,6 @@ private const val ED25519_SEED_BYTES = 32
 // DER definite-length encoding thresholds.
 private const val DER_SHORT_LEN_LIMIT = 0x80 // lengths below use the single-byte short form
 private const val DER_ONE_BYTE_LIMIT = 0x100 // lengths below fit in one long-form byte (0x81 LL)
-
-private fun ReadBuffer.toHexString(): String {
-    val start = position()
-    val n = remaining()
-    val sb = StringBuilder(n * 2)
-    for (i in 0 until n) {
-        val v = get(start + i).toInt() and 0xFF
-        sb.append(HEX[v ushr NIBBLE_BITS])
-        sb.append(HEX[v and NIBBLE_MASK])
-    }
-    return sb.toString()
-}
-
-private fun hexToBuffer(
-    hex: String,
-    factory: BufferFactory,
-): PlatformBuffer {
-    val n = hex.length / 2
-    val b = factory.allocate(n)
-    for (i in 0 until n) {
-        val hi = HEX.indexOf(hex[i * 2].lowercaseChar())
-        val lo = HEX.indexOf(hex[i * 2 + 1].lowercaseChar())
-        b.writeByte(((hi shl NIBBLE_BITS) or lo).toByte())
-    }
-    b.resetForRead()
-    return b
-}
 
 // ---------------------------------------------------------------------------
 // PKCS#8 assembly for WebCrypto private-key import, built through the buffer API.
@@ -228,7 +203,7 @@ internal actual suspend fun signAsyncPlatform(
         throw UnsupportedOperationException("Ed25519 is not available on this WebCrypto engine")
     }
     val sigHex = webCryptoSign(key.scheme, privateMaterialHex(key), message.toHexString())
-    return hexToBuffer(sigHex, factory)
+    return factory.fromHexString(sigHex)
 }
 
 internal actual suspend fun verifyAsyncPlatform(
@@ -259,9 +234,9 @@ internal actual suspend fun generateSigningKeyAsyncPlatform(
         throw UnsupportedOperationException("Ed25519 is not available on this WebCrypto engine")
     }
     val parts = webCryptoGenerateKeyPair(scheme).split(":")
-    val verifyKey = verifyKeyOf(scheme, hexToBuffer(parts[1], BufferFactory.Default))
+    val verifyKey = verifyKeyOf(scheme, BufferFactory.Default.fromHexString(parts[1]))
     // Stage the secret private material in a wiped buffer; the import factory copies it into `factory`.
-    val privBuf = hexToBuffer(parts[0], secureScratch)
+    val privBuf = secureScratch.fromHexString(parts[0])
     return try {
         signingKeyOf(scheme, privBuf, verifyKey, factory)
     } finally {

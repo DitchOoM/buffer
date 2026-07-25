@@ -5,6 +5,9 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.decodeHexInto
 import com.ditchoom.buffer.encodeHexInto
+import com.ditchoom.buffer.fromHexString
+import com.ditchoom.buffer.managed
+import com.ditchoom.buffer.toHexString
 import kotlinx.benchmark.Benchmark
 import kotlinx.benchmark.BenchmarkMode
 import kotlinx.benchmark.BenchmarkTimeUnit
@@ -17,17 +20,22 @@ import kotlinx.benchmark.State
 import kotlinx.benchmark.Warmup
 
 /**
- * Benchmarks for buffer-to-buffer hex encode/decode.
+ * Benchmarks for hex encode/decode — buffer-to-buffer, and the String conversions.
  *
- * Each direction has two variants on the SAME Direct buffer type:
+ * The buffer-to-buffer pair has two variants on the SAME Direct buffer type:
  * - "Primitive" = current encodeHexInto/decodeHexInto (SIMD C cinterop on native, optimized on JVM/JS)
  * - "Baseline" = naive per-byte loop via get()/writeByte() (what a caller would hand-write)
  *
  * Both run native-memory source -> native-memory dest, so the primitive variants exercise the
  * pointer-to-pointer C fast path (buf_hex_encode / buf_hex_decode) on native targets.
  *
+ * The String pair (toHexString / fromHexString) is measured against the shapes it replaced —
+ * "Staged" allocates an intermediate buffer and reads it back, "SubstringParse" is the per-byte
+ * `substring(i, i + 2).toInt(16)` loop hand-rolled decoders reach for.
+ *
  * Run with: ./gradlew macosArm64BenchmarkBenchmark -Pbenchmark.filter=Hex
  */
+@Suppress("TooManyFunctions") // one @Benchmark per variant under test, plus the two baseline helpers
 @State(Scope.Benchmark)
 @Warmup(iterations = 3)
 @Measurement(iterations = 5)
@@ -36,6 +44,17 @@ import kotlinx.benchmark.Warmup
 open class HexBenchmark {
     private val size64k = 64 * 1024
     private val hexSize = size64k * 2
+
+    /** Payload size for the String conversions — a realistic log line / crypto blob, not a 64K blast. */
+    private val stringSize = 1024
+    private lateinit var hexText: String
+
+    /**
+     * The String benchmarks allocate per invocation. On WasmJs `BufferFactory.Default` is a
+     * non-reclaiming bump allocator over a 256MB arena, so a Default-backed loop OOMs long before the
+     * measurement window closes — these variants are pinned to managed() so every target can run them.
+     */
+    private val managed = BufferFactory.managed()
 
     private lateinit var raw: PlatformBuffer
     private lateinit var hex: PlatformBuffer
@@ -57,6 +76,8 @@ open class HexBenchmark {
         raw.encodeHexInto(hex)
         hex.resetForRead()
         raw.resetForRead()
+
+        hexText = raw.toHexString(0, stringSize)
     }
 
     // ========================================================================= encode
@@ -107,6 +128,46 @@ open class HexBenchmark {
         return decodeDest.get(0).toInt()
     }
 
+    // ========================================================================= String conversions
+    //
+    // toHexString / fromHexString against the shapes they replaced. "Staged" is the
+    // allocate-a-buffer-encode-read-it-back dance; "SubstringParse" is the per-byte
+    // `substring(i, i+2).toInt(16)` loop that hand-rolled decoders reach for.
+
+    @Benchmark
+    fun toHexStringDirect(): Int = raw.toHexString(0, stringSize).length
+
+    @Benchmark
+    fun toHexStringStaged(): Int {
+        val dest = managed.allocate(stringSize * 2)
+        raw.encodeHexInto(dest, 0, stringSize)
+        dest.resetForRead()
+        return dest.readString(stringSize * 2).length
+    }
+
+    @Benchmark
+    fun fromHexStringDirect(): Int = managed.fromHexString(hexText).remaining()
+
+    @Benchmark
+    fun fromHexStringStaged(): Int {
+        val ascii = managed.allocate(hexText.length)
+        ascii.writeString(hexText)
+        ascii.resetForRead()
+        val out = managed.allocate(hexText.length / 2)
+        ascii.decodeHexInto(out, 0, hexText.length)
+        out.resetForRead()
+        return out.remaining()
+    }
+
+    @Benchmark
+    fun fromHexStringSubstringParse(): Int {
+        val n = hexText.length / 2
+        val out = managed.allocate(n)
+        for (i in 0 until n) out.writeByte(hexText.substring(i * 2, i * 2 + 2).toInt(HEX_RADIX).toByte())
+        out.resetForRead()
+        return out.remaining()
+    }
+
     private fun nibble(n: Int): Byte {
         val ascii = if (n < DECIMAL_BASE) n + ASCII_ZERO else n - DECIMAL_BASE + ASCII_LOWER_A
         return ascii.toByte()
@@ -129,5 +190,6 @@ open class HexBenchmark {
         private const val ASCII_LOWER_F = 0x66
         private const val ASCII_UPPER_A = 0x41
         private const val ASCII_UPPER_F = 0x46
+        private const val HEX_RADIX = 16
     }
 }

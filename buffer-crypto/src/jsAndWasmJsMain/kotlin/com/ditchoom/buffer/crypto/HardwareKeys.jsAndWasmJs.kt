@@ -2,7 +2,8 @@ package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.fromHexString
+import com.ditchoom.buffer.toHexString
 import com.ditchoom.buffer.use
 
 /*
@@ -96,7 +97,7 @@ internal fun buildWebCryptoSigningKey(
     spec: ProtectedKeySpec,
 ): SigningKey {
     val hashName = ecdsaHashName(scheme)
-    val verifyKey = verifyKeyOf(scheme, hexBuffer(publicHex, BufferFactory.Default))
+    val verifyKey = verifyKeyOf(scheme, BufferFactory.Default.fromHexString(publicHex))
     return ProtectedSigningKey(
         scheme = scheme,
         custody = KeyCustody.NonExportable.Software,
@@ -104,7 +105,7 @@ internal fun buildWebCryptoSigningKey(
             if (!spec.authorization.authorize()) throw AuthorizationFailed()
             // WebCrypto ECDSA sign is raw P1363 (r ‖ s) — the pinned web wire form; DER conversion
             // is a consumer's concern via the existing helpers.
-            hexBuffer(webCryptoEcdsaSign(token, hashName, message.toHexRemaining()), factory)
+            factory.fromHexString(webCryptoEcdsaSign(token, hashName, message.toHexString()))
         },
         verifyKey = verifyKey,
         onClose = { webCryptoReleaseHandle(token) },
@@ -130,9 +131,9 @@ internal fun buildWebCryptoAesGcmKey(
                 val ctTagHex =
                     webCryptoAesGcmSealHandle(
                         token = token,
-                        ivHex = nonce.toHexRemaining(),
-                        aadHex = aad?.toHexRemaining() ?: "",
-                        plaintextHex = plaintext.toHexRemaining(),
+                        ivHex = nonce.toHexString(),
+                        aadHex = aad?.toHexString() ?: "",
+                        plaintextHex = plaintext.toHexString(),
                     )
                 val out = allocateFramed(plaintext.remaining(), factory)
                 out.write(nonce)
@@ -146,11 +147,11 @@ internal fun buildWebCryptoAesGcmKey(
             val ptHex =
                 webCryptoAesGcmOpenHandle(
                     token = token,
-                    ivHex = nonce.toHexRemaining(),
-                    aadHex = aad?.toHexRemaining() ?: "",
-                    ciphertextAndTagHex = ciphertextAndTag.toHexRemaining(),
+                    ivHex = nonce.toHexString(),
+                    aadHex = aad?.toHexString() ?: "",
+                    ciphertextAndTagHex = ciphertextAndTag.toHexString(),
                 ) ?: throw VerificationFailed()
-            hexBuffer(ptHex, factory)
+            factory.fromHexString(ptHex)
         },
         onClose = { webCryptoReleaseHandle(token) },
     )
@@ -162,7 +163,7 @@ internal fun buildWebCryptoKeyAgreementPair(
     publicHex: String,
     spec: ProtectedKeySpec,
 ): KeyAgreementKeyPair {
-    val publicKey = KeyAgreementPublicKey.of(curve, hexBuffer(publicHex, BufferFactory.Default))
+    val publicKey = KeyAgreementPublicKey.of(curve, BufferFactory.Default.fromHexString(publicHex))
     val bits = deriveBitsFor(curve)
     val privateKey =
         ProtectedKeyAgreementPrivateKey(
@@ -177,14 +178,14 @@ internal fun buildWebCryptoKeyAgreementPair(
                 require(peer.curve == curve) { "private/public key curve mismatch" }
                 val sharedHex =
                     try {
-                        webCryptoEcdhDeriveBits(token, curve.curveName, peer.encoded.toHexRemaining(), bits)
+                        webCryptoEcdhDeriveBits(token, curve.curveName, peer.encoded.toHexString(), bits)
                     } catch (_: Throwable) {
                         // A rejected import / deriveBits means an off-curve / low-order / malformed
                         // peer point — surfaced uniformly, cause dropped (oracle avoidance).
                         @Suppress("SwallowedException", "TooGenericExceptionCaught")
                         throw InvalidPublicKey(curve)
                     }
-                hexBuffer(sharedHex, secureScratch)
+                secureScratch.fromHexString(sharedHex)
             },
             onClose = { webCryptoReleaseHandle(token) },
         )
@@ -239,17 +240,6 @@ private fun splitTokenAndHex(marshalled: String): Pair<Int, String> {
     val sep = marshalled.indexOf(':')
     require(sep > 0) { "malformed non-exportable key marshalling" }
     return marshalled.substring(0, sep).toInt() to marshalled.substring(sep + 1)
-}
-
-/** Builds a fresh read-ready buffer from a lowercase-hex string via [factory]. */
-private fun hexBuffer(
-    hex: String,
-    factory: BufferFactory,
-): PlatformBuffer {
-    val out = factory.allocate(hex.length / 2)
-    out.writeHex(hex)
-    out.resetForRead()
-    return out
 }
 
 // =============================================================================
