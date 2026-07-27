@@ -53,13 +53,39 @@ Benchmark results (WASM Node.js):
 
 ## Memory Management
 
-LinearBuffer uses a bump allocator with pre-allocated memory:
+LinearBuffer draws from a fixed, pre-allocated region of WASM linear memory:
 
 - **256MB** allocated by default at first allocation
 - Configurable via `LinearMemoryAllocator.configure()`
-- Memory is not freed (bump allocator)
-- Best for buffers with longer lifetimes (interop scenarios)
+- The pool cannot grow after initialization — growing needs a `@JsFun` call, which trips a
+  Kotlin/WASM optimizer bug if it appears on the allocation path
 - Use `BufferFactory.managed()` for high-frequency, short-lived allocations
+
+### Releasing is required
+
+Linear memory is **not** garbage collected — it lives outside the Wasm-GC heap, and a `LinearBuffer`
+has no finalizer that could return its bytes. Dropping the last reference to one leaks it out of the
+fixed pool. This applies to `BufferFactory.Default` just as much as to `BufferFactory.deterministic()`;
+WASM is the only target where the default allocation must be released.
+
+```kotlin
+// CORRECT — the block is returned to the allocator on scope exit
+BufferFactory.Default.allocate(4096).use { buffer ->
+    buffer.writeInt(42)
+}
+
+// LEAKS on WASM — nothing reclaims this, and the pool is finite
+val buffer = BufferFactory.Default.allocate(4096)
+buffer.writeInt(42)
+```
+
+Releasing a buffer calls `LinearMemoryAllocator.free()`, which either rewinds the bump pointer (when
+the block is the most recent allocation, so an allocate/use/release loop stays flat) or parks the
+block on a size-classed free list for the next request of the same size.
+
+`slice()` and `PlatformBuffer.wrapNativeAddress()` return **non-owning** views: releasing one is a
+no-op, because the memory belongs to someone else. A view must not outlive its owner — once the
+owner is released its block can be handed out to an unrelated allocation.
 
 ### Configuring Memory Size
 

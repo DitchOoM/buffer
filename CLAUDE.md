@@ -169,8 +169,14 @@ parameter: on JVM 21+ it selects `Arena.ofConfined()` instead of the default
 | JVM 8 / Android | `DeterministicUnsafeJvmBuffer` | `Unsafe.allocateMemory`/`freeMemory` |
 | Apple    | `MutableDataBuffer` | ARC-managed (already deterministic) |
 | Linux    | `NativeBuffer` | malloc/free |
-| WASM     | `LinearBuffer` | Linear memory (already deterministic) |
+| WASM     | `LinearBuffer` | Linear memory, released back to `LinearMemoryAllocator` |
 | JS       | `JsBuffer` | GC-managed (no deterministic alternative) |
+
+**WASM is the one platform where releasing is not optional.** Linear memory sits outside the
+Wasm-GC heap and there is no finalization hook, so dropping the last reference to a `LinearBuffer`
+leaks its bytes out of a fixed 256 MB pool — `BufferFactory.Default` included, not just
+`deterministic()`. Always pair a WASM allocation with `use { }` / `freeNativeMemory()`, or use
+`BufferFactory.managed()` for high-frequency short-lived buffers.
 
 **When to use `BufferFactory.deterministic()` vs `BufferFactory.Default`/pooling:**
 - Use `deterministic()` for: FFI/JNI interop, zero-copy I/O, and any path where you need
@@ -598,7 +604,7 @@ When optimizing buffer operations, follow these principles:
 1. **LinearBuffer (Direct)** - Uses native WASM Pointer ops, 25% faster than ByteArrayBuffer
 2. **ByteArrayBuffer (Heap)** - Use for high-frequency allocations (no memory limit)
 3. **Bulk operations are 2x faster** than single operations on LinearBuffer
-4. **256MB pre-allocated** - LinearBuffer uses bump allocator due to optimizer bug workaround
+4. **256MB pre-allocated** - fixed pool; the allocator cannot grow it after init (`@JsFun` calls on the allocation path trip a Kotlin/WASM optimizer bug). Released blocks are recycled: the bump pointer rewinds for the top allocation, otherwise the block goes on a size-classed free list
 5. **Use Direct for JS interop** - Zero-copy sharing with JavaScript via `wasmMemory.buffer`
 
 See `PERFORMANCE.md` for detailed benchmark results.
