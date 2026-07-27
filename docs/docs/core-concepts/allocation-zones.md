@@ -116,7 +116,7 @@ BufferFactory.deterministic().allocate(1024).use { buffer ->
 | JVM 21+ | `FfmBuffer` (FFM Arena-backed) |
 | Apple | `MutableDataBuffer` (ARC-managed, already deterministic) |
 | Linux | `NativeBuffer` (malloc/free, already deterministic) |
-| WASM | `LinearBuffer` (linear memory, already deterministic) |
+| WASM | `LinearBuffer` (linear memory, released back to `LinearMemoryAllocator`) |
 | JS | `JsBuffer` (GC-managed, no deterministic alternative) |
 
 ## Composable Decorators

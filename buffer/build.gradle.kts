@@ -543,6 +543,14 @@ benchmark {
             iterationTimeUnit = "ms"
             include("(Hex|Base64).*")
         }
+        // wasmJs allocate/release cost: bump-pointer rewind vs free-list reuse vs bump-only.
+        register("wasmAllocator") {
+            warmups = 3
+            iterations = 5
+            iterationTime = 500
+            iterationTimeUnit = "ms"
+            include("WasmAllocatorBenchmark")
+        }
         // Fast configuration for WASM - runs only key benchmarks to avoid long run times
         register("wasmFast") {
             warmups = 2

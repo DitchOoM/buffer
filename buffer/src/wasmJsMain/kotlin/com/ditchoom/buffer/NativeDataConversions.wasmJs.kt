@@ -47,7 +47,9 @@ actual fun ReadBuffer.toNativeData(): NativeData {
             else -> {
                 val bytes = toByteArray()
                 val (offset, _) = LinearMemoryAllocator.allocate(bytes.size)
-                val linearBuffer = LinearBuffer(offset, bytes.size, byteOrder)
+                // Freshly allocated, so the returned wrapper owns it: releasing the LinearBuffer
+                // returns the copy to the allocator.
+                val linearBuffer = LinearBuffer(offset, bytes.size, byteOrder, owned = true)
                 linearBuffer.writeBytes(bytes)
                 linearBuffer.resetForRead()
                 linearBuffer
@@ -79,13 +81,20 @@ actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData {
     return MutableNativeData(
         when (unwrapped) {
             is LinearBuffer -> {
-                // Create a new LinearBuffer view sharing the same memory
-                LinearBuffer(unwrapped.baseOffset + unwrapped.position(), unwrapped.remaining(), unwrapped.byteOrder)
+                // Create a new non-owning LinearBuffer view sharing the same memory
+                LinearBuffer(
+                    unwrapped.baseOffset + unwrapped.position(),
+                    unwrapped.remaining(),
+                    unwrapped.byteOrder,
+                    owned = false,
+                )
             }
             else -> {
                 val bytes = toByteArray()
                 val (offset, _) = LinearMemoryAllocator.allocate(bytes.size)
-                val linearBuffer = LinearBuffer(offset, bytes.size, byteOrder)
+                // Freshly allocated, so the returned wrapper owns it: releasing the LinearBuffer
+                // returns the copy to the allocator.
+                val linearBuffer = LinearBuffer(offset, bytes.size, byteOrder, owned = true)
                 linearBuffer.writeBytes(bytes)
                 linearBuffer.resetForRead()
                 linearBuffer

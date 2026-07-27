@@ -126,16 +126,20 @@ interface BufferFactory {
 // =============================================================================
 
 /**
- * Safe, GC-managed, no-leak-risk factory.
+ * The general-purpose factory: platform-optimal memory, GC-managed on every platform but WASM.
  *
- * Returns buffers that are garbage-collected on all platforms — no explicit cleanup required:
+ * Returns buffers that are garbage-collected — no explicit cleanup required:
  * - **JVM 21+**: FfmAutoBuffer (Arena.ofAuto(), GC-collected)
  * - **JVM < 21**: DirectJvmBuffer (GC via Cleaner)
  * - **Android**: DirectJvmBuffer (GC via Cleaner)
  * - **Apple**: MutableDataBuffer (NSMutableData, ARC-managed)
  * - **JS**: JsBuffer (Int8Array, GC-managed)
- * - **WASM**: LinearBuffer (WASM linear memory)
  * - **Linux**: ByteArrayBuffer (GC-managed)
+ *
+ * **WASM is the exception**: LinearBuffer draws from a fixed pool of WASM linear memory, which lives
+ * outside the Wasm-GC heap and has no finalization hook — dropping the last reference to one leaks
+ * it. On WASM these buffers must be released with `use { }` / [PlatformBuffer.freeNativeMemory], or
+ * allocated from [managedBufferFactory] instead.
  */
 internal expect val defaultBufferFactory: BufferFactory
 
