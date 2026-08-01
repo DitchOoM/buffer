@@ -103,8 +103,9 @@ internal class MemoryDatagramCore(
 
         // Carry each control-plane field only if the capability set advertises both ends of it.
         val ecn =
-            if (capabilities.ecnSend && capabilities.ecnReceive && options.ecn != Ecn.Unknown) {
-                options.ecn
+            if (capabilities.ecnSend && capabilities.ecnReceive && options.ecn != EcnPreference.OsDefault) {
+                // The stamped preference arrives as the read-side verdict — the loopback of a real stack.
+                Ecn.fromCodepoint(options.ecn.codepoint)
             } else {
                 Ecn.Unknown
             }

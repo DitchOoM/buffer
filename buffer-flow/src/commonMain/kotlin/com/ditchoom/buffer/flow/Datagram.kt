@@ -25,9 +25,10 @@ private const val HOP_LIMIT_MAX = 255
 /**
  * The ECN (Explicit Congestion Notification) codepoint of a datagram — RFC 3168 / RFC 9331 (L4S).
  *
- * The two low bits of the IP TOS / Traffic Class octet. On the read side [Unknown] is the sentinel
- * for a platform that cannot report the received codepoint (per the §7.2 degradation policy); it is
- * never a valid *send* value.
+ * The two low bits of the IP TOS / Traffic Class octet. **Read-side only**: [Unknown] is the typed
+ * absent state for a platform that cannot report the received codepoint (per the §7.2 degradation
+ * policy). The send side speaks [EcnPreference], which has no unknown to misuse — "never a valid
+ * send value" used to be documentation on this type; now it is a type distinction.
  */
 @ExperimentalDatagramApi
 enum class Ecn(
@@ -57,6 +58,54 @@ enum class Ecn(
             return entries.firstOrNull { it.codepoint == field } ?: Unknown
         }
     }
+}
+
+/**
+ * The send-side ECN request — what to ask the OS to stamp on an outgoing datagram, distinct from the
+ * read-side [Ecn] verdict. The split removes the surface's last double-booked value: [Ecn.Unknown]
+ * used to mean both "the platform could not report the received codepoint" (read) and "leave the OS
+ * default" (send), and only KDoc kept the two apart. Here an unstampable preference is
+ * unrepresentable — there is no `Unknown` entry to pass.
+ *
+ * Entries are singletons, so a [DatagramSendOptions] carrying one allocates nothing. The four
+ * stamping entries mirror [Ecn]'s codepoints and are frozen by RFC 3168 — ECN is two bits and the
+ * codepoint space is full — so the two types can never drift apart.
+ */
+@ExperimentalDatagramApi
+enum class EcnPreference {
+    /**
+     * Leave the OS default: no per-send TOS / Traffic Class change is requested. The
+     * [DatagramSendOptions.Default] value — a *choice*, not an unknown reading.
+     */
+    OsDefault,
+
+    /** Stamp Not ECN-Capable Transport (00). */
+    NotEct,
+
+    /** Stamp ECN-Capable Transport, ECT(1) (01). */
+    Ect1,
+
+    /** Stamp ECN-Capable Transport, ECT(0) (10). */
+    Ect0,
+
+    /** Stamp Congestion Experienced (11). */
+    Ce,
+    ;
+
+    /**
+     * The wire codepoint to stamp — total for the four stamping entries, and a caller bug for
+     * [OsDefault] surfaced eagerly (the same gated-accessor contract as [HopLimit.value]): a send
+     * path checks for [OsDefault] first and skips the sockopt entirely.
+     */
+    val codepoint: Int
+        get() =
+            when (this) {
+                OsDefault -> throw IllegalStateException("OsDefault stamps nothing; check for it before asking")
+                NotEct -> Ecn.NotEct.codepoint
+                Ect1 -> Ecn.Ect1.codepoint
+                Ect0 -> Ecn.Ect0.codepoint
+                Ce -> Ecn.Ce.codepoint
+            }
 }
 
 /**
@@ -171,8 +220,8 @@ class Datagram(
  */
 @ExperimentalDatagramApi
 class DatagramSendOptions(
-    /** ECN codepoint to stamp on the outgoing datagram. [Ecn.Unknown] means "leave OS default". */
-    val ecn: Ecn = Ecn.Unknown,
+    /** ECN request for the outgoing datagram; [EcnPreference.OsDefault] asks for no stamp. */
+    val ecn: EcnPreference = EcnPreference.OsDefault,
     /** DiffServ codepoint (0..63, the upper 6 TOS bits); `-1` leaves the OS default. Advisory. */
     val dscp: Int = -1,
     /** Set the IP Don't-Fragment bit (quiche sets this for PMTU). Correctness-critical. */

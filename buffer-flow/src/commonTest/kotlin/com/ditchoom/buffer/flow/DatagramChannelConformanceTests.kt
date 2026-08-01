@@ -184,6 +184,17 @@ class DatagramChannelConformanceTests {
         }
 
     @Test
+    fun ecnPreferenceStampsExactlyTheWireCodepointsAndGatesOsDefault() {
+        // The four stamping entries mirror Ecn's frozen RFC 3168 codepoints; OsDefault has nothing
+        // to stamp, and asking is a caller bug surfaced eagerly (same contract as HopLimit.value).
+        assertEquals(Ecn.NotEct.codepoint, EcnPreference.NotEct.codepoint)
+        assertEquals(Ecn.Ect1.codepoint, EcnPreference.Ect1.codepoint)
+        assertEquals(Ecn.Ect0.codepoint, EcnPreference.Ect0.codepoint)
+        assertEquals(Ecn.Ce.codepoint, EcnPreference.Ce.codepoint)
+        assertFailsWith<IllegalStateException> { EcnPreference.OsDefault.codepoint }
+    }
+
+    @Test
     fun hopLimitRejectsOutOfRangeAndGatesValueOnIsKnown() {
         // The typed absent state's accessor contract: of() only admits a real octet, and reading
         // value through Unknown is a caller bug surfaced eagerly — not a -1 leaking downstream.
@@ -231,7 +242,7 @@ class DatagramChannelConformanceTests {
             val b = net.bind(addrB)
             val opts =
                 DatagramSendOptions(
-                    ecn = Ecn.Ect0,
+                    ecn = EcnPreference.Ect0,
                     hopLimit = 55,
                     fromLocal = addrB,
                 )
@@ -260,7 +271,7 @@ class DatagramChannelConformanceTests {
             b.send(
                 payload("cp"),
                 to = addrA,
-                options = DatagramSendOptions(ecn = Ecn.Ect0, hopLimit = 55, fromLocal = addrB),
+                options = DatagramSendOptions(ecn = EcnPreference.Ect0, hopLimit = 55, fromLocal = addrB),
             )
             val d = assertIs<DatagramReadResult.Received>(a.receive()).datagram
             // Absent read capabilities → typed absent states, never fabricated values.
