@@ -10,7 +10,8 @@ import kotlin.test.assertTrue
 /**
  * The **make-or-break** (§4): sending to MANY distinct destinations must be zero-alloc.
  *
- * `send(payload, to)` on a relay fanning out to N peers must not allocate per packet. The design's
+ * `AddressedDatagramSink.send(payload, to)` on a relay fanning out to N peers must not allocate per
+ * packet. The design's
  * answer is that a [SocketAddress] *owns* its resolved platform representation from construction — on
  * JVM, an interned `InetSocketAddress` — so a platform sink extracts the send target with a field
  * read, never a resolve-and-pin. This is exactly what deletes the `PathKey → InetSocketAddress`

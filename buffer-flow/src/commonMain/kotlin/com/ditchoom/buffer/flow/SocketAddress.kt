@@ -26,8 +26,9 @@ enum class AddressFamily {
  *    1-entry `lastDest` cache exists to amortize.
  *
  * **Resolved-only (decision §10.1):** DNS happens once, out of band, via [Companion.resolve] — the
- * sole suspending entry point — or [Companion.ofLiteral] for numeric IPs. A [send][DatagramSink.send]
- * therefore never suspends on resolution and stays zero-alloc; ICE gathers pre-resolved candidates.
+ * sole suspending entry point — or [Companion.ofLiteral] for numeric IPs. A
+ * [send][AddressedDatagramSink.send] therefore never suspends on resolution and stays zero-alloc; ICE
+ * gathers pre-resolved candidates.
  *
  * **Value semantics:** implementations must be usable as a map key (a demux routing table keys by
  * peer), so [equals] / [hashCode] compare the resolved endpoint, not object identity.

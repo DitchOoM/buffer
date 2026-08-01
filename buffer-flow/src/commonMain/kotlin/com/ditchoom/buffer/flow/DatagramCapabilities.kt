@@ -15,7 +15,7 @@ package com.ditchoom.buffer.flow
  * - **Correctness-critical** ([dontFragment]) absent → advertised absent here, **never silently
  *   no-op'd**; quiche only grows datagram size past the 1200-byte floor when DF is truly present.
  * - **Read fields** ([ecnReceive], [hopLimitReceive], [localAddressReceive]) absent → the
- *   [Datagram] carries the sentinel ([Ecn.Unknown] / `-1` / `null`).
+ *   [Datagram] carries the typed absent state ([Ecn.Unknown] / [HopLimit.Unknown] / [LocalAddress.Unknown]).
  * - [localAddressReceive] / [sourceAddressSelect] (IP_PKTINFO) absence is the only *functional*
  *   limit, and only for a multi-homed single-socket server; single-homed servers and ICE
  *   (socket-per-candidate) don't need it, and high-scale relays deploy where it exists.

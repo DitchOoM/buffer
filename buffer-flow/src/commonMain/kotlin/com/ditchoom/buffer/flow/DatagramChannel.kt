@@ -11,9 +11,12 @@ import com.ditchoom.buffer.ReadBuffer
  * the way the byte-stream shape does. [receive] returns exactly one [Datagram] (with its source
  * [Datagram.peer]) or a [DatagramReadResult.Closed].
  *
- * - **Connected** (single peer): every [Datagram.peer] is the fixed peer — the QUIC/WebTransport
- *   datagram case and a `connect()`ed UDP socket.
- * - **Unconnected** (many peers): [Datagram.peer] is the per-packet source — raw UDP for SFU/TURN/ICE.
+ * The addressing mode is a *type*, not a runtime state: a [ConnectedDatagramSource] has one fixed
+ * [ConnectedDatagramSource.peer]; an [AddressedDatagramSource] receives from many peers and is bound
+ * by construction. This base carries only the mode-agnostic receive machinery — each mode-specific
+ * field lives solely on the refinement that can honor it, so there is no `null` to interrogate. One
+ * class deliberately cannot implement both refinements (their `localAddress` types conflict): an
+ * endpoint's addressing mode is fixed at construction.
  *
  * **Thread safety:** implementations are NOT assumed thread-safe; confine [receive] to one coroutine.
  */
@@ -21,9 +24,6 @@ import com.ditchoom.buffer.ReadBuffer
 interface DatagramSource {
     /** Whether the source is open. Once closed, [receive] yields [DatagramReadResult.Closed]. */
     val isOpen: Boolean
-
-    /** The local endpoint this source is bound to, for ICE local-candidate gathering, or `null`. */
-    val localAddress: SocketAddress?
 
     /** The read-side control-plane capabilities of this source (§7.2). Consult, never assume. */
     val capabilities: DatagramCapabilities
@@ -50,11 +50,43 @@ interface DatagramSource {
 }
 
 /**
+ * The receive half of a **connected** (single fixed peer) datagram endpoint — a `connect()`ed UDP
+ * socket, a QUIC/WebTransport datagram flow. Every received [Datagram.peer] equals [peer].
+ */
+@ExperimentalDatagramApi
+interface ConnectedDatagramSource : DatagramSource {
+    /** The fixed remote peer, known at construction — hoisted here because only this shape has one. */
+    val peer: SocketAddress
+
+    /**
+     * The local endpoint, when the transport surfaces one. A `connect()`ed UDP socket knows it
+     * ([LocalAddress.of]); a QUIC datagram flow does not surface the underlying UDP endpoint and
+     * reports [LocalAddress.Unknown]. Typed absent state, never `null` (§7.2).
+     */
+    val localAddress: LocalAddress
+}
+
+/**
+ * The receive half of an **addressed** (many peers) datagram endpoint — raw UDP for SFU/TURN/ICE.
+ * [Datagram.peer] is the per-packet source. Bound by construction, so [localAddress] is simply
+ * non-null: ICE local-candidate gathering reads it with no unwrap. An implementation that cannot
+ * learn its bound address (getsockname failure) must fail at construction, not report an absent
+ * state here.
+ */
+@ExperimentalDatagramApi
+interface AddressedDatagramSource : DatagramSource {
+    /** The bound local endpoint (for ICE local-candidate gathering). Non-null by construction. */
+    val localAddress: SocketAddress
+}
+
+/**
  * The send half of a datagram endpoint — the analogue of [ByteSink].
  *
- * The 2-arg send is deliberate (§4): [to] is a pre-resolved [SocketAddress] that owns its platform
- * representation, so sending to many distinct peers is zero-alloc — no per-packet resolve, no address
- * reconstruction.
+ * The send verb lives only on [ConnectedDatagramSink] and [AddressedDatagramSink] — there is no
+ * mode-agnostic send, because the two modes have different arities: a connected sink has no address
+ * parameter at all and an addressed sink requires one. The old `to: SocketAddress? = null` conflation
+ * allowed both a runtime "no destination" error and a silently-ignored address; neither is
+ * expressible now.
  *
  * **Thread safety:** implementations are NOT assumed thread-safe; confine sends to one coroutine.
  */
@@ -64,7 +96,7 @@ interface DatagramSink {
     val isOpen: Boolean
 
     /**
-     * The largest payload a single [send] can carry — the link MTU for raw UDP, or the negotiated
+     * The largest payload a single send can carry — the link MTU for raw UDP, or the negotiated
      * `max_datagram_size` for QUIC/WebTransport datagrams. A payload larger than this may be rejected
      * or dropped.
      */
@@ -73,38 +105,74 @@ interface DatagramSink {
     /** The send-side control-plane capabilities of this sink (§7.2). Consult, never assume. */
     val capabilities: DatagramCapabilities
 
-    /**
-     * Sends [payload] to [to] (or the fixed peer when [to] is `null` on a connected sink) with the
-     * control plane [options].
-     *
-     * [payload] is consumed as a [ReadBuffer]; ownership is not transferred (the caller may pool it).
-     * [options] defaults to the shared [DatagramSendOptions.Default] to keep the hot path allocation-free.
-     */
-    suspend fun send(
-        payload: ReadBuffer,
-        to: SocketAddress? = null,
-        options: DatagramSendOptions = DatagramSendOptions.Default,
-    )
-
-    /**
-     * Batching hook: send many datagrams at once (sendmmsg / GSO where the platform offers it). The
-     * default fans out to [send]; real actuals override with a single syscall.
-     */
-    suspend fun sendBatch(datagrams: List<OutboundDatagram>) {
-        for (d in datagrams) send(d.payload, d.to, d.options)
-    }
-
     /** Close the send side. Idempotent. Defaults to a no-op (a simple sink needs nothing). */
     fun close() {}
 }
 
 /**
- * A bidirectional datagram endpoint — the common case (a bound UDP socket, a QUIC/WebTransport
- * datagram flow). Mirrors [ByteStream] over the byte trichotomy.
- *
- * A receive-only source is a [DatagramSource], a send-only sink is a [DatagramSink]; a duplex endpoint
- * is a [DatagramChannel]. No fake capabilities — the tightest type per direction, exactly as the byte
- * trichotomy.
+ * The send half of a **connected** datagram endpoint. There is no destination parameter — the peer
+ * was fixed at construction, so §4's per-send zero-alloc concern is moot (nothing to resolve, ever).
+ */
+@ExperimentalDatagramApi
+interface ConnectedDatagramSink : DatagramSink {
+    /** The fixed remote peer every [send] targets. */
+    val peer: SocketAddress
+
+    /**
+     * Sends [payload] to the fixed [peer] with the control plane [options]. [payload] is consumed
+     * as a [ReadBuffer]; ownership is not transferred (the caller may pool it). [options] defaults
+     * to the shared [DatagramSendOptions.Default] to keep the hot path allocation-free.
+     */
+    suspend fun send(
+        payload: ReadBuffer,
+        options: DatagramSendOptions = DatagramSendOptions.Default,
+    )
+
+    /**
+     * Batching hook (§10.5): send many payloads to the fixed peer with ONE shared control plane —
+     * exactly the UDP GSO contract (uniform destination, uniform options, equal-segment fan-out),
+     * which is the only kernel batching mechanism a connected sender has. No per-element wrapper
+     * type, so a batch allocates nothing beyond the caller's list; a caller needing per-datagram
+     * options on a connected sink loops [send]. The default fans out to [send]; real actuals
+     * override with a single syscall.
+     */
+    suspend fun sendBatch(
+        payloads: List<ReadBuffer>,
+        options: DatagramSendOptions = DatagramSendOptions.Default,
+    ) {
+        for (p in payloads) send(p, options)
+    }
+}
+
+/**
+ * The send half of an **addressed** datagram endpoint. [to] is REQUIRED: the 3-arg send is
+ * deliberate (§4) — a pre-resolved [SocketAddress] owns its platform representation, so sending to
+ * many distinct peers is zero-alloc (no per-packet resolve, no address reconstruction, and now no
+ * nullable branch either).
+ */
+@ExperimentalDatagramApi
+interface AddressedDatagramSink : DatagramSink {
+    /** Sends [payload] to [to] with the control plane [options]. Ownership/options doc as above. */
+    suspend fun send(
+        payload: ReadBuffer,
+        to: SocketAddress,
+        options: DatagramSendOptions = DatagramSendOptions.Default,
+    )
+
+    /**
+     * Batching hook (§10.5): sendmmsg-shaped — each element carries its own destination and control
+     * plane. The default fans out to [send]; real actuals override with a single syscall.
+     */
+    suspend fun sendBatch(datagrams: List<OutboundDatagram>) {
+        for (d in datagrams) send(d.payload, d.to, d.options)
+    }
+}
+
+/**
+ * A bidirectional datagram endpoint, mode-agnostic. Mirrors [ByteStream] over the byte trichotomy:
+ * the tightest type per direction AND per addressing mode. You cannot send through this base type —
+ * obtain a [ConnectedDatagramChannel] or [AddressedDatagramChannel], which know their destination
+ * story. (Receiving is mode-agnostic, so [receive] stays reachable here.)
  */
 @ExperimentalDatagramApi
 interface DatagramChannel :
@@ -113,3 +181,25 @@ interface DatagramChannel :
     /** Close the whole channel (re-abstracts [DatagramSink.close], which is send-side-only). */
     override fun close()
 }
+
+/**
+ * A duplex **connected** datagram endpoint — a `connect()`ed UDP socket, a QUIC/WebTransport
+ * datagram flow. One fixed [peer]; sends take no address; [localAddress] is the typed maybe-known
+ * state. What `UdpSocket.connect()` and [DatagramMux] flows return.
+ */
+@ExperimentalDatagramApi
+interface ConnectedDatagramChannel :
+    DatagramChannel,
+    ConnectedDatagramSource,
+    ConnectedDatagramSink
+
+/**
+ * A duplex **addressed** datagram endpoint — a bound UDP socket serving many peers (SFU/TURN/ICE,
+ * a shared QUIC server socket, multicast). Sends require [to]; bound by construction, so
+ * [localAddress] is plainly non-null. What `UdpSocket.bind()`/`bindMulticast()` return.
+ */
+@ExperimentalDatagramApi
+interface AddressedDatagramChannel :
+    DatagramChannel,
+    AddressedDatagramSource,
+    AddressedDatagramSink

@@ -16,6 +16,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -91,7 +93,7 @@ class DatagramChannelConformanceTests {
         runTest {
             val net = MemoryDatagramNetwork()
             val (a, b) = net.connectedPair(addrA, addrB)
-            a.send(payload("ping")) // to = null → fixed peer addrB
+            a.send(payload("ping"))
             val atB = assertIs<DatagramReadResult.Received>(b.receive()).datagram
             assertEquals("ping", atB.payload.readByteArray(atB.payload.remaining()).decodeToString())
             assertEquals(addrA, atB.peer)
@@ -99,6 +101,34 @@ class DatagramChannelConformanceTests {
             b.send(payload("pong"))
             val atA = assertIs<DatagramReadResult.Received>(a.receive()).datagram
             assertEquals(addrB, atA.peer)
+        }
+
+    @Test
+    fun connectedChannelExposesFixedPeerAndStampsItOnEveryDatagram() =
+        runTest {
+            val net = MemoryDatagramNetwork()
+            val (a, b) = net.connectedPair(addrA, addrB)
+            // The peer is a non-null type-level fact, hoisted onto the connected refinement.
+            assertEquals(addrB, a.peer)
+            assertEquals(addrA, b.peer)
+            repeat(2) { a.send(payload("n$it")) }
+            repeat(2) {
+                val d = assertIs<DatagramReadResult.Received>(b.receive()).datagram
+                // Every received Datagram.peer on a connected source equals the channel's fixed peer.
+                assertEquals(b.peer, d.peer)
+            }
+            // The memory pair knows its local endpoint — a known, typed LocalAddress.
+            assertEquals(LocalAddress.of(addrA), a.localAddress)
+            assertEquals(addrB, b.localAddress.orNull())
+        }
+
+    @Test
+    fun addressedLocalAddressIsBoundAddressWithNoUnwrap() =
+        runTest {
+            val net = MemoryDatagramNetwork()
+            // Non-null by construction: what ICE local-candidate gathering reads, no unwrap needed.
+            val bound: SocketAddress = net.bind(addrA).localAddress
+            assertEquals(addrA, bound)
         }
 
     // ---- lifecycle ----
@@ -122,6 +152,65 @@ class DatagramChannelConformanceTests {
             a.close()
             assertFailsWith<IllegalStateException> { a.send(payload("x"), to = addrB) }
         }
+
+    @Test
+    fun closedReasonDefaultsToNormal() {
+        // A bare Closed() carries the shared typed Normal arm — never null, never untyped.
+        assertSame(DatagramCloseReason.Normal, DatagramReadResult.Closed().reason)
+    }
+
+    @Test
+    fun closeWithTypedReasonPropagatesToReceive() =
+        runTest {
+            val net = MemoryDatagramNetwork()
+            val a = net.bind(addrA)
+            a.close(DatagramCloseReason.OsError(-9))
+            val r = a.receive()
+            assertEquals(DatagramCloseReason.OsError(-9), assertIs<DatagramReadResult.Closed>(r).reason)
+        }
+
+    @Test
+    fun closeReasonIsDownstreamExtensibleViaSupertyping() =
+        runTest {
+            // The whole reason DatagramCloseReason is an open interface, not sealed: a transport
+            // module buffer-flow cannot import (socket-quic's QuicError) participates by supertyping
+            // and its consumers downcast with `as?`. FakeTransportError stands in for that module.
+            val net = MemoryDatagramNetwork()
+            val a = net.bind(addrA)
+            a.close(FakeTransportError)
+            val reason = assertIs<DatagramReadResult.Closed>(a.receive()).reason
+            assertSame(FakeTransportError, reason as? FakeTransportError)
+            assertNull(reason as? DatagramCloseReason.OsError)
+        }
+
+    @Test
+    fun ecnPreferenceStampsExactlyTheWireCodepointsAndGatesOsDefault() {
+        // The four stamping entries mirror Ecn's frozen RFC 3168 codepoints; OsDefault has nothing
+        // to stamp, and asking is a caller bug surfaced eagerly (same contract as HopLimit.value).
+        assertEquals(Ecn.NotEct.codepoint, EcnPreference.NotEct.codepoint)
+        assertEquals(Ecn.Ect1.codepoint, EcnPreference.Ect1.codepoint)
+        assertEquals(Ecn.Ect0.codepoint, EcnPreference.Ect0.codepoint)
+        assertEquals(Ecn.Ce.codepoint, EcnPreference.Ce.codepoint)
+        assertFailsWith<IllegalStateException> { EcnPreference.OsDefault.codepoint }
+    }
+
+    @Test
+    fun hopLimitRejectsOutOfRangeAndGatesValueOnIsKnown() {
+        // The typed absent state's accessor contract: of() only admits a real octet, and reading
+        // value through Unknown is a caller bug surfaced eagerly — not a -1 leaking downstream.
+        assertFailsWith<IllegalArgumentException> { HopLimit.of(-1) }
+        assertFailsWith<IllegalArgumentException> { HopLimit.of(256) }
+        assertEquals(0, HopLimit.of(0).value)
+        assertEquals(255, HopLimit.of(255).value)
+        assertFailsWith<IllegalStateException> { HopLimit.Unknown.value }
+    }
+
+    @Test
+    fun localAddressUnknownIsTheOneExplicitEscapeToNull() {
+        assertNull(LocalAddress.Unknown.orNull())
+        assertFalse(LocalAddress.Unknown.isKnown)
+        assertEquals(addrA, LocalAddress.of(addrA).orNull())
+    }
 
     @Test
     fun sendDoesNotConsumeCallerBuffer() =
@@ -153,7 +242,7 @@ class DatagramChannelConformanceTests {
             val b = net.bind(addrB)
             val opts =
                 DatagramSendOptions(
-                    ecn = Ecn.Ect0,
+                    ecn = EcnPreference.Ect0,
                     hopLimit = 55,
                     fromLocal = addrB,
                 )
@@ -164,10 +253,12 @@ class DatagramChannelConformanceTests {
                 assertEquals(Ecn.Ect0, d.ecn)
             }
             if (net.capabilities.hopLimitSend && net.capabilities.hopLimitReceive) {
-                assertEquals(55, d.hopLimit)
+                assertEquals(55, d.hopLimit.value)
+                assertEquals(HopLimit.of(55), d.hopLimit)
             }
             if (net.capabilities.localAddressReceive) {
-                assertEquals(addrB, d.localAddress)
+                assertEquals(addrB, d.localAddress.orNull())
+                assertEquals(LocalAddress.of(addrB), d.localAddress)
             }
         }
 
@@ -180,13 +271,13 @@ class DatagramChannelConformanceTests {
             b.send(
                 payload("cp"),
                 to = addrA,
-                options = DatagramSendOptions(ecn = Ecn.Ect0, hopLimit = 55, fromLocal = addrB),
+                options = DatagramSendOptions(ecn = EcnPreference.Ect0, hopLimit = 55, fromLocal = addrB),
             )
             val d = assertIs<DatagramReadResult.Received>(a.receive()).datagram
-            // Absent read capabilities → sentinels, never fabricated values.
+            // Absent read capabilities → typed absent states, never fabricated values.
             assertEquals(Ecn.Unknown, d.ecn)
-            assertEquals(-1, d.hopLimit)
-            assertEquals(null, d.localAddress)
+            assertFalse(d.hopLimit.isKnown)
+            assertFalse(d.localAddress.isKnown)
         }
 
     @Test
@@ -235,6 +326,23 @@ class DatagramChannelConformanceTests {
             assertEquals("ping", received)
         }
 
+    @Test
+    fun typedSendConnectedRoundTrips() =
+        runTest {
+            val net = MemoryDatagramNetwork()
+            val (a, b) = net.connectedPair(addrA, addrB)
+            // The connected one-shot: no destination parameter exists to pass.
+            a.typedSend("one-shot", WholeStringCodec)
+            val received =
+                b
+                    .typed(WholeStringCodec)
+                    .receive()
+                    .take(1)
+                    .toList()
+                    .single()
+            assertEquals("one-shot", received)
+        }
+
     // ---- batching hooks (§10.5) ----
 
     @Test
@@ -250,6 +358,18 @@ class DatagramChannelConformanceTests {
                     OutboundDatagram(payload("3"), to = addrB),
                 ),
             )
+            assertEquals("1", b.receive().text())
+            assertEquals("2", b.receive().text())
+            assertEquals("3", b.receive().text())
+        }
+
+    @Test
+    fun connectedSendBatchSharesOneControlPlaneAndFansOutToFixedPeer() =
+        runTest {
+            val net = MemoryDatagramNetwork()
+            val (a, b) = net.connectedPair(addrA, addrB)
+            // The GSO-shaped connected batch: bare payloads, one shared options, fixed destination.
+            a.sendBatch(listOf(payload("1"), payload("2"), payload("3")))
             assertEquals("1", b.receive().text())
             assertEquals("2", b.receive().text())
             assertEquals("3", b.receive().text())
@@ -280,6 +400,16 @@ class DatagramChannelConformanceTests {
             assertIs<DatagramReadResult.Closed>(batch.last())
             assertTrue(batch.size <= 2)
         }
+}
+
+/**
+ * A downstream transport's close reason, as a module buffer-flow cannot import would declare it —
+ * the stand-in that pins [DatagramCloseReason]'s open-interface supertyping contract (socket-quic's
+ * `QuicError : DatagramCloseReason` is the real instance of this shape).
+ */
+@OptIn(ExperimentalDatagramApi::class)
+private object FakeTransportError : DatagramCloseReason {
+    override fun toString(): String = "FakeTransportError"
 }
 
 /**

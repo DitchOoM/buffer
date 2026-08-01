@@ -15,14 +15,19 @@ import kotlinx.coroutines.flow.Flow
  * The flow-id *semantics* (how the id is encoded on the wire, session lifecycle) live in the consumer
  * (`:socket-quic` / `socket-webtransport`); this interface is only the shared shape (decision §10.4).
  *
+ * Every muxed flow is **connected by construction**: its [ConnectedDatagramChannel.peer] is the
+ * underlying session's peer and a per-send address would be meaningless inside a flow id — so the mux
+ * hands out the connected refinement, typically with [LocalAddress.Unknown]. The mux itself rides one
+ * underlying (usually connected) datagram channel.
+ *
  * **Thread safety:** implementations are NOT assumed thread-safe; external synchronization is required
  * for concurrent [open] / [accept] unless an implementation documents otherwise.
  */
 @ExperimentalDatagramApi
 interface DatagramMux {
     /** Open a logical datagram flow identified by [flowId] over the underlying datagram channel. */
-    fun open(flowId: Long): DatagramChannel
+    fun open(flowId: Long): ConnectedDatagramChannel
 
     /** Peer-initiated datagram flows, demuxed by their leading id. */
-    fun accept(): Flow<DatagramChannel>
+    fun accept(): Flow<ConnectedDatagramChannel>
 }
