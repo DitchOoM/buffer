@@ -88,6 +88,25 @@ interface AddressedDatagramSource : DatagramSource {
  * allowed both a runtime "no destination" error and a silently-ignored address; neither is
  * expressible now.
  *
+ * ## The payload contract, for every send on either refinement
+ *
+ * **A send reads its payload without consuming it.** The send transmits the readable window
+ * `[position, limit)` and leaves the caller's cursor exactly where it found it, so one buffer can be
+ * sent again — to the next peer in a fan-out, or as a retransmit — with no `resetForRead()` in
+ * between. A datagram send is all-or-nothing, so unlike a stream write (whose cursor is the resume
+ * point for a partial write's residue) a post-send cursor would carry no information; all that
+ * consuming could add is a forgotten reset silently putting a legal zero-length datagram on the wire.
+ * An implementation whose platform primitive is itself consuming (java.nio's `write`/`send` advance
+ * position) must therefore transmit through a *view*, never the caller's buffer. Enforced by
+ * `DatagramChannelConformanceTests.sendDoesNotConsumeCallerBuffer`.
+ *
+ * **Ownership is not transferred**: the sink borrows the payload for the duration of the call and
+ * never frees it — the caller frees it, or returns it to its pool, afterwards. Note this runs the
+ * opposite way from the receive side, where [Datagram.payload] ownership transfers *out*; either way
+ * the buffer belongs to whoever allocated it. A borrowing sink must also take no lasting reference on
+ * the payload: on a pooled buffer, a `slice()` retained past the call pins the chunk and quietly
+ * drains the pool.
+ *
  * **Thread safety:** implementations are NOT assumed thread-safe; confine sends to one coroutine.
  */
 @ExperimentalDatagramApi
@@ -119,9 +138,10 @@ interface ConnectedDatagramSink : DatagramSink {
     val peer: SocketAddress
 
     /**
-     * Sends [payload] to the fixed [peer] with the control plane [options]. [payload] is consumed
-     * as a [ReadBuffer]; ownership is not transferred (the caller may pool it). [options] defaults
-     * to the shared [DatagramSendOptions.Default] to keep the hot path allocation-free.
+     * Sends [payload] to the fixed [peer] with the control plane [options]. [payload] is read but
+     * neither consumed nor owned — see the payload contract on [DatagramSink] for both axes.
+     * [options] defaults to the shared [DatagramSendOptions.Default] to keep the hot path
+     * allocation-free.
      */
     suspend fun send(
         payload: ReadBuffer,
@@ -152,7 +172,12 @@ interface ConnectedDatagramSink : DatagramSink {
  */
 @ExperimentalDatagramApi
 interface AddressedDatagramSink : DatagramSink {
-    /** Sends [payload] to [to] with the control plane [options]. Ownership/options doc as above. */
+    /**
+     * Sends [payload] to [to] with the control plane [options]. [payload] is read but neither
+     * consumed nor owned — see the payload contract on [DatagramSink] for both axes. Fan-out to many
+     * peers is exactly what the non-consuming cursor rule buys: send the same buffer to each [to]
+     * with no `resetForRead()` in between.
+     */
     suspend fun send(
         payload: ReadBuffer,
         to: SocketAddress,
