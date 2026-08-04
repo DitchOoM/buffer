@@ -2,6 +2,7 @@
 
 package com.ditchoom.buffer.crypto
 
+import com.ditchoom.buffer.toHexString
 import com.ditchoom.buffer.toReadBuffer
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
@@ -54,11 +55,11 @@ object CryptoAsymDemo {
             val alice = ops.generateKeyPair()
             val bob = ops.generateKeyPair()
             try {
-                val pkAlice = alice.publicKey.encoded.toHexRemaining()
-                val pkBob = bob.publicKey.encoded.toHexRemaining()
+                val pkAlice = alice.publicKey.encoded.toHexString()
+                val pkBob = bob.publicKey.encoded.toHexString()
                 val sharedA = ops.deriveSharedSecret(alice.privateKey, bob.publicKey, demoInfo(), X25519_SHARED_BYTES)
                 val sharedB = ops.deriveSharedSecret(bob.privateKey, alice.publicKey, demoInfo(), X25519_SHARED_BYTES)
-                listOf(pkAlice, pkBob, sharedA.toHexRemaining(), sharedB.toHexRemaining()).joinToString(":")
+                listOf(pkAlice, pkBob, sharedA.toHexString(), sharedB.toHexString()).joinToString(":")
             } finally {
                 alice.close()
                 bob.close()
@@ -87,13 +88,13 @@ object CryptoAsymDemo {
             val bob = hpkeGenerateKeyPair(suite.kem)
             val eve = hpkeGenerateKeyPair(suite.kem)
             try {
-                val pkBob = bob.publicKeyBytes.toHexRemaining()
+                val pkBob = bob.publicKeyBytes.toHexString()
                 val sealed = ops.sealBase(bob.publicKey, demoInfo(), plaintext.toReadBuffer())
-                val encHex = sealed.enc.toHexRemaining()
-                val ctHex = sealed.ciphertext.toHexRemaining()
+                val encHex = sealed.enc.toHexString()
+                val ctHex = sealed.ciphertext.toHexString()
                 // Fresh buffers per open so positions never collide across the two decrypt attempts.
                 val opened = ops.openBase(bob.privateKey, encHex.hexToReadBuffer(), demoInfo(), ctHex.hexToReadBuffer())
-                val recovered = opened.readString(opened.remaining()).toReadBuffer().toHexRemaining()
+                val recovered = opened.readString(opened.remaining()).toReadBuffer().toHexString()
                 val wrongKeyRejected =
                     try {
                         ops.openBase(eve.privateKey, encHex.hexToReadBuffer(), demoInfo(), ctHex.hexToReadBuffer())
@@ -126,8 +127,8 @@ object CryptoAsymDemo {
         GlobalScope.promise {
             val sk = ed25519Ops().generateSigningKey()
             try {
-                val seed = sk.requireInMemoryMaterial().toHexRemaining()
-                val pub = sk.verifyKey.requireInMemoryMaterial().toHexRemaining()
+                val seed = sk.requireInMemoryMaterial().toHexString()
+                val pub = sk.verifyKey.requireInMemoryMaterial().toHexString()
                 "$seed:$pub"
             } finally {
                 sk.close()
@@ -147,7 +148,7 @@ object CryptoAsymDemo {
         GlobalScope.promise {
             val verifyKey = VerifyKey.ed25519(publicKeyHex.hexToReadBuffer())
             SigningKey.ed25519(seedHex.hexToReadBuffer(), verifyKey).use { sk ->
-                ed25519Ops().sign(sk, message.toReadBuffer()).toHexRemaining()
+                ed25519Ops().sign(sk, message.toReadBuffer()).toHexString()
             }
         }
 

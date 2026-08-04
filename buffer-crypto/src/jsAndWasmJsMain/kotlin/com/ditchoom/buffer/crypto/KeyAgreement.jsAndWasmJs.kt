@@ -4,6 +4,8 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.fromHexString
+import com.ditchoom.buffer.toHexString
 
 /**
  * js/wasmJs key agreement over **WebCrypto** (`crypto.subtle`). WebCrypto's key-agreement API is
@@ -32,7 +34,6 @@ import com.ditchoom.buffer.ReadBuffer
  * targets is best-effort; SecureBuffer wiping covers only the Kotlin-side buffers.
  */
 
-private const val HEX_RADIX = 16
 private const val NIBBLE_BITS = 4
 
 // --- raw scalar -> PKCS#8 (WebCrypto importKey('pkcs8') input) ----------------
@@ -78,7 +79,7 @@ private fun scalarToPkcs8Hex(
     curve: KeyAgreementCurve,
     scalar: ReadBuffer,
 ): String {
-    val dHex = scalar.toHex()
+    val dHex = scalar.toHexString()
     if (curve == KeyAgreementCurve.X25519) return X25519_PKCS8_PREFIX + dHex
     // ECPrivateKey ::= SEQUENCE { version INTEGER(1), privateKey OCTET STRING(scalar) }
     val ecPrivateKey = tlv("30", tlv("02", "01") + tlv("04", dHex))
@@ -117,32 +118,6 @@ private fun ensureSupported(curve: KeyAgreementCurve) {
     }
 }
 
-/** Lowercase hex of a buffer's remaining bytes (non-destructive); for WebCrypto string marshalling. */
-private fun ReadBuffer.toHex(): String {
-    val digits = "0123456789abcdef"
-    val start = position()
-    val n = remaining()
-    val sb = StringBuilder(n * 2)
-    for (i in 0 until n) {
-        val v = get(start + i).toInt() and 0xFF
-        sb.append(digits[v ushr NIBBLE_BITS])
-        sb.append(digits[v and 0xF])
-    }
-    return sb.toString()
-}
-
-/** Writes a hex string's bytes into a fresh read-ready buffer from [factory]. */
-private fun hexToBuffer(
-    hex: String,
-    factory: BufferFactory,
-): PlatformBuffer {
-    val n = hex.length / 2
-    val b = factory.allocate(n)
-    for (i in 0 until n) b.writeByte(hex.substring(i * 2, i * 2 + 2).toInt(HEX_RADIX).toByte())
-    b.resetForRead()
-    return b
-}
-
 internal actual suspend fun generateKeyPairAsyncPlatform(curve: KeyAgreementCurve): KeyAgreementKeyPair {
     ensureSupported(curve)
     // WebCrypto returns "publicHex|privateHex" (raw public export, raw private scalar from JWK `d`), or
@@ -151,8 +126,8 @@ internal actual suspend fun generateKeyPairAsyncPlatform(curve: KeyAgreementCurv
     if (result.publicHex == UNSUPPORTED_SENTINEL) {
         throw UnsupportedOperationException("${curve.curveName} is not available in this WebCrypto engine")
     }
-    val pubBuf = hexToBuffer(result.publicHex, BufferFactory.Default)
-    val privBuf = hexToBuffer(result.privateHex, secureScratch)
+    val pubBuf = BufferFactory.Default.fromHexString(result.publicHex)
+    val privBuf = secureScratch.fromHexString(result.privateHex)
     val publicKey = KeyAgreementPublicKey.of(curve, pubBuf)
     return keyAgreementKeyPairOf(curve, keyAgreementPrivateKeyOf(curve, privBuf), publicKey)
 }
@@ -178,7 +153,7 @@ internal actual suspend fun deriveSharedSecretAsyncPlatform(
             webCryptoDeriveSharedSecret(
                 curve.curveName,
                 scalarToPkcs8Hex(curve, privateKey.requireInMemoryMaterial()),
-                peerPublicKey.encoded.toHex(),
+                peerPublicKey.encoded.toHexString(),
             )
         } catch (e: Throwable) {
             // A failed import / deriveBits means an off-curve / low-order / malformed peer point.
@@ -187,7 +162,7 @@ internal actual suspend fun deriveSharedSecretAsyncPlatform(
     if (sharedHex == UNSUPPORTED_SENTINEL) {
         throw UnsupportedOperationException("${curve.curveName} is not available in this WebCrypto engine")
     }
-    val raw = hexToBuffer(sharedHex, secureScratch)
+    val raw = secureScratch.fromHexString(sharedHex)
     return deriveFromRawSecret(curve, raw, info, length, salt, factory)
 }
 
@@ -209,7 +184,7 @@ internal actual suspend fun dhRawSecretInMemory(
             webCryptoDeriveSharedSecret(
                 curve.curveName,
                 scalarToPkcs8Hex(curve, privateKey.requireInMemoryMaterial()),
-                peerPublicKey.encoded.toHex(),
+                peerPublicKey.encoded.toHexString(),
             )
         } catch (e: Throwable) {
             throw InvalidPublicKey(curve)
@@ -217,7 +192,7 @@ internal actual suspend fun dhRawSecretInMemory(
     if (sharedHex == UNSUPPORTED_SENTINEL) {
         throw UnsupportedOperationException("${curve.curveName} is not available in this WebCrypto engine")
     }
-    val raw = hexToBuffer(sharedHex, secureScratch)
+    val raw = secureScratch.fromHexString(sharedHex)
     return validateRawSecret(curve, raw)
 }
 

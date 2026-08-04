@@ -4,6 +4,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
+import com.ditchoom.buffer.toHexString
 
 /*
  * js/wasmJs AEAD.
@@ -84,10 +85,10 @@ internal actual suspend fun aesGcmSealWithNonceAsync(
     }
     val ctTagHex =
         webCryptoAesGcmEncrypt(
-            keyHex = key.requireInMemoryMaterial().toHexRemaining(),
-            ivHex = nonce.toHexRemaining(),
-            aadHex = aad?.toHexRemaining() ?: "",
-            plaintextHex = plaintext.toHexRemaining(),
+            keyHex = key.requireInMemoryMaterial().toHexString(),
+            ivHex = nonce.toHexString(),
+            aadHex = aad?.toHexString() ?: "",
+            plaintextHex = plaintext.toHexString(),
         )
     val out = factory.allocate(plaintext.remaining() + AEAD_TAG_BYTES)
     out.writeHex(ctTagHex)
@@ -107,10 +108,10 @@ internal actual suspend fun aesGcmOpenWithNonceAsync(
     }
     val ptHex =
         webCryptoAesGcmDecrypt(
-            keyHex = key.requireInMemoryMaterial().toHexRemaining(),
-            ivHex = nonce.toHexRemaining(),
-            aadHex = aad?.toHexRemaining() ?: "",
-            ciphertextAndTagHex = ciphertextAndTag.toHexRemaining(),
+            keyHex = key.requireInMemoryMaterial().toHexString(),
+            ivHex = nonce.toHexString(),
+            aadHex = aad?.toHexString() ?: "",
+            ciphertextAndTagHex = ciphertextAndTag.toHexString(),
         ) ?: throw VerificationFailed()
     val out = factory.allocate(maxOf(0, ciphertextAndTag.remaining() - AEAD_TAG_BYTES))
     out.writeHex(ptHex)
@@ -122,22 +123,8 @@ internal actual suspend fun aesGcmOpenWithNonceAsync(
 // hex marshalling (shared js/wasmJs)
 // =============================================================================
 
-private const val HEX = "0123456789abcdef"
 private const val HEX_RADIX = 16
 private const val NIBBLE_BITS = 4
-
-/** Lowercase hex of this buffer's remaining bytes (non-destructive). */
-internal fun ReadBuffer.toHexRemaining(): String {
-    val start = position()
-    val n = remaining()
-    val sb = StringBuilder(n * 2)
-    for (i in 0 until n) {
-        val v = get(start + i).toInt() and 0xFF
-        sb.append(HEX[v ushr NIBBLE_BITS])
-        sb.append(HEX[v and 0xF])
-    }
-    return sb.toString()
-}
 
 /** Writes the bytes decoded from a lowercase/uppercase hex string at the buffer's position. */
 internal fun WriteBuffer.writeHex(hex: String) {
