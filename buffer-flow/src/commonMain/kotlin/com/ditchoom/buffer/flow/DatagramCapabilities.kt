@@ -1,7 +1,9 @@
 package com.ditchoom.buffer.flow
 
 /**
- * The control-plane capabilities a datagram endpoint actually supports on its platform.
+ * The capabilities a datagram endpoint actually supports on its platform: the control-plane fields it
+ * can set or report, plus the one data-plane requirement its send path imposes
+ * ([requiresNativeMemoryBuffers]).
  *
  * Decision §10.2: the full control-plane **surface** ships everywhere ([Datagram] read fields,
  * [DatagramSendOptions] send fields), but each field is implemented to the platform's real ceiling
@@ -19,6 +21,10 @@ package com.ditchoom.buffer.flow
  * - [localAddressReceive] / [sourceAddressSelect] (IP_PKTINFO) absence is the only *functional*
  *   limit, and only for a multi-homed single-socket server; single-homed servers and ICE
  *   (socket-per-candidate) don't need it, and high-scale relays deploy where it exists.
+ *
+ * [requiresNativeMemoryBuffers] inverts that reading: it is the one field whose **presence**
+ * constrains the caller rather than whose absence degrades a feature. It is not a control-plane
+ * feature at all — see its own doc.
  *
  * The empirically-measured platform values (used to seed platform actuals in `:socket-udp`) are:
  *
@@ -59,6 +65,28 @@ class DatagramCapabilities(
      * precludes multicast, but the shipped default is `false` until a later additive minor.
      */
     val multicast: Boolean = false,
+    /**
+     * Sends require the payload to be backed by native memory (a raw address), because the send path
+     * hands that address straight to the OS — io_uring `sendmsg`, `NWConnection`. When `false`, a
+     * heap-backed buffer is accepted too (JVM NIO copies internally; an in-memory endpoint's "send"
+     * is itself a copy).
+     *
+     * **Correctness-critical, and a *data*-plane property, not a control-plane one:** a consumer that
+     * allocates its own outbound datagrams must honour this when choosing its
+     * [com.ditchoom.buffer.BufferFactory], or the send fails at transmit time — long after the
+     * endpoint was constructed and the application believed it had a working session. Reading it at
+     * construction lets that be rejected while the caller can still pick a different factory.
+     *
+     * **Only the channel can answer this.** It is deliberately not an `expect val`: one process can
+     * run both an in-memory endpoint (heap fine) and a real socket (heap fatal) on the same platform,
+     * so a platform-level flag would over-reject. Nor is it the same question as "is this buffer
+     * native" — the NIO path accepts a heap `ByteBuffer` quite happily, so a check phrased that way
+     * would reject a configuration that works. This is about the channel's requirement.
+     *
+     * Conservative default `false`: every endpoint that does not genuinely need a raw address stays
+     * correct without saying anything.
+     */
+    val requiresNativeMemoryBuffers: Boolean = false,
 ) {
     @ExperimentalDatagramApi
     companion object {
@@ -66,6 +94,10 @@ class DatagramCapabilities(
          * No control-plane capabilities — the conservative default. A minimal or in-memory endpoint
          * advertises this; every control-plane read yields a sentinel and every advisory send field
          * is a no-op. Correct on every platform.
+         *
+         * [requiresNativeMemoryBuffers] is `false` here, which is a real claim rather than an absent
+         * one: a capability-less endpoint accepts any buffer. A channel whose send path does need a
+         * raw address must say so, even if it advertises nothing else.
          */
         val None: DatagramCapabilities = DatagramCapabilities()
     }

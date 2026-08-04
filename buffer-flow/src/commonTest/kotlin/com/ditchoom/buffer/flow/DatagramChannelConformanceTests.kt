@@ -289,6 +289,22 @@ class DatagramChannelConformanceTests {
             assertTrue(MemoryDatagramNetwork(FullMemoryCapabilities).capabilities.dontFragment)
         }
 
+    @Test
+    fun nativeMemoryRequirementIsOrthogonalToTheControlPlane() =
+        runTest {
+            // A consumer allocating its own outbound datagrams reads this at construction to pick a
+            // BufferFactory, instead of discovering the requirement as a send-time failure.
+            // Defaulted false, so an endpoint that doesn't need a raw address says nothing.
+            assertFalse(DatagramCapabilities.None.requiresNativeMemoryBuffers)
+            // Full control-plane capability does not imply the requirement: an in-memory send copies.
+            assertFalse(MemoryDatagramNetwork(FullMemoryCapabilities).capabilities.requiresNativeMemoryBuffers)
+            // ...and the requirement does not imply any control-plane capability either.
+            val rawAddressOnly = DatagramCapabilities(requiresNativeMemoryBuffers = true)
+            assertTrue(rawAddressOnly.requiresNativeMemoryBuffers)
+            assertFalse(rawAddressOnly.dontFragment)
+            assertFalse(rawAddressOnly.ecnSend)
+        }
+
     // ---- typed views (§5) ----
 
     @Test

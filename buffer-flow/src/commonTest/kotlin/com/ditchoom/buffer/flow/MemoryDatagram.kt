@@ -209,4 +209,7 @@ internal val FullMemoryCapabilities =
         localAddressReceive = true,
         sourceAddressSelect = true,
         multicast = false,
+        // Stays false even at full control-plane capability: the send here is a copy into a Channel,
+        // so a heap buffer is fine. The two are orthogonal axes, not one "how capable is this" dial.
+        requiresNativeMemoryBuffers = false,
     )
