@@ -39,7 +39,8 @@ import platform.posix.size_tVar
  * bound through the `commoncryptogcm` cinterop because those entry points live in CommonCrypto's
  * SPI header and are absent from Kotlin/Native's platform.CoreCrypto binding. CCCryptorGCMFinal
  * outputs the recomputed tag for both directions; the decrypt path compares it against the
- * supplied tag with constantTimeEquals, scrubs the plaintext, and raises the opaque
+ * supplied tag with constantTimeEqualsAt (offset-form, no slice of the caller's buffer), scrubs
+ * the plaintext, and raises the opaque
  * VerificationFailed on mismatch before returning — no unverified-plaintext release.
  *
  * ChaCha20-Poly1305 has no CommonCrypto one-shot binding exposed to Kotlin/Native, so it routes
@@ -120,8 +121,10 @@ internal actual fun aesGcmOpen(
     val ctLen = ciphertextAndTag.remaining() - AEAD_TAG_BYTES
     require(dest.remaining() >= ctLen) { "dest needs $ctLen bytes remaining, has ${dest.remaining()}" }
 
-    val ctView = absoluteView(ciphertextAndTag, ciphertextAndTag.position(), ctLen)
-    val tagView = absoluteView(ciphertextAndTag, ciphertextAndTag.position() + ctLen, AEAD_TAG_BYTES)
+    // Pointer offsets, not slices — see #332: slicing a pooled ciphertext takes a reference on
+    // every open(), including the reject path, and nothing hands it back.
+    val ctStart = ciphertextAndTag.position()
+    val tagStart = ctStart + ctLen
 
     memScoped {
         val computedTag = allocArray<ByteVar>(AEAD_TAG_BYTES)
@@ -129,7 +132,7 @@ internal actual fun aesGcmOpen(
         key.requireInMemoryMaterial().withRemainingBytes { keyPtr, keyLen ->
             nonce.withRemainingBytes { ivPtr, ivLen ->
                 withOptionalBytes(aad) { aadPtr, aadLen ->
-                    ctView.withRemainingBytes2(ctLen) { ctPtr ->
+                    ciphertextAndTag.withBytesAt(ctStart, ctLen) { ctPtr ->
                         dest.withWritablePointer(ctLen) { ptPtr ->
                             // GCMFinal re-derives the tag from ciphertext+AAD into computedTag; we
                             // compare it ourselves in constant time and discard the plaintext on
@@ -153,8 +156,7 @@ internal actual fun aesGcmOpen(
             }
         }
         // Constant-time tag check. On mismatch, scrub the just-written plaintext and reject.
-        val computed = nativeTagBuffer(computedTag)
-        if (!computed.constantTimeEquals(tagView)) {
+        if (!constantTimeEqualsAt(ciphertextAndTag, tagStart, computedTag, AEAD_TAG_BYTES)) {
             val end = dest.position()
             dest.position(destStart)
             while (dest.position() < end) dest.writeByte(0)

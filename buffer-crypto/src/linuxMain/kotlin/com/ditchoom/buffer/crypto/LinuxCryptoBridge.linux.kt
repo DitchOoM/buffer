@@ -102,19 +102,3 @@ internal inline fun WriteBuffer.withWritablePointer(
     block(ptr)
     position(pos + count)
 }
-
-/** A non-destructive read-ready view of [length] bytes of [source] starting at absolute [from]. */
-internal fun absoluteView(
-    source: ReadBuffer,
-    from: Int,
-    length: Int,
-): ReadBuffer {
-    val savedPos = source.position()
-    val savedLimit = source.limit()
-    source.position(from)
-    source.setLimit(from + length)
-    val view = source.slice()
-    source.position(savedPos)
-    source.setLimit(savedLimit)
-    return view
-}

@@ -35,6 +35,39 @@ internal inline fun ReadBuffer.withRemainingBytes(block: (CPointer<ByteVar>, len
 }
 
 /**
+ * Invokes [block] with a pointer to [count] bytes of this buffer starting at buffer index
+ * [from], without creating a view and without disturbing position or limit.
+ *
+ * The offset form of [withRemainingBytes]. AEAD open paths need pointers to two sub-ranges of one
+ * caller-owned buffer (ciphertext, then tag). Taking `slice()` views for them takes a *reference*
+ * on a pooled/refcounted input which the callee must then hand back — issue #332, where two
+ * unreleased views pinned the caller's pool chunk on every opened record. Offsetting the pointer
+ * has no ownership question to answer.
+ *
+ * Tolerates [count] == 0 by pinning a 1-byte placeholder, so callers can hand CommonCrypto or
+ * CryptoKit a valid non-null pointer with length 0. The pointer is valid only inside [block].
+ */
+internal inline fun ReadBuffer.withBytesAt(
+    from: Int,
+    count: Int,
+    block: (CPointer<ByteVar>) -> Unit,
+) {
+    if (count == 0) {
+        ByteArray(1).usePinned { block(it.addressOf(0)) }
+        return
+    }
+    val managed = managedMemoryAccess
+    if (managed != null) {
+        managed.backingArray.usePinned { block(it.addressOf(managed.arrayOffset + from)) }
+        return
+    }
+    val native = nativeMemoryAccess
+    val ptr = native?.let { (it.nativeAddress + from).toCPointer<ByteVar>() }
+    requireNotNull(ptr) { "buffer must expose native or managed memory" }
+    block(ptr)
+}
+
+/**
  * Invokes [block] with a pointer to [count] writable bytes at this buffer's current position,
  * then advances the position by [count]. Native buffers expose their memory pointer; heap
  * buffers pin their own backing array. No array is allocated — the system call writes straight
