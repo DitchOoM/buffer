@@ -7,7 +7,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
-import kotlin.test.assertTrue
 
 /**
  * Tests for FfmAutoBuffer — GC-managed FFM buffer returned by BufferFactory.Default on JVM 21+.
@@ -89,14 +88,14 @@ class FfmAutoBufferTest {
     }
 
     @Test
-    fun `Default factory returns FfmAutoBuffer on JVM 21+`() {
+    fun `Default factory returns a non-FFM native buffer (no session() overhead)`() {
+        // Default is plain direct native memory on every JVM (DirectJvmBuffer), NOT FfmAutoBuffer:
+        // FFM's per-access session() scope check was pure overhead for the GC-managed default, since
+        // FfmAutoBuffer.freeNativeMemory() is a no-op. Deterministic FFM free lives in deterministic().
         val buffer = BufferFactory.Default.allocate(64)
-        // On JVM 21+ (multi-release JAR), Default should return FfmAutoBuffer
-        // On JVM < 21, this returns DirectJvmBuffer — test passes either way
-        if (buffer is FfmAutoBuffer) {
-            assertFalse(buffer is CloseableBuffer)
-            assertTrue(buffer.nativeAddress != 0L)
-        }
+        assertFalse(buffer is FfmAutoBuffer)
+        assertFalse(buffer is CloseableBuffer) // GC-managed: not closeable
+        assertIs<NativeMemoryAccess>(buffer) // still native-address capable for zero-copy interop
     }
 
     @Test
