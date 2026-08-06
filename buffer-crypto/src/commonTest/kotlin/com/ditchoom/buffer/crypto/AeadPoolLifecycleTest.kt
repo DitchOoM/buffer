@@ -8,6 +8,7 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.counting
 import com.ditchoom.buffer.crypto.CryptoTestVectors.hexBuffer
 import com.ditchoom.buffer.crypto.CryptoTestVectors.toHex
+import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.pool.BufferPool
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -18,6 +19,7 @@ private const val ITERATIONS = 8
 private const val POOL_CHUNK_BYTES = 64
 private const val POOL_MAX_BUFFERS = 4
 private const val FLIP_MASK = 0x01
+private const val PAD_BYTES = 5
 
 /**
  * An AEAD `open` must not retain a reference to the caller's ciphertext buffer.
@@ -195,6 +197,60 @@ class AeadPoolLifecycleTest {
             assertPoolDrained(pool, backing, "aesGcmOpenWithNonceAsync rejection")
             assertEquals(1L, backing.allocationCount, "rejection path must reuse one chunk")
             pool.clear()
+        }
+
+    /**
+     * Every other case in this file hands `open` a buffer sitting at position 0, so the offset
+     * arithmetic that replaced the slices is only ever exercised at `from == 0` — the one value
+     * where it cannot be wrong. This drives a non-zero start by prefixing the sealed frame with
+     * padding and positioning past it, which is the shape a real caller reading out of a framed
+     * stream produces.
+     */
+    @Test
+    fun aesGcmSyncOpenAtNonZeroPositionRoundTrips() =
+        runTest {
+            if (!aesGcmBlockingAvailable) return@runTest
+            val key = AesGcmKey.of(hexBuffer(keyHex))
+            val sealed = sealAesGcm(key)
+            val sealedLen = sealed.remaining()
+
+            val padded = BufferFactory.Default.allocate(PAD_BYTES + sealedLen)
+            repeat(PAD_BYTES) { padded.writeByte(0xAB.toByte()) }
+            padded.write(sealed)
+            padded.resetForRead()
+            padded.position(PAD_BYTES)
+            assertEquals(sealedLen, padded.remaining(), "padding must not change the frame length")
+
+            val out = BufferFactory.Default.allocate(sealedLen - AEAD_TAG_BYTES)
+            aesGcmOpen(key, hexBuffer(ivHex), hexBuffer(aadHex), padded, out)
+            out.resetForRead()
+            assertEquals(ptHex, out.toHex(), "plaintext from a non-zero start must match")
+        }
+
+    /**
+     * A zero-length plaintext against a heap destination. `BufferFactory.managed()` is a
+     * first-class factory, and pairing it with an empty payload leaves the destination with
+     * nothing remaining — which reached `addressOf(backingArray.size)` and threw before the
+     * `count == 0` guard existed.
+     */
+    @Test
+    fun aesGcmOpenEmptyPlaintextIntoManagedDestination() =
+        runTest {
+            if (!aesGcmBlockingAvailable) return@runTest
+            val key = AesGcmKey.of(hexBuffer(keyHex))
+            val sealedEmpty =
+                aesGcmSealWithNonceAsync(
+                    key,
+                    hexBuffer(ivHex),
+                    hexBuffer(aadHex),
+                    BufferFactory.managed().allocate(0).also { it.resetForRead() },
+                    BufferFactory.managed(),
+                )
+            assertEquals(AEAD_TAG_BYTES, sealedEmpty.remaining(), "an empty seal is tag-only")
+
+            val out = BufferFactory.managed().allocate(0)
+            aesGcmOpen(key, hexBuffer(ivHex), hexBuffer(aadHex), sealedEmpty, out)
+            assertEquals(0, out.position(), "nothing to write for an empty plaintext")
         }
 
     /** One sealed `ciphertext‖tag` frame, built off the pool so only opens are counted. */
