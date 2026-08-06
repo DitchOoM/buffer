@@ -37,7 +37,6 @@ import platform.zlib.deflateInit2
 import platform.zlib.deflateSetDictionary
 import platform.zlib.inflate
 import platform.zlib.inflateEnd
-import platform.zlib.inflateInit2
 import platform.zlib.inflateSetDictionary
 import platform.zlib.z_stream
 
@@ -258,23 +257,7 @@ private fun decompressWithZStream(
 
     val s = nativeHeap.alloc<z_stream>()
     try {
-        s.zalloc = null
-        s.zfree = null
-        s.opaque = null
-
-        val windowBits = resolveWindowBits(algorithm, WindowBits.Default)
-
-        var result = inflateInit2(s.ptr, windowBits)
-
-        if (result != Z_OK) {
-            throw CompressionException("inflateInit2 failed with code: $result")
-        }
-
-        // Raw inflate has no in-band Z_NEED_DICT signal, so the dictionary must be applied
-        // eagerly. Zlib-wrapped streams signal via Z_NEED_DICT during the inflate loop below.
-        if (algorithm == CompressionAlgorithm.Raw) {
-            dictionary?.let { applyInflateDictionary(s.ptr, it) }
-        }
+        initInflateStream(s, algorithm, dictionary)
 
         // Start with estimate, grow if needed
         var outputSize = maxOf(inputSize * 4, 1024)
@@ -291,7 +274,7 @@ private fun decompressWithZStream(
                 s.next_out = (outputPtr + totalDecompressed)?.reinterpret()
                 s.avail_out = (outputSize - totalDecompressed).convert()
 
-                result = inflate(s.ptr, Z_FINISH)
+                val result = inflate(s.ptr, Z_FINISH)
 
                 totalDecompressed = outputSize - s.avail_out.toInt()
 
@@ -316,17 +299,7 @@ private fun decompressWithZStream(
                             outputSize = newSize
                         }
                     }
-                    Z_NEED_DICT -> {
-                        if (dictionary == null) {
-                            inflateEnd(s.ptr)
-                            throw CompressionException("Dictionary required")
-                        }
-                        val setResult = applyInflateDictionary(s.ptr, dictionary)
-                        if (setResult != Z_OK) {
-                            inflateEnd(s.ptr)
-                            throw CompressionException("inflateSetDictionary failed with code: $setResult")
-                        }
-                    }
+                    Z_NEED_DICT -> applyDictionaryOrEndAndThrow(s.ptr, dictionary)
                     else -> {
                         inflateEnd(s.ptr)
                         throw CompressionException("inflate failed with code: $result")

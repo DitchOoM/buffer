@@ -438,6 +438,13 @@ private class LinuxZlibStreamingDecompressor(
         currentOutput = null
     }
 
+    // The branch count IS the zlib state machine: inflate()'s result set (Z_OK / Z_STREAM_END /
+    // Z_NEED_DICT / error) crossed with the output-chunk states (full / partial / no progress).
+    // The loop needs both jumps for distinct states — `continue` retries after installing a
+    // dictionary, `break` stops when inflate can make no further progress. Flattening either into
+    // a helper that signals loop control through a Boolean would hide the state machine, not
+    // clarify it.
+    @Suppress("CyclomaticComplexMethod", "LoopWithTooManyJumpStatements")
     override fun decompress(
         input: ReadBuffer,
         onOutput: (ReadBuffer) -> Unit,
@@ -469,11 +476,10 @@ private class LinuxZlibStreamingDecompressor(
                         Z_OK -> {}
                         Z_STREAM_END -> streamEnded = true
                         Z_NEED_DICT -> {
-                            val dict = dictionary ?: throw CompressionException("Dictionary required")
-                            val setResult = applyInflateDictionary(s, dict)
-                            if (setResult != Z_OK) {
-                                throw CompressionException("inflateSetDictionary failed with code: $setResult")
-                            }
+                            applyDictionaryOrThrow(s, dictionary)
+                            // Nothing was produced or consumed by this call; retry the same
+                            // inflate() rather than falling through to the produced == 0 check
+                            // below, which would read as "no more progress possible".
                             continue
                         }
                         else -> throw CompressionException("inflate failed with code: $result")
@@ -505,6 +511,10 @@ private class LinuxZlibStreamingDecompressor(
         emitPartialOutput(onOutput)
     }
 
+    // Both jumps are distinct zlib stream states: `continue` retries the same inflate() after
+    // installing a dictionary (Z_NEED_DICT consumes and produces nothing), `break` stops once
+    // zlib leaves output space unused, meaning the stream is drained.
+    @Suppress("LoopWithTooManyJumpStatements")
     override fun finish(onOutput: (ReadBuffer) -> Unit) {
         check(!closed) { "Decompressor is closed" }
         if (streamEnded) {
@@ -535,11 +545,10 @@ private class LinuxZlibStreamingDecompressor(
                     streamEnded = true
                 }
                 Z_NEED_DICT -> {
-                    val dict = dictionary ?: throw CompressionException("Dictionary required")
-                    val setResult = applyInflateDictionary(s, dict)
-                    if (setResult != Z_OK) {
-                        throw CompressionException("inflateSetDictionary failed with code: $setResult")
-                    }
+                    applyDictionaryOrThrow(s, dictionary)
+                    // Nothing was produced or consumed by this call; retry the same inflate()
+                    // rather than falling through to the avail_out check below, which would
+                    // read as "no more output pending".
                     continue
                 }
                 else -> throw CompressionException("inflate finish failed with code: $result")
