@@ -515,7 +515,7 @@ when (val h = CryptoCapabilities.hpke(suite)) {
 // Hardware-backed keys (secure element), if any.
 when (val hw = CryptoCapabilities.hardware) {
     is HardwareSupport.Available   -> { /* hw.provider mints non-exportable keys */ }
-    HardwareSupport.Unavailable    -> { /* JVM / Linux / JS / WASM */ }
+    HardwareSupport.Unavailable    -> { /* JS / WASM always; JVM / Linux until a PKCS#11 token is configured */ }
 }
 ```
 
@@ -695,9 +695,9 @@ Capability flags are tested error paths, not assumptions — the witness drives 
 | HPKE/DHKEM (P-256/384/521) | ✅ | ✅ | ✅ | ✅ | ✅ (WebCrypto async) |
 | HPKE/DHKEM (X25519) | ✅ (JDK 11+) | ✅ **API 34+** | ✅ | ✅ | ✅ newer engines (feature-detected) |
 | HPKE AEAD = ChaCha20-Poly1305 | ✅ (JDK 11+) | ✅ | ✅ | ✅ | ❌ unavailable — not in WebCrypto |
-| Hardware-backed keys (secure element) | ❌ | ✅ AES-GCM + ECDSA-P256 (StrongBox / TEE) | ✅ ECDSA-P256 only (Secure Enclave) | ❌ | ❌ |
+| Hardware-backed keys (secure element) | ⚙️ ECDSA-P256 via PKCS#11 token | ✅ AES-GCM + ECDSA-P256 (StrongBox / TEE) | ✅ ECDSA-P256 only (Secure Enclave) | ⚙️ ECDSA-P256 via PKCS#11 token | ❌ |
 
-Legend: ✅ available · ❌ unavailable (no reachable witness path).
+Legend: ✅ available · ⚙️ available once configured · ❌ unavailable (no reachable witness path).
 
 Notes:
 
@@ -705,7 +705,19 @@ Notes:
 - **Linux** uses a native BoringSSL backend (statically linked) and has full byte-level parity with JVM across every primitive above, including a raw-scalar EC private-key encoding.
 - **Android Ed25519 is unavailable on every API level.** Although Android 14 (API 34+) advertises Ed25519, the platform exposes it **only** through the `AndroidKeyStore` provider for keystore-resident keys — there is no general-purpose `Ed25519` `KeyFactory` that imports a caller-supplied raw 32-byte seed (verified on an API 36 device). A raw-key-import library therefore reports `SignatureSupport.Unavailable` for Ed25519 on Android. (A future hardware-backed, keystore-*generated* Ed25519 could be wired through the `HardwareKeyProvider` surface, but that is non-exportable generate-only and distinct from the import path.) **X25519** *is* genuinely API-gated: Conscrypt added `XDH` in Android 14, so X25519 / ECDH-X25519 and the X25519 HPKE KEM are available on API 34+ and `Unavailable` on 28–33.
 - **JS/WASM** make ChaCha20-Poly1305 unavailable entirely (not in WebCrypto, never polyfilled), and feature-detect Ed25519/X25519 against the engine's WebCrypto at call time.
-- **Hardware-backed keys** are reached through `CryptoCapabilities.hardware` (`HardwareSupport.Available` / `Unavailable`). The provider mints **non-exportable** keys inside the secure element; they carry `KeyProvenance.Hardware` and operate only through the `suspend` AEAD/signature witnesses (the blocking/material path does not compile for them), gated per-use by a `HardwareAuthorization`. **Android Keystore** backs AES-GCM and ECDSA-P256, StrongBox-backed when a dedicated secure element is present (`dedicatedSecureElement = true`) and TEE-backed otherwise. **Apple Secure Enclave** backs ECDSA-P256 only: CryptoKit exposes no app-controlled symmetric Enclave key, so AES-GCM is not eligible there. JVM, Linux, and JS/WASM wire no secure element, so `hardware` is `Unavailable`. A provider-minted signing key publishes its matching public key via `SigningKey.verifyKey`.
+- **Hardware-backed keys** are reached through `CryptoCapabilities.hardware` (`HardwareSupport.Available` / `Unavailable`). The provider mints **non-exportable** keys inside the secure element; they carry `KeyProvenance.Hardware` and operate only through the `suspend` AEAD/signature witnesses (the blocking/material path does not compile for them), gated per-use by a `HardwareAuthorization`. **Android Keystore** backs AES-GCM and ECDSA-P256, StrongBox-backed when a dedicated secure element is present (`dedicatedSecureElement = true`) and TEE-backed otherwise. **Apple Secure Enclave** backs ECDSA-P256 only: CryptoKit exposes no app-controlled symmetric Enclave key, so AES-GCM is not eligible there. **JS/WASM** wire no secure element, so `hardware` is always `Unavailable` there. A provider-minted signing key publishes its matching public key via `SigningKey.verifyKey`.
+
+**Desktop JVM and Linux reach hardware through PKCS#11**, so `hardware` is `Unavailable` until a token is configured and then reports `Available`. A TPM 2.0 via `tpm2-pkcs11` is auto-discovered at well-known Linux paths; **any** conforming PKCS#11 module works when named explicitly — OpenSC for a YubiKey/PIV, a network HSM, SoftHSM:
+
+```
+-Dbuffer.crypto.pkcs11.module=/opt/homebrew/lib/opensc-pkcs11.so
+-Dbuffer.crypto.pkcs11.pin=…
+-Dbuffer.crypto.pkcs11.slotIndex=0        # optional, defaults to the first initialized token
+```
+
+(Kotlin/Native Linux has no system properties; use `BUFFER_CRYPTO_PKCS11_MODULE` / `_PIN` / `_SLOT_INDEX`. The original `…tpm2.pkcs11…` / `BUFFER_CRYPTO_TPM2_PKCS11_*` spellings remain supported.) An explicitly configured module resolves on **macOS and Windows** too — only auto-discovery is Linux-gated. Note that a macOS JVM process cannot reach the Secure Enclave: that requires an entitlement the JDK's `java` launcher does not carry, so a PKCS#11 token is the hardware path there.
+
+Resolution is probed end-to-end — module present, token login accepted, and a full generate → sign → software-verify round-trip — before `Available` is reported, and each refusal is a typed `CapabilityFinding.Tpm2`. **The custody claim is only as trustworthy as the configured module:** the JCA/PKCS#11 layer cannot read `CK_TOKEN_INFO` to confirm a real TPM, so pointing the module path at a software implementation such as SoftHSM yields software keys labelled `KeyCustody.NonExportable.Hardware`. Treat the module path and PIN as security-sensitive, same-integrity-domain configuration.
 
 #### Encoding summary
 

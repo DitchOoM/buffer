@@ -45,9 +45,14 @@ import platform.posix.size_tVar
  * needs no message parsing.
  *
  * **Configuration** (environment only - Kotlin/Native has no system properties):
- *  - `BUFFER_CRYPTO_TPM2_PKCS11_MODULE` - module path; otherwise well-known distro locations.
- *  - `BUFFER_CRYPTO_TPM2_PKCS11_PIN` - token user PIN (required; absent is a typed refusal).
- *  - `BUFFER_CRYPTO_TPM2_PKCS11_SLOT_INDEX` - index into the present-token slot list (default 0).
+ *  - `BUFFER_CRYPTO_PKCS11_MODULE` - module path; otherwise well-known TPM distro locations.
+ *  - `BUFFER_CRYPTO_PKCS11_PIN` - token user PIN (required; absent is a typed refusal).
+ *  - `BUFFER_CRYPTO_PKCS11_SLOT_INDEX` - index into the present-token slot list (default 0).
+ *
+ * The original `BUFFER_CRYPTO_TPM2_PKCS11_*` spellings remain supported and are not deprecated;
+ * where both are set the module-neutral name wins. As on the JVM, nothing on this path is
+ * TPM-specific - the module is dlopen'd and driven over the plain PKCS#11 C API, so any conforming
+ * module works when named explicitly. Only auto-discovery is TPM-shaped.
  *
  * **Eligibility mirrors what the stack actually backs.** ECDSA P-256 is the proven baseline (the
  * resolution probe). ECDH P-256 is probed lazily end-to-end against a BoringSSL software peer - as
@@ -196,10 +201,10 @@ internal actual fun platformProtectedKeyResolution(): ProtectedKeyResolution = l
 @Suppress("ReturnCount", "SwallowedException", "TooGenericExceptionCaught") // typed refusals; probe fails closed
 private fun resolveNativeTpm2Pkcs11(): ProtectedKeyResolution {
     val modulePath =
-        env(MODULE_ENV) ?: WELL_KNOWN_MODULE_PATHS.firstOrNull { access(it, R_OK) == 0 }
+        envPkcs11(MODULE_ENV, LEGACY_MODULE_ENV) ?: WELL_KNOWN_MODULE_PATHS.firstOrNull { access(it, R_OK) == 0 }
             ?: return refused(CapabilityFinding.Tpm2.ModuleNotFound)
-    val pin = env(PIN_ENV) ?: return refused(CapabilityFinding.Tpm2.AuthNotConfigured)
-    val slotIndex = env(SLOT_ENV)?.toIntOrNull() ?: 0
+    val pin = envPkcs11(PIN_ENV, LEGACY_PIN_ENV) ?: return refused(CapabilityFinding.Tpm2.AuthNotConfigured)
+    val slotIndex = envPkcs11(SLOT_ENV, LEGACY_SLOT_ENV)?.toIntOrNull() ?: 0
 
     val token =
         when (val opened = Pkcs11Token.open(modulePath, pin, slotIndex)) {
@@ -417,10 +422,29 @@ private fun structurallyValidPoint(encoded: ReadBuffer): ReadBuffer {
 
 private fun env(name: String): String? = getenv(name)?.toKString()?.takeIf { it.isNotBlank() }
 
-private const val MODULE_ENV = "BUFFER_CRYPTO_TPM2_PKCS11_MODULE"
-private const val PIN_ENV = "BUFFER_CRYPTO_TPM2_PKCS11_PIN"
-private const val SLOT_ENV = "BUFFER_CRYPTO_TPM2_PKCS11_SLOT_INDEX"
+/**
+ * The module-neutral variable first, then the legacy `TPM2`-flavoured one. Both name the same
+ * setting; the `TPM2` spelling shipped first and is published configuration, so it keeps working.
+ * Mirrors the JVM backend's precedence exactly - the newer, accurate name wins if both are set.
+ */
+private fun envPkcs11(
+    name: String,
+    legacy: String,
+): String? = env(name) ?: env(legacy)
 
+private const val MODULE_ENV = "BUFFER_CRYPTO_PKCS11_MODULE"
+private const val PIN_ENV = "BUFFER_CRYPTO_PKCS11_PIN"
+private const val SLOT_ENV = "BUFFER_CRYPTO_PKCS11_SLOT_INDEX"
+
+private const val LEGACY_MODULE_ENV = "BUFFER_CRYPTO_TPM2_PKCS11_MODULE"
+private const val LEGACY_PIN_ENV = "BUFFER_CRYPTO_TPM2_PKCS11_PIN"
+private const val LEGACY_SLOT_ENV = "BUFFER_CRYPTO_TPM2_PKCS11_SLOT_INDEX"
+
+/**
+ * TPM-only by design, matching the JVM backend: these back *auto-discovery*, so widening the list
+ * would silently upgrade a host that configured nothing from [CapabilityFinding.Tpm2.ModuleNotFound]
+ * to a hardware-custody provider. A non-TPM module is named explicitly, never discovered.
+ */
 private val WELL_KNOWN_MODULE_PATHS =
     listOf(
         "/usr/lib/x86_64-linux-gnu/libtpm2_pkcs11.so.1",
