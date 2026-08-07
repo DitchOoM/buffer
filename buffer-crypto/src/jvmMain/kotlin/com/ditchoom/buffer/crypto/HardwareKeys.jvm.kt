@@ -20,8 +20,22 @@ import java.security.interfaces.ECPublicKey
 import java.security.spec.X509EncodedKeySpec
 
 /*
- * Desktop-JVM non-exportable key backend: a TPM 2.0 reached through the standard `tpm2-pkcs11`
- * module via the JCA `SunPKCS11` provider.
+ * Desktop-JVM non-exportable key backend: a PKCS#11 token reached through the JCA `SunPKCS11`
+ * provider. A TPM 2.0 via the standard `tpm2-pkcs11` module is the *auto-discovered* default, not
+ * the only supported token - **nothing on this path is TPM-specific**. Point the module path at any
+ * PKCS#11 implementation (OpenSC for a YubiKey/PIV, a network HSM, SoftHSM) and it resolves through
+ * the same code; the JCA layer cannot read `CK_TOKEN_INFO`, so it never sees what kind of token it
+ * is talking to. Auto-discovery is deliberately TPM-only (see [WELL_KNOWN_MODULE_PATHS]); any other
+ * module is named explicitly.
+ *
+ * **This works on macOS and Windows too.** The `os.name` check in [resolveTpm2Pkcs11] gates only
+ * auto-discovery - an explicitly configured module proceeds on every desktop OS. A macOS JVM
+ * process cannot reach the Secure Enclave (that needs an entitlement the JDK's `java` launcher does
+ * not carry), but a PKCS#11 token is fully reachable there:
+ *
+ * ```
+ * -Dbuffer.crypto.pkcs11.module=/opt/homebrew/lib/opensc-pkcs11.so -Dbuffer.crypto.pkcs11.pin=...
+ * ```
  *
  * Keys are *generated inside* the TPM-backed PKCS#11 token and never leave it: the gated closures
  * drive a JCA `Signature` / `KeyAgreement` over the token key handle, so the private scalar is never
@@ -36,12 +50,17 @@ import java.security.spec.X509EncodedKeySpec
  * distinct states, not one `null`.
  *
  * **Configuration** (system property, falling back to the environment variable):
- *  - `buffer.crypto.tpm2.pkcs11.module` / `BUFFER_CRYPTO_TPM2_PKCS11_MODULE` - module path;
- *    otherwise the well-known distro locations are tried.
- *  - `buffer.crypto.tpm2.pkcs11.pin` / `BUFFER_CRYPTO_TPM2_PKCS11_PIN` - the token user PIN
- *    (required; without it the resolution is [CapabilityFinding.Tpm2.AuthNotConfigured]).
- *  - `buffer.crypto.tpm2.pkcs11.slotIndex` / `BUFFER_CRYPTO_TPM2_PKCS11_SLOT_INDEX` - the
- *    `slotListIndex` handed to SunPKCS11 (default 0, the first initialized token).
+ *  - `buffer.crypto.pkcs11.module` / `BUFFER_CRYPTO_PKCS11_MODULE` - module path; otherwise the
+ *    well-known TPM locations are tried (Linux only).
+ *  - `buffer.crypto.pkcs11.pin` / `BUFFER_CRYPTO_PKCS11_PIN` - the token user PIN (required;
+ *    without it the resolution is [CapabilityFinding.Tpm2.AuthNotConfigured]).
+ *  - `buffer.crypto.pkcs11.slotIndex` / `BUFFER_CRYPTO_PKCS11_SLOT_INDEX` - the `slotListIndex`
+ *    handed to SunPKCS11 (default 0, the first initialized token).
+ *
+ * The original `buffer.crypto.tpm2.pkcs11.*` / `BUFFER_CRYPTO_TPM2_PKCS11_*` spellings remain
+ * supported for every setting above and are not deprecated - they are published configuration. The
+ * module-neutral names exist because the TPM-flavoured ones made a general PKCS#11 backend read as
+ * TPM-only. Where both are set, the module-neutral name wins.
  *
  * **Eligibility mirrors what the stack actually backs.** ECDSA P-256 is the proven baseline (it is
  * the resolution probe). ECDH P-256 is probed lazily end-to-end on a second, derive-capable provider
@@ -117,8 +136,8 @@ internal class Tpm2Pkcs11HardwareKeyProvider(
     private fun configureAgreementSide(): AgreementSide? =
         try {
             val base = Security.getProvider(SUN_PKCS11)
-            val pin = configured(PIN_PROP, PIN_ENV)
-            if (base == null || pin == null) {
+            val pin = pkcs11(Pkcs11Setting.Pin)
+            if (base == null || pin !is Pkcs11Value.Configured) {
                 null
             } else {
                 val conf =
@@ -126,7 +145,7 @@ internal class Tpm2Pkcs11HardwareKeyProvider(
                         AGREEMENT_ATTRIBUTES
                 val provider = base.configure(conf)
                 val keyStore = java.security.KeyStore.getInstance(PKCS11_KEYSTORE, provider)
-                val pinChars = pin.toCharArray()
+                val pinChars = pin.value.toCharArray()
                 try {
                     keyStore.load(null, pinChars)
                 } finally {
@@ -449,19 +468,27 @@ internal fun tpm2Pkcs11ProviderOrNull(): Tpm2Pkcs11HardwareKeyProvider? =
 
 @Suppress("SwallowedException", "TooGenericExceptionCaught", "ReturnCount", "CyclomaticComplexMethod")
 private fun resolveTpm2Pkcs11(): ProtectedKeyResolution {
-    val explicitModule = configured(MODULE_PROP, MODULE_ENV)
+    val explicitModule = pkcs11(Pkcs11Setting.Module)
     val os = System.getProperty("os.name")?.lowercase() ?: ""
     // Without an explicit module, only Linux is worth probing (the module is a Linux stack); a
     // macOS/Windows JVM wires no backend in this version - None, a build fact, not a device refusal.
-    if (explicitModule == null && !os.contains("linux")) return ProtectedKeyResolution.None
+    if (explicitModule is Pkcs11Value.NotConfigured && !os.contains("linux")) return ProtectedKeyResolution.None
 
     val modulePath =
-        explicitModule ?: WELL_KNOWN_MODULE_PATHS.firstOrNull { java.io.File(it).exists() }
-            ?: return refused(CapabilityFinding.Tpm2.ModuleNotFound)
+        when (explicitModule) {
+            is Pkcs11Value.Configured -> explicitModule.value
+            Pkcs11Value.NotConfigured ->
+                WELL_KNOWN_MODULE_PATHS.firstOrNull { java.io.File(it).exists() }
+                    ?: return refused(CapabilityFinding.Tpm2.ModuleNotFound)
+        }
     if (!java.io.File(modulePath).exists()) return refused(CapabilityFinding.Tpm2.ModuleNotFound)
 
-    val pin = configured(PIN_PROP, PIN_ENV) ?: return refused(CapabilityFinding.Tpm2.AuthNotConfigured)
-    val slotIndex = configured(SLOT_PROP, SLOT_ENV)?.toIntOrNull() ?: 0
+    val pin =
+        when (val configured = pkcs11(Pkcs11Setting.Pin)) {
+            is Pkcs11Value.Configured -> configured.value
+            Pkcs11Value.NotConfigured -> return refused(CapabilityFinding.Tpm2.AuthNotConfigured)
+        }
+    val slotIndex = pkcs11(Pkcs11Setting.SlotIndex).orElse("").toIntOrNull() ?: DEFAULT_SLOT_INDEX
 
     // Configure SunPKCS11 + login. Provider.configure is JVM 9+; a JVM 8 runtime is a typed refusal.
     // The logged-in keystore is retained: it is the persistence surface for Tpm2Pkcs11KeyStore.
@@ -552,19 +579,91 @@ private fun ckrOf(failure: Throwable): Ckr? {
     return null
 }
 
-/** System property first, then the environment; blank answers count as absent. */
-private fun configured(
-    prop: String,
-    env: String,
-): String? = System.getProperty(prop)?.takeIf { it.isNotBlank() } ?: System.getenv(env)?.takeIf { it.isNotBlank() }
+/**
+ * A PKCS#11 setting and both spellings it answers to. The module-neutral name is authoritative; the
+ * `tpm2` one shipped first and is published configuration, so it stays supported forever. Every read
+ * goes through [pkcs11] rather than touching these names, because each setting has more than one
+ * reader (the PIN is read by both resolution and the agreement-side configure) and a call site that
+ * reached for a name directly would go blind to a legacy-configured deployment.
+ */
+internal enum class Pkcs11Setting(
+    val prop: String,
+    val env: String,
+    val legacyProp: String,
+    val legacyEnv: String,
+) {
+    Module(
+        "buffer.crypto.pkcs11.module",
+        "BUFFER_CRYPTO_PKCS11_MODULE",
+        "buffer.crypto.tpm2.pkcs11.module",
+        "BUFFER_CRYPTO_TPM2_PKCS11_MODULE",
+    ),
+    Pin(
+        "buffer.crypto.pkcs11.pin",
+        "BUFFER_CRYPTO_PKCS11_PIN",
+        "buffer.crypto.tpm2.pkcs11.pin",
+        "BUFFER_CRYPTO_TPM2_PKCS11_PIN",
+    ),
+    SlotIndex(
+        "buffer.crypto.pkcs11.slotIndex",
+        "BUFFER_CRYPTO_PKCS11_SLOT_INDEX",
+        "buffer.crypto.tpm2.pkcs11.slotIndex",
+        "BUFFER_CRYPTO_TPM2_PKCS11_SLOT_INDEX",
+    ),
+}
 
-private const val MODULE_PROP = "buffer.crypto.tpm2.pkcs11.module"
-private const val MODULE_ENV = "BUFFER_CRYPTO_TPM2_PKCS11_MODULE"
-private const val PIN_PROP = "buffer.crypto.tpm2.pkcs11.pin"
-private const val PIN_ENV = "BUFFER_CRYPTO_TPM2_PKCS11_PIN"
-private const val SLOT_PROP = "buffer.crypto.tpm2.pkcs11.slotIndex"
-private const val SLOT_ENV = "BUFFER_CRYPTO_TPM2_PKCS11_SLOT_INDEX"
+/**
+ * What a [Pkcs11Setting] reads as. "Not configured" is a state of its own rather than a `null`, so a
+ * caller has to name the unconfigured case to compile - which is what the resolution flow wants: an
+ * absent module means "try auto-discovery", an absent PIN means
+ * [CapabilityFinding.Tpm2.AuthNotConfigured], and the two must never be confused for each other.
+ */
+internal sealed interface Pkcs11Value {
+    data class Configured(
+        val value: String,
+    ) : Pkcs11Value
 
+    data object NotConfigured : Pkcs11Value
+}
+
+/**
+ * Reads [setting] from a system property, then the environment, under the module-neutral name and
+ * then the legacy one. Blank answers count as absent. The nullable `String?` of the JDK accessors
+ * stops here; nothing above this line sees one.
+ */
+internal fun pkcs11(setting: Pkcs11Setting): Pkcs11Value {
+    val raw =
+        sequenceOf(
+            System.getProperty(setting.prop),
+            System.getenv(setting.env),
+            System.getProperty(setting.legacyProp),
+            System.getenv(setting.legacyEnv),
+        ).firstOrNull { !it.isNullOrBlank() }
+    return if (raw == null) Pkcs11Value.NotConfigured else Pkcs11Value.Configured(raw)
+}
+
+/** The configured value, or [fallback] when the setting is absent. */
+internal fun Pkcs11Value.orElse(fallback: String): String =
+    when (this) {
+        is Pkcs11Value.Configured -> value
+        Pkcs11Value.NotConfigured -> fallback
+    }
+
+private const val LEGACY_MODULE_PROP = "buffer.crypto.tpm2.pkcs11.module"
+private const val LEGACY_MODULE_ENV = "BUFFER_CRYPTO_TPM2_PKCS11_MODULE"
+private const val LEGACY_PIN_PROP = "buffer.crypto.tpm2.pkcs11.pin"
+private const val LEGACY_PIN_ENV = "BUFFER_CRYPTO_TPM2_PKCS11_PIN"
+private const val LEGACY_SLOT_PROP = "buffer.crypto.tpm2.pkcs11.slotIndex"
+private const val LEGACY_SLOT_ENV = "BUFFER_CRYPTO_TPM2_PKCS11_SLOT_INDEX"
+
+/**
+ * TPM-only by design. These back *auto-discovery*, which runs when no module is configured, so
+ * widening the list would change resolution for deployments that configured nothing: a host with
+ * some other PKCS#11 module installed would begin reporting a hardware-custody provider where it
+ * previously reported [CapabilityFinding.Tpm2.ModuleNotFound]. Given that the custody claim is only
+ * as trustworthy as the module (see the trust-boundary note on this file), a non-TPM module must be
+ * named explicitly rather than discovered.
+ */
 private val WELL_KNOWN_MODULE_PATHS =
     listOf(
         "/usr/lib/x86_64-linux-gnu/libtpm2_pkcs11.so.1",
@@ -574,6 +673,9 @@ private val WELL_KNOWN_MODULE_PATHS =
         "/usr/lib/libtpm2_pkcs11.so.1",
         "/usr/local/lib/libtpm2_pkcs11.so.1",
     )
+
+/** The first initialized token, when the slot index is absent or unparseable. */
+private const val DEFAULT_SLOT_INDEX = 0
 
 private const val SUN_PKCS11 = "SunPKCS11"
 private const val PKCS11_KEYSTORE = "PKCS11"

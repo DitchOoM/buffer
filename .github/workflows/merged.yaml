@@ -109,40 +109,52 @@ jobs:
           echo "Only non-code files changed, skipping"
           echo "flow=skip" >> $GITHUB_OUTPUT
 
-  build-linux:
+  # One version for the whole run, computed before anything builds. The bump flags live
+  # in gradle-args, so this has to run after check-release. See compute-version.yaml for
+  # why every downstream job reads this instead of computing its own.
+  version:
     needs: check-release
+    if: needs.check-release.outputs.flow != 'skip'
+    uses: ./.github/workflows/compute-version.yaml
+    with:
+      gradle-args: ${{ needs.check-release.outputs.gradle-args }}
+
+  build-linux:
+    needs: [check-release, version]
     if: needs.check-release.outputs.flow != 'skip'
     uses: ./.github/workflows/build-linux.yaml
     with:
       gradle-args: ${{ needs.check-release.outputs.gradle-args }}
+      version: ${{ needs.version.outputs.version }}
       # For an actual release/draft publish-to-Central, force a clean, cache-free rebuild
       # of the published artifacts. Non-publishing flows (dry-run) reuse the build cache.
       clean-publish: ${{ needs.check-release.outputs.flow == 'release' || needs.check-release.outputs.flow == 'draft' }}
 
   build-apple:
-    needs: check-release
+    needs: [check-release, version]
     if: needs.check-release.outputs.flow != 'skip'
     uses: ./.github/workflows/build-apple.yaml
     with:
       gradle-args: ${{ needs.check-release.outputs.gradle-args }}
+      version: ${{ needs.version.outputs.version }}
       # For an actual release/draft publish-to-Central, force a clean, cache-free rebuild
       # of the published artifacts. Non-publishing flows (dry-run) reuse the build cache.
       clean-publish: ${{ needs.check-release.outputs.flow == 'release' || needs.check-release.outputs.flow == 'draft' }}
 
   validate:
-    needs: [check-release, build-linux, build-apple]
+    needs: [check-release, version, build-linux, build-apple]
     if: needs.check-release.outputs.flow != 'skip'
     uses: ./.github/workflows/validate-artifacts.yaml
     with:
-      version: ${{ needs.build-linux.outputs.version }}
+      version: ${{ needs.version.outputs.version }}
 
   publish:
-    needs: [check-release, validate]
+    needs: [check-release, version, validate]
     if: needs.check-release.outputs.flow == 'draft' || needs.check-release.outputs.flow == 'release'
     uses: ./.github/workflows/publish-to-central.yaml
     with:
       publishing-type: ${{ needs.check-release.outputs.flow == 'draft' && 'USER_MANAGED' || 'AUTOMATIC' }}
-      version: ${{ needs.build-linux.outputs.version }}
+      version: ${{ needs.version.outputs.version }}
     secrets:
       GPG_KEY_CONTENTS: ${{ secrets.GPG_KEY_CONTENTS }}
       SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
@@ -151,7 +163,7 @@ jobs:
 
   finalize:
     name: Finalize Release
-    needs: [check-release, build-linux, publish]
+    needs: [check-release, version, publish]
     if: always() && needs.check-release.outputs.flow != 'skip' && needs.check-release.outputs.flow != 'dry-run'
     runs-on: ubuntu-latest
     permissions:
@@ -168,7 +180,7 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title || 'Manual release' }}
           PR_URL: ${{ github.event.pull_request.html_url || format('{0}/{1}', github.server_url, github.repository) }}
         run: |
-          version="${{ needs.build-linux.outputs.version }}"
+          version="${{ needs.version.outputs.version }}"
           deployment_id="${{ needs.publish.outputs.deployment-id }}"
           staging_url="https://central.sonatype.com/publishing/deployments"
 
@@ -199,7 +211,7 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title || 'Manual release' }}
           PR_URL: ${{ github.event.pull_request.html_url || format('{0}/{1}', github.server_url, github.repository) }}
         run: |
-          version="${{ needs.build-linux.outputs.version }}"
+          version="${{ needs.version.outputs.version }}"
           tag="v${version}"
 
           # Check if tag already exists
@@ -269,6 +281,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          version="${{ needs.build-linux.outputs.version }}"
+          version="${{ needs.version.outputs.version }}"
           gh release upload "v${version}" /tmp/buffer-sbom.cdx.json \
             --repo="$GITHUB_REPOSITORY" --clobber

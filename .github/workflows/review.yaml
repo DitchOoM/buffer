@@ -11,17 +11,30 @@ permissions:
   contents: read
 
 jobs:
+  # One version for the whole run. The linux and apple builds run in parallel, so
+  # letting each compute its own lets a release publishing to Central mid-run make
+  # them disagree — and `validate` then looks up artifacts under a version only one
+  # of them stamped. See compute-version.yaml.
+  version:
+    uses: ./.github/workflows/compute-version.yaml
+
   build-linux:
+    needs: version
     uses: ./.github/workflows/build-linux.yaml
+    with:
+      version: ${{ needs.version.outputs.version }}
 
   build-apple:
+    needs: version
     uses: ./.github/workflows/build-apple.yaml
+    with:
+      version: ${{ needs.version.outputs.version }}
 
   validate:
-    needs: [build-linux, build-apple]
+    needs: [version, build-linux, build-apple]
     uses: ./.github/workflows/validate-artifacts.yaml
     with:
-      version: ${{ needs.build-linux.outputs.version }}
+      version: ${{ needs.version.outputs.version }}
 
   docs:
     name: "Validate Docs Generation"

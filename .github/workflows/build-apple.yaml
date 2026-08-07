@@ -8,6 +8,11 @@ on:
         required: false
         default: ""
         type: string
+      version:
+        description: "Version to stamp artifacts with. Leave empty to compute one from Maven Central (see compute-version.yaml for why callers should supply it)."
+        required: false
+        default: ""
+        type: string
       clean-publish:
         description: "Publish with --no-build-cache (clean rebuild from source). Set true for the actual release/publish-to-Central path."
         required: false
@@ -15,7 +20,7 @@ on:
         type: boolean
     outputs:
       version:
-        description: "Computed next version"
+        description: "The version this job stamped its artifacts with"
         value: ${{ jobs.build.outputs.version }}
 
 permissions:
@@ -63,9 +68,27 @@ jobs:
           key: gradle-macos-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-macos-
-      - name: Get version
+      # Prefer the version the caller computed once for the whole run. Falling back to a
+      # local `nextVersion` query keeps this workflow usable standalone, but a caller that
+      # also runs build-linux must pass one in — two independent queries straddling a
+      # release to Central return different strings. See compute-version.yaml.
+      #
+      # ORG_GRADLE_PROJECT_version pins it for *every* later Gradle invocation in this job
+      # (all the module build scripts honor an externally-supplied version), so the
+      # artifacts publishToMavenLocal writes carry exactly the string reported here.
+      - name: Resolve version
         id: version
-        run: echo "version=$(./gradlew -q nextVersion ${{ inputs.gradle-args }})" >> $GITHUB_OUTPUT
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="$INPUT_VERSION"
+          if [ -z "$version" ]; then
+            version="$(./gradlew -q nextVersion ${{ inputs.gradle-args }})"
+          fi
+          echo "Building version $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "ORG_GRADLE_PROJECT_version=$version" >> "$GITHUB_ENV"
 
       - name: Run Apple target tests
         run: ./gradlew macosArm64Test iosSimulatorArm64Test ${{ inputs.gradle-args }}

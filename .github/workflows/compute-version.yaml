@@ -1,0 +1,63 @@
+name: "Compute Version"
+
+# Single source of truth for the version used across an entire CI run.
+#
+# getNextVersion (gradle/setup.gradle.kts) reads Maven Central's maven-metadata.xml and
+# increments the patch/minor/major. Every separate `./gradlew nextVersion` (or version-stamping
+# publish) is a *fresh live query* — the in-process cache does not survive across Gradle
+# invocations. When the linux and apple build jobs each compute the version independently, a
+# release publishing to Central mid-run makes them disagree: one job stamps 6.20.1 while the
+# other stamps 6.21.1, and the validate/publish jobs that look artifacts up by version then
+# point at a directory that does not exist ("no Apple-publishing modules detected").
+#
+# Computing the version once here and threading it into every downstream job via `-Pversion`
+# guarantees all artifacts — and every job that resolves them by version — agree on one string.
+
+on:
+  workflow_call:
+    inputs:
+      gradle-args:
+        description: "Extra Gradle arguments that affect the version increment (e.g., -PincrementMinor=true)"
+        required: false
+        default: ""
+        type: string
+    outputs:
+      version:
+        description: "The single next version for this run"
+        value: ${{ jobs.compute.outputs.version }}
+
+permissions:
+  contents: read
+
+jobs:
+  compute:
+    name: "Compute Version"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: gradle
+
+      # Assigned before the redirect, not inlined into `echo`: a failure inside
+      # `$(...)` on the echo line would be swallowed by echo's exit status and
+      # publish an empty version to every downstream job. The emptiness check
+      # catches a `nextVersion` that succeeds but prints nothing.
+      - name: Compute next version
+        id: version
+        run: |
+          set -euo pipefail
+          version="$(./gradlew -q nextVersion ${{ inputs.gradle-args }})"
+          if [ -z "$version" ]; then
+            echo "::error::nextVersion produced an empty version"
+            exit 1
+          fi
+          echo "Version for this run: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
