@@ -2,8 +2,6 @@
 
 package com.ditchoom.buffer.crypto
 
-import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
@@ -29,7 +27,8 @@ import platform.posix.size_tVar
  *
  * These helpers expose buffer memory to the CommonCrypto calls without allocating arrays,
  * mirroring withRemainingBytes / withWritablePointer but adding the small extras the AEAD paths
- * need (optional AAD pointer, absolute sub-views, a native-tag comparison view).
+ * need: an optional-AAD pointer, an offset-form byte pointer (withBytesAt) and an offset-form
+ * constant-time tag compare. None of them takes a reference on the caller's buffer.
  */
 
 /**
@@ -65,28 +64,24 @@ internal inline fun withOptionalBytes(
     aad.withRemainingBytes { ptr, len -> block(ptr, len) }
 }
 
-/** A non-destructive read-ready view of [length] bytes of [source] starting at absolute [from]. */
-internal fun absoluteView(
+/**
+ * Constant-time compare of [count] bytes at buffer index [from] in [source] against the native
+ * [expected] pointer. Mirrors [constantTimeEquals]: it OR-accumulates the XOR of every byte and
+ * never short-circuits, so runtime depends only on [count], never on how many leading bytes
+ * match. Reads are absolute, so [source]'s position and limit are untouched and no view — and so
+ * no pooled reference (#332) — is created.
+ */
+internal fun constantTimeEqualsAt(
     source: ReadBuffer,
     from: Int,
-    length: Int,
-): ReadBuffer {
-    val savedPos = source.position()
-    val savedLimit = source.limit()
-    source.position(from)
-    source.setLimit(from + length)
-    val view = source.slice()
-    source.position(savedPos)
-    source.setLimit(savedLimit)
-    return view
-}
-
-/** Wraps a native [AEAD_TAG_BYTES]-byte tag pointer as a read-ready buffer for constant-time compare. */
-internal fun nativeTagBuffer(tag: CPointer<ByteVar>): ReadBuffer {
-    val out = BufferFactory.Default.allocate(AEAD_TAG_BYTES)
-    for (i in 0 until AEAD_TAG_BYTES) out.writeByte(tag[i])
-    out.resetForRead()
-    return out
+    expected: CPointer<ByteVar>,
+    count: Int,
+): Boolean {
+    var diff = 0
+    for (i in 0 until count) {
+        diff = diff or (source.get(from + i).toInt() xor expected[i].toInt())
+    }
+    return diff == 0
 }
 
 /**
@@ -159,8 +154,10 @@ internal fun appleChaChaPolyOpen(
     val ctLen = ciphertextAndTag.remaining() - AEAD_TAG_BYTES
     require(dest.remaining() >= ctLen) { "dest needs $ctLen bytes remaining, has ${dest.remaining()}" }
 
-    val ctView = absoluteView(ciphertextAndTag, ciphertextAndTag.position(), ctLen)
-    val tagView = absoluteView(ciphertextAndTag, ciphertextAndTag.position() + ctLen, AEAD_TAG_BYTES)
+    // Pointer offsets, not slices: a slice of a PooledBuffer takes a reference the callee would
+    // have to hand back on every path including the VerificationFailed throw (#332).
+    val ctStart = ciphertextAndTag.position()
+    val tagStart = ctStart + ctLen
 
     memScoped {
         val destStart = dest.position()
@@ -170,8 +167,8 @@ internal fun appleChaChaPolyOpen(
         key.requireInMemoryMaterial().withRemainingBytes { keyPtr, keyLen ->
             nonce.withRemainingBytes { ivPtr, ivLen ->
                 withOptionalBytes(aad) { aadPtr, aadLen ->
-                    ctView.withRemainingBytes2(ctLen) { ctPtr ->
-                        tagView.withRemainingBytes2(AEAD_TAG_BYTES) { tagPtr ->
+                    ciphertextAndTag.withBytesAt(ctStart, ctLen) { ctPtr ->
+                        ciphertextAndTag.withBytesAt(tagStart, AEAD_TAG_BYTES) { tagPtr ->
                             // CryptoKit authenticates first; on tag mismatch it returns BCKS_ERR_AUTH
                             // and never writes plaintext into dest.
                             dest.withWritablePointer(ctLen) { ptPtr ->
