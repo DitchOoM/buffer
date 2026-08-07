@@ -648,6 +648,10 @@ private class JvmInflateStreamingDecompressor(
         }
     }
 
+    // Both jumps are distinct inflater states: `continue` retries after installing the dictionary
+    // the inflater just asked for (that call consumed and produced nothing), `break` stops once
+    // the inflater produces no output and wants no dictionary, i.e. it needs more input.
+    @Suppress("LoopWithTooManyJumpStatements")
     private fun drainInflater(onOutput: (ReadBuffer) -> Unit) {
         while (!inflater.needsInput() && !inflater.finished()) {
             if (currentOutput == null) {

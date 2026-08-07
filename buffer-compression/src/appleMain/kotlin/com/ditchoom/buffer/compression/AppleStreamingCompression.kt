@@ -334,13 +334,7 @@ private class AppleZlibStreamingDecompressor(
                         when (result) {
                             Z_OK -> {}
                             Z_STREAM_END -> streamEnded = true
-                            Z_NEED_DICT -> {
-                                val dict = dictionary ?: throw CompressionException("Dictionary required")
-                                val setResult = applyInflateDictionary(s, dict)
-                                if (setResult != Z_OK) {
-                                    throw CompressionException("inflateSetDictionary failed with code: $setResult")
-                                }
-                            }
+                            Z_NEED_DICT -> applyDictionaryOrThrow(s, dictionary)
                             else -> throw CompressionException("inflate failed with code: $result")
                         }
 
@@ -391,11 +385,7 @@ private class AppleZlibStreamingDecompressor(
                             streamEnded = true
                         }
                         Z_NEED_DICT -> {
-                            val dict = dictionary ?: throw CompressionException("Dictionary required")
-                            val setResult = applyInflateDictionary(s, dict)
-                            if (setResult != Z_OK) {
-                                throw CompressionException("inflateSetDictionary failed with code: $setResult")
-                            }
+                            applyDictionaryOrThrow(s, dictionary)
                             // Nothing was produced/consumed by this call; retry on the next
                             // outer loop iteration instead of falling through to the
                             // avail_out-based shouldBreak check below (which would
