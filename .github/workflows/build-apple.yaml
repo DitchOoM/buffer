@@ -101,12 +101,16 @@ jobs:
       # would break. There is no hosted watchOS device runner, so this links the test binaries
       # without running them — the same compile-only gate the Linux workflow applies via
       # linkDebugTestLinuxArm64 before its QEMU steps. Module set mirrors that Linux set.
+      #
+      # The two lists differ by one module on purpose: buffer-crypto registers watchosDeviceArm64
+      # but NOT watchosArm64, because arm64_32 breaks its compileAppleMainKotlinMetadata. See the
+      # target list in buffer-crypto/build.gradle.kts. Note that this step would not have caught
+      # that on its own — per-target linking succeeds; only the shared metadata compilation fails.
       - name: Build watchOS test binaries (link-only, no device runner)
         run: >-
           ./gradlew
           :buffer:linkDebugTestWatchosArm64 :buffer-compression:linkDebugTestWatchosArm64
           :buffer-flow:linkDebugTestWatchosArm64 :buffer-codec-test:linkDebugTestWatchosArm64
-          :buffer-crypto:linkDebugTestWatchosArm64
           :buffer:linkDebugTestWatchosDeviceArm64 :buffer-compression:linkDebugTestWatchosDeviceArm64
           :buffer-flow:linkDebugTestWatchosDeviceArm64 :buffer-codec-test:linkDebugTestWatchosDeviceArm64
           :buffer-crypto:linkDebugTestWatchosDeviceArm64
