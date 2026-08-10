@@ -191,6 +191,119 @@ public abstract interface class com/ditchoom/buffer/crypto/BiometricAuthorizatio
 	public abstract fun authenticate (Lcom/ditchoom/buffer/crypto/UserAuthenticationMethod;Landroidx/biometric/BiometricPrompt$CryptoObject;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
+public abstract interface class com/ditchoom/buffer/crypto/BiometricAvailability {
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/BiometricAvailability$Actionable : com/ditchoom/buffer/crypto/BiometricAvailability {
+}
+
+public final class com/ditchoom/buffer/crypto/BiometricAvailability$Actionable$DeviceLockNotSet : com/ditchoom/buffer/crypto/BiometricAvailability$Actionable {
+	public static final field INSTANCE Lcom/ditchoom/buffer/crypto/BiometricAvailability$Actionable$DeviceLockNotSet;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/BiometricAvailability$Actionable$LockedOutTemporarily : com/ditchoom/buffer/crypto/BiometricAvailability$Actionable {
+	public static final field INSTANCE Lcom/ditchoom/buffer/crypto/BiometricAvailability$Actionable$LockedOutTemporarily;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/BiometricAvailability$Actionable$LockedOutUntilCredential : com/ditchoom/buffer/crypto/BiometricAvailability$Actionable {
+	public abstract fun unlockWithDeviceCredential (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/BiometricAvailability$Actionable$NotEnrolled : com/ditchoom/buffer/crypto/BiometricAvailability$Actionable {
+	public abstract fun getModality ()Lcom/ditchoom/buffer/crypto/BiometricModality;
+	public abstract fun getOpenEnrollment ()Lkotlin/jvm/functions/Function1;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/BiometricAvailability$Actionable$PermissionDenied : com/ditchoom/buffer/crypto/BiometricAvailability$Actionable {
+	public abstract fun openAppSettings (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class com/ditchoom/buffer/crypto/BiometricAvailability$Actionable$SecurityUpdateRequired : com/ditchoom/buffer/crypto/BiometricAvailability$Actionable {
+	public static final field INSTANCE Lcom/ditchoom/buffer/crypto/BiometricAvailability$Actionable$SecurityUpdateRequired;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/BiometricAvailability$Actionable$SensorDisconnected : com/ditchoom/buffer/crypto/BiometricAvailability$Actionable {
+	public static final field INSTANCE Lcom/ditchoom/buffer/crypto/BiometricAvailability$Actionable$SensorDisconnected;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/BiometricAvailability$Actionable$SensorNotPaired : com/ditchoom/buffer/crypto/BiometricAvailability$Actionable {
+	public static final field INSTANCE Lcom/ditchoom/buffer/crypto/BiometricAvailability$Actionable$SensorNotPaired;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/BiometricAvailability$Indeterminate : com/ditchoom/buffer/crypto/BiometricAvailability {
+	public static final field INSTANCE Lcom/ditchoom/buffer/crypto/BiometricAvailability$Indeterminate;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/BiometricAvailability$Ready : com/ditchoom/buffer/crypto/BiometricAvailability {
+	public fun <init> (Lcom/ditchoom/buffer/crypto/BiometricModality;)V
+	public final fun component1 ()Lcom/ditchoom/buffer/crypto/BiometricModality;
+	public final fun copy (Lcom/ditchoom/buffer/crypto/BiometricModality;)Lcom/ditchoom/buffer/crypto/BiometricAvailability$Ready;
+	public static synthetic fun copy$default (Lcom/ditchoom/buffer/crypto/BiometricAvailability$Ready;Lcom/ditchoom/buffer/crypto/BiometricModality;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/BiometricAvailability$Ready;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getModality ()Lcom/ditchoom/buffer/crypto/BiometricModality;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/BiometricAvailability$Unavailable : com/ditchoom/buffer/crypto/BiometricAvailability {
+}
+
+public final class com/ditchoom/buffer/crypto/BiometricAvailability$Unavailable$NoHardware : com/ditchoom/buffer/crypto/BiometricAvailability$Unavailable {
+	public static final field INSTANCE Lcom/ditchoom/buffer/crypto/BiometricAvailability$Unavailable$NoHardware;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/BiometricAvailability$Unavailable$NotSupportedByOs : com/ditchoom/buffer/crypto/BiometricAvailability$Unavailable {
+	public static final field INSTANCE Lcom/ditchoom/buffer/crypto/BiometricAvailability$Unavailable$NotSupportedByOs;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/BiometricAvailability$Unavailable$OnlyWeakBiometrics : com/ditchoom/buffer/crypto/BiometricAvailability$Unavailable {
+	public static final field INSTANCE Lcom/ditchoom/buffer/crypto/BiometricAvailability$Unavailable$OnlyWeakBiometrics;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/BiometricAvailability$Unavailable$TemporarilyUnavailable : com/ditchoom/buffer/crypto/BiometricAvailability$Unavailable {
+	public static final field INSTANCE Lcom/ditchoom/buffer/crypto/BiometricAvailability$Unavailable$TemporarilyUnavailable;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/BiometricModality : java/lang/Enum {
+	public static final field Face Lcom/ditchoom/buffer/crypto/BiometricModality;
+	public static final field Fingerprint Lcom/ditchoom/buffer/crypto/BiometricModality;
+	public static final field Iris Lcom/ditchoom/buffer/crypto/BiometricModality;
+	public static final field Unspecified Lcom/ditchoom/buffer/crypto/BiometricModality;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/ditchoom/buffer/crypto/BiometricModality;
+	public static fun values ()[Lcom/ditchoom/buffer/crypto/BiometricModality;
+}
+
 public final class com/ditchoom/buffer/crypto/BiometricPromptAuthenticator : com/ditchoom/buffer/crypto/BiometricAuthorization {
 	public fun <init> (Landroidx/fragment/app/FragmentActivity;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
 	public synthetic fun <init> (Landroidx/fragment/app/FragmentActivity;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
@@ -439,6 +552,14 @@ public final class com/ditchoom/buffer/crypto/CustodyTier : java/lang/Enum {
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lcom/ditchoom/buffer/crypto/CustodyTier;
 	public static fun values ()[Lcom/ditchoom/buffer/crypto/CustodyTier;
+}
+
+public final class com/ditchoom/buffer/crypto/DeviceCredentialAvailability : java/lang/Enum {
+	public static final field Available Lcom/ditchoom/buffer/crypto/DeviceCredentialAvailability;
+	public static final field NotSet Lcom/ditchoom/buffer/crypto/DeviceCredentialAvailability;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/ditchoom/buffer/crypto/DeviceCredentialAvailability;
+	public static fun values ()[Lcom/ditchoom/buffer/crypto/DeviceCredentialAvailability;
 }
 
 public final class com/ditchoom/buffer/crypto/EcEncodingError : java/lang/Enum {
@@ -1360,6 +1481,15 @@ public abstract interface class com/ditchoom/buffer/crypto/PerUseAgreementCapabl
 	public abstract fun generateKeyAgreement (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy$PerUse;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
+public final class com/ditchoom/buffer/crypto/PromptOutcome : java/lang/Enum {
+	public static final field Failed Lcom/ditchoom/buffer/crypto/PromptOutcome;
+	public static final field Succeeded Lcom/ditchoom/buffer/crypto/PromptOutcome;
+	public static final field UserCancelled Lcom/ditchoom/buffer/crypto/PromptOutcome;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/ditchoom/buffer/crypto/PromptOutcome;
+	public static fun values ()[Lcom/ditchoom/buffer/crypto/PromptOutcome;
+}
+
 public final class com/ditchoom/buffer/crypto/ProtectedKeyAlgorithm : java/lang/Enum {
 	public static final field AesGcm Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
 	public static final field EcdhP256 Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
@@ -1899,6 +2029,37 @@ public final class com/ditchoom/buffer/crypto/UserAuthenticationPolicy$Session :
 }
 
 public abstract interface class com/ditchoom/buffer/crypto/UserAuthenticationPolicy$Windowed : com/ditchoom/buffer/crypto/UserAuthenticationPolicy {
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/UserVerification {
+	public abstract fun availability ()Lcom/ditchoom/buffer/crypto/UserVerificationAvailability;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/UserVerificationAvailability {
+}
+
+public final class com/ditchoom/buffer/crypto/UserVerificationAvailability$Supported : com/ditchoom/buffer/crypto/UserVerificationAvailability {
+	public fun <init> (Lcom/ditchoom/buffer/crypto/BiometricAvailability;Lcom/ditchoom/buffer/crypto/DeviceCredentialAvailability;)V
+	public final fun component1 ()Lcom/ditchoom/buffer/crypto/BiometricAvailability;
+	public final fun component2 ()Lcom/ditchoom/buffer/crypto/DeviceCredentialAvailability;
+	public final fun copy (Lcom/ditchoom/buffer/crypto/BiometricAvailability;Lcom/ditchoom/buffer/crypto/DeviceCredentialAvailability;)Lcom/ditchoom/buffer/crypto/UserVerificationAvailability$Supported;
+	public static synthetic fun copy$default (Lcom/ditchoom/buffer/crypto/UserVerificationAvailability$Supported;Lcom/ditchoom/buffer/crypto/BiometricAvailability;Lcom/ditchoom/buffer/crypto/DeviceCredentialAvailability;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/UserVerificationAvailability$Supported;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBiometric ()Lcom/ditchoom/buffer/crypto/BiometricAvailability;
+	public final fun getDeviceCredential ()Lcom/ditchoom/buffer/crypto/DeviceCredentialAvailability;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/UserVerificationAvailability$Unsupported : com/ditchoom/buffer/crypto/UserVerificationAvailability {
+	public static final field INSTANCE Lcom/ditchoom/buffer/crypto/UserVerificationAvailability$Unsupported;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/UserVerification_androidKt {
+	public static final fun userVerification (Landroidx/fragment/app/FragmentActivity;)Lcom/ditchoom/buffer/crypto/UserVerification;
 }
 
 public final class com/ditchoom/buffer/crypto/VerificationFailed : com/ditchoom/buffer/crypto/CryptoException {

@@ -22,6 +22,12 @@ import Foundation
 // so the os() clause is load-bearing.
 import LocalAuthentication
 #endif
+#if canImport(UIKit) && !os(watchOS) && !os(tvOS)
+// Imported for one thing only: the per-app settings deep link (bcks_open_app_settings). watchOS
+// ships a partial UIKit that has no UIApplication, and tvOS has no settings URL, so both are
+// excluded from the canImport clause rather than relying on canImport alone.
+import UIKit
+#endif
 
 // Status codes — kept in sync with CryptoKitShim.h.
 private let BCKS_OK: Int32 = 0
@@ -30,6 +36,7 @@ private let BCKS_ERR_AUTH: Int32 = -2 // AEAD tag mismatch / signature did not v
 private let BCKS_ERR_BUFFER: Int32 = -3 // output buffer too small
 private let BCKS_ERR_INTERNAL: Int32 = -4 // unexpected CryptoKit failure
 private let BCKS_ERR_PEER: Int32 = -5 // peer public key rejected (malformed / off-curve)
+private let BCKS_ERR_CANCELED: Int32 = -6 // user/system dismissed an interactive prompt (a decision, not a failure)
 
 // Copy a CryptoKit Data result into a caller-provided output buffer, writing the length out.
 private func emit(_ data: Data, _ out: UnsafeMutablePointer<UInt8>?, _ outCap: Int, _ outLen: UnsafeMutablePointer<Int>?) -> Int32 {
@@ -732,4 +739,163 @@ public func bcks_keychain_aliases(
     guard status == errSecSuccess, let array = items as? [[String: Any]] else { return BCKS_ERR_INTERNAL }
     let names = array.compactMap { $0[kSecAttrAccount as String] as? String }
     return emit(Data(names.joined(separator: "\n").utf8), out, outCap, outLenOut)
+}
+
+// =============================================================================
+// Interactive user verification — probing (and remedying) the device's biometric /
+// device-credential facility. Consumed by UserVerification.apple.kt.
+// =============================================================================
+//
+// Everything here is probe-shaped except the two remedies (bcks_la_unlock_with_credential,
+// bcks_open_app_settings). The probes build their own throwaway LAContext and never touch
+// LAContextRegistry, so asking "may this app draw a Face ID button?" can never disturb an evaluated
+// session context that is authorizing Enclave signs.
+
+// Probe results — a SEPARATE space from the BCKS_ERR_* statuses above (device state, not call
+// failure), so only "no LocalAuthentication at all" is negative. Kept in sync with CryptoKitShim.h.
+private let BCKS_BIO_READY: Int32 = 0
+private let BCKS_BIO_NOT_ENROLLED: Int32 = 1
+private let BCKS_BIO_PASSCODE_NOT_SET: Int32 = 2
+private let BCKS_BIO_NOT_AVAILABLE: Int32 = 3
+private let BCKS_BIO_LOCKOUT: Int32 = 4
+private let BCKS_BIO_DISCONNECTED: Int32 = 5
+private let BCKS_BIO_NOT_PAIRED: Int32 = 6
+private let BCKS_BIO_UNSUPPORTED: Int32 = -1
+
+#if canImport(LocalAuthentication) && !os(tvOS) && !os(watchOS)
+// LABiometryType -> the modality codes UserVerification.apple.kt maps: 0 none, 1 touchID, 2 faceID,
+// 3 opticID. `biometryType` does not exist on watchOS/tvOS at all, hence this guard.
+private func biometryTypeCode(_ ctx: LAContext) -> Int32 {
+    #if os(iOS)
+    // Optic ID is spelled only in the iOS-family SDK (an iOS binary running on visionOS reports it),
+    // and only from iOS 17 — below the deployment target here — so it needs both guards.
+    if #available(iOS 17.0, *), ctx.biometryType == .opticID { return 3 }
+    #endif
+    switch ctx.biometryType {
+    case .touchID: return 1
+    case .faceID: return 2
+    default: return 0
+    }
+}
+#endif
+
+// Probe key-capable biometry with a FRESH LAContext and report a BCKS_BIO_* state. Non-prompting.
+// biometryTypeOut is written on every path (0 none, 1 touchID, 2 faceID, 3 opticID) — it is what
+// tells "no sensor" apart from "sensor present, this app may not use it" under BCKS_BIO_NOT_AVAILABLE.
+@_cdecl("bcks_la_biometric_availability")
+public func bcks_la_biometric_availability(_ biometryTypeOut: UnsafeMutablePointer<Int32>?) -> Int32 {
+    #if canImport(LocalAuthentication) && !os(tvOS)
+    #if os(watchOS)
+    // watchOS exposes no discrete biometric policy at all (wrist detection stands in for biometrics
+    // and is not something an app can name or gate a key on), so there is nothing to probe: report
+    // "no biometry" and let the device-credential half carry the platform.
+    biometryTypeOut?.pointee = 0
+    return BCKS_BIO_NOT_AVAILABLE
+    #else
+    let ctx = LAContext()
+    var probeError: NSError?
+    let ok = ctx.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &probeError)
+    // ORDER MATTERS: biometryType is only populated once canEvaluatePolicy has run on the context —
+    // read before that, it reports .none no matter what hardware is present.
+    biometryTypeOut?.pointee = biometryTypeCode(ctx)
+    if ok { return BCKS_BIO_READY }
+    guard let ns = probeError, ns.domain == LAError.errorDomain, let code = LAError.Code(rawValue: ns.code) else {
+        return BCKS_BIO_NOT_AVAILABLE
+    }
+    #if os(macOS)
+    // External-sensor states exist only on macOS (an external Touch ID keyboard) and only from
+    // macOS 12, which is above this shim's macOS 11 deployment target — so both guards are needed.
+    if #available(macOS 12.0, *) {
+        switch code {
+        case .biometryDisconnected: return BCKS_BIO_DISCONNECTED
+        case .biometryNotPaired: return BCKS_BIO_NOT_PAIRED
+        default: break
+        }
+    }
+    #endif
+    switch code {
+    case .biometryNotEnrolled: return BCKS_BIO_NOT_ENROLLED
+    case .passcodeNotSet: return BCKS_BIO_PASSCODE_NOT_SET
+    case .biometryLockout: return BCKS_BIO_LOCKOUT
+    case .biometryNotAvailable: return BCKS_BIO_NOT_AVAILABLE
+    default: return BCKS_BIO_NOT_AVAILABLE
+    }
+    #endif
+    #else
+    biometryTypeOut?.pointee = 0
+    return BCKS_BIO_UNSUPPORTED
+    #endif
+}
+
+// Whether the device has a credential (passcode / PIN) the OS can verify, probed with a FRESH
+// LAContext. 1 = yes, 0 = no or the probe failed, -1 where LocalAuthentication does not exist
+// (tvOS). Non-prompting.
+@_cdecl("bcks_la_device_credential_available")
+public func bcks_la_device_credential_available() -> Int32 {
+    #if canImport(LocalAuthentication) && !os(tvOS)
+    return LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil) ? 1 : 0
+    #else
+    return -1
+    #endif
+}
+
+#if canImport(LocalAuthentication) && !os(tvOS)
+// Map an evaluatePolicy failure onto the status Kotlin turns into a PromptOutcome: an explicit
+// dismissal (by the user, this app, or the system) is a decision, everything else is a failure.
+private func classifyEvaluateFailure(_ error: Error?) -> Int32 {
+    guard let error = error else { return BCKS_ERR_AUTH }
+    let ns = error as NSError
+    guard ns.domain == LAError.errorDomain, let code = LAError.Code(rawValue: ns.code) else {
+        return BCKS_ERR_AUTH
+    }
+    switch code {
+    case .userCancel, .appCancel, .systemCancel: return BCKS_ERR_CANCELED
+    default: return BCKS_ERR_AUTH
+    }
+}
+#endif
+
+// Drive the system DEVICE-CREDENTIAL prompt (passcode / PIN — never biometry) on the context behind
+// `handle`, which carries the localized reason. A successful deviceOwnerAuthentication is what
+// clears a biometry lockout, so this is the remedy for BCKS_BIO_LOCKOUT. BLOCKING — call off the
+// main thread. BCKS_OK, BCKS_ERR_CANCELED on dismissal, BCKS_ERR_AUTH otherwise, BCKS_ERR_INPUT for
+// an unknown handle.
+@_cdecl("bcks_la_unlock_with_credential")
+public func bcks_la_unlock_with_credential(_ handle: Int64) -> Int32 {
+    #if canImport(LocalAuthentication) && !os(tvOS)
+    guard let (ctx, reason) = LAContextRegistry.shared.get(handle) else { return BCKS_ERR_INPUT }
+    // The whole point is to put the credential prompt on screen, so interaction is always allowed.
+    ctx.interactionNotAllowed = false
+    let sem = DispatchSemaphore(value: 0)
+    var status: Int32 = BCKS_ERR_AUTH
+    ctx.evaluatePolicy(
+        .deviceOwnerAuthentication,
+        localizedReason: reason.isEmpty ? "unlock biometrics with your device passcode" : reason
+    ) { success, error in
+        status = success ? BCKS_OK : classifyEvaluateFailure(error)
+        sem.signal()
+    }
+    sem.wait()
+    return status
+    #else
+    return BCKS_ERR_INTERNAL
+    #endif
+}
+
+// Open this app's own OS settings page so the user can re-grant biometry (iOS family only).
+// Fire-and-forget: 1 means the launch was DISPATCHED, never that the page appeared or that anything
+// changed — the caller re-probes afterwards regardless. 0 where no route exists: macOS publishes no
+// supported per-app settings URL, and watchOS / tvOS have none at all.
+@_cdecl("bcks_open_app_settings")
+public func bcks_open_app_settings() -> Int32 {
+    #if canImport(UIKit) && !os(watchOS) && !os(tvOS)
+    // UIApplication is main-thread-only and this is called from a background dispatcher.
+    DispatchQueue.main.async {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
+    }
+    return 1
+    #else
+    return 0
+    #endif
 }
