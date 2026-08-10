@@ -7,10 +7,10 @@ import com.ditchoom.buffer.ReadBuffer
 import java.math.BigInteger
 import java.security.AlgorithmParameters
 import java.security.GeneralSecurityException
+import java.security.InvalidAlgorithmParameterException
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.interfaces.ECPublicKey
-import java.security.interfaces.XECPublicKey
 import java.security.spec.ECGenParameterSpec
 import java.security.spec.ECParameterSpec
 import java.security.spec.ECPoint
@@ -24,9 +24,17 @@ import javax.crypto.KeyAgreement as JcaKeyAgreement
  * P-curves. Public keys are converted between the pinned raw encoding ([KeyAgreementCurve]) and
  * JCA's SPKI/X.509 / `ECPoint` forms here.
  *
- * Android note: X25519 is only present from API 34 (Conscrypt added it in Android 14). The
- * capability flags below probe the provider at class-load time, so on API 28–33 [supportsSyncX25519]
+ * Android note: X25519 arrives with Conscrypt in Android 14 (API 34); below that [supportsSyncX25519]
  * is `false` and the X25519 entry points throw [UnsupportedOperationException] — JVM is unaffected.
+ *
+ * Where Conscrypt is present it differs from the JDK in two ways that both used to break it here, and
+ * both are silent rather than loud, so they are worth stating: its `XDH` [KeyPairGenerator] accepts no
+ * `AlgorithmParameterSpec` at all (see [x25519KeyPairGenerator]), and its public key does not implement
+ * `XECPublicKey` (see [rawX25519]). Between them, X25519 reported *unavailable on every Android API
+ * level* — including 34+, where it works — and the one consumer that picked a curve from that flag
+ * could not negotiate X25519 on any Android device. Measured on API 35, not inferred: the capability
+ * flags below are class-load-time probes, so a probe that stops short of the real call is a capability
+ * answer nobody can see is wrong.
  *
  * `ByteArray` appears in this file at the unavoidable JCA seam (X509EncodedKeySpec / generateSecret /
  * BigInteger) — the same system-API boundary the landed `JvmCryptoBridge` lives at; it is never used
@@ -51,9 +59,37 @@ private fun probe(block: () -> Unit): Boolean =
         false
     }
 
+/**
+ * An `XDH` [KeyPairGenerator] pinned to X25519 on **both** JCA implementations we run on.
+ *
+ * The JDK's `XDH` generator is multi-curve (X25519 / X448) and must be told which one via
+ * [NamedParameterSpec]. Conscrypt's is X25519-only and supports **no** `AlgorithmParameterSpec`
+ * whatsoever — `initialize(NamedParameterSpec.X25519)` raises
+ * `InvalidAlgorithmParameterException: No AlgorithmParameterSpec classes are supported`. Measured on
+ * an API 35 emulator: the generator itself is `OpenSSLXDHKeyPairGenerator`, and `generateKeyPair()`
+ * with no `initialize` returns a working X25519 pair.
+ *
+ * So: ask for the spec, and treat a refusal as "this provider is already X25519". Swallowing the
+ * exception is safe precisely because it is the *parameterless* generator that refuses — a provider
+ * that supported X448 through this entry point would have accepted the spec.
+ */
+private fun x25519KeyPairGenerator(): KeyPairGenerator =
+    KeyPairGenerator.getInstance("XDH").apply {
+        try {
+            initialize(NamedParameterSpec.X25519)
+        } catch (_: InvalidAlgorithmParameterException) {
+            // Conscrypt: X25519-only, nothing to select.
+        }
+    }
+
 private val supportsSyncX25519: Boolean =
     probe {
-        KeyPairGenerator.getInstance("XDH").initialize(NamedParameterSpec.X25519)
+        // Generate, rather than merely constructing the generator. The previous probe stopped at
+        // `initialize`, so Conscrypt's refusal of the spec made it report X25519 UNAVAILABLE on every
+        // Android API level — including the ones where it is fully present and working. Anything
+        // consuming this flag to pick a curve (a DTLS 1.3 key_share, say) was therefore told Android
+        // could not do X25519 at all, which is false. Generating proves the whole path.
+        x25519KeyPairGenerator().generateKeyPair()
         JcaKeyAgreement.getInstance("XDH")
     }
 
@@ -161,20 +197,26 @@ private fun x25519PrivateKeyFrom(scalar: ByteArray): java.security.PrivateKey {
     return KeyFactory.getInstance("XDH").generatePrivate(java.security.spec.PKCS8EncodedKeySpec(der))
 }
 
-/** Little-endian 32-byte raw u from an XEC public key's BigInteger u-coordinate. */
+/**
+ * The little-endian 32-byte raw u of an X25519 public key.
+ *
+ * Reads the **X.509/SPKI encoding** rather than casting to [XECPublicKey], because that cast is not
+ * portable: Conscrypt's key is `com.android.org.conscrypt.OpenSSLX25519PublicKey`, which does **not**
+ * implement [XECPublicKey] (measured on API 35 — `isXEC=false`), so the cast is a
+ * `ClassCastException` on Android even where X25519 works perfectly.
+ *
+ * The SPKI tail is well-defined and identical across providers: `getFormat() == "X.509"`, and the
+ * encoding is [x25519SpkiPrefix] followed by the raw little-endian u — which is exactly what
+ * [x25519PublicKey] writes when going the other way, so the two are now inverses by construction
+ * rather than by coincidence. Measured encoding length is 44 = 12 + 32.
+ */
 private fun rawX25519(pub: java.security.PublicKey): ByteArray {
-    val u = (pub as XECPublicKey).u
-    val be = u.toByteArray() // big-endian, possibly with sign byte / shorter than 32
-    val raw = ByteArray(X25519_RAW_BYTES)
-    // copy big-endian magnitude into the low bytes, then reverse to little-endian
-    var src = be.size - 1
-    var dst = 0
-    while (src >= 0 && dst < X25519_RAW_BYTES) {
-        raw[dst] = be[src]
-        src--
-        dst++
+    val encoded =
+        requireNotNull(pub.encoded) { "X25519 public key exposes no encoding" }
+    require(encoded.size >= X25519_RAW_BYTES) {
+        "X25519 SPKI is ${encoded.size} bytes, too short to carry a $X25519_RAW_BYTES-byte u"
     }
-    return raw
+    return encoded.copyOfRange(encoded.size - X25519_RAW_BYTES, encoded.size)
 }
 
 // ---- ECDH -------------------------------------------------------------------
@@ -232,9 +274,7 @@ internal actual fun generateKeyPairPlatform(curve: KeyAgreementCurve): KeyAgreem
     requireSupported(curve)
     return when (curve) {
         KeyAgreementCurve.X25519 -> {
-            val kpg = KeyPairGenerator.getInstance("XDH")
-            kpg.initialize(NamedParameterSpec.X25519)
-            val kp = kpg.generateKeyPair()
+            val kp = x25519KeyPairGenerator().generateKeyPair()
             val rawPub = rawX25519(kp.public)
             // Private scalar lives in a wiped SecureBuffer. JCA does not expose the raw XDH scalar
             // via a stable API, so we re-import the PKCS#8 octet string we'll need for agreement;
