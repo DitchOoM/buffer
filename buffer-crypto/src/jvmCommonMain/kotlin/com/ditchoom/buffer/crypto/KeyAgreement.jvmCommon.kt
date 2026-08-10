@@ -82,26 +82,36 @@ private fun x25519KeyPairGenerator(): KeyPairGenerator =
         }
     }
 
-private val supportsSyncX25519: Boolean =
-    probe {
-        // Generate, rather than merely constructing the generator. The previous probe stopped at
-        // `initialize`, so Conscrypt's refusal of the spec made it report X25519 UNAVAILABLE on every
-        // Android API level — including the ones where it is fully present and working. Anything
-        // consuming this flag to pick a curve (a DTLS 1.3 key_share, say) was therefore told Android
-        // could not do X25519 at all, which is false. Generating proves the whole path.
-        x25519KeyPairGenerator().generateKeyPair()
-        JcaKeyAgreement.getInstance("XDH")
+/**
+ * Every probe below **generates a key pair** rather than stopping at `initialize`, and each is `lazy`
+ * so only the curves a caller actually asks about are paid for.
+ *
+ * Generating is the whole point: `probe {}` swallows `Throwable`, so a probe that stops short of the
+ * real call turns any provider disagreement into a silent "unavailable" that nothing can see is wrong.
+ * That is exactly how X25519 came to be reported missing on every Android API level — Conscrypt's
+ * `XDH` generator refuses the `AlgorithmParameterSpec` the JDK's requires — and the same shape of
+ * disagreement is possible on the EC side, so [probeEc] is held to the same standard. `lazy` covers
+ * the added cost: a caller that only ever uses P-256 no longer generates a P-521 key to find out.
+ */
+private val supportsSyncX25519: Boolean by
+    lazy {
+        probe {
+            x25519KeyPairGenerator().generateKeyPair()
+            JcaKeyAgreement.getInstance("XDH")
+        }
     }
 
 private fun probeEc(curve: String): Boolean =
     probe {
-        KeyPairGenerator.getInstance("EC").initialize(ECGenParameterSpec(curve))
+        val generator = KeyPairGenerator.getInstance("EC")
+        generator.initialize(ECGenParameterSpec(curve))
+        generator.generateKeyPair()
         JcaKeyAgreement.getInstance("ECDH")
     }
 
-private val supportsSyncEcdhP256: Boolean = probeEc("secp256r1")
-private val supportsSyncEcdhP384: Boolean = probeEc("secp384r1")
-private val supportsSyncEcdhP521: Boolean = probeEc("secp521r1")
+private val supportsSyncEcdhP256: Boolean by lazy { probeEc("secp256r1") }
+private val supportsSyncEcdhP384: Boolean by lazy { probeEc("secp384r1") }
+private val supportsSyncEcdhP521: Boolean by lazy { probeEc("secp521r1") }
 
 /** Whether [curve] has a synchronous JCA path on this runtime (X25519 needs XDH; Android 14+). */
 private fun jvmSupportsSync(curve: KeyAgreementCurve): Boolean =
@@ -209,14 +219,22 @@ private fun x25519PrivateKeyFrom(scalar: ByteArray): java.security.PrivateKey {
  * encoding is [x25519SpkiPrefix] followed by the raw little-endian u — which is exactly what
  * [x25519PublicKey] writes when going the other way, so the two are now inverses by construction
  * rather than by coincidence. Measured encoding length is 44 = 12 + 32.
+ *
+ * That exact shape is *asserted*, not assumed. Taking the trailing 32 bytes of whatever a provider
+ * hands back would turn an unexpected encoding into silently wrong key material — the same class of
+ * quiet wrongness this function exists to fix. A provider that disagrees now fails loudly instead.
  */
 private fun rawX25519(pub: java.security.PublicKey): ByteArray {
     val encoded =
         requireNotNull(pub.encoded) { "X25519 public key exposes no encoding" }
-    require(encoded.size >= X25519_RAW_BYTES) {
-        "X25519 SPKI is ${encoded.size} bytes, too short to carry a $X25519_RAW_BYTES-byte u"
+    val spkiSize = x25519SpkiPrefix.size + X25519_RAW_BYTES
+    require(encoded.size == spkiSize) {
+        "X25519 public key encoding is ${encoded.size} bytes, expected $spkiSize (SPKI prefix + u)"
     }
-    return encoded.copyOfRange(encoded.size - X25519_RAW_BYTES, encoded.size)
+    require(x25519SpkiPrefix.indices.all { encoded[it] == x25519SpkiPrefix[it] }) {
+        "X25519 public key is not in the expected X.509/SPKI form (format=${pub.format})"
+    }
+    return encoded.copyOfRange(x25519SpkiPrefix.size, encoded.size)
 }
 
 // ---- ECDH -------------------------------------------------------------------

@@ -3,6 +3,7 @@ package com.ditchoom.buffer.crypto
 import com.ditchoom.buffer.toHexString
 import kotlinx.coroutines.runBlocking
 import java.security.KeyPairGenerator
+import java.security.spec.ECGenParameterSpec
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -26,6 +27,10 @@ import javax.crypto.KeyAgreement as JcaKeyAgreement
  * So this asserts the **agreement between the two**, in the only direction that can be checked
  * portably: where the JCA can really produce an X25519 keypair, the capability must say so — and then
  * the whole documented path (generate → encode → agree) must actually run.
+ *
+ * X25519 keeps its own named tests because that is the curve that regressed and the one whose key
+ * encoding the fix rewrote, but the honesty check itself is applied to every curve — nothing about a
+ * probe disagreeing with its provider was specific to X25519.
  */
 class X25519CapabilityHonestyTest {
     /** Whether this runtime's JCA can genuinely produce an X25519 keypair, asked without our own flags. */
@@ -49,6 +54,64 @@ class X25519CapabilityHonestyTest {
                 "this is the Conscrypt regression: an AlgorithmParameterSpec-shaped probe reporting a " +
                 "working primitive as missing",
         )
+    }
+
+    /**
+     * Whether the JCA can genuinely produce a key pair on [curve], asked without our own flags.
+     *
+     * Generates rather than merely initializing, for the same reason the production probes do: a
+     * provider can accept a spec and still refuse to produce a key, and only generating tells them
+     * apart. Deliberately does not share code with the production helper — a check that reuses the
+     * thing it is checking cannot detect the thing being wrong.
+     */
+    private fun jcaCanReallyDo(curve: KeyAgreementCurve): Boolean =
+        try {
+            when (curve) {
+                // No AlgorithmParameterSpec at all, which both the JDK (defaults to X25519) and
+                // Conscrypt (X25519-only) accept.
+                KeyAgreementCurve.X25519 -> {
+                    KeyPairGenerator.getInstance("XDH").generateKeyPair()
+                    JcaKeyAgreement.getInstance("XDH")
+                }
+
+                else -> {
+                    val generator = KeyPairGenerator.getInstance("EC")
+                    generator.initialize(ECGenParameterSpec(sec1Name(curve)))
+                    generator.generateKeyPair()
+                    JcaKeyAgreement.getInstance("ECDH")
+                }
+            }
+            true
+        } catch (_: Throwable) {
+            false
+        }
+
+    private fun sec1Name(curve: KeyAgreementCurve): String =
+        when (curve) {
+            KeyAgreementCurve.P256 -> "secp256r1"
+            KeyAgreementCurve.P384 -> "secp384r1"
+            KeyAgreementCurve.P521 -> "secp521r1"
+            KeyAgreementCurve.X25519 -> error("X25519 is not an EC named curve")
+        }
+
+    /**
+     * The same honesty check across every curve, not just the one that regressed.
+     *
+     * X25519 is where the under-reporting was found, but nothing about the failure was specific to
+     * it: any capability probe that disagrees with its provider produces a flag whose wrongness is
+     * invisible to a suite that skips on the flag. Asserting it per curve means the next divergence
+     * — a provider that drops P-521, say — surfaces here rather than at a consumer.
+     */
+    @Test
+    fun everyCurveTheProviderCanGenerateIsReportedAsSupported() {
+        curves.filter { jcaCanReallyDo(it) }.forEach { curve ->
+            assertTrue(
+                CryptoCapabilities.keyAgreement(curve) is KeyAgreementSupport.Blocking,
+                "the JCA produced a ${curve.curveName} key pair, so reporting the curve as Unavailable " +
+                    "is a capability lie — a consumer choosing a curve from this flag would skip one " +
+                    "that works",
+            )
+        }
     }
 
     @Test
@@ -97,5 +160,13 @@ class X25519CapabilityHonestyTest {
     private companion object {
         /** RFC 7748 X25519 public keys are a 32-byte u-coordinate. */
         const val X25519_RAW_PUBLIC_BYTES = 32
+
+        val curves =
+            listOf(
+                KeyAgreementCurve.X25519,
+                KeyAgreementCurve.P256,
+                KeyAgreementCurve.P384,
+                KeyAgreementCurve.P521,
+            )
     }
 }
