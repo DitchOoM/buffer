@@ -87,6 +87,13 @@ fun appleSwiftShim(
             "tvos_arm64" -> Triple("arm64-apple-tvos14", "appletvos", "appletvos")
             "tvos_simulator_arm64" -> Triple("arm64-apple-tvos14-simulator", "appletvsimulator", "appletvsimulator")
             "tvos_x64" -> Triple("x86_64-apple-tvos14-simulator", "appletvsimulator", "appletvsimulator")
+            // arm64_32: the watchOS device ABI (64-bit registers, 32-bit pointers/size_t). The shim
+            // itself is width-agnostic — it passes lengths as size_t and the Kotlin side converts
+            // via `.convert()` — so it needs only the triple, not a separate code path.
+            "watchos_arm64" -> Triple("arm64_32-apple-watchos7", "watchos", "watchos")
+            // watchosDeviceArm64: the 64-bit watchOS device ABI (Series 9 / Ultra). Same watchos SDK
+            // as arm64_32 above, plain arm64 — identical to the ios/tvos device triples in shape.
+            "watchos_device_arm64" -> Triple("arm64-apple-watchos7", "watchos", "watchos")
             "watchos_simulator_arm64" -> Triple("arm64-apple-watchos7-simulator", "watchsimulator", "watchsimulator")
             "watchos_x64" -> Triple("x86_64-apple-watchos7-simulator", "watchsimulator", "watchsimulator")
             else -> return null
@@ -238,11 +245,15 @@ kotlin {
             iosArm64()
             iosSimulatorArm64()
             iosX64()
-            // watchosArm64 (arm64_32) is intentionally omitted: it is the only 32-bit
-            // Apple target, and appleMain calls CommonCrypto/Security size_t functions plus
-            // the commoncryptogcm cinterop below. Its 32-bit size_t width cannot be verified
-            // on the 64-bit hosts/CI we build on, so we keep it out rather than ship unverified
-            // crypto. watchOS is still covered by the simulator + x64 (64-bit) targets below.
+            // watchosArm64 is arm64_32 — the only 32-bit-pointer Apple target, so it is the one
+            // place where `size_t` is 32 bits wide. Every appleMain call into CommonCrypto/Security
+            // and the commoncryptogcm cinterop passes lengths through `size_tVar` + `.convert()`,
+            // which resolves per-target, so the width is handled by construction rather than by
+            // assuming 64 bits. Compile coverage comes from the Apple CI publish (which builds
+            // every registered target); there is no hosted watchOS device runner, so its tests run
+            // on the simulator + x64 targets below.
+            watchosArm64()
+            watchosDeviceArm64()
             watchosSimulatorArm64()
             watchosX64()
             tvosArm64()

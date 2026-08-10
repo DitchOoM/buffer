@@ -93,6 +93,25 @@ jobs:
       - name: Run Apple target tests
         run: ./gradlew macosArm64Test iosSimulatorArm64Test ${{ inputs.gradle-args }}
 
+      # Compile-and-link the appleTest sources for watchOS. `publishToMavenLocal` below builds
+      # every registered target, but MAIN sources only — so without this step no watchOS test code
+      # is ever compiled, and the tested targets above (macosArm64, iosSimulatorArm64) are both
+      # 64-bit arm64. watchosArm64 is arm64_32: the only Apple target with 32-bit pointers and a
+      # 32-bit `size_t`, which is exactly where an appleTest helper that assumes 64-bit widths
+      # would break. There is no hosted watchOS device runner, so this links the test binaries
+      # without running them — the same compile-only gate the Linux workflow applies via
+      # linkDebugTestLinuxArm64 before its QEMU steps. Module set mirrors that Linux set.
+      - name: Build watchOS test binaries (link-only, no device runner)
+        run: >-
+          ./gradlew
+          :buffer:linkDebugTestWatchosArm64 :buffer-compression:linkDebugTestWatchosArm64
+          :buffer-flow:linkDebugTestWatchosArm64 :buffer-codec-test:linkDebugTestWatchosArm64
+          :buffer-crypto:linkDebugTestWatchosArm64
+          :buffer:linkDebugTestWatchosDeviceArm64 :buffer-compression:linkDebugTestWatchosDeviceArm64
+          :buffer-flow:linkDebugTestWatchosDeviceArm64 :buffer-codec-test:linkDebugTestWatchosDeviceArm64
+          :buffer-crypto:linkDebugTestWatchosDeviceArm64
+          ${{ inputs.gradle-args }}
+
       # The release/publish-to-Central path passes clean-publish: true to force a cold,
       # cache-free rebuild of the published artifacts. PR validation reuses the build cache.
       - name: Publish to Maven Local
