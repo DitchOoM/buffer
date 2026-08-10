@@ -1,5 +1,7 @@
 package com.ditchoom.buffer.crypto
 
+import com.ditchoom.buffer.toHexString
+import kotlinx.coroutines.runBlocking
 import java.security.KeyPairGenerator
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -39,7 +41,7 @@ class X25519CapabilityHonestyTest {
         }
 
     @Test
-    fun a_provider_that_can_do_x25519_is_reported_as_able_to_do_x25519() {
+    fun providerThatCanDoX25519IsReportedAsAbleToDoX25519() {
         if (!jcaCanReallyDoX25519()) return // genuinely absent (e.g. Android < 34); nothing to contradict
         assertTrue(
             CryptoCapabilities.keyAgreement(KeyAgreementCurve.X25519) is KeyAgreementSupport.Blocking,
@@ -50,7 +52,7 @@ class X25519CapabilityHonestyTest {
     }
 
     @Test
-    fun the_reported_capability_can_complete_a_real_agreement() {
+    fun reportedCapabilityCanCompleteARealAgreement() {
         val support = CryptoCapabilities.keyAgreement(KeyAgreementCurve.X25519)
         if (support !is KeyAgreementSupport.Blocking) return
         // Not merely "the flag is true": generate two pairs through our own ops and agree, so a flag that
@@ -60,27 +62,16 @@ class X25519CapabilityHonestyTest {
         val b = support.ops.generateKeyPairBlocking()
         try {
             assertEquals(
-                32,
+                X25519_RAW_PUBLIC_BYTES,
                 a.publicKey.encoded.remaining(),
-                "X25519 raw public point is 32 bytes; a different width means the SPKI tail was misread",
+                "X25519 raw public point is $X25519_RAW_PUBLIC_BYTES bytes; a different width means the " +
+                    "SPKI tail was misread",
             )
-            val ab =
-                runBlockingCompat {
-                    support.ops.deriveTlsPremasterSecret(
-                        a.privateKey,
-                        KeyAgreementPublicKey.of(KeyAgreementCurve.X25519, b.publicKey.encoded),
-                    )
-                }
-            val ba =
-                runBlockingCompat {
-                    support.ops.deriveTlsPremasterSecret(
-                        b.privateKey,
-                        KeyAgreementPublicKey.of(KeyAgreementCurve.X25519, a.publicKey.encoded),
-                    )
-                }
+            val ab = agree(support, a, b)
+            val ba = agree(support, b, a)
             try {
-                assertEquals(hex(ab), hex(ba), "both sides must derive the same X25519 secret")
-                assertTrue(hex(ab).any { it != '0' }, "the shared secret must not be all-zero")
+                assertEquals(ab.toHexString(), ba.toHexString(), "both sides must derive the same X25519 secret")
+                assertTrue(ab.toHexString().any { it != '0' }, "the shared secret must not be all-zero")
             } finally {
                 ab.freeNativeMemory()
                 ba.freeNativeMemory()
@@ -91,16 +82,20 @@ class X25519CapabilityHonestyTest {
         }
     }
 
-    private fun hex(buf: com.ditchoom.buffer.ReadBuffer): String {
-        val start = buf.position()
-        val sb = StringBuilder()
-        while (buf.remaining() > 0) {
-            val v = buf.readByte().toInt() and 0xFF
-            sb.append("0123456789abcdef"[v ushr 4]).append("0123456789abcdef"[v and 0xF])
-        }
-        buf.position(start)
-        return sb.toString()
+    /** [own]'s private key agreed against [peer]'s public point, through the reported blocking ops. */
+    private fun agree(
+        support: KeyAgreementSupport.Blocking,
+        own: KeyAgreementKeyPair,
+        peer: KeyAgreementKeyPair,
+    ) = runBlocking {
+        support.ops.deriveTlsPremasterSecret(
+            own.privateKey,
+            KeyAgreementPublicKey.of(KeyAgreementCurve.X25519, peer.publicKey.encoded),
+        )
     }
 
-    private fun <T> runBlockingCompat(block: suspend () -> T): T = kotlinx.coroutines.runBlocking { block() }
+    private companion object {
+        /** RFC 7748 X25519 public keys are a 32-byte u-coordinate. */
+        const val X25519_RAW_PUBLIC_BYTES = 32
+    }
 }
