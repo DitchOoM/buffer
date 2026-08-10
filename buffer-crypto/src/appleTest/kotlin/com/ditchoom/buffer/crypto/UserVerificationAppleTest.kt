@@ -70,7 +70,7 @@ class UserVerificationAppleTest {
         when (state) {
             is BiometricAvailability.Ready -> true
             is BiometricAvailability.Actionable.NotEnrolled -> true
-            BiometricAvailability.Actionable.DeviceLockNotSet -> true
+            is BiometricAvailability.Actionable.DeviceLockNotSet -> true
             is BiometricAvailability.Actionable.PermissionDenied -> true
             is BiometricAvailability.Actionable.LockedOutUntilCredential -> true
             // macOS external Touch ID keyboards — Apple-only, never produced on Android.
@@ -100,7 +100,7 @@ class UserVerificationAppleTest {
         when (state) {
             is BiometricAvailability.Ready -> "ready:${state.modality}"
             is BiometricAvailability.Actionable.NotEnrolled -> "not-enrolled"
-            BiometricAvailability.Actionable.DeviceLockNotSet -> "device-lock-not-set"
+            is BiometricAvailability.Actionable.DeviceLockNotSet -> "device-lock-not-set"
             is BiometricAvailability.Actionable.PermissionDenied -> "permission-denied"
             BiometricAvailability.Actionable.SecurityUpdateRequired -> "security-update-required"
             BiometricAvailability.Actionable.SensorDisconnected -> "sensor-disconnected"

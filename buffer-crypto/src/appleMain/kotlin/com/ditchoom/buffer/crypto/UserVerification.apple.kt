@@ -108,7 +108,7 @@ internal class AppleUserVerification(
         when (status) {
             BCKS_BIO_READY -> BiometricAvailability.Ready(biometryType.toModality())
             BCKS_BIO_NOT_ENROLLED -> AppleNotEnrolled(biometryType.toModality())
-            BCKS_BIO_PASSCODE_NOT_SET -> BiometricAvailability.Actionable.DeviceLockNotSet
+            BCKS_BIO_PASSCODE_NOT_SET -> AppleDeviceLockNotSet
             BCKS_BIO_LOCKOUT -> AppleLockedOutUntilCredential(authenticator)
             BCKS_BIO_DISCONNECTED -> BiometricAvailability.Actionable.SensorDisconnected
             BCKS_BIO_NOT_PAIRED -> BiometricAvailability.Actionable.SensorNotPaired
@@ -168,6 +168,20 @@ internal class AppleNotEnrolled(
     override fun hashCode(): Int = modality.hashCode()
 
     override fun toString(): String = "NotEnrolled(modality=$modality)"
+}
+
+/**
+ * Apple's [BiometricAvailability.Actionable.DeviceLockNotSet]: `LAError.passcodeNotSet`.
+ *
+ * [openDeviceLockSetup] is `null` — passcode setup has no public deep link on any Apple platform
+ * (`App-Prefs:` URLs are private API; macOS's `x-apple.systempreferences:` pane identifiers are
+ * undocumented and unstable across releases, so the library does not ship them — an app that
+ * accepts that brittleness can open the URL itself). Stateless, hence an object.
+ */
+internal object AppleDeviceLockNotSet : BiometricAvailability.Actionable.DeviceLockNotSet {
+    override val openDeviceLockSetup: (suspend () -> Boolean)? = null
+
+    override fun toString(): String = "DeviceLockNotSet"
 }
 
 /**

@@ -197,11 +197,8 @@ public abstract interface class com/ditchoom/buffer/crypto/BiometricAvailability
 public abstract interface class com/ditchoom/buffer/crypto/BiometricAvailability$Actionable : com/ditchoom/buffer/crypto/BiometricAvailability {
 }
 
-public final class com/ditchoom/buffer/crypto/BiometricAvailability$Actionable$DeviceLockNotSet : com/ditchoom/buffer/crypto/BiometricAvailability$Actionable {
-	public static final field INSTANCE Lcom/ditchoom/buffer/crypto/BiometricAvailability$Actionable$DeviceLockNotSet;
-	public fun equals (Ljava/lang/Object;)Z
-	public fun hashCode ()I
-	public fun toString ()Ljava/lang/String;
+public abstract interface class com/ditchoom/buffer/crypto/BiometricAvailability$Actionable$DeviceLockNotSet : com/ditchoom/buffer/crypto/BiometricAvailability$Actionable {
+	public abstract fun getOpenDeviceLockSetup ()Lkotlin/jvm/functions/Function1;
 }
 
 public final class com/ditchoom/buffer/crypto/BiometricAvailability$Actionable$LockedOutTemporarily : com/ditchoom/buffer/crypto/BiometricAvailability$Actionable {

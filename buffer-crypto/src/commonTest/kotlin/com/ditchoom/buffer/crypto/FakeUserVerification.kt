@@ -66,6 +66,27 @@ internal class FakeNotEnrolled(
 }
 
 /**
+ * [BiometricAvailability.Actionable.DeviceLockNotSet] with a scripted lock-setup launch. `launches
+ * = null` models the Apple side (no public route to passcode setup); a Boolean models Android's
+ * launch-and-report remedy.
+ */
+internal class FakeDeviceLockNotSet(
+    launches: Boolean? = true,
+) : BiometricAvailability.Actionable.DeviceLockNotSet {
+    /** How many times the remedy was invoked — `0` proves the "no OS route" path skipped it. */
+    var lockSetupLaunches: Int = 0
+        private set
+
+    override val openDeviceLockSetup: (suspend () -> Boolean)? =
+        launches?.let { result ->
+            suspend {
+                lockSetupLaunches++
+                result
+            }
+        }
+}
+
+/**
  * [BiometricAvailability.Actionable.PermissionDenied] whose settings launch reports [presents]
  * (`false` is the honest answer on the Apple platforms that publish no per-app settings URL).
  */

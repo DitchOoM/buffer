@@ -111,7 +111,7 @@ internal class AndroidUserVerification(
                 if (isDeviceSecure()) {
                     AndroidNotEnrolled(activity)
                 } else {
-                    BiometricAvailability.Actionable.DeviceLockNotSet
+                    AndroidDeviceLockNotSet(activity)
                 }
 
             // "No Class 3 hardware" and "no hardware at all" are different UX stories: a device whose
@@ -203,27 +203,7 @@ internal class AndroidNotEnrolled(
      * screens, which surfaces as `ActivityNotFoundException`. A `false` is a signal to fall back to
      * prose ("Set up a fingerprint in Settings"), never a crash.
      */
-    private suspend fun launchEnrollment(): Boolean =
-        // Main-executor dispatch (not Dispatchers.Main): the module depends on coroutines-core only,
-        // and core's Main dispatcher throws without the kotlinx-coroutines-android artifact. Same
-        // choice, for the same reason, as BiometricPromptAuthenticator.
-        suspendCancellableCoroutine { cont ->
-            ContextCompat.getMainExecutor(activity).execute {
-                // RuntimeException, not just ActivityNotFoundException: OEM settings activities also
-                // throw SecurityException (activity not exported to third-party callers) and bare
-                // RuntimeExceptions. The contract promises launch-failure -> false, never a crash —
-                // and an escaped throwable here would both kill the main thread AND leave the
-                // continuation suspended forever.
-                val launched =
-                    try {
-                        activity.startActivity(enrollmentIntent())
-                        true
-                    } catch (_: RuntimeException) {
-                        false
-                    }
-                if (cont.isActive) cont.resume(launched)
-            }
-        }
+    private suspend fun launchEnrollment(): Boolean = activity.launchFirstResolvable(enrollmentIntent())
 
     /**
      * The canonical enrollment Intent for this API level, centralized here so no consumer has to
@@ -256,3 +236,72 @@ internal class AndroidNotEnrolled(
             else -> Intent(Settings.ACTION_SECURITY_SETTINGS)
         }
 }
+
+/**
+ * [BiometricAvailability.Actionable.DeviceLockNotSet] for Android: key-capable hardware exists but
+ * no screen lock is set, so enrollment is impossible until one is. Closes over the [activity] the
+ * remedy launches from.
+ */
+internal class AndroidDeviceLockNotSet(
+    private val activity: FragmentActivity,
+) : BiometricAvailability.Actionable.DeviceLockNotSet {
+    /**
+     * Non-`null` on Android. On API 30+ the first choice is [Settings.ACTION_BIOMETRIC_ENROLL]:
+     * stock Android's enroll flow detects the missing screen lock and walks the user through
+     * setting it *and* enrolling in one pass — a single tap can carry this state all the way to
+     * [BiometricAvailability.Ready]. OEM builds that strip that flow fall back to
+     * [Settings.ACTION_SECURITY_SETTINGS] (the screen-lock settings themselves); only if both
+     * refuse does this report `false` and the app falls back to prose.
+     */
+    override val openDeviceLockSetup: (suspend () -> Boolean)? = { launchDeviceLockSetup() }
+
+    private suspend fun launchDeviceLockSetup(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            activity.launchFirstResolvable(
+                Intent(Settings.ACTION_BIOMETRIC_ENROLL).putExtra(
+                    Settings.EXTRA_BIOMETRIC_AUTHENTICATORS_ALLOWED,
+                    BiometricManager.Authenticators.BIOMETRIC_STRONG,
+                ),
+                Intent(Settings.ACTION_SECURITY_SETTINGS),
+            )
+        } else {
+            activity.launchFirstResolvable(Intent(Settings.ACTION_SECURITY_SETTINGS))
+        }
+
+    /** Value equality over the reported state (see [AndroidNotEnrolled.equals]). */
+    override fun equals(other: Any?): Boolean = other is AndroidDeviceLockNotSet
+
+    override fun hashCode(): Int = this::class.hashCode()
+
+    override fun toString(): String = "DeviceLockNotSet"
+}
+
+/**
+ * Launches the first of [intents] that actually starts, on the main executor, resuming with whether
+ * any launched. Main-executor dispatch (not `Dispatchers.Main`): the module depends on
+ * coroutines-core only, and core's Main dispatcher throws without the kotlinx-coroutines-android
+ * artifact — same choice, for the same reason, as `BiometricPromptAuthenticator`.
+ *
+ * Catches [RuntimeException], not just `ActivityNotFoundException`: OEM settings activities also
+ * throw `SecurityException` (activity not exported to third-party callers) and bare
+ * RuntimeExceptions. The remedies' contract promises launch-failure -> `false`, never a crash — and
+ * an escaped throwable here would both kill the main thread AND leave the continuation suspended
+ * forever. Launch-time try-and-report is deliberate: since Android 11, `resolveActivity()` lies
+ * unless the *consumer app* declares `<queries>` for each action, while `startActivity()` may fire
+ * blind — so this is the one mechanism that needs nothing from the consumer's manifest.
+ */
+private suspend fun FragmentActivity.launchFirstResolvable(vararg intents: Intent): Boolean =
+    suspendCancellableCoroutine { cont ->
+        ContextCompat.getMainExecutor(this).execute {
+            val launched =
+                intents.any { intent ->
+                    try {
+                        startActivity(intent)
+                        true
+                    } catch (_: RuntimeException) {
+                        false
+                    }
+                }
+            if (cont.isActive) cont.resume(launched)
+        }
+    }

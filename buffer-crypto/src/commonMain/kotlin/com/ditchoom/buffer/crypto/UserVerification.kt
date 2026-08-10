@@ -59,8 +59,8 @@ package com.ditchoom.buffer.crypto
  *             showCta("Allow biometrics for this app", action = biometric::openAppSettings)
  *         is BiometricAvailability.Actionable.LockedOutUntilCredential ->
  *             showCta("Unlock with your device passcode") { biometric.unlockWithDeviceCredential() }
- *         BiometricAvailability.Actionable.DeviceLockNotSet ->
- *             showCta("Set a screen lock to use biometrics")
+ *         is BiometricAvailability.Actionable.DeviceLockNotSet ->
+ *             showCta("Set a screen lock to use biometrics", action = biometric.openDeviceLockSetup)
  *         is BiometricAvailability.Actionable -> showGenericCta(biometric)
  *         is BiometricAvailability.Unavailable -> hideBiometricOption()
  *         // Status could not be determined — attempting the prompt is legitimate.
@@ -186,7 +186,17 @@ sealed interface BiometricAvailability {
          * enrollment from this state dead-ends them. Setting a device credential also moves
          * [DeviceCredentialAvailability] to [DeviceCredentialAvailability.Available].
          */
-        data object DeviceLockNotSet : Actionable
+        interface DeviceLockNotSet : Actionable {
+            /**
+             * Launches the OS flow that sets a device credential; `null` ⇔ the OS has no route
+             * (Apple — passcode setup has no public deep link). On Android API 30+ this is the
+             * biometric-enroll flow itself, which walks the user through setting the lock *and*
+             * enrolling in one pass, so a single tap can carry this state all the way to [Ready].
+             * `true` means the flow was launched, not completed — re-probe with
+             * [UserVerification.availability] on resume.
+             */
+            val openDeviceLockSetup: (suspend () -> Boolean)?
+        }
 
         /**
          * The user revoked this app's permission to use biometry (Apple: Face ID toggled off for

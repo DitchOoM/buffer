@@ -108,4 +108,20 @@ class UserVerificationInstrumentedTest {
         // line IS the test's product.
         Log.i("UserVerificationTest", "openEnrollment -> $launched on this OEM build")
     }
+
+    /**
+     * Same shape as the enrollment datum, for [BiometricAvailability.Actionable.DeviceLockNotSet]:
+     * on a device with no screen lock, invoke the real lock-setup remedy and record whether this
+     * OEM's `ACTION_BIOMETRIC_ENROLL`-or-`ACTION_SECURITY_SETTINGS` tiering launched. Skips
+     * (trivially passes) in any other state.
+     */
+    @Test
+    fun deviceLockSetupRemedyReturnsHonestlyWhenLockNotSet() {
+        val state = withVerification { _, v -> v.availability() } as UserVerificationAvailability.Supported
+        val lockNotSet =
+            state.biometric as? BiometricAvailability.Actionable.DeviceLockNotSet ?: return
+        val remedy = assertNotNull(lockNotSet.openDeviceLockSetup, "Android always publishes a lock-setup route")
+        val launched = runBlocking { remedy() }
+        Log.i("UserVerificationTest", "openDeviceLockSetup -> $launched on this OEM build")
+    }
 }

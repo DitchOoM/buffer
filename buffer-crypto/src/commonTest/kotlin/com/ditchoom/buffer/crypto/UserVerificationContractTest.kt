@@ -63,7 +63,7 @@ class UserVerificationContractTest {
         when (state) {
             is BiometricAvailability.Ready -> "ready"
             is BiometricAvailability.Actionable.NotEnrolled -> "not-enrolled"
-            BiometricAvailability.Actionable.DeviceLockNotSet -> "device-lock-not-set"
+            is BiometricAvailability.Actionable.DeviceLockNotSet -> "device-lock-not-set"
             is BiometricAvailability.Actionable.PermissionDenied -> "permission-denied"
             BiometricAvailability.Actionable.SecurityUpdateRequired -> "security-update-required"
             BiometricAvailability.Actionable.SensorDisconnected -> "sensor-disconnected"
@@ -89,7 +89,7 @@ class UserVerificationContractTest {
     private fun actionableStates(): List<BiometricAvailability.Actionable> =
         listOf(
             FakeNotEnrolled(),
-            BiometricAvailability.Actionable.DeviceLockNotSet,
+            FakeDeviceLockNotSet(),
             FakePermissionDenied(),
             BiometricAvailability.Actionable.SecurityUpdateRequired,
             BiometricAvailability.Actionable.SensorDisconnected,
@@ -233,6 +233,21 @@ class UserVerificationContractTest {
             val strippedOpen = assertNotNull(stripped.openEnrollment)
             assertFalse(strippedOpen(), "false means the Intent never launched")
             assertEquals(1, stripped.enrollmentLaunches)
+        }
+
+    @Test
+    fun deviceLockNotSetCarriesTheSameNullableRemedyShape() =
+        runTest {
+            // Android: a route exists (API 30+ walks lock-setup AND enrollment in one flow).
+            val launched = FakeDeviceLockNotSet()
+            val open = assertNotNull(launched.openDeviceLockSetup, "Android supplies a lock-setup route")
+            assertTrue(open(), "true means the flow was launched")
+            assertEquals(1, launched.lockSetupLaunches)
+
+            // Apple: passcode setup has no public deep link — null, prose fallback, remedy never runs.
+            val prose = FakeDeviceLockNotSet(launches = null)
+            assertNull(prose.openDeviceLockSetup, "no OS route reports null, not a no-op lambda")
+            assertEquals(0, prose.lockSetupLaunches, "nothing was launched")
         }
 
     @Test
