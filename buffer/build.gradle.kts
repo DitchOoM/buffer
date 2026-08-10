@@ -5,6 +5,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.KotlinSourceSetTree
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 import org.jetbrains.kotlin.konan.target.HostManager
+import org.jetbrains.kotlin.konan.target.KonanTarget
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -247,6 +248,24 @@ kotlin {
     }
 
     applyDefaultHierarchyTemplate()
+
+    // The 64-bit half of `decodeWithFoundation` (see StringDecoding.apple.kt for why that function
+    // cannot simply live in appleMain). `NSUInteger` is 32 bits on watchosArm64 — the arm64_32 ABI —
+    // and 64 bits on every other Apple target, so the Foundation call needs one body per width, not
+    // one per target. This source set holds the LP64 body; watchosArm64Main holds the other.
+    //
+    // Membership is derived from the Konan target instead of listing source sets by name, so
+    // registering a new Apple target sorts it onto the correct side with no edit here and no new
+    // actual. Guarded on appleMain existing because Apple targets are only registered on Mac hosts.
+    sourceSets.findByName("appleMain")?.let { appleMain ->
+        val appleLp64Main = sourceSets.create("appleLp64Main") { dependsOn(appleMain) }
+        targets.withType<KotlinNativeTarget>().configureEach {
+            if (konanTarget.family.isAppleFamily && konanTarget != KonanTarget.WATCHOS_ARM64) {
+                compilations.getByName("main").defaultSourceSet.dependsOn(appleLp64Main)
+            }
+        }
+    }
+
     sourceSets {
         // Create nonJvmMain source set shared by nativeMain and wasmJsMain
         // This contains ByteArrayBuffer which is used for managed memory on these platforms

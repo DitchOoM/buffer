@@ -9,8 +9,12 @@ import platform.Foundation.NSString
 import platform.Foundation.create
 
 /**
- * watchOS device (arm64) implementation using Foundation's NSString.
- * On watchOS devices, NSData and NSString.create expect UInt parameters.
+ * Foundation `NSString` decoding for `watchosArm64` — the arm64_32 ABI, 64-bit registers with 32-bit
+ * pointers, and the only Apple target where `NSUInteger` is 32 bits wide. Hence `toUInt()` where
+ * every other Apple target uses `toULong()`; see `StringDecoding.appleLp64.kt` for that half.
+ *
+ * Not to be confused with `watchosDeviceArm64`, the 64-bit watchOS device target, which is LP64 and
+ * therefore lives in `appleLp64Main`.
  */
 internal actual fun decodeWithFoundation(
     data: ByteArray,
