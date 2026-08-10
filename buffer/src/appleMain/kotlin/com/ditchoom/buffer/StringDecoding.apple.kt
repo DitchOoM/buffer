@@ -46,8 +46,22 @@ internal actual fun decodeByteArrayToString(
 }
 
 /**
- * Platform-specific NSString decoding using Foundation APIs.
- * Implemented in macosMain, iosMain, etc. to handle platform-varying types.
+ * NSString decoding through Foundation, split by pointer width: `appleLp64Main` implements it for
+ * every 64-bit Apple target, `watchosArm64Main` for arm64_32.
+ *
+ * **This must stay an `expect`; do not collapse the actuals into one `appleMain` body.** The two
+ * actuals differ only in `length.toULong()` vs `length.toUInt()`, which reads like pure duplication,
+ * but `NSUInteger` is 32-bit on `watchosArm64` (arm64_32) and 64-bit on every other Apple target,
+ * and `appleMain` compiles to a *single* shared metadata artifact spanning all of them. Referring to
+ * `NSData.create` / `NSString.create` directly from `appleMain` fails
+ * `compileAppleMainKotlinMetadata` with "The declaration is using numbers with different bit widths
+ * in least two actual platforms" — and `kotlinx.cinterop.convert()` does not rescue it, because the
+ * overloads themselves resolve per-target. The `expect` is what keeps `NSUInteger` out of the shared
+ * compilation.
+ *
+ * Registering a new Apple target needs no edit here: `build.gradle.kts` routes targets into
+ * `appleLp64Main` by Konan target, so a new one picks up the 64-bit actual unless it is another
+ * arm64_32 — the only case that would need a third actual.
  */
 internal expect fun decodeWithFoundation(
     data: ByteArray,

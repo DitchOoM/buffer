@@ -87,6 +87,12 @@ fun appleSwiftShim(
             "tvos_arm64" -> Triple("arm64-apple-tvos14", "appletvos", "appletvos")
             "tvos_simulator_arm64" -> Triple("arm64-apple-tvos14-simulator", "appletvsimulator", "appletvsimulator")
             "tvos_x64" -> Triple("x86_64-apple-tvos14-simulator", "appletvsimulator", "appletvsimulator")
+            // watchosDeviceArm64: the 64-bit watchOS device ABI (Series 9 / Ultra), plain arm64 —
+            // identical in shape to the ios/tvos device triples. There is deliberately no
+            // "watchos_arm64" (arm64_32) entry: that target is not registered for this module, so
+            // the branch would be unreachable. If it is ever registered — see the target list
+            // below for what that costs — its triple is "arm64_32-apple-watchos7", same SDK.
+            "watchos_device_arm64" -> Triple("arm64-apple-watchos7", "watchos", "watchos")
             "watchos_simulator_arm64" -> Triple("arm64-apple-watchos7-simulator", "watchsimulator", "watchsimulator")
             "watchos_x64" -> Triple("x86_64-apple-watchos7-simulator", "watchsimulator", "watchsimulator")
             else -> return null
@@ -238,11 +244,26 @@ kotlin {
             iosArm64()
             iosSimulatorArm64()
             iosX64()
-            // watchosArm64 (arm64_32) is intentionally omitted: it is the only 32-bit
-            // Apple target, and appleMain calls CommonCrypto/Security size_t functions plus
-            // the commoncryptogcm cinterop below. Its 32-bit size_t width cannot be verified
-            // on the 64-bit hosts/CI we build on, so we keep it out rather than ship unverified
-            // crypto. watchOS is still covered by the simulator + x64 (64-bit) targets below.
+            // watchosArm64 (arm64_32) stays OUT, and `.convert()` is not what decides it.
+            //
+            // arm64_32 is the only Apple target with a 32-bit `size_t`. Every appleMain call site
+            // here does pass lengths through `size_tVar` + `.convert()`, which resolves per-target
+            // and makes each individual target compile — `compileKotlinWatchosArm64` and
+            // `linkDebugTestWatchosArm64` both succeed. What fails is
+            // `compileAppleMainKotlinMetadata`: appleMain is ONE shared metadata artifact spanning
+            // every registered Apple target, and merely *naming* a CommonCrypto/Security function
+            // whose signature is `size_t`-typed is rejected there with "The declaration is using
+            // numbers with different bit widths in least two actual platforms". 112 such errors
+            // across 17 files — SecRandomCopyBytes, CCCrypt, the SecKey* surface, the
+            // commoncryptogcm cinterop. `.convert()` cannot help: the overloads themselves resolve
+            // per-target, so the reference is what offends, not the argument.
+            //
+            // Admitting arm64_32 therefore means splitting appleMain by pointer width the way
+            // :buffer does for its one NSString call — 17 files' worth, not one. Until that is
+            // done, every Apple target in this module is LP64 and the metadata artifact is
+            // width-uniform. watchosDeviceArm64 below is the 64-bit watchOS device ABI and is
+            // unaffected, so watchOS device support does land here — just not on arm64_32.
+            watchosDeviceArm64()
             watchosSimulatorArm64()
             watchosX64()
             tvosArm64()
