@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Instrumented-test-only manifest: registers the host FragmentActivity that
+     UserVerificationInstrumentedTest launches via ActivityScenario. Merged into the test APK
+     only — nothing here ships in the library. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name="com.ditchoom.buffer.crypto.TestHostActivity"
+            android:exported="false" />
+    </application>
+</manifest>

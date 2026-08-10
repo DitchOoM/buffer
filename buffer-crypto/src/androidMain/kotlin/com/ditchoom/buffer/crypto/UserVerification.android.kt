@@ -183,6 +183,8 @@ internal class AndroidNotEnrolled(
 
     override fun hashCode(): Int = this::class.hashCode()
 
+    override fun toString(): String = "NotEnrolled(modality=$modality)"
+
     /**
      * Non-`null` on Android: unlike Apple, the platform publishes real enrollment deep links, so this
      * remedy is always reachable from this state.

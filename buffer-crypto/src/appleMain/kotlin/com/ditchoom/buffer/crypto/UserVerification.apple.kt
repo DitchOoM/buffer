@@ -166,6 +166,8 @@ internal class AppleNotEnrolled(
     override fun equals(other: Any?): Boolean = other is AppleNotEnrolled && other.modality == modality
 
     override fun hashCode(): Int = modality.hashCode()
+
+    override fun toString(): String = "NotEnrolled(modality=$modality)"
 }
 
 /**
@@ -195,6 +197,8 @@ internal class AppleLockedOutUntilCredential(
     override fun equals(other: Any?): Boolean = other is AppleLockedOutUntilCredential
 
     override fun hashCode(): Int = this::class.hashCode()
+
+    override fun toString(): String = "LockedOutUntilCredential"
 
     /**
      * Prompts for the device credential on a **fresh** context carrying the authenticator's reason,
