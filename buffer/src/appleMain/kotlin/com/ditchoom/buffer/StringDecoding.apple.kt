@@ -47,7 +47,20 @@ internal actual fun decodeByteArrayToString(
 
 /**
  * Platform-specific NSString decoding using Foundation APIs.
- * Implemented in macosMain, iosMain, etc. to handle platform-varying types.
+ * Implemented per-target (macosMain, iosMain, watchosArm64Main, …) to handle platform-varying types.
+ *
+ * **This must stay an `expect`; do not collapse the actuals into one `appleMain` body.** The actuals
+ * differ only in `length.toULong()` vs `length.toUInt()`, which reads like pure duplication, but
+ * `NSUInteger` is 32-bit on `watchosArm64` (arm64_32) and 64-bit on every other Apple target, and
+ * `appleMain` compiles to a *single* shared metadata artifact spanning all of them. Referring to
+ * `NSData.create` / `NSString.create` directly from `appleMain` fails
+ * `compileAppleMainKotlinMetadata` with "The declaration is using numbers with different bit widths
+ * in least two actual platforms" — and `kotlinx.cinterop.convert()` does not rescue it, because the
+ * overloads themselves resolve per-target. The `expect` is what keeps `NSUInteger` out of the shared
+ * compilation.
+ *
+ * Consequence: **registering a new Apple target requires adding an actual here**, or that target
+ * fails to compile. 64-bit targets copy the `toULong()` form; only arm64_32 uses `toUInt()`.
  */
 internal expect fun decodeWithFoundation(
     data: ByteArray,
