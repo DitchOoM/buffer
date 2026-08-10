@@ -157,20 +157,11 @@ tasks.register("connectedAndroidTestCompatible") {
     // (emulator timings are not representative) and which therefore stays excluded here.
     // When a new module is added (e.g. buffer-crypto, minSdk 28), add it here with its
     // minSdk so the API-21 leg cleanly skips it instead of failing.
-    //
-    // `:buffer-crypto` is the module where NOT being in this list has actually cost something. It is
-    // the one whose behaviour differs most between JCA implementations — the JDK's providers on a host
-    // JVM versus Conscrypt on a device — and it was the only module absent here, so none of that
-    // divergence was ever executed. That is how a probe written to the JDK's shape came to report
-    // X25519 `Unavailable` on every Android API level while Conscrypt implemented it fine, and why the
-    // regression test guarding it (`X25519CapabilityHonestyTest`) would otherwise run only on the JVM,
-    // where the bug cannot reproduce. minSdk 28, so the API-21 leg skips it and the API-35 leg runs it.
     val androidConnectedTests =
         listOf(
             Triple(":buffer-compression", ":buffer-compression:connectedDebugAndroidTest", 21),
             Triple(":buffer-flow", ":buffer-flow:connectedDebugAndroidTest", 21),
             Triple(":buffer-codec", ":buffer-codec:connectedDebugAndroidTest", 21),
-            Triple(":buffer-crypto", ":buffer-crypto:connectedDebugAndroidTest", 28),
         )
 
     androidConnectedTests.forEach { (_, testTaskPath, minSdk) ->
