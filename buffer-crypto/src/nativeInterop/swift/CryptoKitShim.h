@@ -21,6 +21,9 @@
 #define BCKS_ERR_BUFFER (-3)
 #define BCKS_ERR_INTERNAL (-4)
 #define BCKS_ERR_PEER (-5)
+// The user (or the system) dismissed an interactive prompt — a decision, not a failure. Only
+// bcks_la_unlock_with_credential returns it; see PromptOutcome.UserCancelled on the Kotlin side.
+#define BCKS_ERR_CANCELED (-6)
 
 // ChaCha20-Poly1305.
 int32_t bcks_chachapoly_seal(
@@ -210,5 +213,50 @@ int32_t bcks_keychain_delete(const char *service, const char *account);
 int32_t bcks_keychain_aliases(
     const char *service,
     uint8_t *out, size_t outCap, size_t *outLenOut);
+
+// Interactive user verification — probing (and remedying) the device's biometric / device-credential
+// facility, for UserVerification.apple.kt. The probes create their own throwaway LAContext and never
+// touch the registry behind bcks_la_context_create, so asking "may this app draw a Face ID button?"
+// can never disturb an evaluated session context that is authorizing Secure Enclave signs.
+
+// Probe results for bcks_la_biometric_availability. These are a SEPARATE space from the BCKS_ERR_*
+// statuses above: they report device *state*, not call failure, so every real state is non-negative
+// and only "this platform has no LocalAuthentication at all" is negative. BCKS_BIO_UNSUPPORTED
+// therefore shares the numeric value of BCKS_ERR_INPUT — the two can never appear on the same return.
+#define BCKS_BIO_READY 0            // key-capable biometry is enrolled and usable right now
+#define BCKS_BIO_NOT_ENROLLED 1     // sensor present and usable, nothing enrolled
+#define BCKS_BIO_PASSCODE_NOT_SET 2 // no device credential, so biometry cannot be enrolled at all
+#define BCKS_BIO_NOT_AVAILABLE 3    // no sensor, or the app may not use it (disambiguate via biometryTypeOut)
+#define BCKS_BIO_LOCKOUT 4          // locked out until the device credential is verified
+#define BCKS_BIO_DISCONNECTED 5     // external biometric sensor currently disconnected (macOS only)
+#define BCKS_BIO_NOT_PAIRED 6       // external biometric sensor present but not paired (macOS only)
+#define BCKS_BIO_UNSUPPORTED (-1)   // no LocalAuthentication on this platform (tvOS)
+
+// Probes key-capable biometry with a fresh, throwaway LAContext and returns a BCKS_BIO_* code.
+// Non-prompting: nothing is put on screen. Writes the biometry type into biometryTypeOut on every
+// path — 0 none, 1 Touch ID, 2 Face ID, 3 Optic ID — which is what distinguishes "no sensor" from
+// "sensor present, this app may not use it" when BCKS_BIO_NOT_AVAILABLE is returned. watchOS has no
+// discrete biometric policy (wrist detection is not biometry an app can name or gate a key on), so
+// it reports BCKS_BIO_NOT_AVAILABLE with type 0.
+int32_t bcks_la_biometric_availability(int32_t *biometryTypeOut);
+
+// 1 when the device has a credential (passcode / PIN) the OS can verify, 0 when it does not or the
+// probe failed for any other reason, -1 where LocalAuthentication does not exist (tvOS).
+// Non-prompting.
+int32_t bcks_la_device_credential_available(void);
+
+// Drives the system DEVICE-CREDENTIAL prompt (passcode / PIN — never biometry) on the context behind
+// `handle`, which carries the localized reason. A successful deviceOwnerAuthentication evaluation is
+// what clears a biometry lockout, so this is the remedy for BCKS_BIO_LOCKOUT. BLOCKING — call off the
+// main thread. BCKS_OK on success, BCKS_ERR_CANCELED when the prompt was dismissed, BCKS_ERR_AUTH on
+// any other denial, BCKS_ERR_INPUT for an unknown handle.
+int32_t bcks_la_unlock_with_credential(int64_t handle);
+
+// Opens this app's own OS settings page so the user can re-grant biometry (iOS family only).
+// Fire-and-forget: 1 means the launch was DISPATCHED, never that the page appeared or that the user
+// changed anything — the caller re-probes afterwards regardless. Returns 0 where no such route
+// exists: macOS publishes no supported per-app settings URL (so a permission-denied state there
+// reports openAppSettings() == false), and watchOS / tvOS have none at all.
+int32_t bcks_open_app_settings(void);
 
 #endif // BUFFER_CRYPTO_CRYPTOKIT_SHIM_H
