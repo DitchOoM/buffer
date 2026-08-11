@@ -294,3 +294,57 @@ jobs:
           version="${{ needs.version.outputs.version }}"
           gh release upload "v${version}" /tmp/buffer-sbom.cdx.json \
             --repo="$GITHUB_REPOSITORY" --clobber
+
+      # ---- Hold the `deploy` slot until Central can be read correctly again ----
+      #
+      # compute-version.yaml derives the next version from a LIVE read of Central's
+      # maven-metadata.xml <latest> (see getNextVersion in gradle/setup.gradle.kts).
+      # Central serves the artifacts well before that file reflects them, so a release
+      # cut inside the lag window reads a stale <latest> and computes a version <= the
+      # one just shipped.
+      #
+      # This is not hypothetical. v6.28.0 was tagged 2026-08-10T23:43:34Z; the next
+      # merged run computed 6.27.1 — content-wise a SUPERSET of 6.28.0 (its commit is a
+      # descendant), published BENEATH it. Central's <release> pointer stayed at 6.28.0,
+      # so nobody tracking latest ever received that fix, and every job in both runs
+      # reported success. Measured lag on the follow-up release: tagged 06:40:30Z,
+      # metadata lastUpdated 06:53:29Z — about 13 minutes. The 30-minute ceiling below
+      # is roughly 2.3x that.
+      #
+      # The `concurrency: deploy` group at the top of this file already serializes RUNS.
+      # The gap it cannot close is that a run FINISHES before Central catches up — which
+      # is why switching compute-version to read git tags instead would NOT have helped
+      # either: when 6.27.1 was computed, the v6.28.0 tag did not exist yet. Holding this
+      # job open is what closes it, because the next merged run queues behind this one and
+      # is then guaranteed a fresh read.
+      #
+      # Fails rather than warns on timeout, deliberately. The release itself has already
+      # succeeded by this point — tag, GitHub release, attestations and SBOM are all done
+      # above, and nothing here can undo any of it. A red X here means "the invariant the
+      # NEXT release depends on is not established yet", which is worth a loud false
+      # alarm; the alternative is the silent regression described above, which surfaces
+      # weeks later as "why is Central serving an older version than our newest tag".
+      - name: Wait for Central to index this release
+        if: needs.check-release.outputs.flow == 'release' && needs.publish.result == 'success'
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -uo pipefail
+          url="https://repo1.maven.org/maven2/com/ditchoom/buffer/maven-metadata.xml"
+          latest=""
+          for i in $(seq 1 60); do
+            # `|| true` so a transient network blip is just another poll, not a job failure.
+            latest="$(curl -sf --max-time 30 "$url" \
+                      | sed -n 's:.*<latest>\(.*\)</latest>.*:\1:p' || true)"
+            if [ "$latest" = "$VERSION" ]; then
+              echo "Central <latest> reports $latest after ~$((i * 30))s. Next release will read a current value."
+              exit 0
+            fi
+            echo "poll $i/60: <latest>=${latest:-unreadable}, waiting for $VERSION"
+            sleep 30
+          done
+          echo "::error::Central still reports <latest>=${latest:-unreadable} after 30m, not $VERSION. \
+          The release SUCCEEDED — v$VERSION is tagged, released and uploaded, and nothing needs undoing. \
+          This gate protects the NEXT release, which reads <latest> to pick its version and would \
+          compute a stale one. Before releasing again, confirm $url shows $VERSION."
+          exit 1
