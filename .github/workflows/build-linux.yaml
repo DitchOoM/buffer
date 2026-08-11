@@ -21,74 +21,123 @@ on:
     outputs:
       version:
         description: "The version this job stamped its artifacts with"
-        value: ${{ jobs.build.outputs.version }}
+        value: ${{ jobs.publish.outputs.version }}
 
+# Read-only on purpose — see the extended note in build-apple.yaml. Cache writability is
+# decided by the ref, not the token's scopes (a read-only token saves fine on a
+# pull_request ref and is denied on a closed PR's pull_request_target ref), so
+# `actions: write` would be inert here. warm-cache.yaml is what keeps refs/heads/main
+# populated for these keys.
 permissions:
   contents: read
 
 jobs:
-  build:
-    name: "Linux / JVM / JS / WASM / Android"
+  # ---------------------------------------------------------------------------
+  # Four test legs, all concurrent with each other and with `publish`.
+  #
+  # Only the `linux` leg installs the apt/QEMU/aarch64 toolchain and only the `js-wasm`
+  # leg needs a browser, so each leg's setup is gated on `matrix.name` rather than every
+  # leg paying for every other leg's prerequisites.
+  test:
+    name: "Test (${{ matrix.name }})"
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    outputs:
-      version: ${{ steps.version.outputs.version }}
+    timeout-minutes: 45
+    strategy:
+      # A JS failure should not hide a Linux-native failure: report every leg.
+      fail-fast: false
+      matrix:
+        include:
+          # The KSP processor's own compile-time validation suite plus the JVM buffer
+          # tests. Pure JVM — no SDK, no browser, no cross-toolchain.
+          - name: jvm
+            tasks: ":buffer-codec-processor:test jvmTest"
+          - name: js-wasm
+            tasks: "jsNodeTest jsBrowserTest wasmJsNodeTest wasmJsBrowserTest"
+          # The host-JVM Android unit tasks run here so contributors can reproduce them on
+          # the desktop without an emulator — a convenience signal. Under AGP 9, a KMP
+          # androidTarget creates a unit-test task only for its testBuildType:
+          # compression/flow/codec default to "debug" (testDebugUnitTest), while :buffer
+          # pins testBuildType="benchmark" (testBenchmarkUnitTest). There is no
+          # testReleaseUnitTest. They are NOT authoritative for Android: the host JDK 21
+          # differs from ART (its own Unsafe / libcore surface, the legacy
+          # java.nio.DirectByteBuffer `(long, int)` ctor, different `Unsafe.invokeCleaner`
+          # resolution). The dedicated "Android Emulator Integration Test" workflow runs
+          # the full suite on a real emulator (ART, API 21 + 35) and is the source of
+          # truth for Android behavior.
+          - name: android-ktlint
+            tasks: "ktlintCheck testDebugUnitTest testBenchmarkUnitTest"
+          - name: linux
+            tasks: ""  # driven by explicit steps below (QEMU runs are not Gradle tasks)
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # No `cache: gradle` — it caches ~/.gradle/caches, the same path as the explicit
+      # restore below, so enabling both stored the tree twice (482 MB on Linux) against a
+      # 10 GB per-repo budget and had the two racing to save it. See build-apple.yaml.
       - name: Set up JDK 21
         uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
         with:
           distribution: 'zulu'
           java-version: '21'
-          cache: gradle
 
-      # GitHub-hosted ubuntu runners ship Google Chrome + Chromium preinstalled, so point Karma's
-      # jsBrowserTest / wasmJsBrowserTest at the preinstalled binary via CHROME_BIN instead of
-      # re-downloading a fresh Chrome through browser-actions/setup-chrome. That action pulls from
-      # Google's CDN on every run and intermittently fails with `read ECONNRESET` — a network flake
-      # entirely unrelated to anything under test. Resolving the on-image browser removes the
-      # download (and the flake class) while keeping the browser tests running.
+      # GitHub-hosted ubuntu runners ship Google Chrome + Chromium preinstalled, so point
+      # Karma's jsBrowserTest / wasmJsBrowserTest at the preinstalled binary via CHROME_BIN
+      # instead of re-downloading a fresh Chrome through browser-actions/setup-chrome. That
+      # action pulls from Google's CDN on every run and intermittently fails with
+      # `read ECONNRESET` — a network flake entirely unrelated to anything under test.
+      # Resolving the on-image browser removes the download (and the flake class) while
+      # keeping the browser tests running.
       - name: Locate preinstalled Chrome
+        if: matrix.name == 'js-wasm'
         run: |
           CHROME_BIN="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium-browser || command -v chromium || true)"
           test -n "$CHROME_BIN" || { echo "::error::No preinstalled Chrome/Chromium found on the runner"; exit 1; }
           echo "CHROME_BIN=$CHROME_BIN" >> "$GITHUB_ENV"
           echo "Using preinstalled browser: $CHROME_BIN ($("$CHROME_BIN" --version 2>/dev/null || echo version-unknown))"
 
+      # Deliberately NOT gated to the android leg. Gradle configures every project in
+      # every leg, and the Android modules need a resolvable SDK at CONFIGURATION time —
+      # so a leg that never builds an Android variant still fails without one. The
+      # original single job installed this unconditionally; keeping that is worth far
+      # more than the ~20s it costs on a leg that does not use it.
       - name: Setup Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
 
-      - name: Cache Konan
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Restore-only in the test legs: five concurrent jobs racing to save one key is the
+      # `Unable to reserve cache ... another job may be creating this cache` warning. The
+      # `publish` job is the single saver — it produces the widest set of reusable outputs.
+      - name: Restore Konan
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.konan
           key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: konan-linux-
 
-      - name: Cache simdutf x64
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: buffer/build/simdutf/libs/linux-x64
-          key: simdutf-linux-x64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
-
-      - name: Cache simdutf ARM64
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: buffer/build/simdutf/libs/linux-arm64
-          key: simdutf-linux-arm64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
-
-      # Cache the Gradle module caches + local build cache (~/.gradle/caches/build-cache-1)
-      # so compiled klibs, cinterop klibs, and KSP/codegen outputs survive across runs.
-      # Keyed on the build definition (version catalog, build scripts, wrapper); restore-keys
-      # fall back to the most recent partial match when those change.
-      - name: Cache Gradle build outputs
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore Gradle build outputs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.gradle/caches
           key: gradle-linux-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-linux-
+
+      # ---- linux-leg-only native prerequisites -------------------------------------
+      # Restore-only, like the Gradle/Konan caches above: `publish` and warm-cache.yaml
+      # are the savers. Giving this leg its own save key would store a second copy of
+      # identical content under a different name.
+      - name: Restore simdutf x64
+        if: matrix.name == 'linux'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: buffer/build/simdutf/libs/linux-x64
+          key: simdutf-linux-x64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
+
+      - name: Restore simdutf ARM64
+        if: matrix.name == 'linux'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: buffer/build/simdutf/libs/linux-arm64
+          key: simdutf-linux-arm64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
 
       # Two ARM64 runtime libs that the QEMU-emulated test binaries need inside the
       # cross sysroot (`qemu-aarch64-static -L /usr/aarch64-linux-gnu`, below).
@@ -103,6 +152,7 @@ jobs:
       # Cached because they are version-pinned: refetched only when this workflow
       # changes, not once per run.
       - name: Cache ARM64 runtime libraries
+        if: matrix.name == 'linux'
         id: cache-arm64-libs
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -116,7 +166,7 @@ jobs:
       # enough from Azure-hosted runners that "fail fast and retry" has to be
       # explicit; curl's default is to wait forever.
       - name: Download ARM64 runtime libraries
-        if: steps.cache-arm64-libs.outputs.cache-hit != 'true'
+        if: matrix.name == 'linux' && steps.cache-arm64-libs.outputs.cache-hit != 'true'
         timeout-minutes: 10
         run: |
           set -euo pipefail
@@ -131,6 +181,7 @@ jobs:
           done
 
       - name: Install ARM64 dependencies
+        if: matrix.name == 'linux'
         timeout-minutes: 15
         run: |
           set -euo pipefail
@@ -154,6 +205,136 @@ jobs:
             rm -rf "$dir"
           done
 
+      # ---- shared -------------------------------------------------------------------
+      # Pin the version for every Gradle invocation in this job. Not cosmetic even on a
+      # test leg: with no externally-supplied version each module's build script calls
+      # getNextVersion(), which queries Maven Central AT CONFIGURATION TIME, once per
+      # module, in every leg. Callers always pass `version` in, so this is a plain echo.
+      - name: Resolve version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="$INPUT_VERSION"
+          if [ -z "$version" ]; then
+            version="$(./gradlew -q nextVersion ${{ inputs.gradle-args }})"
+          fi
+          echo "Building version $version"
+          echo "ORG_GRADLE_PROJECT_version=$version" >> "$GITHUB_ENV"
+
+      - name: Run ${{ matrix.name }} tests
+        if: matrix.name != 'linux'
+        run: ./gradlew ${{ matrix.tasks }} ${{ inputs.gradle-args }}
+
+      # ---- linux-leg-only test steps -------------------------------------------------
+      # BoringSSL is provisioned by the com.ditchoom.boringssl.provision plugin (resolved from the
+      # Plugin Portal / Maven Central at the pinned version): it downloads the checksum-pinned
+      # linuxX64/linuxArm64 bundle from the boringssl-kmp GitHub Release and verifies it against its
+      # baked-in SHA-256 before use — no in-repo BoringSSL build, no TOFU.
+      - name: Run Linux x64 tests
+        if: matrix.name == 'linux'
+        # :buffer-crypto:linuxX64Test runs the full common crypto suite (KAT + Wycheproof +
+        # tamper/negative + capability) over the BoringSSL backend. BoringSSL's libcrypto.a is now
+        # provisioned by the com.ditchoom.boringssl.provision plugin (download + sha256-verify), not
+        # built in-repo — this is also the pin-downgrade (API42 -> API21) validation gate.
+        run: >-
+          ./gradlew :buffer:linuxX64Test :buffer-compression:linuxX64Test :buffer-flow:linuxX64Test
+          :buffer-codec:linuxX64Test :buffer-codec-test:linuxX64Test :buffer-crypto:linuxX64Test
+          ${{ inputs.gradle-args }}
+
+      - name: Build ARM64 test binaries
+        if: matrix.name == 'linux'
+        # buffer-crypto's arm64 BoringSSL is the prebuilt linuxArm64 tarball from the provision bundle
+        # (no in-repo cross-build); :buffer's simdutf is still cross-built with the aarch64 toolchain
+        # installed above. The linkDebugTestLinuxArm64 output is then QEMU-run below.
+        run: >-
+          ./gradlew :buffer:linkDebugTestLinuxArm64 :buffer-compression:linkDebugTestLinuxArm64 :buffer-flow:linkDebugTestLinuxArm64
+          :buffer-codec-test:linkDebugTestLinuxArm64 :buffer-crypto:linkDebugTestLinuxArm64
+          ${{ inputs.gradle-args }}
+
+      - name: Run buffer ARM64 tests via QEMU
+        if: matrix.name == 'linux'
+        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer/build/bin/linuxArm64/debugTest/test.kexe
+
+      - name: Run buffer-compression ARM64 tests via QEMU
+        if: matrix.name == 'linux'
+        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-compression/build/bin/linuxArm64/debugTest/test.kexe
+
+      - name: Run buffer-flow ARM64 tests via QEMU
+        if: matrix.name == 'linux'
+        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-flow/build/bin/linuxArm64/debugTest/test.kexe
+
+      - name: Run buffer-codec-test ARM64 tests via QEMU
+        if: matrix.name == 'linux'
+        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-codec-test/build/bin/linuxArm64/debugTest/test.kexe
+
+      - name: Run buffer-crypto ARM64 tests via QEMU
+        if: matrix.name == 'linux'
+        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-crypto/build/bin/linuxArm64/debugTest/test.kexe
+
+  # ---------------------------------------------------------------------------
+  # The artifact producer, concurrent with the test legs.
+  #
+  # Unlike build-apple's publish job this one stays on the full `publishToMavenLocal`:
+  # validate-artifacts.yaml uses the LINUX repo as its base and merges Apple on top, so
+  # every jvm/js/wasmJs/android/linux publication has to come from here.
+  publish:
+    name: "Publish (all Linux-host targets)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+
+      # Publishing :buffer's linuxArm64 publication cross-compiles simdutf (C++) with the
+      # aarch64 toolchain, so this job needs the cross-compiler even though it never runs
+      # an arm64 binary (no qemu / no runtime libs needed here). Same reasoning as the
+      # equivalent step in osv-scanner.yaml.
+      - name: Install ARM64 cross-compiler (for buffer simdutf arm64)
+        run: |
+          set -euo pipefail
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      # This job is the single SAVER for both Linux caches (see the legs' restore-only
+      # note above), so it uses the full restore+save action rather than cache/restore.
+      - name: Cache Konan
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.konan
+          key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-linux-
+
+      - name: Cache Gradle build outputs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.gradle/caches
+          key: gradle-linux-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-linux-
+
+      - name: Cache simdutf x64
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: buffer/build/simdutf/libs/linux-x64
+          key: simdutf-linux-x64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
+
+      - name: Cache simdutf ARM64
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: buffer/build/simdutf/libs/linux-arm64
+          key: simdutf-linux-arm64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
+
       # Prefer the version the caller computed once for the whole run. Falling back to a
       # local `nextVersion` query keeps this workflow usable standalone, but a caller that
       # also runs build-apple must pass one in — two independent queries straddling a
@@ -176,69 +357,6 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "ORG_GRADLE_PROJECT_version=$version" >> "$GITHUB_ENV"
 
-      - name: Run KSP processor tests
-        run: >-
-          ./gradlew :buffer-codec-processor:test
-          ${{ inputs.gradle-args }}
-
-      - name: Run JVM / JS / WASM / Android-host tests
-        # The host-JVM Android unit tasks run here so contributors can reproduce
-        # them on the desktop without an emulator — a convenience signal.
-        # Under AGP 9, a KMP androidTarget creates a unit-test task only for its
-        # testBuildType: compression/flow/codec default to "debug"
-        # (testDebugUnitTest), while :buffer pins testBuildType="benchmark"
-        # (testBenchmarkUnitTest). There is no testReleaseUnitTest.
-        # They are NOT authoritative for Android: the host JDK 21 differs
-        # from ART (its own Unsafe / libcore surface, the legacy
-        # java.nio.DirectByteBuffer `(long, int)` ctor, different
-        # `Unsafe.invokeCleaner` resolution). The dedicated "Android
-        # Emulator Integration Test" workflow runs the full suite on a
-        # real emulator (ART, API 19 + 29) and is the source of truth
-        # for Android behavior.
-        run: >-
-          ./gradlew ktlintCheck
-          jvmTest jsNodeTest jsBrowserTest wasmJsNodeTest wasmJsBrowserTest
-          testDebugUnitTest testBenchmarkUnitTest
-          ${{ inputs.gradle-args }}
-
-      # BoringSSL is provisioned by the com.ditchoom.boringssl.provision plugin (resolved from the
-      # Plugin Portal / Maven Central at the pinned version): it downloads the checksum-pinned
-      # linuxX64/linuxArm64 bundle from the boringssl-kmp GitHub Release and verifies it against its
-      # baked-in SHA-256 before use — no in-repo BoringSSL build, no TOFU.
-      - name: Run Linux x64 tests
-        # :buffer-crypto:linuxX64Test runs the full common crypto suite (KAT + Wycheproof +
-        # tamper/negative + capability) over the BoringSSL backend. BoringSSL's libcrypto.a is now
-        # provisioned by the com.ditchoom.boringssl.provision plugin (download + sha256-verify), not
-        # built in-repo — this is also the pin-downgrade (API42 -> API21) validation gate.
-        run: >-
-          ./gradlew :buffer:linuxX64Test :buffer-compression:linuxX64Test :buffer-flow:linuxX64Test
-          :buffer-codec:linuxX64Test :buffer-codec-test:linuxX64Test :buffer-crypto:linuxX64Test
-          ${{ inputs.gradle-args }}
-
-      - name: Build ARM64 test binaries
-        # buffer-crypto's arm64 BoringSSL is the prebuilt linuxArm64 tarball from the provision bundle
-        # (no in-repo cross-build); :buffer's simdutf is still cross-built with the aarch64 toolchain
-        # installed above. The linkDebugTestLinuxArm64 output is then QEMU-run below.
-        run: >-
-          ./gradlew :buffer:linkDebugTestLinuxArm64 :buffer-compression:linkDebugTestLinuxArm64 :buffer-flow:linkDebugTestLinuxArm64
-          :buffer-codec-test:linkDebugTestLinuxArm64 :buffer-crypto:linkDebugTestLinuxArm64
-          ${{ inputs.gradle-args }}
-
-      - name: Run buffer ARM64 tests via QEMU
-        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer/build/bin/linuxArm64/debugTest/test.kexe
-
-      - name: Run buffer-compression ARM64 tests via QEMU
-        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-compression/build/bin/linuxArm64/debugTest/test.kexe
-
-      - name: Run buffer-flow ARM64 tests via QEMU
-        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-flow/build/bin/linuxArm64/debugTest/test.kexe
-
-      - name: Run buffer-codec-test ARM64 tests via QEMU
-        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-codec-test/build/bin/linuxArm64/debugTest/test.kexe
-
-      - name: Run buffer-crypto ARM64 tests via QEMU
-        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-crypto/build/bin/linuxArm64/debugTest/test.kexe
-
       # The release/publish-to-Central path passes clean-publish: true to force a cold,
       # cache-free rebuild of the published artifacts. PR validation reuses the build cache.
       - name: Publish to Maven Local
@@ -250,3 +368,25 @@ jobs:
           name: maven-local-linux
           path: ~/.m2/repository/com/ditchoom
           retention-days: 3
+
+  # ---------------------------------------------------------------------------
+  # Branch-protection gate. `build-linux / Linux / JVM / JS / WASM / Android` is one of
+  # exactly three required status checks on main, and the context string is
+  # `<caller job id> / <this job's name>` — so this job MUST keep that exact name even
+  # though it no longer does the work itself. See the matching gate in build-apple.yaml
+  # for why this is `if: always()` with explicit result checks rather than a bare `needs:`.
+  linux:
+    name: "Linux / JVM / JS / WASM / Android"
+    needs: [test, publish]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Assert every Linux job succeeded
+        run: |
+          echo "test legs: ${{ needs.test.result }}"
+          echo "publish:   ${{ needs.publish.result }}"
+          # A matrix job's aggregate result is `success` only when every leg succeeded.
+          [ "${{ needs.test.result }}" = "success" ] || { echo "::error::Linux test legs did not all pass"; exit 1; }
+          [ "${{ needs.publish.result }}" = "success" ] || { echo "::error::Linux publish did not pass"; exit 1; }
+          echo "All Linux / JVM / JS / WASM / Android checks passed."

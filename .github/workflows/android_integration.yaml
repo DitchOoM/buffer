@@ -11,7 +11,64 @@ permissions:
   contents: read
 
 jobs:
+  # Skip both emulator legs when the diff provably cannot reach ART.
+  #
+  # Each leg boots a cold emulator and runs the full instrumented suite (~6-7 min), and a
+  # change confined to a foreign platform's actuals — appleMain, linuxMain, jsMain,
+  # wasmJsMain — cannot alter a single byte the emulator executes. Anything that touches
+  # the build itself, the version catalog, or common/JVM-shared/Android source is treated
+  # as reaching ART. This workflow is NOT a required status check, so a skipped run
+  # reports no status and blocks no merge.
+  #
+  # Uses the paginated "list PR files" API rather than `gh pr diff`: the latter hits the
+  # .diff endpoint, which GitHub caps at 300 files and returns HTTP 406 for larger PRs.
+  # The PR-files API returns objects with a `filename` field, not `path`.
+  changes:
+    name: "Classify changed paths"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      android: ${{ steps.filter.outputs.android }}
+    steps:
+      - name: Classify
+        id: filter
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          files=$(gh api --paginate \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --jq '.[].filename')
+
+          android=false
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            case "$f" in
+              *.gradle.kts|gradle/*|gradle.properties|settings.gradle.kts|.github/workflows/*|.ci/*)
+                android=true ;;
+              # ONE line of explicit source-set names on purpose: a `\`-continued pattern
+              # list folds the next line's indentation INTO the pattern, so every glob
+              # after the first would silently never match, and a wildcard-in-the-middle
+              # form like `*/src/*osMain/*` can over-match — which fails in the dangerous
+              # direction, dropping real Android coverage. Anything under src/ not
+              # recognised here falls through to android=true below, so a source set added
+              # later errs toward running the tests.
+              */src/appleMain/*|*/src/appleTest/*|*/src/appleLp64Main/*|*/src/macosMain/*|*/src/iosMain/*|*/src/tvosMain/*|*/src/watchosMain/*|*/src/linuxMain/*|*/src/linuxTest/*|*/src/nativeMain/*|*/src/nativeTest/*|*/src/nonJvmMain/*|*/src/jsMain/*|*/src/jsTest/*|*/src/wasmJsMain/*|*/src/wasmJsTest/*|*/src/webMain/*)
+                ;;
+              */src/*)
+                android=true ;;
+            esac
+          done <<< "$files"
+
+          echo "android=$android" >> "$GITHUB_OUTPUT"
+          echo "android=$android"
+
   test:
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:

@@ -11,6 +11,79 @@ permissions:
   contents: read
 
 jobs:
+  # Classify the diff once, so jobs that provably cannot be affected by it don't run.
+  #
+  # Deliberately NARROW. Only two consumers below are gated, and both are non-required
+  # checks, so a wrong answer here costs a missed signal rather than an unmergeable PR:
+  #   * docs     — the Dokka + Docusaurus validation job, which is a macOS runner
+  #   * android  — see android_integration.yaml, gated on the same reasoning
+  # build-linux / build-apple are NOT gated: their contexts are required status checks,
+  # and any `.github/**` change can alter the build itself, so the only safe skip for
+  # them is the pure-`**/*.md` case that `paths-ignore` above already handles (with
+  # review-docs-only.yaml supplying the stand-in contexts).
+  #
+  # Uses the paginated "list PR files" API rather than `gh pr diff`: the latter hits the
+  # .diff endpoint, which GitHub caps at 300 files and returns HTTP 406 for larger PRs.
+  # The PR-files API returns objects with a `filename` field, not `path`.
+  changes:
+    name: "Classify changed paths"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      docs: ${{ steps.filter.outputs.docs }}
+      android: ${{ steps.filter.outputs.android }}
+    steps:
+      - name: Classify
+        id: filter
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          files=$(gh api --paginate \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --jq '.[].filename')
+
+          docs=false
+          android=false
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            case "$f" in
+              # Anything that changes the build itself, the version catalog, or this
+              # workflow can change any downstream job's behavior — take everything.
+              *.gradle.kts|gradle/*|gradle.properties|.github/workflows/*|settings.gradle.kts)
+                docs=true; android=true ;;
+              # Dokka reads every module's sources; the site build reads docs/.
+              docs/*|MODULE.md)
+                docs=true ;;
+              # Source under any module feeds Dokka. It only feeds the emulator when it
+              # can reach ART: common/jvm-shared/android source sets, never a foreign
+              # native/web-only actual.
+              #
+              # The foreign-source-set list below is written as ONE line of explicit
+              # names on purpose. A `\`-continued pattern list would fold the next line's
+              # indentation INTO the pattern (`*/src/nativeMain/*|      */src/jsMain/*`),
+              # so every glob after the first would silently never match; and a
+              # wildcard-in-the-middle form like `*/src/*osMain/*` can over-match, which
+              # fails in the dangerous direction — a false skip drops real Android coverage.
+              # Anything under src/ that is NOT recognised here falls through to
+              # android=true, so a source set added later errs toward running the tests.
+              */src/*)
+                docs=true
+                case "$f" in
+                  */src/appleMain/*|*/src/appleTest/*|*/src/appleLp64Main/*|*/src/macosMain/*|*/src/iosMain/*|*/src/tvosMain/*|*/src/watchosMain/*|*/src/linuxMain/*|*/src/linuxTest/*|*/src/nativeMain/*|*/src/nativeTest/*|*/src/nonJvmMain/*|*/src/jsMain/*|*/src/jsTest/*|*/src/wasmJsMain/*|*/src/wasmJsTest/*|*/src/webMain/*)
+                    ;;
+                  *) android=true ;;
+                esac ;;
+            esac
+          done <<< "$files"
+
+          echo "docs=$docs"    >> "$GITHUB_OUTPUT"
+          echo "android=$android" >> "$GITHUB_OUTPUT"
+          echo "docs=$docs android=$android"
+
   # One version for the whole run. The linux and apple builds run in parallel, so
   # letting each compute its own lets a release publishing to Central mid-run make
   # them disagree — and `validate` then looks up artifacts under a version only one
@@ -18,6 +91,11 @@ jobs:
   version:
     uses: ./.github/workflows/compute-version.yaml
 
+  # These runs CAN write caches despite the read-only token — an open PR's
+  # `refs/pull/N/merge` is a writable cache scope, so no `permissions:` grant is needed
+  # (verified: `Cache saved with key: gradle-macos-…` from a job printing only
+  # `Contents: read, Metadata: read`). Those saves stay confined to this PR's scope
+  # though, which is why main has to be warmed separately — see warm-cache.yaml.
   build-linux:
     needs: version
     uses: ./.github/workflows/build-linux.yaml
@@ -36,8 +114,16 @@ jobs:
     with:
       version: ${{ needs.version.outputs.version }}
 
+  # Gated on `changes` because this is a macOS runner and build-apple's fan-out already
+  # uses up to 5 of them concurrently (4 test shards + publish). GitHub's per-plan cap on
+  # concurrent macOS jobs is 5 on Free/Team, so leaving this ungated would make a 6th
+  # macOS job queue behind the build on every PR — including the many that cannot change
+  # a single line of generated documentation. Not a required check, so skipping it
+  # reports no status and blocks nothing.
   docs:
     name: "Validate Docs Generation"
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -50,8 +136,8 @@ jobs:
       - name: Cache Konan
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.konan
           key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          path: ~/.konan
           restore-keys: konan-${{ runner.os }}-
       - name: Setup Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6

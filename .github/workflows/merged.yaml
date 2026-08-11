@@ -119,6 +119,15 @@ jobs:
     with:
       gradle-args: ${{ needs.check-release.outputs.gradle-args }}
 
+  # Note: this run CANNOT write Actions caches, and no `permissions:` grant changes that.
+  #
+  # `pull_request_target` on a CLOSED pr resolves to `refs/pull/N/merge`, which stops
+  # being a writable cache scope once the PR is merged, so every cache save in these
+  # builds fails with `cache write denied: token has no writable scopes` regardless of
+  # token scopes. This repo's logs show the same key saving fine from a `pull_request`
+  # run whose token was equally read-only, which is what rules out the scopes as the
+  # cause. See warm-cache.yaml — it runs on `push: branches: [main]`, where the ref is
+  # writable, and is what actually keeps main's caches populated for PRs to restore.
   build-linux:
     needs: [check-release, version]
     if: needs.check-release.outputs.flow != 'skip'
@@ -130,6 +139,7 @@ jobs:
       # of the published artifacts. Non-publishing flows (dry-run) reuse the build cache.
       clean-publish: ${{ needs.check-release.outputs.flow == 'release' || needs.check-release.outputs.flow == 'draft' }}
 
+  # Same cache-write caveat as build-linux above.
   build-apple:
     needs: [check-release, version]
     if: needs.check-release.outputs.flow != 'skip'
