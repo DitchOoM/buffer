@@ -37,14 +37,26 @@ jobs:
         with:
           distribution: "zulu"
           java-version: "21"
-          cache: gradle
 
-      - name: Cache Konan
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Restore-only on both caches. This job deliberately builds with CHANGED dependency
+      # versions, so anything it produced would be keyed off a libs.versions.toml that does
+      # not exist on main — a copy nothing else can ever restore, occupying the shared
+      # 10 GB budget. warm-cache.yaml owns populating these keys.
+      - name: Restore Gradle build outputs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.gradle/caches
+          key: gradle-linux-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-linux-
+
+      # Literal `konan-linux-`, not `konan-${{ runner.os }}-`: runner.os is "Linux", which
+      # expanded to `konan-Linux-` and never matched build-linux's `konan-linux-`.
+      - name: Restore Konan
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.konan
-          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
-          restore-keys: konan-${{ runner.os }}-
+          key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-linux-
 
       - name: Claude — coordinated toolchain update
         uses: anthropics/claude-code-action@6b082c41935b4c8a3b8b0ef85ba4ba4d9eeb8975 # v1

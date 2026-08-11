@@ -132,13 +132,27 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '21'
-          cache: gradle
-      - name: Cache Konan
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Restore-only against the keys build-apple already saves, instead of setup-java's
+      # `cache: gradle`. That option covers ~/.gradle/caches — the same tree build-apple
+      # caches explicitly — so it stored a SECOND full copy under its own key: 1.74 GB on
+      # a single PR's macOS run, against a 10 GB per-repo cap that warm-cache's
+      # main-scoped entries must also fit inside. This job only consumes; it saves nothing.
+      - name: Restore Gradle build outputs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          path: ~/.gradle/caches
+          key: gradle-macos-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-macos-
+      # Spelled literally, NOT as `konan-${{ runner.os }}-`: runner.os is "macOS", so that
+      # expanded to `konan-macOS-` — a distinct key from build-apple's `konan-macos-`.
+      # Both existed side by side as separate 439 MB and 605 MB entries, and this job
+      # restored the one nothing else populates.
+      - name: Restore Konan
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
           path: ~/.konan
-          restore-keys: konan-${{ runner.os }}-
+          key: konan-macos-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-macos-
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
