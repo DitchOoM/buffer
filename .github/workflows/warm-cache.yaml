@@ -18,6 +18,18 @@ name: "Warm main-scoped build caches"
 # `Contents: read, Metadata: read`; only the ref differed. So no `permissions:` grant on
 # merged.yaml can fix it, and none is applied there.
 #
+# IF YOU RE-INVESTIGATE THIS, know that one obvious instrument gives a FALSE NEGATIVE.
+# `ReserveCacheError: Unable to reserve cache <key>, another job may be creating this
+# cache` looks like an ordinary reservation conflict and reads as "the write was
+# permitted, it just lost a race". It is not proof of that: setup-gradle logs
+# `Cache reservation failed: cache write denied: token has no writable scopes` and THEN
+# re-reports the identical denial as that generic ReserveCacheError (see any merged-run
+# `validate` job log). A denial and a genuine race are indistinguishable from that line
+# alone, and it fails in the direction that makes you stop looking.
+#
+# Only a POSITIVE result proves writability: a run that printed `Cache saved with key:
+# <key>` from a token with no writable declared scopes. That is the test that settled it.
+#
 # The upshot was that `refs/heads/main` never held a `gradle-*`/`konan-*` entry, so every
 # PR's first run restored nothing: build-apple measured 46m53s cold against 6m40s warm,
 # with publishToMavenLocal alone accounting for 27m25s of the cold run. Subsequent pushes
