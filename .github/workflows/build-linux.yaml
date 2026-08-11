@@ -96,8 +96,12 @@ jobs:
           echo "CHROME_BIN=$CHROME_BIN" >> "$GITHUB_ENV"
           echo "Using preinstalled browser: $CHROME_BIN ($("$CHROME_BIN" --version 2>/dev/null || echo version-unknown))"
 
+      # Deliberately NOT gated to the android leg. Gradle configures every project in
+      # every leg, and the Android modules need a resolvable SDK at CONFIGURATION time —
+      # so a leg that never builds an Android variant still fails without one. The
+      # original single job installed this unconditionally; keeping that is worth far
+      # more than the ~20s it costs on a leg that does not use it.
       - name: Setup Android SDK
-        if: matrix.name == 'android-ktlint'
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
 
       # Restore-only in the test legs: five concurrent jobs racing to save one key is the
