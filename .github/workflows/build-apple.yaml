@@ -23,18 +23,22 @@ on:
         description: "The version this job stamped its artifacts with"
         value: ${{ jobs.publish.outputs.version }}
 
-# `actions: write` is what lets the cache steps below actually SAVE. Without a single
-# writable scope on the token, GitHub's cache service refuses every write with
-# `cache write denied: token has no writable scopes` — which is precisely what every
-# merged.yaml (pull_request_target) run was hitting, silently, for both this workflow
-# and build-linux. The consequence was that `refs/heads/main` never held a
-# gradle-macos-*/konan-macos-* entry, so every PR's FIRST run restored nothing and paid
-# a fully cold Kotlin/Native build (~47 min vs ~7 min warm). A reusable workflow can only
-# ever narrow what the caller grants, so the callers (review.yaml, merged.yaml) must grant
-# `actions: write` on their job too — this line alone is not enough.
+# Deliberately read-only, and deliberately NOT granting `actions: write`.
+#
+# Cache writability here is decided by the REF, not by the token's declared scopes.
+# Proof from this repo's own logs, same cache key, same printed token
+# (`Contents: read, Metadata: read`) in both:
+#   * pull_request run        -> `Cache saved with key: gradle-macos-1f607f18…`
+#   * pull_request_target run -> `cache write denied: token has no writable scopes`
+# A closed PR's `refs/pull/N/merge` is simply not a writable cache scope. Granting
+# `actions: write` therefore changes nothing, and adding an inert permission to the
+# most security-sensitive trigger type would just mislead the next reader.
+#
+# What actually keeps `refs/heads/main` warm — and so keeps every PR's first run off a
+# cold ~47-minute Kotlin/Native build — is warm-cache.yaml, which runs on
+# `push: branches: [main]` where the ref genuinely is writable.
 permissions:
   contents: read
-  actions: write
 
 jobs:
   # ---------------------------------------------------------------------------

@@ -91,24 +91,19 @@ jobs:
   version:
     uses: ./.github/workflows/compute-version.yaml
 
-  # `actions: write` is required by the callee so its cache steps can SAVE — a reusable
-  # workflow can only narrow the caller's permissions, never widen them, so omitting it
-  # here would leave the build unable to write its own PR-scoped cache. See the extended
-  # note in merged.yaml.
+  # These runs CAN write caches despite the read-only token — an open PR's
+  # `refs/pull/N/merge` is a writable cache scope, so no `permissions:` grant is needed
+  # (verified: `Cache saved with key: gradle-macos-…` from a job printing only
+  # `Contents: read, Metadata: read`). Those saves stay confined to this PR's scope
+  # though, which is why main has to be warmed separately — see warm-cache.yaml.
   build-linux:
     needs: version
-    permissions:
-      contents: read
-      actions: write
     uses: ./.github/workflows/build-linux.yaml
     with:
       version: ${{ needs.version.outputs.version }}
 
   build-apple:
     needs: version
-    permissions:
-      contents: read
-      actions: write
     uses: ./.github/workflows/build-apple.yaml
     with:
       version: ${{ needs.version.outputs.version }}

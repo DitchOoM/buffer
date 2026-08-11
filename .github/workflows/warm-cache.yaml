@@ -1,0 +1,223 @@
+name: "Warm main-scoped build caches"
+
+# Populates the `refs/heads/main` Actions-cache scope so that every PR's FIRST run
+# restores a warm Gradle/Konan cache instead of paying a cold Kotlin/Native build.
+#
+# WHY THIS EXISTS AS A SEPARATE WORKFLOW
+#
+# A PR run can restore caches from exactly two scopes: its own `refs/pull/N/merge`, and
+# the default branch's. buffer's post-merge build (merged.yaml) is triggered by
+# `pull_request_target` on a CLOSED pr, whose ref is `refs/pull/N/merge` — and once the PR
+# is merged that ref stops being a writable cache scope. Every cache save in every merged
+# run therefore fails with:
+#
+#     cache write denied: token has no writable scopes
+#
+# despite the message, this is NOT about the token's declared permissions. The same cache
+# key saved successfully from a `pull_request` run whose token printed the identical
+# `Contents: read, Metadata: read`; only the ref differed. So no `permissions:` grant on
+# merged.yaml can fix it, and none is applied there.
+#
+# The upshot was that `refs/heads/main` never held a `gradle-*`/`konan-*` entry, so every
+# PR's first run restored nothing: build-apple measured 46m53s cold against 6m40s warm,
+# with publishToMavenLocal alone accounting for 27m25s of the cold run. Subsequent pushes
+# to the same PR hit that PR's own scope and were fast, which is why the cost looked
+# intermittent rather than systematic.
+#
+# A `push: branches: [main]` run's ref genuinely IS `refs/heads/main` and is writable, so
+# this workflow can do what merged.yaml cannot. It duplicates build work that merged.yaml
+# is already doing, which is deliberate: nothing waits on this job, and the alternative
+# (moving the whole release flow off pull_request_target) would put the label-driven
+# version-bump logic at risk for no additional caching benefit.
+#
+# Self-reinforcing after the first run: this workflow restores the same keys it saves, so
+# only its very first execution is cold. PR runs restoring from main keep those entries
+# hot in the repo's LRU cache eviction order.
+
+on:
+  push:
+    branches: [main]
+    # No point re-warming for changes that cannot invalidate a compiled artifact.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+# Read-only is sufficient — see above, cache writability follows the ref, not the scopes.
+permissions:
+  contents: read
+
+# Only the newest main commit's cache is worth building. If merges land in quick
+# succession, cancel the older warm-up rather than queueing several full Apple builds.
+concurrency:
+  group: warm-cache
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: "Warm macOS caches"
+    runs-on: macos-latest
+    # First run is a fully cold ~12-target Apple build; later runs restore their own
+    # output and finish in a fraction of that.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # No `cache: gradle` — it would double-store ~/.gradle/caches against the 10 GB
+      # per-repo budget and race the explicit step below. Same reasoning as build-apple.yaml.
+      - name: Set up JDK 21
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      # Keys MUST stay byte-identical to build-apple.yaml's, including the hashFiles
+      # inputs — a PR restores by exact key first and by the `gradle-macos-` /
+      # `konan-macos-` prefix second, so any drift here silently stops warming anything.
+      - name: Cache Konan
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.konan
+          key: konan-macos-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-macos-
+
+      - name: Cache Gradle build outputs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.gradle/caches
+          key: gradle-macos-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-macos-
+
+      # Pin a version so the module build scripts don't each query Maven Central for
+      # getNextVersion() at configuration time. The value is irrelevant — nothing here is
+      # published — but it must be set, and it must not perturb the cached task outputs
+      # that PRs will reuse, so it mirrors what a normal build would compute.
+      - name: Resolve version
+        run: |
+          set -euo pipefail
+          version="$(./gradlew -q nextVersion)"
+          echo "Warming caches for version $version"
+          echo "ORG_GRADLE_PROJECT_version=$version" >> "$GITHUB_ENV"
+
+      # Mirrors build-apple.yaml's publish job: the expensive, cacheable half is the
+      # shared prefix (KSP, commonizer, appleMain metadata) plus all 12 targets' main
+      # klibs, which is exactly what every PR shard needs back.
+      - name: Warm Apple publication outputs
+        run: >-
+          ./gradlew
+          publishKotlinMultiplatformPublicationToMavenLocal
+          publishMacosArm64PublicationToMavenLocal publishMacosX64PublicationToMavenLocal
+          publishIosArm64PublicationToMavenLocal publishIosSimulatorArm64PublicationToMavenLocal
+          publishIosX64PublicationToMavenLocal
+          publishTvosArm64PublicationToMavenLocal publishTvosSimulatorArm64PublicationToMavenLocal
+          publishTvosX64PublicationToMavenLocal
+          publishWatchosArm64PublicationToMavenLocal publishWatchosDeviceArm64PublicationToMavenLocal
+          publishWatchosSimulatorArm64PublicationToMavenLocal publishWatchosX64PublicationToMavenLocal
+
+      # Test-source compilation for the four shards. Link tasks themselves are not
+      # cacheable, but the compileTestKotlin* outputs they depend on are, and those are a
+      # large share of a shard's cold cost. `continue-on-error` because this workflow's
+      # job is to populate a cache, not to gate anything: merged.yaml already ran the real
+      # build for this commit, so a failure here must not page anyone.
+      - name: Warm Apple test-compilation outputs
+        continue-on-error: true
+        run: >-
+          ./gradlew
+          macosArm64Test iosSimulatorArm64Test tvosSimulatorArm64Test watchosSimulatorArm64Test
+          :buffer:linkDebugTestMacosX64 :buffer-codec:linkDebugTestMacosX64
+          :buffer-compression:linkDebugTestMacosX64 :buffer-flow:linkDebugTestMacosX64
+          :buffer-codec-test:linkDebugTestMacosX64 :buffer-crypto:linkDebugTestMacosX64
+          :buffer:linkDebugTestIosArm64 :buffer-codec:linkDebugTestIosArm64
+          :buffer-compression:linkDebugTestIosArm64 :buffer-flow:linkDebugTestIosArm64
+          :buffer-codec-test:linkDebugTestIosArm64 :buffer-crypto:linkDebugTestIosArm64
+          :buffer:linkDebugTestTvosArm64 :buffer-codec:linkDebugTestTvosArm64
+          :buffer-compression:linkDebugTestTvosArm64 :buffer-flow:linkDebugTestTvosArm64
+          :buffer-codec-test:linkDebugTestTvosArm64 :buffer-crypto:linkDebugTestTvosArm64
+          :buffer:linkDebugTestWatchosArm64 :buffer-codec:linkDebugTestWatchosArm64
+          :buffer-compression:linkDebugTestWatchosArm64 :buffer-flow:linkDebugTestWatchosArm64
+          :buffer-codec-test:linkDebugTestWatchosArm64
+          :buffer:linkDebugTestWatchosDeviceArm64 :buffer-codec:linkDebugTestWatchosDeviceArm64
+          :buffer-compression:linkDebugTestWatchosDeviceArm64 :buffer-flow:linkDebugTestWatchosDeviceArm64
+          :buffer-codec-test:linkDebugTestWatchosDeviceArm64 :buffer-crypto:linkDebugTestWatchosDeviceArm64
+
+  linux:
+    name: "Warm Linux caches"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      # Gradle configures every project, and the Android modules need a resolvable SDK at
+      # configuration time — so this is required even though nothing here builds an
+      # Android variant deliberately.
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+
+      # publishToMavenLocal builds :buffer's linuxArm64 publication, which cross-compiles
+      # simdutf (C++) with the aarch64 toolchain. No qemu or arm64 runtime libs are needed:
+      # this job compiles arm64 artifacts but never executes them.
+      - name: Install ARM64 cross-compiler (for buffer simdutf arm64)
+        run: |
+          set -euo pipefail
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      # Keys MUST stay byte-identical to build-linux.yaml's — see the macOS note above.
+      - name: Cache Konan
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.konan
+          key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-linux-
+
+      - name: Cache Gradle build outputs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.gradle/caches
+          key: gradle-linux-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-linux-
+
+      # publishToMavenLocal below cross-builds simdutf for both Linux arches, so warm those
+      # too — same keys build-linux.yaml uses, where the `linux` test leg restores them
+      # read-only. Without this they would only ever exist in a per-PR scope.
+      - name: Cache simdutf x64
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: buffer/build/simdutf/libs/linux-x64
+          key: simdutf-linux-x64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
+
+      - name: Cache simdutf ARM64
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: buffer/build/simdutf/libs/linux-arm64
+          key: simdutf-linux-arm64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
+
+      - name: Resolve version
+        run: |
+          set -euo pipefail
+          version="$(./gradlew -q nextVersion)"
+          echo "Warming caches for version $version"
+          echo "ORG_GRADLE_PROJECT_version=$version" >> "$GITHUB_ENV"
+
+      - name: Warm publication outputs
+        run: ./gradlew publishToMavenLocal
+
+      # The test legs' compile outputs. No browser and no QEMU here: jsBrowserTest /
+      # wasmJsBrowserTest and the arm64 QEMU runs execute binaries rather than producing
+      # cacheable Gradle outputs, so they are left to the real PR legs. continue-on-error
+      # for the same reason as the macOS job — this gates nothing.
+      - name: Warm test-compilation outputs
+        continue-on-error: true
+        run: >-
+          ./gradlew :buffer-codec-processor:test jvmTest jsNodeTest wasmJsNodeTest
+          ktlintCheck testDebugUnitTest testBenchmarkUnitTest
+          :buffer:linuxX64Test :buffer-compression:linuxX64Test :buffer-flow:linuxX64Test
+          :buffer-codec:linuxX64Test :buffer-codec-test:linuxX64Test :buffer-crypto:linuxX64Test

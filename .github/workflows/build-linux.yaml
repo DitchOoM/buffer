@@ -23,14 +23,13 @@ on:
         description: "The version this job stamped its artifacts with"
         value: ${{ jobs.publish.outputs.version }}
 
-# See the identical block in build-apple.yaml: without a writable scope on the token,
-# GitHub's cache service refuses every save with `cache write denied: token has no
-# writable scopes`, which is why refs/heads/main never held a gradle-linux-*/konan-linux-*
-# entry and every PR's first run started cold. Callers must grant this too — a reusable
-# workflow can only narrow the caller's permissions, never widen them.
+# Read-only on purpose — see the extended note in build-apple.yaml. Cache writability is
+# decided by the ref, not the token's scopes (a read-only token saves fine on a
+# pull_request ref and is denied on a closed PR's pull_request_target ref), so
+# `actions: write` would be inert here. warm-cache.yaml is what keeps refs/heads/main
+# populated for these keys.
 permissions:
   contents: read
-  actions: write
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -123,16 +122,19 @@ jobs:
             gradle-linux-
 
       # ---- linux-leg-only native prerequisites -------------------------------------
-      - name: Cache simdutf x64
+      # Restore-only, like the Gradle/Konan caches above: `publish` and warm-cache.yaml
+      # are the savers. Giving this leg its own save key would store a second copy of
+      # identical content under a different name.
+      - name: Restore simdutf x64
         if: matrix.name == 'linux'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: buffer/build/simdutf/libs/linux-x64
           key: simdutf-linux-x64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
 
-      - name: Cache simdutf ARM64
+      - name: Restore simdutf ARM64
         if: matrix.name == 'linux'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: buffer/build/simdutf/libs/linux-arm64
           key: simdutf-linux-arm64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
@@ -325,13 +327,13 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: buffer/build/simdutf/libs/linux-x64
-          key: simdutf-publish-linux-x64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
+          key: simdutf-linux-x64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
 
       - name: Cache simdutf ARM64
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: buffer/build/simdutf/libs/linux-arm64
-          key: simdutf-publish-linux-arm64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
+          key: simdutf-linux-arm64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
 
       # Prefer the version the caller computed once for the whole run. Falling back to a
       # local `nextVersion` query keeps this workflow usable standalone, but a caller that
