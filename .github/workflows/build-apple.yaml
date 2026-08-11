@@ -65,15 +65,34 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macosArm64 and iosSimulatorArm64 are the two families with a hosted runner
-          # that can actually EXECUTE tests. Everything else is compile-and-link only:
-          # there is no hosted watchOS/tvOS/iOS-device runner, so those shards link the
-          # test binaries without running them (the same compile-only gate build-linux
-          # applies via linkDebugTestLinuxArm64 before its QEMU steps).
+          # Four target groups actually EXECUTE tests on a hosted arm64 macOS runner:
+          # macosArm64, iosSimulatorArm64, tvosSimulatorArm64, watchosSimulatorArm64. The
+          # last two are easy to miss — they ran only as a side effect of the old job's
+          # publishToMavenLocal, and dropping them here would have silently retired 10
+          # executing test tasks. (The x64 simulator variants are a different story: the
+          # old CI's own log shows macosX64Test/iosX64Test/tvosX64Test/watchosX64Test all
+          # reporting SKIPPED, because an x64 simulator cannot run on an arm64 runner.)
           #
-          # The link tasks are MODULE-QUALIFIED, matching the five-module set build-linux
-          # runs under QEMU (:buffer, :buffer-compression, :buffer-flow, :buffer-codec-test,
-          # :buffer-crypto) — i.e. the modules that actually have native test binaries.
+          # Device ABIs have no hosted runner at all, so those are compile-and-link only —
+          # the same gate build-linux applies via linkDebugTestLinuxArm64 before its QEMU
+          # steps. The x64 simulator targets are likewise link-only here, matching what the
+          # old job effectively did once its *Test tasks skipped.
+          #
+          # The four *Test tasks are left UNQUALIFIED: they resolve across all ten modules
+          # that register the target (verified), which is broader than the six-module link
+          # set below, and a *Test task already depends on its own linkDebugTest*, so the
+          # simulator targets need no separate link entry.
+          #
+          # The link tasks are MODULE-QUALIFIED, covering the six modules that have native
+          # test binaries: :buffer, :buffer-codec, :buffer-codec-test, :buffer-compression,
+          # :buffer-flow, :buffer-crypto. That is build-linux's QEMU set PLUS :buffer-codec —
+          # which the QEMU set omits but which does have Apple test binaries for all 12
+          # targets, and which the old `publishToMavenLocal` graph compiled and linked as a
+          # side effect. Dropping it here would have been a silent coverage regression; it
+          # was caught by diffing the old job's task graph against the new one's, not by
+          # anything failing. If you add a module with native tests, add it to all four
+          # shards and re-run that diff.
+          #
           # Do NOT "simplify" these to bare task names: an unqualified `linkDebugTestMacosX64`
           # also selects :buffer-1brc, which registers macosX64 but cannot resolve it
           # (androidx.collection:collection:1.6.0 publishes no macos_x64 variant), so the
@@ -83,16 +102,16 @@ jobs:
           - name: macos
             tasks: >-
               macosArm64Test
-              :buffer:linkDebugTestMacosX64 :buffer-compression:linkDebugTestMacosX64
+              :buffer:linkDebugTestMacosX64 :buffer-codec:linkDebugTestMacosX64 :buffer-compression:linkDebugTestMacosX64
               :buffer-flow:linkDebugTestMacosX64 :buffer-codec-test:linkDebugTestMacosX64
               :buffer-crypto:linkDebugTestMacosX64
           - name: ios
             tasks: >-
               iosSimulatorArm64Test
-              :buffer:linkDebugTestIosArm64 :buffer-compression:linkDebugTestIosArm64
+              :buffer:linkDebugTestIosArm64 :buffer-codec:linkDebugTestIosArm64 :buffer-compression:linkDebugTestIosArm64
               :buffer-flow:linkDebugTestIosArm64 :buffer-codec-test:linkDebugTestIosArm64
               :buffer-crypto:linkDebugTestIosArm64
-              :buffer:linkDebugTestIosX64 :buffer-compression:linkDebugTestIosX64
+              :buffer:linkDebugTestIosX64 :buffer-codec:linkDebugTestIosX64 :buffer-compression:linkDebugTestIosX64
               :buffer-flow:linkDebugTestIosX64 :buffer-codec-test:linkDebugTestIosX64
               :buffer-crypto:linkDebugTestIosX64
           # watchosArm64 is arm64_32 — the only Apple target with 32-bit pointers and a
@@ -103,26 +122,22 @@ jobs:
           # compileAppleMainKotlinMetadata. See the target list in buffer-crypto/build.gradle.kts.
           - name: watchos
             tasks: >-
-              :buffer:linkDebugTestWatchosArm64 :buffer-compression:linkDebugTestWatchosArm64
+              :buffer:linkDebugTestWatchosArm64 :buffer-codec:linkDebugTestWatchosArm64 :buffer-compression:linkDebugTestWatchosArm64
               :buffer-flow:linkDebugTestWatchosArm64 :buffer-codec-test:linkDebugTestWatchosArm64
-              :buffer:linkDebugTestWatchosDeviceArm64 :buffer-compression:linkDebugTestWatchosDeviceArm64
+              :buffer:linkDebugTestWatchosDeviceArm64 :buffer-codec:linkDebugTestWatchosDeviceArm64 :buffer-compression:linkDebugTestWatchosDeviceArm64
               :buffer-flow:linkDebugTestWatchosDeviceArm64 :buffer-codec-test:linkDebugTestWatchosDeviceArm64
               :buffer-crypto:linkDebugTestWatchosDeviceArm64
-              :buffer:linkDebugTestWatchosSimulatorArm64 :buffer-compression:linkDebugTestWatchosSimulatorArm64
-              :buffer-flow:linkDebugTestWatchosSimulatorArm64 :buffer-codec-test:linkDebugTestWatchosSimulatorArm64
-              :buffer-crypto:linkDebugTestWatchosSimulatorArm64
-              :buffer:linkDebugTestWatchosX64 :buffer-compression:linkDebugTestWatchosX64
+              watchosSimulatorArm64Test
+              :buffer:linkDebugTestWatchosX64 :buffer-codec:linkDebugTestWatchosX64 :buffer-compression:linkDebugTestWatchosX64
               :buffer-flow:linkDebugTestWatchosX64 :buffer-codec-test:linkDebugTestWatchosX64
               :buffer-crypto:linkDebugTestWatchosX64
           - name: tvos
             tasks: >-
-              :buffer:linkDebugTestTvosArm64 :buffer-compression:linkDebugTestTvosArm64
+              :buffer:linkDebugTestTvosArm64 :buffer-codec:linkDebugTestTvosArm64 :buffer-compression:linkDebugTestTvosArm64
               :buffer-flow:linkDebugTestTvosArm64 :buffer-codec-test:linkDebugTestTvosArm64
               :buffer-crypto:linkDebugTestTvosArm64
-              :buffer:linkDebugTestTvosSimulatorArm64 :buffer-compression:linkDebugTestTvosSimulatorArm64
-              :buffer-flow:linkDebugTestTvosSimulatorArm64 :buffer-codec-test:linkDebugTestTvosSimulatorArm64
-              :buffer-crypto:linkDebugTestTvosSimulatorArm64
-              :buffer:linkDebugTestTvosX64 :buffer-compression:linkDebugTestTvosX64
+              tvosSimulatorArm64Test
+              :buffer:linkDebugTestTvosX64 :buffer-codec:linkDebugTestTvosX64 :buffer-compression:linkDebugTestTvosX64
               :buffer-flow:linkDebugTestTvosX64 :buffer-codec-test:linkDebugTestTvosX64
               :buffer-crypto:linkDebugTestTvosX64
     steps:
