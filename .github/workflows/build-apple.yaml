@@ -21,23 +21,171 @@ on:
     outputs:
       version:
         description: "The version this job stamped its artifacts with"
-        value: ${{ jobs.build.outputs.version }}
+        value: ${{ jobs.publish.outputs.version }}
 
+# `actions: write` is what lets the cache steps below actually SAVE. Without a single
+# writable scope on the token, GitHub's cache service refuses every write with
+# `cache write denied: token has no writable scopes` — which is precisely what every
+# merged.yaml (pull_request_target) run was hitting, silently, for both this workflow
+# and build-linux. The consequence was that `refs/heads/main` never held a
+# gradle-macos-*/konan-macos-* entry, so every PR's FIRST run restored nothing and paid
+# a fully cold Kotlin/Native build (~47 min vs ~7 min warm). A reusable workflow can only
+# ever narrow what the caller grants, so the callers (review.yaml, merged.yaml) must grant
+# `actions: write` on their job too — this line alone is not enough.
 permissions:
   contents: read
+  actions: write
 
 jobs:
-  build:
-    name: "Apple Targets"
+  # ---------------------------------------------------------------------------
+  # Per-OS test shards. These run CONCURRENTLY with `publish` below, so the job's
+  # wall clock is max(slowest shard, publish) rather than their sum.
+  #
+  # Every shard registers the FULL 12-target Apple matrix (the build scripts key off
+  # GITHUB_REPOSITORY, which is always set on a runner). That is deliberate and is NOT
+  # something to "optimize" by giving each shard only its own targets: appleMain is ONE
+  # shared metadata artifact spanning every registered Apple target, so narrowing the
+  # registered set would narrow `compileAppleMainKotlinMetadata` to match and stop it
+  # catching cross-target mismatches. That is exactly the failure mode of the
+  # watchosArm64/arm64_32 work (see buffer-crypto/build.gradle.kts) — per-target compiles
+  # all pass; only the shared metadata compile rejects it. Shards differ ONLY in which
+  # test/link tasks they run.
+  #
+  # Concurrency note: this matrix plus `publish` is 5 macOS jobs. GitHub's per-plan cap on
+  # concurrent macOS jobs is 5 on Free/Team (higher on Enterprise), and review.yaml's
+  # `docs` job is a 6th macOS job — which is why that one is gated behind the change
+  # filter. Exceeding the cap only queues a job, it never fails one.
+  test:
+    name: "Test (${{ matrix.name }})"
     runs-on: macos-latest
-    # The test step (macosArm64 + iosSimulatorArm64) finishes in ~20 min, but the subsequent
-    # `publishToMavenLocal` rebuilds the per-target CryptoKit Swift shims, CommonCrypto cinterops,
-    # and Kotlin/Native klibs for the full ~10-target Apple matrix (macos/ios/tvos/watchos ×
-    # arm64/x64/sim) with `--no-build-cache`. Only Konan is cached, so this is ~50+ min of cold
-    # native compilation. Since buffer-crypto landed those per-target shims, 60 min is no longer
-    # enough and the job was being killed mid-publish (timeout, not a code failure). Raised to 120
-    # to fit the cold run with headroom; cache the native shim archives to bring this back down.
-    timeout-minutes: 120
+    timeout-minutes: 60
+    strategy:
+      # One OS family failing should still report the others — the whole point of
+      # sharding is to see WHICH Apple family broke without re-running the rest.
+      fail-fast: false
+      matrix:
+        include:
+          # macosArm64 and iosSimulatorArm64 are the two families with a hosted runner
+          # that can actually EXECUTE tests. Everything else is compile-and-link only:
+          # there is no hosted watchOS/tvOS/iOS-device runner, so those shards link the
+          # test binaries without running them (the same compile-only gate build-linux
+          # applies via linkDebugTestLinuxArm64 before its QEMU steps).
+          #
+          # The link tasks are MODULE-QUALIFIED, matching the five-module set build-linux
+          # runs under QEMU (:buffer, :buffer-compression, :buffer-flow, :buffer-codec-test,
+          # :buffer-crypto) — i.e. the modules that actually have native test binaries.
+          # Do NOT "simplify" these to bare task names: an unqualified `linkDebugTestMacosX64`
+          # also selects :buffer-1brc, which registers macosX64 but cannot resolve it
+          # (androidx.collection:collection:1.6.0 publishes no macos_x64 variant), so the
+          # shard dies during dependency resolution before compiling anything. The current
+          # CI never trips over that only because :buffer-1brc has nothing to publish and so
+          # never enters the publishToMavenLocal graph.
+          - name: macos
+            tasks: >-
+              macosArm64Test
+              :buffer:linkDebugTestMacosX64 :buffer-compression:linkDebugTestMacosX64
+              :buffer-flow:linkDebugTestMacosX64 :buffer-codec-test:linkDebugTestMacosX64
+              :buffer-crypto:linkDebugTestMacosX64
+          - name: ios
+            tasks: >-
+              iosSimulatorArm64Test
+              :buffer:linkDebugTestIosArm64 :buffer-compression:linkDebugTestIosArm64
+              :buffer-flow:linkDebugTestIosArm64 :buffer-codec-test:linkDebugTestIosArm64
+              :buffer-crypto:linkDebugTestIosArm64
+              :buffer:linkDebugTestIosX64 :buffer-compression:linkDebugTestIosX64
+              :buffer-flow:linkDebugTestIosX64 :buffer-codec-test:linkDebugTestIosX64
+              :buffer-crypto:linkDebugTestIosX64
+          # watchosArm64 is arm64_32 — the only Apple target with 32-bit pointers and a
+          # 32-bit size_t, which is exactly where an appleTest helper that assumes 64-bit
+          # widths would break. Note the asymmetry in the module lists: :buffer-crypto is
+          # absent from the watchosArm64 line and present on every other, because that
+          # module registers watchosDeviceArm64 but NOT watchosArm64 — arm64_32 breaks its
+          # compileAppleMainKotlinMetadata. See the target list in buffer-crypto/build.gradle.kts.
+          - name: watchos
+            tasks: >-
+              :buffer:linkDebugTestWatchosArm64 :buffer-compression:linkDebugTestWatchosArm64
+              :buffer-flow:linkDebugTestWatchosArm64 :buffer-codec-test:linkDebugTestWatchosArm64
+              :buffer:linkDebugTestWatchosDeviceArm64 :buffer-compression:linkDebugTestWatchosDeviceArm64
+              :buffer-flow:linkDebugTestWatchosDeviceArm64 :buffer-codec-test:linkDebugTestWatchosDeviceArm64
+              :buffer-crypto:linkDebugTestWatchosDeviceArm64
+              :buffer:linkDebugTestWatchosSimulatorArm64 :buffer-compression:linkDebugTestWatchosSimulatorArm64
+              :buffer-flow:linkDebugTestWatchosSimulatorArm64 :buffer-codec-test:linkDebugTestWatchosSimulatorArm64
+              :buffer-crypto:linkDebugTestWatchosSimulatorArm64
+              :buffer:linkDebugTestWatchosX64 :buffer-compression:linkDebugTestWatchosX64
+              :buffer-flow:linkDebugTestWatchosX64 :buffer-codec-test:linkDebugTestWatchosX64
+              :buffer-crypto:linkDebugTestWatchosX64
+          - name: tvos
+            tasks: >-
+              :buffer:linkDebugTestTvosArm64 :buffer-compression:linkDebugTestTvosArm64
+              :buffer-flow:linkDebugTestTvosArm64 :buffer-codec-test:linkDebugTestTvosArm64
+              :buffer-crypto:linkDebugTestTvosArm64
+              :buffer:linkDebugTestTvosSimulatorArm64 :buffer-compression:linkDebugTestTvosSimulatorArm64
+              :buffer-flow:linkDebugTestTvosSimulatorArm64 :buffer-codec-test:linkDebugTestTvosSimulatorArm64
+              :buffer-crypto:linkDebugTestTvosSimulatorArm64
+              :buffer:linkDebugTestTvosX64 :buffer-compression:linkDebugTestTvosX64
+              :buffer-flow:linkDebugTestTvosX64 :buffer-codec-test:linkDebugTestTvosX64
+              :buffer-crypto:linkDebugTestTvosX64
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # No `cache: gradle` here on purpose: setup-java's Gradle cache covers
+      # ~/.gradle/caches — the SAME path as the explicit cache step below — so enabling
+      # both stored the tree twice (839 MB of pure duplication on macOS) against a 10 GB
+      # per-repo cache budget that was already sitting at 9.6 GB, and the two racing to
+      # save produced `Unable to reserve cache ... another job may be creating this cache`
+      # on real runs. The explicit step is the one that's keyed and tuned for this build.
+      - name: Set up JDK 21
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      # RESTORE-ONLY in the shards. Five macOS jobs racing to save the same key is the
+      # `another job may be creating this cache` failure above: one wins and the rest log
+      # a warning. `publish` is the single saver — it builds the expensive shared prefix
+      # (commonizer, appleMain metadata, all 12 targets' main klibs) that the shards want
+      # back next run, whereas a shard's marginal output is mostly linkDebugTest*, which
+      # Gradle does not cache anyway.
+      - name: Restore Konan
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.konan
+          key: konan-macos-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-macos-
+
+      - name: Restore Gradle build outputs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.gradle/caches
+          key: gradle-macos-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-macos-
+
+      # Pin the version for every Gradle invocation in this job. This is not cosmetic on a
+      # test shard: with no externally-supplied version each module's build script calls
+      # getNextVersion(), which queries Maven Central AT CONFIGURATION TIME — once per
+      # module, in every shard. Callers always pass `version` in, so this is a plain echo.
+      - name: Resolve version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="$INPUT_VERSION"
+          if [ -z "$version" ]; then
+            version="$(./gradlew -q nextVersion ${{ inputs.gradle-args }})"
+          fi
+          echo "Building version $version"
+          echo "ORG_GRADLE_PROJECT_version=$version" >> "$GITHUB_ENV"
+
+      - name: Run ${{ matrix.name }} tests
+        run: ./gradlew ${{ matrix.tasks }} ${{ inputs.gradle-args }}
+
+  # ---------------------------------------------------------------------------
+  # The artifact producer. Runs concurrently with the test shards.
+  publish:
+    name: "Publish (Apple targets)"
+    runs-on: macos-latest
+    timeout-minutes: 90
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -48,8 +196,9 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '21'
-          cache: gradle
 
+      # This job is the single SAVER for both macOS caches (see the shards' restore-only
+      # note above), so it uses the full restore+save action rather than cache/restore.
       - name: Cache Konan
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -57,10 +206,6 @@ jobs:
           key: konan-macos-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: konan-macos-
 
-      # Cache the Gradle module caches + local build cache (~/.gradle/caches/build-cache-1)
-      # so compiled klibs, cinterop klibs, and the per-target native shim archives survive
-      # across runs. Keyed on the build definition (version catalog, build scripts, wrapper);
-      # restore-keys fall back to the most recent partial match when those change.
       - name: Cache Gradle build outputs
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -68,6 +213,7 @@ jobs:
           key: gradle-macos-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-macos-
+
       # Prefer the version the caller computed once for the whole run. Falling back to a
       # local `nextVersion` query keeps this workflow usable standalone, but a caller that
       # also runs build-linux must pass one in — two independent queries straddling a
@@ -90,36 +236,37 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "ORG_GRADLE_PROJECT_version=$version" >> "$GITHUB_ENV"
 
-      - name: Run Apple target tests
-        run: ./gradlew macosArm64Test iosSimulatorArm64Test ${{ inputs.gradle-args }}
-
-      # Compile-and-link the appleTest sources for watchOS. `publishToMavenLocal` below builds
-      # every registered target, but MAIN sources only — so without this step no watchOS test code
-      # is ever compiled, and the tested targets above (macosArm64, iosSimulatorArm64) are both
-      # 64-bit arm64. watchosArm64 is arm64_32: the only Apple target with 32-bit pointers and a
-      # 32-bit `size_t`, which is exactly where an appleTest helper that assumes 64-bit widths
-      # would break. There is no hosted watchOS device runner, so this links the test binaries
-      # without running them — the same compile-only gate the Linux workflow applies via
-      # linkDebugTestLinuxArm64 before its QEMU steps. Module set mirrors that Linux set.
+      # Publish ONLY the Apple publications, not `publishToMavenLocal`.
       #
-      # The two lists differ by one module on purpose: buffer-crypto registers watchosDeviceArm64
-      # but NOT watchosArm64, because arm64_32 breaks its compileAppleMainKotlinMetadata. See the
-      # target list in buffer-crypto/build.gradle.kts. Note that this step would not have caught
-      # that on its own — per-target linking succeeds; only the shared metadata compilation fails.
-      - name: Build watchOS test binaries (link-only, no device runner)
+      # validate-artifacts.yaml takes the LINUX repo as its base and, from this job's
+      # upload, consumes exactly three things: the per-target Apple leaf directories
+      # (buffer-macosarm64, buffer-iosarm64, …), the umbrella .module file's `variants`,
+      # and the umbrella metadata JAR's Apple klib dirs + PSM sourceSets/variants. It
+      # explicitly SKIPS anything already present from Linux ("Skipping $target_name
+      # (already from Linux)").
+      #
+      # `publishToMavenLocal` nonetheless also built this runner's jvm/js/wasmJs/android
+      # publications — measured at 2,268 of 2,923 tasks (78%) in the publish step — and
+      # every byte of that was discarded by the merge. Naming the Apple publications
+      # explicitly cuts the graph from 2,908 tasks to 1,660 (-43%); the JS bucket alone
+      # drops 324 -> 23 tasks, which is where the webpack/browser-distribution work lived.
+      #
+      # The umbrella publication (publishKotlinMultiplatformPublicationToMavenLocal) is
+      # what produces the PSM the merge reads, so it stays. Task names are unqualified so
+      # Gradle runs each in every project that has it — buffer-crypto has no
+      # watchosArm64 publication and is skipped for that one target automatically.
+      - name: Publish Apple publications to Maven Local
         run: >-
           ./gradlew
-          :buffer:linkDebugTestWatchosArm64 :buffer-compression:linkDebugTestWatchosArm64
-          :buffer-flow:linkDebugTestWatchosArm64 :buffer-codec-test:linkDebugTestWatchosArm64
-          :buffer:linkDebugTestWatchosDeviceArm64 :buffer-compression:linkDebugTestWatchosDeviceArm64
-          :buffer-flow:linkDebugTestWatchosDeviceArm64 :buffer-codec-test:linkDebugTestWatchosDeviceArm64
-          :buffer-crypto:linkDebugTestWatchosDeviceArm64
-          ${{ inputs.gradle-args }}
-
-      # The release/publish-to-Central path passes clean-publish: true to force a cold,
-      # cache-free rebuild of the published artifacts. PR validation reuses the build cache.
-      - name: Publish to Maven Local
-        run: ./gradlew publishToMavenLocal ${{ inputs.clean-publish && '--no-build-cache' || '' }} ${{ inputs.gradle-args }}
+          publishKotlinMultiplatformPublicationToMavenLocal
+          publishMacosArm64PublicationToMavenLocal publishMacosX64PublicationToMavenLocal
+          publishIosArm64PublicationToMavenLocal publishIosSimulatorArm64PublicationToMavenLocal
+          publishIosX64PublicationToMavenLocal
+          publishTvosArm64PublicationToMavenLocal publishTvosSimulatorArm64PublicationToMavenLocal
+          publishTvosX64PublicationToMavenLocal
+          publishWatchosArm64PublicationToMavenLocal publishWatchosDeviceArm64PublicationToMavenLocal
+          publishWatchosSimulatorArm64PublicationToMavenLocal publishWatchosX64PublicationToMavenLocal
+          ${{ inputs.clean-publish && '--no-build-cache' || '' }} ${{ inputs.gradle-args }}
 
       - name: Upload Maven local artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -127,3 +274,30 @@ jobs:
           name: maven-local-apple
           path: ~/.m2/repository/com/ditchoom
           retention-days: 3
+
+  # ---------------------------------------------------------------------------
+  # Branch-protection gate. `build-apple / Apple Targets` is one of exactly three required
+  # status checks on main (alongside `build-linux / Linux / JVM / JS / WASM / Android` and
+  # `scan`), and the context string is `<caller job id> / <this job's name>`. Fanning the
+  # real work out into `test`/`publish` would have retired that context and left every PR
+  # unmergeable, so this job keeps the name and stands in for the whole matrix.
+  #
+  # `if: always()` + explicit result checks, NOT a bare `needs:`. A job whose `needs`
+  # failed is SKIPPED, and a skipped job reports no status at all — the required check
+  # would then sit at "Expected — waiting for status to be reported" forever instead of
+  # going red. Same trap review-docs-only.yaml documents from the other direction.
+  apple:
+    name: "Apple Targets"
+    needs: [test, publish]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Assert every Apple job succeeded
+        run: |
+          echo "test shards: ${{ needs.test.result }}"
+          echo "publish:     ${{ needs.publish.result }}"
+          # A matrix job's aggregate result is `success` only when every leg succeeded.
+          [ "${{ needs.test.result }}" = "success" ] || { echo "::error::Apple test shards did not all pass"; exit 1; }
+          [ "${{ needs.publish.result }}" = "success" ] || { echo "::error::Apple publish did not pass"; exit 1; }
+          echo "All Apple targets passed."

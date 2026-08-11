@@ -119,9 +119,30 @@ jobs:
     with:
       gradle-args: ${{ needs.check-release.outputs.gradle-args }}
 
+  # `actions: write` is what makes this run's caches actually reachable by later PRs.
+  #
+  # Every merged.yaml run was silently failing EVERY cache save with
+  # `cache write denied: token has no writable scopes` — the workflow-level
+  # `permissions: contents: read` above leaves the token with no writable scope at all,
+  # and GitHub's cache service refuses writes outright in that state. Because merges are
+  # the only runs whose ref is `refs/heads/main`, and a PR can restore only from its own
+  # `refs/pull/N/merge` scope plus main's, main having no gradle-*/konan-* entry meant
+  # every PR's FIRST run restored nothing and paid a fully cold Kotlin/Native build:
+  # ~47 min for build-apple versus ~7 min once warm. A reusable workflow can only narrow
+  # what its caller grants, so this has to be set here as well as inside the callee.
+  #
+  # If a merged run still logs `cache write denied` after this, the denial is
+  # ref-driven rather than scope-driven (pull_request_target on a CLOSED pr resolves to
+  # `refs/pull/N/merge`, which is no longer writable once the PR is merged). The fallback
+  # is a small `push: branches: [main]` workflow that does nothing but run the build to
+  # populate the main-scoped caches. Check the "Post Cache ..." steps of the first merged
+  # run on this change before assuming it took.
   build-linux:
     needs: [check-release, version]
     if: needs.check-release.outputs.flow != 'skip'
+    permissions:
+      contents: read
+      actions: write
     uses: ./.github/workflows/build-linux.yaml
     with:
       gradle-args: ${{ needs.check-release.outputs.gradle-args }}
@@ -130,9 +151,13 @@ jobs:
       # of the published artifacts. Non-publishing flows (dry-run) reuse the build cache.
       clean-publish: ${{ needs.check-release.outputs.flow == 'release' || needs.check-release.outputs.flow == 'draft' }}
 
+  # See the build-linux job above for why `actions: write` is required here.
   build-apple:
     needs: [check-release, version]
     if: needs.check-release.outputs.flow != 'skip'
+    permissions:
+      contents: read
+      actions: write
     uses: ./.github/workflows/build-apple.yaml
     with:
       gradle-args: ${{ needs.check-release.outputs.gradle-args }}
