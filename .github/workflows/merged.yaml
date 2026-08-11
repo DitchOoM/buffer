@@ -44,7 +44,7 @@ jobs:
       flow: ${{ steps.check.outputs.flow }}
       gradle-args: ${{ steps.check.outputs.gradle-args }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Determine release flow
@@ -181,7 +181,7 @@ jobs:
       id-token: write # OIDC for SLSA build-provenance attestation
       attestations: write # write provenance + SBOM attestations to the GitHub attestation store
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Create draft GitHub release
         if: needs.check-release.outputs.flow == 'draft' && needs.publish.result == 'success'
@@ -268,7 +268,7 @@ jobs:
 
       - name: Attest build provenance
         if: needs.publish.result == 'success'
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           # The shipped binaries: JVM/Android jars+aars and Kotlin/Native klibs.
           subject-path: |
