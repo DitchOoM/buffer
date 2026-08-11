@@ -29,7 +29,16 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '21'
-          cache: gradle
+
+      # Restore-only against build-linux's key rather than setup-java's `cache: gradle`,
+      # which stored a second copy of the same ~/.gradle/caches tree under its own key.
+      # Integration jobs consume the build cache; only build-linux/warm-cache save it.
+      - name: Restore Gradle build outputs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.gradle/caches
+          key: gradle-linux-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-linux-
 
       - name: Install swtpm + tpm2-pkcs11 stack
         run: |
@@ -110,7 +119,16 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '21'
-          cache: gradle
+
+      # Restore-only against build-linux's key rather than setup-java's `cache: gradle`,
+      # which stored a second copy of the same ~/.gradle/caches tree under its own key.
+      # Integration jobs consume the build cache; only build-linux/warm-cache save it.
+      - name: Restore Gradle build outputs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.gradle/caches
+          key: gradle-linux-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-linux-
 
       - name: Install and initialize SoftHSM
         run: |
