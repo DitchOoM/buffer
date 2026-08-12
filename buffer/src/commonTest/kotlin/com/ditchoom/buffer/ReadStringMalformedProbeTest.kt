@@ -66,9 +66,17 @@ class ReadStringMalformedProbeTest {
     fun probe() {
         val sb = StringBuilder("\n=== READSTRING-PROBE ===\n")
         for ((name, data) in cases) {
-            sb.append(name)
-                .append(" default{").append(probeRead(BufferFactory.Default, data)).append('}')
-                .append(" managed{").append(probeRead(BufferFactory.managed(), data)).append('}')
+            sb
+                .append(name)
+                .append(" default{")
+                .append(probeRead(BufferFactory.Default, data))
+                .append('}')
+                .append(" managed{")
+                .append(probeRead(BufferFactory.managed(), data))
+                .append('}')
+                .append(" deterministic{")
+                .append(probeRead(BufferFactory.deterministic(), data))
+                .append('}')
                 .append('\n')
         }
         sb.append("=== END PROBE ===")
