@@ -83,6 +83,70 @@ internal fun encodeUtf8ToNative(
     return pos
 }
 
+/**
+ * Substituting twin of [encodeUtf8ToNative]: identical loop, but an unpaired surrogate writes
+ * U+FFFD (EF BF BD) instead of throwing — the [com.ditchoom.buffer.Utf8.Lenient] contract.
+ * Produces byte-for-byte the output of `Utf8TextEncoder.encodeSubstituting`, with no staging array.
+ *
+ * Same complexity drivers as the strict loop, same suppressions.
+ */
+@Suppress("CyclomaticComplexMethod")
+internal fun encodeUtf8LenientToNative(
+    text: CharSequence,
+    startPosition: Int,
+    limit: Int,
+    base: Long,
+): Int {
+    var pos = startPosition
+    val len = text.length
+    var i = 0
+    while (i < len) {
+        val c = text[i].code
+        when {
+            c < 0x80 -> {
+                if (pos >= limit) throw overflow(pos, limit)
+                directPutByte(base + pos, c.toByte())
+                pos += 1
+            }
+            c < 0x800 -> {
+                if (pos + 2 > limit) throw overflow(pos, limit)
+                directPutByte(base + pos, (0xC0 or (c ushr 6)).toByte())
+                directPutByte(base + pos + 1, (0x80 or (c and 0x3F)).toByte())
+                pos += 2
+            }
+            c < 0xD800 || c >= 0xE000 -> {
+                // BMP scalar (excludes the surrogate range 0xD800..0xDFFF): 3 bytes.
+                if (pos + 3 > limit) throw overflow(pos, limit)
+                directPutByte(base + pos, (0xE0 or (c ushr 12)).toByte())
+                directPutByte(base + pos + 1, (0x80 or ((c ushr 6) and 0x3F)).toByte())
+                directPutByte(base + pos + 2, (0x80 or (c and 0x3F)).toByte())
+                pos += 3
+            }
+            c < 0xDC00 && i + 1 < len && text[i + 1].code in 0xDC00..0xDFFF -> {
+                // High surrogate with a real low surrogate: one supplementary scalar, 4 bytes.
+                val cp = 0x10000 + ((c - 0xD800) shl 10) + (text[i + 1].code - 0xDC00)
+                if (pos + 4 > limit) throw overflow(pos, limit)
+                directPutByte(base + pos, (0xF0 or (cp ushr 18)).toByte())
+                directPutByte(base + pos + 1, (0x80 or ((cp ushr 12) and 0x3F)).toByte())
+                directPutByte(base + pos + 2, (0x80 or ((cp ushr 6) and 0x3F)).toByte())
+                directPutByte(base + pos + 3, (0x80 or (cp and 0x3F)).toByte())
+                pos += 4
+                i += 1 // consumed the low surrogate as well
+            }
+            else -> {
+                // Unpaired surrogate (lone high or lone low): substitute U+FFFD.
+                if (pos + 3 > limit) throw overflow(pos, limit)
+                directPutByte(base + pos, 0xEF.toByte())
+                directPutByte(base + pos + 1, 0xBF.toByte())
+                directPutByte(base + pos + 2, 0xBD.toByte())
+                pos += 3
+            }
+        }
+        i += 1
+    }
+    return pos
+}
+
 private fun overflow(
     pos: Int,
     limit: Int,

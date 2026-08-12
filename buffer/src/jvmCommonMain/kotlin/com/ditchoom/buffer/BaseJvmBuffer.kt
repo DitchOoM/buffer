@@ -447,6 +447,36 @@ abstract class BaseJvmBuffer(
      */
     protected open fun tryWriteUtf8ToNative(text: CharSequence): Boolean = false
 
+    /**
+     * Substituting twin of [tryWriteUtf8ToNative] for the [Utf8.Lenient] policy: same native
+     * fast path, but unpaired surrogates become U+FFFD instead of throwing.
+     */
+    protected open fun tryWriteUtf8LenientToNative(text: CharSequence): Boolean = false
+
+    override fun <R> writeText(
+        text: CharSequence,
+        encoding: TextEncoding<R>,
+    ): R = dispatchWriteText(text, encoding) { t -> writeUtf8Substituting(t) }
+
+    /** Encodes with U+FFFD substitution and returns the bytes written. */
+    private fun writeUtf8Substituting(text: CharSequence): Int {
+        val start = position()
+        if (!tryWriteUtf8LenientToNative(text)) {
+            // Heap fallback: the REPLACE-configured encoder writes into the backing array directly.
+            val encoder = utf8LenientEncoder.get()
+            encoder.reset()
+            val result = encoder.encode(CharBuffer.wrap(text), byteBuffer, true)
+            if (result.isOverflow) {
+                throw BufferOverflowException(
+                    "Buffer overflow: cannot encode UTF-8 string of ${text.length} char(s) at position " +
+                        "${position()} (limit=${limit()}, remaining=${remaining()})",
+                )
+            }
+            // REPLACE mode cannot produce malformed/unmappable results for UTF-8.
+        }
+        return position() - start
+    }
+
     override fun write(buffer: ReadBuffer) {
         val actual = buffer.unwrapFully()
         try {

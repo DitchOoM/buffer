@@ -483,6 +483,22 @@ class NativeBuffer private constructor(
         positionValue += written
         return this
     }
+    override fun <R> writeText(
+        text: CharSequence,
+        encoding: TextEncoding<R>,
+    ): R =
+        dispatchWriteText(text, encoding) { t ->
+            // simdutf transcodes well-formed text in one pass but whole-write no-ops on any
+            // unpaired surrogate (position unchanged). The rare ill-formed case falls back to
+            // the common substituting encoder so the U+FFFD byte contract still holds.
+            val start = position()
+            writeString(t, Charset.UTF8)
+            if (position() == start && t.isNotEmpty()) {
+                writeBytes(Utf8TextEncoder.encodeSubstituting(t))
+            }
+            position() - start
+        }
+
 
     // === Optimized bulk operations ===
 
@@ -1086,6 +1102,22 @@ private class NativeBufferSlice(
         positionValue += written
         return this
     }
+    override fun <R> writeText(
+        text: CharSequence,
+        encoding: TextEncoding<R>,
+    ): R =
+        dispatchWriteText(text, encoding) { t ->
+            // simdutf transcodes well-formed text in one pass but whole-write no-ops on any
+            // unpaired surrogate (position unchanged). The rare ill-formed case falls back to
+            // the common substituting encoder so the U+FFFD byte contract still holds.
+            val start = position()
+            writeString(t, Charset.UTF8)
+            if (position() == start && t.isNotEmpty()) {
+                writeBytes(Utf8TextEncoder.encodeSubstituting(t))
+            }
+            position() - start
+        }
+
 
     fun close() = Unit
 

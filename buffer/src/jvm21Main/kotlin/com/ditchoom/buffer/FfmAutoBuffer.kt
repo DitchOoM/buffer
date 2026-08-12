@@ -39,6 +39,11 @@ class FfmAutoBuffer(
         return true
     }
 
+    override fun tryWriteUtf8LenientToNative(text: CharSequence): Boolean {
+        position(encodeUtf8LenientToNative(text, position(), limit(), segment.address()))
+        return true
+    }
+
     // Read mirror of tryWriteUtf8ToNative: decode UTF-8 straight off the segment's native address
     // instead of taking the direct-ByteBuffer decodeBufferLoop. Non-UTF-8 falls back to the base
     // CharsetDecoder path.

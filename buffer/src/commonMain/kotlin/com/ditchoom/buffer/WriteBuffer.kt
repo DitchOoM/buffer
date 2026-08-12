@@ -416,30 +416,12 @@ interface WriteBuffer : PositionBuffer {
     fun <R> writeText(
         text: CharSequence,
         encoding: TextEncoding<R>,
-    ): R {
-        // Sentinel is local to implementations only (bytes written, or first-malformed ~index);
-        // the public surface is the policy-typed R. Mapping through `encoding` (never through a
-        // smart-cast branch) is what lets each branch produce R without unchecked casts.
-        val outcome =
-            when (encoding) {
-                Utf8.Lenient -> {
-                    val bytes = Utf8TextEncoder.encodeSubstituting(text)
-                    writeBytes(bytes)
-                    bytes.size
-                }
-                Utf8.Strict -> {
-                    val bad = Utf8TextEncoder.firstMalformedIndex(text)
-                    if (bad >= 0) {
-                        bad.inv()
-                    } else {
-                        val bytes = Utf8TextEncoder.encodeSubstituting(text)
-                        writeBytes(bytes)
-                        bytes.size
-                    }
-                }
-            }
-        return if (outcome >= 0) encoding.written(this, outcome) else encoding.malformed(outcome.inv())
-    }
+    ): R =
+        dispatchWriteText(text, encoding) { t ->
+            val bytes = Utf8TextEncoder.encodeSubstituting(t)
+            writeBytes(bytes)
+            bytes.size
+        }
 
     /**
      * Writes all remaining bytes from the source buffer and advances both positions.

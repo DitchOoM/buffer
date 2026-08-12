@@ -79,6 +79,13 @@ class DirectJvmBuffer(
         return true
     }
 
+    override fun tryWriteUtf8LenientToNative(text: CharSequence): Boolean {
+        val base = directBase()
+        if (base == 0L) return false // no --add-opens on JVM<21: fall back to the CharsetEncoder path
+        position(encodeUtf8LenientToNative(text, position(), limit(), base))
+        return true
+    }
+
     // No readString override here: the direct-from-native UTF-8 decode is a win only where the byte
     // accessor is a JIT intrinsic — the FFM buffers on JDK 21+ (see jvm21Main/Utf8DirectDecode.kt).
     // On the sun.misc.Unsafe path this class takes (JVM 8-20 / Android) a per-byte Unsafe.getByte loop

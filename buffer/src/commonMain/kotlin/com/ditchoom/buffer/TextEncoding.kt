@@ -136,6 +136,29 @@ sealed interface SizeHint {
     }
 }
 
+/**
+ * Shared [WriteBuffer.writeText] dispatch: policy selection, strict pre-validation (atomic
+ * rejection), and the outcome-to-R mapping. Platform overrides supply only [substitutingWrite] —
+ * their fastest "encode with U+FFFD substitution, return bytes written" primitive. The sentinel
+ * Int (bytes written, or first-malformed `~index`) is internal to implementations; the public
+ * surface is the policy-typed R.
+ */
+internal inline fun <R> WriteBuffer.dispatchWriteText(
+    text: CharSequence,
+    encoding: TextEncoding<R>,
+    substitutingWrite: (CharSequence) -> Int,
+): R {
+    val outcome =
+        when (encoding) {
+            Utf8.Lenient -> substitutingWrite(text)
+            Utf8.Strict -> {
+                val bad = Utf8TextEncoder.firstMalformedIndex(text)
+                if (bad >= 0) bad.inv() else substitutingWrite(text)
+            }
+        }
+    return if (outcome >= 0) encoding.written(this, outcome) else encoding.malformed(outcome.inv())
+}
+
 /** Writes [text] as substituting UTF-8 — the drop-in replacement for `writeString(text)`. */
 fun WriteBuffer.writeText(text: CharSequence): WriteBuffer = writeText(text, Utf8.Lenient)
 
