@@ -483,6 +483,7 @@ class NativeBuffer private constructor(
         positionValue += written
         return this
     }
+
     override fun <R> writeText(
         text: CharSequence,
         encoding: TextEncoding<R>,
@@ -498,7 +499,6 @@ class NativeBuffer private constructor(
             }
             position() - start
         }
-
 
     // === Optimized bulk operations ===
 
@@ -1102,6 +1102,7 @@ private class NativeBufferSlice(
         positionValue += written
         return this
     }
+
     override fun <R> writeText(
         text: CharSequence,
         encoding: TextEncoding<R>,
@@ -1117,7 +1118,6 @@ private class NativeBufferSlice(
             }
             position() - start
         }
-
 
     fun close() = Unit
 
