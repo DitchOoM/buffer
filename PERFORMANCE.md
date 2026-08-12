@@ -115,7 +115,7 @@ BufferFactory.deterministic().allocate(1024).use { buffer ->
 | Android | Unsafe.allocateMemory/freeMemory |
 | Apple | MutableDataBuffer (ARC, already deterministic) |
 | Linux | NativeBuffer (malloc/free, already deterministic) |
-| WASM | LinearBuffer (already deterministic) |
+| WASM | LinearBuffer (linear memory, released back to `LinearMemoryAllocator`) |
 | JS | JsBuffer (GC-managed, no alternative) |
 
 ## Secure Buffers (`buffer-crypto`)

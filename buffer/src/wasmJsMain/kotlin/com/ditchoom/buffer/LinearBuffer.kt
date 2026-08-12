@@ -108,13 +108,41 @@ private external fun copyToJsArray(
  * JS (via DataView on the same memory) can access the same underlying bytes.
  *
  * All read/write operations compile to native WASM i32.load/i32.store instructions.
+ *
+ * ## Memory ownership
+ *
+ * Linear memory is outside the Wasm-GC heap, so dropping the last reference to a LinearBuffer does
+ * **not** reclaim its bytes. An *owning* buffer — one produced by a [BufferFactory] or by
+ * [PlatformBuffer.allocateNative] — must be released with [freeNativeMemory] (directly or via
+ * `use { }`), which returns the block to [LinearMemoryAllocator].
+ *
+ * [owned] is `false` for views that alias memory somebody else is responsible for: [slice], and
+ * [PlatformBuffer.wrapNativeAddress] over an externally-owned address. Releasing those is a no-op.
+ *
+ * Because a released block is handed straight back out to the next allocation of the same size,
+ * reading or writing through a buffer (or a live [slice] of one) after it has been released reads
+ * or corrupts unrelated data. As documented on [slice], a view must not outlive its parent.
+ *
+ * `@Suppress("TooManyFunctions")`: the count is set by the PlatformBuffer surface this class must
+ * implement (the read/write primitives plus the NativeMemoryAccess and CloseableBuffer members),
+ * not by anything decomposable. Splitting it would put the buffer's own accessors behind a delegate
+ * on the hot path. Same reasoning as LockFreeBufferPool.
+ *
+ * @param owned whether releasing this buffer returns its block to [LinearMemoryAllocator]. Defaults
+ *   to `false` so that a construction site that has not thought about ownership fails safe by
+ *   leaking rather than by double-freeing.
  */
+@Suppress("TooManyFunctions")
 class LinearBuffer(
     internal val baseOffset: Int,
     capacity: Int,
     byteOrder: ByteOrder,
+    private val owned: Boolean = false,
 ) : BaseWebBuffer(capacity, byteOrder),
-    NativeMemoryAccess {
+    NativeMemoryAccess,
+    CloseableBuffer {
+    private var freed: Boolean = false
+
     /**
      * The offset in WASM linear memory for zero-copy JS interop.
      * Use with `new DataView(wasmExports.memory.buffer, nativeAddress, nativeSize)`.
@@ -372,6 +400,12 @@ class LinearBuffer(
         }
     }
 
+    /**
+     * A zero-copy view of the remaining bytes, sharing this buffer's linear memory.
+     *
+     * The slice is non-owning: releasing it does nothing, and it must not outlive this buffer —
+     * once the parent is released its block can be reissued to an unrelated allocation.
+     */
     override fun slice(byteOrder: ByteOrder): LinearBuffer {
         // Create a new LinearBuffer view of the remaining portion
         // This is zero-copy - just creates a new view with different base offset
@@ -379,7 +413,22 @@ class LinearBuffer(
             baseOffset + positionValue,
             limitValue - positionValue,
             byteOrder,
+            owned = false,
         )
+    }
+
+    override val isFreed: Boolean get() = freed
+
+    /**
+     * Returns this buffer's block to [LinearMemoryAllocator], if this buffer owns it.
+     *
+     * Idempotent, and a no-op for non-owning views ([slice], wrapped external addresses) — so it is
+     * always safe to call, including through `use { }`.
+     */
+    override fun freeNativeMemory() {
+        if (freed || !owned) return
+        freed = true
+        LinearMemoryAllocator.free(baseOffset, capacity)
     }
 
     override fun readByteArray(size: Int): ByteArray = copyToByteArray(size)
