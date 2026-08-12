@@ -38,10 +38,16 @@ class Utf8SurrogateProbeTest {
     fun probe() {
         val sb = StringBuilder("\n=== UTF8-PROBE ===\n")
         for ((name, text) in cases) {
-            sb.append(name)
-                .append(" utf8Length=").append(text.utf8Length())
-                .append(" default[").append(probeWrite(BufferFactory.Default, text)).append(']')
-                .append(" managed[").append(probeWrite(BufferFactory.managed(), text)).append(']')
+            sb
+                .append(name)
+                .append(" utf8Length=")
+                .append(text.utf8Length())
+                .append(" default[")
+                .append(probeWrite(BufferFactory.Default, text))
+                .append(']')
+                .append(" managed[")
+                .append(probeWrite(BufferFactory.managed(), text))
+                .append(']')
                 .append('\n')
         }
         sb.append("=== END PROBE ===")
