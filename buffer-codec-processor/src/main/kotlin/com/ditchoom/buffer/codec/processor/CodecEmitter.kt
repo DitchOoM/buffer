@@ -242,6 +242,7 @@ internal class CodecEmitter(
             TypeSpec
                 .objectBuilder(shape.codecSimpleName)
                 .withVisibility(shape.visibility)
+                .addSuperinterface(FRAME_DETECTOR_CN)
                 .addFunction(buildFramedByDecodeFun(shape, framedBy))
                 .addFunction(buildFramedByEncodeFun(shape, framedBy))
                 .addFunction(buildFramedByPeekFrameFun(shape, framedBy))
@@ -372,6 +373,17 @@ internal class CodecEmitter(
      * walker drives its `decode` against a non-consuming peek view at
      * `baseOffset + headerWireWidth` and computes total = headerWireWidth
      * + observed-codec-width + decodedValue.toInt().
+     *
+     * A framed shape always frames — the length prefix is the frame size,
+     * which is what `@FramedBy` means — so unlike [buildPeekFrame] there is
+     * no `NoFraming` branch to classify against.
+     *
+     * The emitted shape is a `FrameDetector` override (no `baseOffset`
+     * default of its own; the interface supplies it). A framed codec drops
+     * the `Codec` superinterface, so before this it implemented nothing at
+     * all and its peek was reachable only by name, never as a value — and
+     * the override shape is what lets the *same* `FunSpec` serve both the
+     * codec object and a companion.
      */
     private fun buildFramedByPeekFrameFun(
         shape: CodecShape,
@@ -382,13 +394,10 @@ internal class CodecEmitter(
         val builder =
             FunSpec
                 .builder("peekFrameSize")
+                .addModifiers(KModifier.OVERRIDE)
                 .addParameter("stream", STREAM_PROCESSOR_CN)
-                .addParameter(
-                    com.squareup.kotlinpoet.ParameterSpec
-                        .builder("baseOffset", INT)
-                        .defaultValue("0")
-                        .build(),
-                ).returns(PEEK_RESULT_CN)
+                .addParameter("baseOffset", INT)
+                .returns(PEEK_RESULT_CN)
         val body = CodeBlock.builder()
         if (variableAfter != null) {
             // Variable-width header (varint discriminator): measure the
@@ -687,15 +696,26 @@ internal class CodecEmitter(
                     .builder(binding.codecParameterName, codecOfP, KModifier.PRIVATE)
                     .initializer(binding.codecParameterName)
                     .build(),
-            ).addFunction(buildFramedByDecodeFun(shape, framedBy, parameterizedMessage))
+            ).addSuperinterface(FRAME_DETECTOR_CN)
+            .addFunction(buildFramedByDecodeFun(shape, framedBy, parameterizedMessage))
             .addFunction(buildFramedByEncodeFun(shape, framedBy, parameterizedMessage))
-            .addFunction(buildFramedByPeekFrameFun(shape, framedBy))
+            .addFunction(memberPeekFun(PeekEmit.Framed(buildFramedByPeekFrameFun(shape, framedBy))))
             .also { builder ->
+                // Same placement rule as the unframed generic codec: framing
+                // derives from the length prefix, never from the injected
+                // payload codec, so it belongs where a consumer without one
+                // can reach it.
+                val peek = buildFramedByPeekFrameFun(shape, framedBy)
                 if (shouldEmitPartial(shape)) {
                     builder.addType(buildPartialClassTypeSpec(shape, payloadTypeParameter = binding))
                     builder.addCodecCompanion(
-                        CodecCompanion.PartialOnly(buildPartialEntryFun(shape, binding)),
+                        CodecCompanion.PartialAndFraming(
+                            partial = buildPartialEntryFun(shape, binding),
+                            peek = peek,
+                        ),
                     )
+                } else {
+                    builder.addCodecCompanion(CodecCompanion.FramingOnly(peek))
                 }
             }.build()
     }

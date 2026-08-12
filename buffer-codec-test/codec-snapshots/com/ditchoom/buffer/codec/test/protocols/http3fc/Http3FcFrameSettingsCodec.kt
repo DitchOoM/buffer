@@ -6,6 +6,7 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
@@ -13,7 +14,7 @@ import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
 import kotlin.Throwable
 
-public object Http3FcFrameSettingsCodec {
+public object Http3FcFrameSettingsCodec : FrameDetector {
   public fun decode(buffer: ReadBuffer, context: DecodeContext): Http3FcFrame.Settings {
     val frameType = Http3FcFrameTypeCodec.decode(buffer, context)
     val __framingOuterLimit = buffer.limit()
@@ -72,7 +73,7 @@ public object Http3FcFrameSettingsCodec {
     }
   }
 
-  public fun peekFrameSize(stream: StreamProcessor, baseOffset: Int = 0): PeekResult {
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     val __headerFrame = Http3FcFrameTypeCodec.peekFrameSize(stream, baseOffset)
     if (__headerFrame !is PeekResult.Complete) {
       return __headerFrame
