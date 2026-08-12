@@ -617,6 +617,7 @@ internal class CodecEmitter(
         val typeVar = TypeVariableName(binding.typeVariableName, binding.bound)
         val parameterizedMessage = shape.messageClassName.parameterizedBy(typeVar)
         val codecOfP = CODEC_CN.parameterizedBy(typeVar)
+        val peek = buildPeekFrame(shape)
         return TypeSpec
             .classBuilder(shape.codecSimpleName)
             .withVisibility(shape.visibility)
@@ -636,7 +637,7 @@ internal class CodecEmitter(
             .addFunction(buildEncodeFun(shape, parameterizedMessage))
             .addFunction(buildWireSizeFun(shape, parameterizedMessage))
             .addFunction(buildSizeHintFun(shape, parameterizedMessage))
-            .addFunction(buildPeekFrameFun(shape))
+            .addFunction(memberPeekFun(peek))
             .also { builder ->
                 // For the (class) shape, `Partial` is a
                 // nested class (independent type parameter <P : Payload>) and
@@ -648,8 +649,8 @@ internal class CodecEmitter(
                 // codec choice past header decode).
                 if (shouldEmitPartial(shape)) {
                     builder.addType(buildPartialClassTypeSpec(shape, payloadTypeParameter = binding))
-                    builder.addType(buildPartialCompanionObject(shape, payloadTypeParameter = binding))
                 }
+                builder.addCodecCompanion(codecCompanionFor(shape, peek, binding))
             }.build()
     }
 
@@ -692,7 +693,9 @@ internal class CodecEmitter(
             .also { builder ->
                 if (shouldEmitPartial(shape)) {
                     builder.addType(buildPartialClassTypeSpec(shape, payloadTypeParameter = binding))
-                    builder.addType(buildPartialCompanionObject(shape, payloadTypeParameter = binding))
+                    builder.addCodecCompanion(
+                        CodecCompanion.PartialOnly(buildPartialEntryFun(shape, binding)),
+                    )
                 }
             }.build()
     }
@@ -1838,21 +1841,40 @@ internal class CodecEmitter(
     }
 
     /**
-     * Companion-object wrapper for the
-     * `partial<P>(...)` entry. Companion-side placement is required:
-     * a member-side `partial(...)` would force the consumer to first
-     * construct `MqttPublishV3Codec(somePayloadCodec)` just to call
-     * `partial`, defeating the purpose of deferring the
-     * codec choice past the header decode.
+     * Which codec-free entry points the generic codec's companion carries.
+     *
+     * Both entries exist for the same reason: a consumer holding no
+     * `Codec<P>` still needs to read the envelope. `partial<P>(...)` gives
+     * it the decoded header (a member-side `partial` would force
+     * `MqttPublishV3Codec(someCodec)` to be constructed first, defeating the
+     * deferral); `peekFrameSize(...)` gives it the frame boundary off a
+     * stream. Issue #348: framing that derives from header scalars alone was
+     * reachable only through an instance, so a consumer deferring the payload
+     * codec had to fabricate a throwing `Codec<P>` just to get a receiver.
+     *
+     * Companion placement is gated on [PeekEmit.Framed] rather than applied
+     * unconditionally: hoisting a constant `NoFraming` would advertise an
+     * entry point that can never frame, and a consumer would learn that at
+     * runtime instead of from the compiler.
      */
-    private fun buildPartialCompanionObject(
+    private fun codecCompanionFor(
         shape: CodecShape,
+        peek: PeekEmit,
         payloadTypeParameter: PayloadTypeParameter,
-    ): TypeSpec =
-        TypeSpec
-            .companionObjectBuilder()
-            .addFunction(buildPartialEntryFun(shape, payloadTypeParameter))
-            .build()
+    ): CodecCompanion {
+        val emitsPartial = shouldEmitPartial(shape)
+        return when {
+            emitsPartial && peek is PeekEmit.Framed ->
+                CodecCompanion.PartialAndFraming(
+                    partial = buildPartialEntryFun(shape, payloadTypeParameter),
+                    peek = peek.fn,
+                )
+            emitsPartial ->
+                CodecCompanion.PartialOnly(buildPartialEntryFun(shape, payloadTypeParameter))
+            peek is PeekEmit.Framed -> CodecCompanion.FramingOnly(peek.fn)
+            else -> CodecCompanion.None
+        }
+    }
 
     /**
      * Derive the property `TypeName` for a header
@@ -1908,6 +1930,99 @@ internal class CodecEmitter(
             is FieldSpec.EnumScalar -> field.enumType
         }
 }
+
+/**
+ * The companion object a generated codec class carries, as a closed set of
+ * the combinations that are actually reachable.
+ *
+ * Only *class*-shaped codecs (a generic payload's constructor-injected
+ * `Codec<P>`) need this: an `object` codec is already its own static
+ * receiver, so `FooCodec.peekFrameSize(...)` resolves without a companion.
+ * Kotlin permits one companion per class, so every codec-free entry point
+ * shares this single object and the combinations have to be enumerated
+ * rather than added independently.
+ */
+internal sealed interface CodecCompanion {
+    /** Neither a `Partial` entry nor derivable framing — no companion at all. */
+    data object None : CodecCompanion
+
+    /** Header deferral only; the shape collapsed to `NoFraming`. */
+    data class PartialOnly(
+        val partial: FunSpec,
+    ) : CodecCompanion
+
+    /** Framing only; the shape has no deferred payload to partially decode. */
+    data class FramingOnly(
+        val peek: FunSpec,
+    ) : CodecCompanion
+
+    /** Both — the shape issue #348 is about: a sibling-sized deferred payload. */
+    data class PartialAndFraming(
+        val partial: FunSpec,
+        val peek: FunSpec,
+    ) : CodecCompanion
+}
+
+/**
+ * Add the companion described by [companion], if any.
+ *
+ * A companion carrying framing declares `: FrameDetector`, which is what
+ * makes the emitted `peekFrameSize` an `override` in either placement (so
+ * the same `FunSpec` serves both) and lets consumers pass the companion
+ * itself wherever a [FRAME_DETECTOR_CN] is expected — not merely call a
+ * same-named function on it.
+ */
+internal fun TypeSpec.Builder.addCodecCompanion(companion: CodecCompanion): TypeSpec.Builder =
+    when (companion) {
+        is CodecCompanion.None -> this
+        is CodecCompanion.PartialOnly ->
+            addType(
+                TypeSpec
+                    .companionObjectBuilder()
+                    .addFunction(companion.partial)
+                    .build(),
+            )
+        is CodecCompanion.FramingOnly ->
+            addType(
+                TypeSpec
+                    .companionObjectBuilder()
+                    .addSuperinterface(FRAME_DETECTOR_CN)
+                    .addFunction(companion.peek)
+                    .build(),
+            )
+        is CodecCompanion.PartialAndFraming ->
+            addType(
+                TypeSpec
+                    .companionObjectBuilder()
+                    .addSuperinterface(FRAME_DETECTOR_CN)
+                    .addFunction(companion.peek)
+                    .addFunction(companion.partial)
+                    .build(),
+            )
+    }
+
+/**
+ * The codec's own `peekFrameSize` member.
+ *
+ * When the walker framed the shape, the body lives on the companion and the
+ * member forwards to it — one body, two receivers. The `Companion.` receiver
+ * is required: an unqualified call would resolve to this very member and
+ * recurse. An unframed shape keeps its constant-`NoFraming` body inline,
+ * since there is no companion copy to forward to.
+ */
+internal fun memberPeekFun(peek: PeekEmit): FunSpec =
+    when (peek) {
+        is PeekEmit.Unframed -> peek.fn
+        is PeekEmit.Framed ->
+            FunSpec
+                .builder("peekFrameSize")
+                .addModifiers(KModifier.OVERRIDE)
+                .addParameter("stream", STREAM_PROCESSOR_CN)
+                .addParameter("baseOffset", INT)
+                .returns(PEEK_RESULT_CN)
+                .addStatement("return Companion.peekFrameSize(stream, baseOffset)")
+                .build()
+    }
 
 /** Index of the (single) `DeferredPayload` field, or -1. */
 private fun CodecShape.payloadFieldIndex(): Int = fields.indexOfFirst { it is FieldSpec.DeferredPayload }
