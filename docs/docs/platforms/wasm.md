@@ -53,19 +53,28 @@ Benchmark results (WASM Node.js):
 
 ## Memory Management
 
-LinearBuffer draws from a fixed, pre-allocated region of WASM linear memory:
+LinearBuffer draws from a pool of WASM linear memory that grows on demand:
 
-- **256MB** allocated by default at first allocation
-- Configurable via `LinearMemoryAllocator.configure()`
-- The pool cannot grow after initialization — growing needs a `@JsFun` call, which trips a
-  Kotlin/WASM optimizer bug if it appears on the allocation path
+- **16MB** reserved at the first allocation, growing in **16MB steps** as needed
+- **256MB** ceiling on that growth, past which allocation fails with a diagnostic
+- Both are configurable via `PlatformBuffer.configureWasmMemory()` /
+  `LinearMemoryAllocator.configure()`, which must be called *before* the first allocation
 - Use `BufferFactory.managed()` for high-frequency, short-lived allocations
+
+The ceiling is what makes a leak reportable. Linear memory is never returned to the engine —
+WebAssembly has no shrink operation — so an uncapped pool would climb until the engine gave out and
+took the page down, instead of failing at a point you can debug. The default is the same 256MB the
+old fixed pool imposed, so nothing that fit before fails now.
+
+Growing is cheap in the other direction: `memory.grow` reserves address space and engines commit
+physical pages on first touch, so a large *reservation* is not a large upfront footprint. What
+`initialSizeMB` buys is avoiding the growth step itself, not memory you would otherwise pay for.
 
 ### Releasing is required
 
 Linear memory is **not** garbage collected — it lives outside the Wasm-GC heap, and a `LinearBuffer`
-has no finalizer that could return its bytes. Dropping the last reference to one leaks it out of the
-fixed pool. This applies to `BufferFactory.Default` just as much as to `BufferFactory.deterministic()`;
+has no finalizer that could return its bytes. Dropping the last reference to one leaks it, and the
+pool it leaks from is capped. This applies to `BufferFactory.Default` just as much as to `BufferFactory.deterministic()`;
 WASM is the only target where the default allocation must be released.
 
 ```kotlin
@@ -91,17 +100,24 @@ owner is released its block can be handed out to an unrelated allocation.
 
 ```kotlin
 // At app startup, BEFORE any LinearBuffer allocation:
-LinearMemoryAllocator.configure(initialSizeMB = 32)  // Set to 32MB
+LinearMemoryAllocator.configure(initialSizeMB = 32, maxSizeMB = 512)
 
-// Or use a smaller size for lightweight apps:
-LinearMemoryAllocator.configure(initialSizeMB = 4)   // Set to 4MB
+// A lightweight app that should fail fast if it starts leaking:
+LinearMemoryAllocator.configure(initialSizeMB = 4, maxSizeMB = 32)
 ```
 
-`PlatformBuffer.configureWasmMemory(initialSizeMB = N)` is the public, expect/actual-friendly alias for `LinearMemoryAllocator.configure(initialSizeMB = N)` — use whichever reads better in your call site; they configure the same value:
+`PlatformBuffer.configureWasmMemory()` is the public, expect/actual-friendly alias — use whichever
+reads better at your call site; they configure the same values, and it is a no-op on non-WASM
+targets, so it can live in common startup code:
 
 ```kotlin
-PlatformBuffer.configureWasmMemory(initialSizeMB = 32)  // equivalent to the call above
+PlatformBuffer.configureWasmMemory(initialSizeMB = 32, maxSizeMB = 512)
 ```
+
+The single-argument `configureWasmMemory(initialSizeMB)` is **deprecated**: it still works and
+leaves the ceiling at its 256MB default, but the ceiling is the half worth tuning now that the pool
+grows on demand. It is a separate overload rather than a defaulted parameter, so callers compiled
+against the old form keep linking.
 
 ### Usage Patterns
 
@@ -149,19 +165,24 @@ linearBuffer.readToJsArray(jsInt8Array, dstOffset = 0, length = 100)
 
 ### Optimizer Bug Workaround
 
-Due to a Kotlin/WASM production optimizer bug, LinearBuffer pre-allocates memory at initialization rather than growing dynamically. This means:
+A Kotlin/WASM production optimizer bug makes a `@JsFun` call blow the stack when it appears
+**directly in the body of** `LinearMemoryAllocator.allocateOffset`. It does not extend to a call
+behind a cold branch in a separate function, which is how both the initial reservation and each
+growth step reach `memory.grow`. The practical consequence is a constraint on how that code is
+written, not on what the allocator can do.
 
-1. **Configurable limit** - Default 256MB, adjustable via `configureWasmMemory()`
-2. **No memory reclamation** - Bump allocator doesn't free memory
-3. **Use managed() for benchmarks** - High-frequency allocation benchmarks should use `BufferFactory.managed()`
-
-If you exceed the configured limit, you'll get an `OutOfMemoryError` with guidance:
+If you exhaust the configured ceiling, you get an `OutOfMemoryError` with guidance:
 
 ```
-LinearBuffer allocation exceeded 256MB pre-allocated memory. Use BufferFactory.managed() for
-high-frequency allocations, or call LinearMemoryAllocator.configure(initialSizeMB = N) at
-startup with a larger value.
+LinearBuffer allocation of 4096 bytes failed: the linear-memory pool is at 256MB of the 256MB
+limit. Release LinearBuffers with use { } / freeNativeMemory() — linear memory is not garbage
+collected, so an unreleased buffer is leaked for the life of the process. Use
+BufferFactory.managed() for high-frequency allocations, or raise the limit with
+PlatformBuffer.configureWasmMemory(initialSizeMB, maxSizeMB) before the first allocation.
 ```
+
+Reaching this almost always means buffers are not being released, rather than that the ceiling is
+genuinely too low — see [Releasing is required](#releasing-is-required).
 
 ### ByteArray Conversion
 

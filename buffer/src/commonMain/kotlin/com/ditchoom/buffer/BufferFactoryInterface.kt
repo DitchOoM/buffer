@@ -136,10 +136,11 @@ interface BufferFactory {
  * - **JS**: JsBuffer (Int8Array, GC-managed)
  * - **Linux**: ByteArrayBuffer (GC-managed)
  *
- * **WASM is the exception**: LinearBuffer draws from a fixed pool of WASM linear memory, which lives
+ * **WASM is the exception**: LinearBuffer draws from a pool of WASM linear memory, which lives
  * outside the Wasm-GC heap and has no finalization hook — dropping the last reference to one leaks
- * it. On WASM these buffers must be released with `use { }` / [PlatformBuffer.freeNativeMemory], or
- * allocated from [managedBufferFactory] instead.
+ * it. The pool grows on demand but is capped (256MB by default), so a leak ends in an
+ * `OutOfMemoryError` rather than climbing forever. On WASM these buffers must be released with
+ * `use { }` / [PlatformBuffer.freeNativeMemory], or allocated from [managedBufferFactory] instead.
  */
 internal expect val defaultBufferFactory: BufferFactory
 

@@ -21,9 +21,9 @@ import kotlin.test.fail
  *
  * Every row here releases each buffer, which is the contract on a platform without a collector for
  * native memory. The complementary case — allocating without ever releasing, which no collector can
- * rescue on wasmJs — is `LinearMemoryExhaustionTest` in wasmJsTest, where the leak can be cleaned up
- * afterwards instead of poisoning the rest of the suite. Mechanism-level assertions live in
- * `LinearMemoryReclamationTest`.
+ * rescue on wasmJs — is `LinearMemoryGrowthTest` in wasmJsTest, where the pool grows to absorb it and
+ * the leak is cleaned up afterwards instead of poisoning the rest of the suite. Mechanism-level
+ * assertions live in `LinearMemoryReclamationTest`.
  */
 class SustainedAllocationChurnTest {
     // `allocate` is last so it can be passed as a trailing lambda.

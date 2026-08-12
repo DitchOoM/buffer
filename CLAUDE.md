@@ -174,7 +174,7 @@ parameter: on JVM 21+ it selects `Arena.ofConfined()` instead of the default
 
 **WASM is the one platform where releasing is not optional.** Linear memory sits outside the
 Wasm-GC heap and there is no finalization hook, so dropping the last reference to a `LinearBuffer`
-leaks its bytes out of a fixed 256 MB pool — `BufferFactory.Default` included, not just
+leaks its bytes out of a pool capped at 256 MB by default — `BufferFactory.Default` included, not just
 `deterministic()`. Always pair a WASM allocation with `use { }` / `freeNativeMemory()`, or use
 `BufferFactory.managed()` for high-frequency short-lived buffers.
 
@@ -604,7 +604,7 @@ When optimizing buffer operations, follow these principles:
 1. **LinearBuffer (Direct)** - Uses native WASM Pointer ops, 25% faster than ByteArrayBuffer
 2. **ByteArrayBuffer (Heap)** - Use for high-frequency allocations (no memory limit)
 3. **Bulk operations are 2x faster** than single operations on LinearBuffer
-4. **256MB pre-allocated** - fixed pool; the allocator cannot grow it after init (`@JsFun` calls on the allocation path trip a Kotlin/WASM optimizer bug). Released blocks are recycled: the bump pointer rewinds for the top allocation, otherwise the block goes on a size-classed free list
+4. **16MB reserved, grows in 16MB steps to a 256MB ceiling** - both ends configurable via `PlatformBuffer.configureWasmMemory(initialSizeMB, maxSizeMB)`. The ceiling is deliberate: linear memory is never returned to the engine (WASM has no shrink), so an uncapped pool would climb until the engine gave out instead of reporting a leak. Released blocks are recycled: the bump pointer rewinds for the top allocation, otherwise the block goes on a size-classed free list. The Kotlin/WASM optimizer bug only forbids a `@JsFun` call *directly in* `allocateOffset`'s body — growth sits behind a cold branch in a separate function
 5. **Use Direct for JS interop** - Zero-copy sharing with JavaScript via `wasmMemory.buffer`
 
 See `PERFORMANCE.md` for detailed benchmark results.
