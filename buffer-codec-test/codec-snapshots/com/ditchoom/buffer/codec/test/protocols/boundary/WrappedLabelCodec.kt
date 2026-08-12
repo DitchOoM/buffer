@@ -1,14 +1,15 @@
 package com.ditchoom.buffer.codec.test.protocols.boundary
 
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
@@ -22,7 +23,7 @@ public object WrappedLabelCodec : Codec<WrappedLabel> {
       throw DecodeException(fieldPath = "WrappedLabel.label", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = labelPrefix.toString())
     }
     val labelLength = labelPrefix.toInt()
-    val label = buffer.readString(labelLength, Charset.UTF8)
+    val label = buffer.readText(labelLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     return WrappedLabel(label = label)
   }
 
@@ -34,7 +35,7 @@ public object WrappedLabelCodec : Codec<WrappedLabel> {
     val labelSizePosition = buffer.position()
     repeat(2) { buffer.writeUByte(0u) }
     val labelBodyStart = buffer.position()
-    buffer.writeString(value.label, Charset.UTF8)
+    buffer.writeText(value.label, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val labelEndPosition = buffer.position()
     val labelByteCount = labelEndPosition - labelBodyStart
     if (labelByteCount > 65_535) {

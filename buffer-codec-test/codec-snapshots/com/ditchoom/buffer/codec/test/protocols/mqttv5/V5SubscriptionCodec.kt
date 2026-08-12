@@ -1,14 +1,15 @@
 package com.ditchoom.buffer.codec.test.protocols.mqttv5
 
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
@@ -22,7 +23,7 @@ public object V5SubscriptionCodec : Codec<V5Subscription> {
       throw DecodeException(fieldPath = "V5Subscription.topicFilter", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = topicFilterPrefix.toString())
     }
     val topicFilterLength = topicFilterPrefix.toInt()
-    val topicFilter = buffer.readString(topicFilterLength, Charset.UTF8)
+    val topicFilter = buffer.readText(topicFilterLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val subscriptionOptions = V5SubscriptionOptions(buffer.readUByte())
     return V5Subscription(topicFilter = topicFilter, subscriptionOptions = subscriptionOptions)
   }
@@ -35,7 +36,7 @@ public object V5SubscriptionCodec : Codec<V5Subscription> {
     val topicFilterSizePosition = buffer.position()
     repeat(2) { buffer.writeUByte(0u) }
     val topicFilterBodyStart = buffer.position()
-    buffer.writeString(value.topicFilter, Charset.UTF8)
+    buffer.writeText(value.topicFilter, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val topicFilterEndPosition = buffer.position()
     val topicFilterByteCount = topicFilterEndPosition - topicFilterBodyStart
     if (topicFilterByteCount > 65_535) {

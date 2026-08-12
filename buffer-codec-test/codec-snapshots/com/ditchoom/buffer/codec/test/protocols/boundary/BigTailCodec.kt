@@ -1,14 +1,15 @@
 package com.ditchoom.buffer.codec.test.protocols.boundary
 
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
@@ -22,7 +23,7 @@ public object BigTailCodec : Codec<BigTail> {
       throw DecodeException(fieldPath = "BigTail.a", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = aPrefix.toString())
     }
     val aLength = aPrefix.toInt()
-    val a = buffer.readString(aLength, Charset.UTF8)
+    val a = buffer.readText(aLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val bPrefixB0 = buffer.readUByte().toUInt()
     val bPrefixB1 = buffer.readUByte().toUInt()
     val bPrefixB2 = buffer.readUByte().toUInt()
@@ -32,7 +33,7 @@ public object BigTailCodec : Codec<BigTail> {
       throw DecodeException(fieldPath = "BigTail.b", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = bPrefix.toString())
     }
     val bLength = bPrefix.toInt()
-    val b = buffer.readString(bLength, Charset.UTF8)
+    val b = buffer.readText(bLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     return BigTail(a = a, b = b)
   }
 
@@ -44,7 +45,7 @@ public object BigTailCodec : Codec<BigTail> {
     val aSizePosition = buffer.position()
     repeat(2) { buffer.writeUByte(0u) }
     val aBodyStart = buffer.position()
-    buffer.writeString(value.a, Charset.UTF8)
+    buffer.writeText(value.a, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val aEndPosition = buffer.position()
     val aByteCount = aEndPosition - aBodyStart
     if (aByteCount > 65_535) {
@@ -58,7 +59,7 @@ public object BigTailCodec : Codec<BigTail> {
     val bSizePosition = buffer.position()
     repeat(4) { buffer.writeUByte(0u) }
     val bBodyStart = buffer.position()
-    buffer.writeString(value.b, Charset.UTF8)
+    buffer.writeText(value.b, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val bEndPosition = buffer.position()
     val bByteCount = bEndPosition - bBodyStart
     buffer.position(bSizePosition)

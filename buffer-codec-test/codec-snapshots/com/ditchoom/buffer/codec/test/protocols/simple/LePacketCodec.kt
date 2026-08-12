@@ -1,14 +1,15 @@
 package com.ditchoom.buffer.codec.test.protocols.simple
 
 import com.ditchoom.buffer.ByteOrder
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.swapBytes
@@ -18,7 +19,7 @@ public object LePacketCodec : Codec<LePacket> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): LePacket {
     val headerRaw = buffer.readShort()
     val header = LeHeader((if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) headerRaw else swapBytes(headerRaw)).toUShort())
-    val payload = buffer.readString(header.length, Charset.UTF8)
+    val payload = buffer.readText(header.length, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     return LePacket(header = header, payload = payload)
   }
 
@@ -29,7 +30,7 @@ public object LePacketCodec : Codec<LePacket> {
   ) {
     val headerRaw = value.header.raw.toShort()
     buffer.writeShort(if (buffer.byteOrder == ByteOrder.LITTLE_ENDIAN) headerRaw else swapBytes(headerRaw))
-    buffer.writeString(value.payload, Charset.UTF8)
+    buffer.writeText(value.payload, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
   }
 
   override fun wireSize(`value`: LePacket, context: EncodeContext): WireSize = WireSize.Exact(2 + value.header.length)

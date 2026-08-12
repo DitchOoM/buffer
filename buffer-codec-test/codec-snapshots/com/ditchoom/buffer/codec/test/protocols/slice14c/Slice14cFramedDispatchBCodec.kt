@@ -1,15 +1,16 @@
 package com.ditchoom.buffer.codec.test.protocols.slice14c
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
@@ -39,7 +40,7 @@ public object Slice14cFramedDispatchBCodec {
         throw DecodeException(fieldPath = "B.message", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = messagePrefix.toString())
       }
       val messageLength = messagePrefix.toInt()
-      val message = buffer.readString(messageLength, Charset.UTF8)
+      val message = buffer.readText(messageLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
       if (buffer.position() != __framingBound) {
         throw DecodeException(
               fieldPath = "B.@FramedBy",
@@ -70,7 +71,7 @@ public object Slice14cFramedDispatchBCodec {
     val messageSizePosition = buffer.position()
     repeat(2) { buffer.writeUByte(0u) }
     val messageBodyStart = buffer.position()
-    buffer.writeString(value.message, Charset.UTF8)
+    buffer.writeText(value.message, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val messageEndPosition = buffer.position()
     val messageByteCount = messageEndPosition - messageBodyStart
     if (messageByteCount > 65_535) {

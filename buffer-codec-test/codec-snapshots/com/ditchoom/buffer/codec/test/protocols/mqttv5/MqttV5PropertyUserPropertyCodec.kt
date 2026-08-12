@@ -1,14 +1,15 @@
 package com.ditchoom.buffer.codec.test.protocols.mqttv5
 
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
@@ -23,7 +24,7 @@ public object MqttV5PropertyUserPropertyCodec : Codec<MqttV5Property.UserPropert
       throw DecodeException(fieldPath = "UserProperty.key", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = keyPrefix.toString())
     }
     val keyLength = keyPrefix.toInt()
-    val key = buffer.readString(keyLength, Charset.UTF8)
+    val key = buffer.readText(keyLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val valuePrefixB0 = buffer.readUByte().toUInt()
     val valuePrefixB1 = buffer.readUByte().toUInt()
     val valuePrefix = ((valuePrefixB0 shl 8) or valuePrefixB1)
@@ -31,7 +32,7 @@ public object MqttV5PropertyUserPropertyCodec : Codec<MqttV5Property.UserPropert
       throw DecodeException(fieldPath = "UserProperty.value", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = valuePrefix.toString())
     }
     val valueLength = valuePrefix.toInt()
-    val value = buffer.readString(valueLength, Charset.UTF8)
+    val value = buffer.readText(valueLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     return MqttV5Property.UserProperty(id = id, key = key, value = value)
   }
 
@@ -44,7 +45,7 @@ public object MqttV5PropertyUserPropertyCodec : Codec<MqttV5Property.UserPropert
     val keySizePosition = buffer.position()
     repeat(2) { buffer.writeUByte(0u) }
     val keyBodyStart = buffer.position()
-    buffer.writeString(value.key, Charset.UTF8)
+    buffer.writeText(value.key, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val keyEndPosition = buffer.position()
     val keyByteCount = keyEndPosition - keyBodyStart
     if (keyByteCount > 65_535) {
@@ -58,7 +59,7 @@ public object MqttV5PropertyUserPropertyCodec : Codec<MqttV5Property.UserPropert
     val valueSizePosition = buffer.position()
     repeat(2) { buffer.writeUByte(0u) }
     val valueBodyStart = buffer.position()
-    buffer.writeString(value.value, Charset.UTF8)
+    buffer.writeText(value.value, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val valueEndPosition = buffer.position()
     val valueByteCount = valueEndPosition - valueBodyStart
     if (valueByteCount > 65_535) {

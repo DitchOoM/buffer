@@ -6,6 +6,22 @@ import com.squareup.kotlinpoet.KModifier
 import com.squareup.kotlinpoet.TypeName
 
 /**
+ * How a String field's [com.ditchoom.buffer.TextPolicy] is resolved in generated code.
+ * Precedence (resolved at analysis time): field `@UseTextPolicy` > message `@UseTextPolicy` >
+ * [FromContext] (runtime `context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY`).
+ */
+internal sealed interface TextPolicyRef {
+    /** Compile-time pinned: a built-in fluent singleton, or a TextPolicyProvider object. */
+    data class Pinned(
+        val className: ClassName,
+        val isProvider: Boolean,
+    ) : TextPolicyRef
+
+    /** Unpinned: generated code resolves the policy from the codec context at runtime. */
+    data object FromContext : TextPolicyRef
+}
+
+/**
  * A diagnostic produced by the emitter's analysis pass. [message]
  * describes why a shape is unsupported; [node] is the offending
  * source element to anchor a KSP error on.
@@ -559,6 +575,7 @@ internal sealed interface FieldSpec {
          * [ValueClassStringWrapper].
          */
         val valueClass: ValueClassStringWrapper? = null,
+        val textPolicy: TextPolicyRef = TextPolicyRef.FromContext,
     ) : FieldSpec
 
     /**
@@ -668,6 +685,7 @@ internal sealed interface FieldSpec {
          * [ValueClassStringWrapper] / [LengthPrefixedString.valueClass].
          */
         val valueClass: ValueClassStringWrapper? = null,
+        val textPolicy: TextPolicyRef = TextPolicyRef.FromContext,
     ) : FieldSpec
 
     /**
@@ -928,6 +946,7 @@ internal sealed interface FieldSpec {
          * [ValueClassStringWrapper] / [LengthPrefixedString.valueClass].
          */
         val valueClass: ValueClassStringWrapper? = null,
+        val textPolicy: TextPolicyRef = TextPolicyRef.FromContext,
     ) : FieldSpec
 
     /**
@@ -1049,6 +1068,7 @@ internal sealed interface ConditionalInner {
          * [FieldSpec.LengthPrefixedString.valueClass].
          */
         val valueClass: ValueClassStringWrapper? = null,
+        val textPolicy: TextPolicyRef = TextPolicyRef.FromContext,
     ) : ConditionalInner
 
     data class ValueClassScalar(

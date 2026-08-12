@@ -1,14 +1,15 @@
 package com.ditchoom.buffer.codec.test.protocols.simple
 
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
@@ -22,7 +23,7 @@ public object TwoStringsCodec : Codec<TwoStrings> {
       throw DecodeException(fieldPath = "TwoStrings.first", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = firstPrefix.toString())
     }
     val firstLength = firstPrefix.toInt()
-    val first = buffer.readString(firstLength, Charset.UTF8)
+    val first = buffer.readText(firstLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val secondPrefixB0 = buffer.readUByte().toUInt()
     val secondPrefixB1 = buffer.readUByte().toUInt()
     val secondPrefix = ((secondPrefixB0 shl 8) or secondPrefixB1)
@@ -30,7 +31,7 @@ public object TwoStringsCodec : Codec<TwoStrings> {
       throw DecodeException(fieldPath = "TwoStrings.second", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = secondPrefix.toString())
     }
     val secondLength = secondPrefix.toInt()
-    val second = buffer.readString(secondLength, Charset.UTF8)
+    val second = buffer.readText(secondLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     return TwoStrings(first = first, second = second)
   }
 
@@ -42,7 +43,7 @@ public object TwoStringsCodec : Codec<TwoStrings> {
     val firstSizePosition = buffer.position()
     repeat(2) { buffer.writeUByte(0u) }
     val firstBodyStart = buffer.position()
-    buffer.writeString(value.first, Charset.UTF8)
+    buffer.writeText(value.first, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val firstEndPosition = buffer.position()
     val firstByteCount = firstEndPosition - firstBodyStart
     if (firstByteCount > 65_535) {
@@ -56,7 +57,7 @@ public object TwoStringsCodec : Codec<TwoStrings> {
     val secondSizePosition = buffer.position()
     repeat(2) { buffer.writeUByte(0u) }
     val secondBodyStart = buffer.position()
-    buffer.writeString(value.second, Charset.UTF8)
+    buffer.writeText(value.second, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val secondEndPosition = buffer.position()
     val secondByteCount = secondEndPosition - secondBodyStart
     if (secondByteCount > 65_535) {

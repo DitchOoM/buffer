@@ -1,14 +1,15 @@
 package com.ditchoom.buffer.codec.test.protocols.mqttv5
 
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
@@ -23,7 +24,7 @@ public object MqttV5PropertyServerReferenceCodec : Codec<MqttV5Property.ServerRe
       throw DecodeException(fieldPath = "ServerReference.value", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = valuePrefix.toString())
     }
     val valueLength = valuePrefix.toInt()
-    val value = buffer.readString(valueLength, Charset.UTF8)
+    val value = buffer.readText(valueLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     return MqttV5Property.ServerReference(id = id, value = value)
   }
 
@@ -36,7 +37,7 @@ public object MqttV5PropertyServerReferenceCodec : Codec<MqttV5Property.ServerRe
     val valueSizePosition = buffer.position()
     repeat(2) { buffer.writeUByte(0u) }
     val valueBodyStart = buffer.position()
-    buffer.writeString(value.value, Charset.UTF8)
+    buffer.writeText(value.value, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val valueEndPosition = buffer.position()
     val valueByteCount = valueEndPosition - valueBodyStart
     if (valueByteCount > 65_535) {

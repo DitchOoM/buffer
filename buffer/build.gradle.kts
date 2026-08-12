@@ -569,7 +569,7 @@ benchmark {
             iterations = 5
             iterationTime = 1000
             iterationTimeUnit = "ms"
-            include("(WriteString|WriteText|ReadString|Utf8Length)")
+            include("(WriteString|WriteText|ReadString|ReadText|Utf8Length)")
         }
         // writeText vs writeString A/B: identical measurement params, only the encode entry differs.
         register("writeText") {
@@ -577,7 +577,7 @@ benchmark {
             iterations = 5
             iterationTime = 1000
             iterationTimeUnit = "ms"
-            include("(WriteString|WriteText)Benchmark")
+            include("(WriteString|WriteText|ReadString|ReadText)Benchmark")
         }
         register("codec") {
             warmups = 5

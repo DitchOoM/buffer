@@ -342,6 +342,7 @@ internal fun <D> dispatchReadText(
     buffer: ReadBuffer,
     length: Int,
     policy: TextPolicy<*, D>,
+    scratch: ByteArray? = null,
 ): D {
     if (policy is CustomTextPolicy) {
         return policy.decoded(policy.customDecoder.decodeFrom(buffer, length))
@@ -359,6 +360,11 @@ internal fun <D> dispatchReadText(
         }
         bytes = managed.backingArray
         bytesOffset = managed.arrayOffset + start
+    } else if (scratch != null && scratch.size >= length) {
+        // Reused scratch (JVM native-memory path): copies without allocating per call.
+        buffer.readInto(scratch, 0, length) // advances; rewound below on rejection
+        bytes = scratch
+        bytesOffset = 0
     } else {
         bytes = buffer.readByteArray(length) // advances; rewound below on rejection
         bytesOffset = 0

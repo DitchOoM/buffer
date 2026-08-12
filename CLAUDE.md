@@ -230,38 +230,67 @@ buffer.fill(0x123456789ABCDEF0L) // fill with Long pattern
 buffer.xorMask(0x12345678)      // XOR remaining bytes with repeating 4-byte mask
 ```
 
-### Text Encoding (`writeText` / `TextEncoding`)
+### Text (`TextPolicy` / `writeText` / `readText`)
 
-**Prefer `writeText` over `writeString`** (which is deprecated toward it). The policy picks the
-result type, and `size(text)` reports exactly the bytes the write produces — on every platform:
+**Prefer `writeText`/`readText` over `writeString`/`readString`** (deprecated toward them). One
+sealed policy object governs BOTH directions, and the policy picks each direction's result type:
 
 ```kotlin
-// Lenient (substituting): cannot fail, fluent, identical bytes everywhere.
-// Unpaired surrogates become U+FFFD (3 bytes) — never platform-dependent.
-buffer.writeText(text)                          // same as writeText(text, Utf8.Lenient)
-buffer.writeText(text, Utf8.Lenient)
-val exact = Utf8.Lenient.size(text)             // == bytes writeText writes, exactly
-val exact2 = text.utf8Size()                    // convenience for the same number
+// Utf8.Lenient — substituting, cannot fail. Write: unpaired surrogates → U+FFFD (3 bytes).
+// Read: ill-formed bytes → U+FFFD per the WHATWG maximal-subpart rule. Identical on every platform.
+buffer.writeText(text)                      // fluent; same as writeText(text, Utf8.Lenient)
+val s = buffer.readText(length)             // String; same as readText(length, Utf8.Lenient)
+val exact = text.utf8Size()                 // == bytes writeText writes, exactly
 
-// Strict (validating): sealed result, atomic rejection (position unchanged).
-when (val r = buffer.writeText(text, Utf8.Strict)) {
+// Utf8.Strict — rejects loudly: throws sealed MalformedTextException, always atomically
+// (position unchanged, nothing written/consumed). Fluent write, String read.
+buffer.writeText(text, Utf8.Strict)         // throws MalformedTextException.UnpairedSurrogate(charIndex)
+buffer.readText(length, Utf8.Strict)        // throws MalformedTextException.IllFormedBytes(byteOffset)
+
+// Utf8.Checked — failure as data, for repair/branching flows:
+when (val r = buffer.writeText(text, Utf8.Checked)) {
     is TextOutcome.Bytes -> framePayload(r.count)
-    is TextOutcome.Malformed -> reject(r.index)  // index of first unpaired surrogate
+    is TextOutcome.Malformed -> reject(r.index)
+}
+when (val r = buffer.readText(length, Utf8.Checked)) {
+    is DecodedText.Text -> r.value
+    is DecodedText.Malformed -> resync(r.byteOffset)
 }
 
-// Allocation with a sizing strategy:
-val rb = text.toReadBuffer(Utf8.Lenient, SizeHint.Exact)       // one measuring pass, minimal memory
-val rb2 = text.toReadBuffer(Utf8.Lenient, SizeHint.UpperBound) // no pass, up to 3x memory (default)
+// Custom policies compose freely implementable halves (size is DERIVED from the author's
+// encode via a counting sink — size/write drift is unrepresentable unless overridden, and
+// TextTranscoderContractKit verifies overrides):
+val policy = TextPolicy.custom(encoder = MyEncoder, decoder = Utf8.Lenient.decoder)
+
+// Allocation with a sizing strategy (UpperBound is the measured-fastest default everywhere;
+// Exact is for memory-constrained callers — on Apple/Linux the size pass costs more than the encode):
+val rb = text.toReadBuffer(Utf8.Strict, SizeHint.Exact)
 ```
 
-Guarantees (pinned by `TextEncodingTests` on every platform): `size == bytes written`; identical
-bytes for identical `(text, encoding)`; strict `Malformed` writes nothing; overflow throws and is
-unreachable when the buffer was sized from the same policy. Measured: `writeText` is at parity
-with `writeString` (JVM 0.86–1.14x, macOS 0.92–1.11x, same-run A/B). On Apple, the `size()` pass
-is slower than the Foundation encode itself — prefer `SizeHint.UpperBound` there unless memory-bound.
+**In buffer-codec**, `@UseTextPolicy` pins a String field's policy in the schema (one declaration,
+both directions); precedence: field → message → `context[TextPolicyKey]` → `Utf8.Strict` (protocols
+never silently rewrite payloads). `Utf8.Checked` is rejected at compile time and by the context
+key's `FluentTextPolicy` bound — generated bodies have no channel for a checked result.
+
+```kotlin
+@ProtocolMessage
+data class Publish(
+    @UseTextPolicy(Utf8.Strict::class) @LengthPrefixed val topic: String,
+    @UseTextPolicy(MyProviderObject::class) @LengthPrefixed val note: String,  // TextPolicyProvider
+    @LengthPrefixed val payload: String,   // unpinned → context → Utf8.Strict
+)
+```
+
+Guarantees (pinned by `TextPolicyTests`/`ReadTextTests` across Default/managed/deterministic
+factories on every platform): fluent `size == bytes written`; identical bytes/characters for
+identical inputs; rejection is atomic; overflow throws and is unreachable when sized from the
+same policy. Measured: `writeText` at parity with `writeString` on all five platforms
+(0.86–1.14x, same-run A/B).
 
 Deprecated toward this API (removed in v7): `utf8Length()` → `utf8Size()`, `maxBufferSize()`
-→ `SizeHint`, `writeString` → `writeText` (once non-UTF-8 policies reach parity).
+→ `SizeHint`, `writeString`/`readString` → `writeText`/`readText` (once non-UTF-8 policies reach
+parity). NOTE: `readString`'s failure type is platform-dependent (7 distinct identities measured);
+`readText` is the typed, consistent path.
 
 ### Buffer Pool (`com.ditchoom.buffer.pool`)
 

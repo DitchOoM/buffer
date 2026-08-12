@@ -458,6 +458,27 @@ abstract class BaseJvmBuffer(
         policy: TextPolicy<W, *>,
     ): W = dispatchWriteText(text, policy) { t -> writeUtf8Substituting(t) }
 
+    override fun <D> readText(
+        length: Int,
+        policy: TextPolicy<*, D>,
+    ): D {
+        // Direct buffers have no backing array; without help the common dispatch would allocate
+        // a staging ByteArray per call (caught by the codec allocation gate). Reuse a grown
+        // thread-local scratch instead — allocation-free at steady state.
+        val scratch =
+            if (length <= MAX_SCRATCH_BYTES) {
+                var array = readScratch.get()
+                if (array.size < length) {
+                    array = ByteArray(length.takeHighestOneBit() shl 1)
+                    readScratch.set(array)
+                }
+                array
+            } else {
+                null
+            }
+        return dispatchReadText(this, length, policy, scratch)
+    }
+
     /** Encodes with U+FFFD substitution and returns the bytes written. */
     private fun writeUtf8Substituting(text: CharSequence): Int {
         val start = position()
@@ -809,3 +830,16 @@ fun ByteBuffer.toArray(size: Int = remaining()): ByteArray =
         get(byteArray)
         byteArray
     }
+
+/** Reused staging buffer for [BaseJvmBuffer.readText] over native memory. */
+private val readScratch =
+    object : ThreadLocal<ByteArray>() {
+        override fun initialValue(): ByteArray = ByteArray(INITIAL_SCRATCH_BYTES)
+
+        override fun get(): ByteArray = super.get()!!
+    }
+
+private const val INITIAL_SCRATCH_BYTES = 4096
+
+/** Above this, fall back to a one-off allocation rather than pinning huge thread-locals. */
+private const val MAX_SCRATCH_BYTES = 1 shl 20
