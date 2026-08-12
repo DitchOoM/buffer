@@ -29,7 +29,6 @@ import platform.Foundation.NSMakeRange
 import platform.Foundation.NSMutableData
 import platform.Foundation.NSString
 import platform.Foundation.create
-import platform.Foundation.dataUsingEncoding
 import platform.Foundation.replaceBytesInRange
 import platform.Foundation.subdataWithRange
 import platform.posix.memchr
@@ -431,16 +430,7 @@ class MutableDataBuffer private constructor(
         text: CharSequence,
         charset: Charset,
     ): WriteBuffer {
-        val string =
-            if (text is String) {
-                @Suppress("CAST_NEVER_SUCCEEDS")
-                text as NSString
-            } else {
-                @Suppress("CAST_NEVER_SUCCEEDS")
-                text.toString() as NSString
-            }
-        val charsetEncoding = charset.toEncoding()
-        val stringData = string.dataUsingEncoding(charsetEncoding)!!
+        val stringData = encodeToNSData(text, charset)
 
         @Suppress("UNCHECKED_CAST")
         val stringBytes = stringData.bytes as CPointer<ByteVar>
@@ -1051,16 +1041,7 @@ class MutableDataBufferSlice(
         text: CharSequence,
         charset: Charset,
     ): WriteBuffer {
-        val string =
-            if (text is String) {
-                @Suppress("CAST_NEVER_SUCCEEDS")
-                text as NSString
-            } else {
-                @Suppress("CAST_NEVER_SUCCEEDS")
-                text.toString() as NSString
-            }
-        val charsetEncoding = charset.toEncoding()
-        val stringData = string.dataUsingEncoding(charsetEncoding)!!
+        val stringData = encodeToNSData(text, charset)
 
         @Suppress("UNCHECKED_CAST")
         val stringBytes = stringData.bytes as CPointer<ByteVar>

@@ -20,7 +20,8 @@ import kotlin.test.assertEquals
  * `NativeBufferSlice` overloads to that contract.
  *
  * Kept in linuxTest because the lone-surrogate outcome is platform-specific:
- * JVM charset encoders substitute a replacement character instead of rejecting.
+ * JVM charset encoders throw MalformedInputException, while JS, WASM, and the
+ * ByteArrayBuffer/MutableDataBuffer paths substitute U+FFFD.
  */
 class WriteStringLoneSurrogateTest {
     private val loneHigh = "\uD800"
