@@ -441,6 +441,7 @@ class MutableDataBuffer private constructor(
         position += stringLength
         return this
     }
+
     override fun <R> writeText(
         text: CharSequence,
         encoding: TextEncoding<R>,
@@ -452,7 +453,6 @@ class MutableDataBuffer private constructor(
             writeString(t, Charset.UTF8)
             position() - start
         }
-
 
     // endregion
 
@@ -1064,6 +1064,7 @@ class MutableDataBufferSlice(
         position += stringLength
         return this
     }
+
     override fun <R> writeText(
         text: CharSequence,
         encoding: TextEncoding<R>,
@@ -1075,7 +1076,6 @@ class MutableDataBufferSlice(
             writeString(t, Charset.UTF8)
             position() - start
         }
-
 
     fun close() = Unit
 

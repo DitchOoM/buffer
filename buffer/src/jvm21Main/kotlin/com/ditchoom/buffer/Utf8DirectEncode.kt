@@ -88,9 +88,10 @@ internal fun encodeUtf8ToNative(
  * U+FFFD (EF BF BD) instead of throwing — the [com.ditchoom.buffer.Utf8.Lenient] contract.
  * Produces byte-for-byte the output of `Utf8TextEncoder.encodeSubstituting`, with no staging array.
  *
- * Same complexity drivers as the strict loop, same suppressions.
+ * Same complexity drivers as the strict loop, same suppressions (the per-sequence-length
+ * overflow guards drive ThrowsCount exactly as in the strict twin).
  */
-@Suppress("CyclomaticComplexMethod")
+@Suppress("CyclomaticComplexMethod", "ThrowsCount")
 internal fun encodeUtf8LenientToNative(
     text: CharSequence,
     startPosition: Int,

@@ -236,6 +236,7 @@ class JsBuffer(
         }
         return this
     }
+
     override fun <R> writeText(
         text: CharSequence,
         encoding: TextEncoding<R>,
@@ -247,7 +248,6 @@ class JsBuffer(
             writeString(t, Charset.UTF8)
             position() - start
         }
-
 
     /**
      * Reverses bytes of an Int for little-endian Int32Array compatibility.

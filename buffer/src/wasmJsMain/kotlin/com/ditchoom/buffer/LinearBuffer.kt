@@ -566,6 +566,7 @@ class LinearBuffer(
         }
         return this
     }
+
     override fun <R> writeText(
         text: CharSequence,
         encoding: TextEncoding<R>,
@@ -577,7 +578,6 @@ class LinearBuffer(
             writeString(t, Charset.UTF8)
             position() - start
         }
-
 
     /**
      * Optimized single byte indexOf using Long comparisons (8 bytes at a time).

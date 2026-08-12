@@ -34,6 +34,9 @@ import kotlinx.benchmark.Warmup
 @Measurement(iterations = 5)
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(BenchmarkTimeUnit.SECONDS)
+// One @Benchmark method per corpus mirrors WriteStringBenchmark (shape must match for a valid
+// A/B) plus the three size-pass probes; splitting the class would change the shape being compared.
+@Suppress("TooManyFunctions")
 open class WriteTextBenchmark {
     // Char counts, not byte counts. Multi-byte/emoji strings encode to a larger byte payload.
     private val small = 64

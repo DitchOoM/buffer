@@ -356,6 +356,7 @@ class ByteArrayBuffer(
         }
         return this
     }
+
     override fun <R> writeText(
         text: CharSequence,
         encoding: TextEncoding<R>,
@@ -367,7 +368,6 @@ class ByteArrayBuffer(
             writeString(t, Charset.UTF8)
             position() - start
         }
-
 
     // === Optimized bulk operations ===
 
