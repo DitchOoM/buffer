@@ -7,6 +7,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -15,7 +16,7 @@ import kotlin.Throwable
 
 public class MqttPacketCodec<P : Payload>(
   private val payloadCodec: Codec<P>,
-) {
+) : FrameDetector {
   private val publishCodec: MqttPacketPublishCodec<P> = MqttPacketPublishCodec(payloadCodec)
 
   public fun decode(buffer: ReadBuffer, context: DecodeContext): MqttPacket<P> {
@@ -68,7 +69,7 @@ public class MqttPacketCodec<P : Payload>(
     }
   }
 
-  public fun peekFrameSize(stream: StreamProcessor, baseOffset: Int = 0): PeekResult {
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 2) return PeekResult.NeedsMoreData
     val __framingPeek = stream.peekBuffer(baseOffset + 1, 5) ?: return PeekResult.NeedsMoreData
     try {

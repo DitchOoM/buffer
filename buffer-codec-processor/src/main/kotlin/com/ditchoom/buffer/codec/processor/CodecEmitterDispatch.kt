@@ -726,9 +726,12 @@ internal fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
                     TypeSpec
                         .objectBuilder(shape.codecSimpleName)
                         .withVisibility(shape.visibility)
-                if (!framed) {
-                    builder.addSuperinterface(CODEC_CN.parameterizedBy(parentTypeRef))
-                }
+                // A framed dispatcher isn't a `Codec` (its encode returns a
+                // ReadBuffer), but it does detect frames — so it binds the one
+                // interface it genuinely satisfies rather than none at all.
+                builder.addSuperinterface(
+                    if (framed) FRAME_DETECTOR_CN else CODEC_CN.parameterizedBy(parentTypeRef),
+                )
                 builder.addFunction(buildDispatchDecodeFun(shape))
                 if (framed) {
                     builder.addFunction(buildFramedByDispatchOnEncodeFun(shape, parentTypeRef))
@@ -761,9 +764,9 @@ internal fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
                                 .initializer(binding.codecParameterName)
                                 .build(),
                         )
-                if (!framed) {
-                    builder.addSuperinterface(CODEC_CN.parameterizedBy(parentTypeRef))
-                }
+                builder.addSuperinterface(
+                    if (framed) FRAME_DETECTOR_CN else CODEC_CN.parameterizedBy(parentTypeRef),
+                )
                 for (variant in shape.variants) {
                     val ref = variant.codecRef as? VariantCodecRef.GenericInstance ?: continue
                     val fieldType = variant.codecClassName.parameterizedBy(typeVar)
@@ -880,13 +883,10 @@ internal fun buildFramedByDispatchOnPeekFun(shape: DispatchShape): FunSpec {
     val builder =
         FunSpec
             .builder("peekFrameSize")
+            .addModifiers(KModifier.OVERRIDE)
             .addParameter("stream", STREAM_PROCESSOR_CN)
-            .addParameter(
-                com.squareup.kotlinpoet.ParameterSpec
-                    .builder("baseOffset", INT)
-                    .defaultValue("0")
-                    .build(),
-            ).returns(PEEK_RESULT_CN)
+            .addParameter("baseOffset", INT)
+            .returns(PEEK_RESULT_CN)
     val body = CodeBlock.builder()
     val headerWidthExpr: String
     if (shape.discriminator is Discriminator.Varint) {

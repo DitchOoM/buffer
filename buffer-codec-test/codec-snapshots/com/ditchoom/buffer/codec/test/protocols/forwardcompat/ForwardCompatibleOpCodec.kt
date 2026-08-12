@@ -7,6 +7,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.ForwardCompatibleFactoryKey
+import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
@@ -15,7 +16,7 @@ import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
 import kotlin.Throwable
 
-public object ForwardCompatibleOpCodec {
+public object ForwardCompatibleOpCodec : FrameDetector {
   public fun decode(buffer: ReadBuffer, context: DecodeContext): ForwardCompatibleOp {
     val discriminatorPosition = buffer.position()
     val __discriminator = OpCodeCodec.decode(buffer, context)
@@ -67,7 +68,7 @@ public object ForwardCompatibleOpCodec {
     }
   }
 
-  public fun peekFrameSize(stream: StreamProcessor, baseOffset: Int = 0): PeekResult {
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 2) return PeekResult.NeedsMoreData
     val __framingPeek = stream.peekBuffer(baseOffset + 1, 5) ?: return PeekResult.NeedsMoreData
     try {
