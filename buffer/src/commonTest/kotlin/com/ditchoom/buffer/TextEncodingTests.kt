@@ -22,6 +22,14 @@ import kotlin.test.assertTrue
  * 4. wrappers stay transparent and fluent results identify the wrapper, not the inner buffer.
  */
 class TextEncodingTests {
+    // Unpaired-surrogate STRINGS must be constructed at runtime: the Kotlin/JS compiler's
+// clean-build codegen lossily rewrites unpaired surrogates in string LITERALS to '?'
+// (incremental builds emit them faithfully — the divergence was caught when a clean
+// rebuild flipped these tests). Char() is numeric and safe. Valid pairs are unaffected.
+    private val loneHigh = Char(0xD800).toString()
+    private val loneHighEnd = Char(0xDBFF).toString()
+    private val loneLow = Char(0xDC00).toString()
+    private val loneLowEnd = Char(0xDFFF).toString()
     private val wellFormed =
         listOf(
             "",
@@ -37,14 +45,14 @@ class TextEncodingTests {
 
     private val illFormed =
         listOf(
-            "\uD800" to 0,
-            "\uDC00" to 0,
-            "\uD800€" to 0,
-            "\uD800A" to 0,
-            "A\uD800" to 1,
-            "AB\uD800" to 2,
-            "\uDC00\uD800" to 0,
-            "😀\uD800" to 2,
+            loneHigh to 0,
+            loneLow to 0,
+            (loneHigh + "€") to 0,
+            (loneHigh + "A") to 0,
+            ("A" + loneHigh) to 1,
+            ("AB" + loneHigh) to 2,
+            (loneLow + loneHigh) to 0,
+            ("😀" + loneHigh) to 2,
         )
 
     private val factories = listOf("default" to BufferFactory.Default, "managed" to BufferFactory.managed())
@@ -82,14 +90,14 @@ class TextEncodingTests {
     @Test
     fun lenientSubstitutionBytesArePinned() {
         for ((name, factory) in factories) {
-            assertEquals(fffd, writtenBytes(factory, "\uD800"), "lone high [$name]")
-            assertEquals(fffd, writtenBytes(factory, "\uDC00"), "lone low [$name]")
+            assertEquals(fffd, writtenBytes(factory, loneHigh), "lone high [$name]")
+            assertEquals(fffd, writtenBytes(factory, loneLow), "lone low [$name]")
             assertEquals(
                 fffd + listOf(0xE2.toByte(), 0x82.toByte(), 0xAC.toByte()),
-                writtenBytes(factory, "\uD800€"),
+                writtenBytes(factory, (loneHigh + "€")),
                 "U+FFFD then € [$name]",
             )
-            assertEquals(listOf(0x41.toByte()) + fffd, writtenBytes(factory, "A\uD800"), "A then U+FFFD [$name]")
+            assertEquals(listOf(0x41.toByte()) + fffd, writtenBytes(factory, ("A" + loneHigh)), "A then U+FFFD [$name]")
             assertEquals(
                 listOf(0xF0.toByte(), 0x9F.toByte(), 0x98.toByte(), 0x80.toByte()),
                 writtenBytes(factory, "😀"),
@@ -143,7 +151,7 @@ class TextEncodingTests {
     @Test
     fun oneArgWriteTextIsLenient() {
         val buffer = BufferFactory.Default.allocate(16)
-        assertSame(buffer, buffer.writeText("\uD800"))
+        assertSame(buffer, buffer.writeText(loneHigh))
         assertEquals(3, buffer.position())
     }
 
@@ -159,7 +167,7 @@ class TextEncodingTests {
     fun writeTextThroughPooledBufferAndTrackedSliceStaysFluentAndTransparent() {
         withPool(defaultBufferSize = 256) { pool ->
             pool.withBuffer(128) { pooled ->
-                val returned = pooled.writeText("a\uD800€", Utf8.Lenient)
+                val returned = pooled.writeText(("a" + loneHigh + "€"), Utf8.Lenient)
                 assertSame(pooled, returned, "fluent result must be the wrapper, not the inner buffer")
                 assertEquals(7, pooled.position(), "1 + 3 (U+FFFD) + 3 (€)")
 
@@ -167,7 +175,7 @@ class TextEncodingTests {
                 val sliceReturned = slice.writeText("😀", Utf8.Lenient)
                 assertSame(slice, sliceReturned, "slice fluent result must be the tracked slice")
 
-                val strict = pooled.writeText("\uDC00", Utf8.Strict)
+                val strict = pooled.writeText(loneLow, Utf8.Strict)
                 assertIs<TextOutcome.Malformed>(strict)
                 assertEquals(7, pooled.position(), "strict rejection through wrapper must not move position")
             }
@@ -187,7 +195,7 @@ class TextEncodingTests {
 
     @Test
     fun toReadBufferSubstitutesIllFormedText() {
-        val readBuffer = "\uD800€".toReadBuffer(Utf8.Lenient, SizeHint.Exact)
+        val readBuffer = (loneHigh + "€").toReadBuffer(Utf8.Lenient, SizeHint.Exact)
         assertEquals(6, readBuffer.remaining())
         assertEquals(fffd + listOf(0xE2.toByte(), 0x82.toByte(), 0xAC.toByte()), readBuffer.readByteArray(6).toList())
     }

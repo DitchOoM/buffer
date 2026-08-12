@@ -21,6 +21,15 @@ import kotlin.test.assertEquals
  * prove nothing about the count.
  */
 class Utf8LengthTests {
+    // Unpaired-surrogate STRINGS must be constructed at runtime: the Kotlin/JS compiler's
+// clean-build codegen lossily rewrites unpaired surrogates in string LITERALS to '?'
+// (incremental builds emit them faithfully — the divergence was caught when a clean
+// rebuild flipped these tests). Char() is numeric and safe. Valid pairs are unaffected.
+    private val loneHigh = Char(0xD800).toString()
+    private val loneHighEnd = Char(0xDBFF).toString()
+    private val loneLow = Char(0xDC00).toString()
+    private val loneLowEnd = Char(0xDFFF).toString()
+
     private fun assertUtf8Length(
         expected: Int,
         text: String,
@@ -55,26 +64,26 @@ class Utf8LengthTests {
 
     @Test
     fun unpairedSurrogatesCountAsReplacementChar() {
-        assertUtf8Length(3, "\uD800", "lone high surrogate (range start)")
-        assertUtf8Length(3, "\uDBFF", "lone high surrogate (range end)")
-        assertUtf8Length(3, "\uDC00", "lone low surrogate (range start)")
-        assertUtf8Length(3, "\uDFFF", "lone low surrogate (range end)")
-        assertUtf8Length(6, "\uD800\uD800", "two consecutive lone high surrogates")
-        assertUtf8Length(6, "\uDC00\uD800", "reversed pair is two lone surrogates")
+        assertUtf8Length(3, loneHigh, "lone high surrogate (range start)")
+        assertUtf8Length(3, loneHighEnd, "lone high surrogate (range end)")
+        assertUtf8Length(3, loneLow, "lone low surrogate (range start)")
+        assertUtf8Length(3, loneLowEnd, "lone low surrogate (range end)")
+        assertUtf8Length(6, (loneHigh + loneHigh), "two consecutive lone high surrogates")
+        assertUtf8Length(6, (loneLow + loneHigh), "reversed pair is two lone surrogates")
     }
 
     @Test
     fun unpairedHighSurrogateMustNotSwallowTheNextChar() {
         // Regression: the pre-fix loop charged 4 for a high surrogate and skipped the
-        // following char unconditionally, under-counting "\uD800€" as 4 instead of 6.
-        assertUtf8Length(6, "\uD800€", "lone high then € (3 + 3)")
-        assertUtf8Length(4, "\uD800A", "lone high then ASCII (3 + 1)")
-        assertUtf8Length(7, "\uD800😀", "lone high then a valid pair (3 + 4)")
+        // following char unconditionally, under-counting (loneHigh + "€") as 4 instead of 6.
+        assertUtf8Length(6, (loneHigh + "€"), "lone high then € (3 + 3)")
+        assertUtf8Length(4, (loneHigh + "A"), "lone high then ASCII (3 + 1)")
+        assertUtf8Length(7, (loneHigh + "😀"), "lone high then a valid pair (3 + 4)")
     }
 
     @Test
     fun unpairedHighSurrogateAtEndOfString() {
-        assertUtf8Length(4, "A\uD800", "ASCII then lone high (1 + 3)")
-        assertUtf8Length(5, "AB\uD800", "two ASCII then lone high (2 + 3)")
+        assertUtf8Length(4, ("A" + loneHigh), "ASCII then lone high (1 + 3)")
+        assertUtf8Length(5, ("AB" + loneHigh), "two ASCII then lone high (2 + 3)")
     }
 }
