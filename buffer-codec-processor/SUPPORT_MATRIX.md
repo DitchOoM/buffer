@@ -106,6 +106,8 @@ applied identically to standalone codecs (`CodecShape.payloadTypeParameter`) and
 | Generic variant carrying `<P : Payload>` referenced from the dispatcher as a constructor-injected `GenericInstance` codec field | `VariantCodecRef.GenericInstance`; `analyzeSealedDispatcher` / `analyzeDispatchOnSealedDispatcher` |
 | `Partial<P>` aggregator machinery for constructor-injected codec resolution | snapshot `slice10e/RemoteCommandCodec.kt` (`Partial<P>`); `buildDispatchOnAggregatorCompanion` |
 | `Partial` for a sibling-sized payload, incl. a **variable-width** trailer after it | `deferredpayload/SmpFrameWithTrailer` (#293); `partialCapturesPayloadRegion` |
+| Companion-side `peekFrameSize` on a generic codec whose shape frames, so framing needs no `Codec<P>` instance (#348); the member forwards to it | snapshot `deferredpayload/SmpGenericFrameCodec.kt`; `CodecCompanion`, `memberPeekFun`, `PeekEmit.Framed` |
+| Every emitted `peekFrameSize` is a `FrameDetector` override — including `@FramedBy` codecs and framed dispatchers, which bind `FrameDetector` in place of the `Codec` superinterface they drop | `buildFramedByFileSpec`, `buildFramedByPeekFrameFun`, `buildDispatchFileSpec` |
 
 #### Rejected (with diagnostic)
 
@@ -210,6 +212,7 @@ still confirmable against the current source:
 | Limitation | Nature | Evidence |
 |------------|--------|----------|
 | `@LengthFrom` length-carrier siblings are limited to `{UByte, Byte, UShort, UInt}` (both the bare-sibling form and the dotted value-class-inner form); `Int` / `Long` / `ULong` carriers are not resolved by the analyzer. | analyzer returns null → no `LengthSource` | `CodecAnalyzer.kt peekableLengthFromSiblingKinds`, `analyzeLengthSource` |
+| A **generic dispatcher**'s `peekFrameSize` stays instance-only; only generic *codecs* got companion framing in #348. The dispatcher's peek routes through per-variant receivers, so lifting it needs each variant's framing status carried on the dispatch IR. | documented limitation (instance framing unchanged; consumers of a generic sealed parent still need the dispatcher instance to peek) | `buildDispatchPeekFun` (`variant.codecReceiver()`); `DispatchVariant` |
 | `peekFrameSize` collapses to `NoFraming` when a message has more than one self-delimiting/variable-length field (multiple enums, or an enum plus a variable-length `@UseCodec` field). A single such field with all-fixed priors and suffix frames correctly. | documented limitation (decode/encode still round-trip; only stream pre-framing is unavailable) | `CodecEmitterPeek.kt` (`isVariableLength` / enum peek → `NoFraming`); `EnumScalar` kdoc in `CodecIr.kt` |
 
 > The `Diagnostic` kdoc at the top of `CodecIr.kt` still claims diagnostics are "constructed but NOT emitted." That

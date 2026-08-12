@@ -976,6 +976,45 @@ hanging the receive loop.
 - Two or more variable-width fields where more than one is an enum (or an enum
   plus a variable-length suffix) — only a single variable field can frame
 
+### Framing a generic payload without its codec
+
+A codec for a message with a generic payload (`<P : Payload>`) takes the
+payload codec as a constructor parameter — but framing never consults it. The
+frame size comes from header scalars, so `peekFrameSize` is emitted on the
+codec's **companion**, right beside `partial()`, and is callable with no
+instance:
+
+```kotlin
+@ProtocolMessage(wireOrder = Endianness.Big)
+data class Packet<P : Payload>(
+    val group: UShort,
+    val command: UByte,
+    val length: UShort = 0u,
+    @LengthFrom("length") val payload: P,
+)
+
+// No Codec<P> anywhere in this loop — the payload codec is chosen from the
+// header, which is the whole reason for deferring it.
+while (true) {
+    val frame = PacketCodec.peekFrameSize(stream)
+    if (frame !is PeekResult.Complete) break
+    val packet = stream.readBufferScoped(frame.bytes) {
+        val partial = PacketCodec.partial<MyPayload>(this, DecodeContext.Empty)
+        partial.complete(codecFor(partial.group, partial.command))
+    }
+}
+```
+
+The companion implements `FrameDetector`, so it can also be *passed* to code
+that frames generically, not just called by name.
+
+Only shapes that actually frame get the companion entry point. A codec whose
+`peekFrameSize` returns `NoFraming` keeps framing as a member alone, so
+reaching for `FooCodec.peekFrameSize(...)` on an unframable shape is a compile
+error rather than a runtime `NoFraming`. Codecs emitted as `object`s (any
+message without a generic payload) are already their own static receiver and
+are unaffected.
+
 ## The Codec Interface
 
 `Codec<T>` is the union of three smaller interfaces. Send-only consumers can
