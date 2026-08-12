@@ -8,7 +8,7 @@ package com.ditchoom.buffer
  * surrogate-pair encoding (Unicode). They are centralized here so the per-platform decoders cannot
  * drift from one another. Every value is the literal it replaces — there is no behavior change.
  */
-internal object Utf8 {
+internal object Utf8Wire {
     /**
      * Mask isolating the low 8 bits of a value (one byte). Used when packing/unpacking pending
      * incomplete sequences into/out of a `Long`.

@@ -399,6 +399,49 @@ interface WriteBuffer : PositionBuffer {
     ): WriteBuffer
 
     /**
+     * Writes [text] under the given [encoding] policy and advances position by the bytes written.
+     *
+     * The result type is chosen by the policy — see [TextEncoding]. Guarantees, on every platform:
+     * - the policy's `size(text)` reports exactly the bytes this call writes;
+     * - identical bytes for identical `(text, encoding)` inputs;
+     * - a strict policy rejecting ill-formed input writes nothing (position unchanged);
+     * - insufficient remaining capacity throws [BufferOverflowException] — unreachable when the
+     *   buffer was sized from the same policy.
+     *
+     * This is the only text-encode member; platform implementations override it for fast paths.
+     * The default routes through [writeBytes] using the common reference encoder, so it is correct
+     * for any implementation, including wrappers. No `writeText(text)` member will ever be added;
+     * the one-argument form is provided as an extension and stays an extension.
+     */
+    fun <R> writeText(
+        text: CharSequence,
+        encoding: TextEncoding<R>,
+    ): R {
+        // Sentinel is local to implementations only (bytes written, or first-malformed ~index);
+        // the public surface is the policy-typed R. Mapping through `encoding` (never through a
+        // smart-cast branch) is what lets each branch produce R without unchecked casts.
+        val outcome =
+            when (encoding) {
+                Utf8.Lenient -> {
+                    val bytes = Utf8TextEncoder.encodeSubstituting(text)
+                    writeBytes(bytes)
+                    bytes.size
+                }
+                Utf8.Strict -> {
+                    val bad = Utf8TextEncoder.firstMalformedIndex(text)
+                    if (bad >= 0) {
+                        bad.inv()
+                    } else {
+                        val bytes = Utf8TextEncoder.encodeSubstituting(text)
+                        writeBytes(bytes)
+                        bytes.size
+                    }
+                }
+            }
+        return if (outcome >= 0) encoding.written(this, outcome) else encoding.malformed(outcome.inv())
+    }
+
+    /**
      * Writes all remaining bytes from the source buffer and advances both positions.
      *
      * After this operation:

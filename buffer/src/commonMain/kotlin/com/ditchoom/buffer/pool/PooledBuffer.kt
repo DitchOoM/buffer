@@ -4,6 +4,7 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.TextEncoding
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.bufferEquals
 import com.ditchoom.buffer.bufferHashCode
@@ -252,6 +253,15 @@ internal class PooledBuffer(
         checkNotFreed()
         inner.writeString(text, charset)
         return this
+    }
+
+    override fun <R> writeText(
+        text: CharSequence,
+        encoding: TextEncoding<R>,
+    ): R {
+        checkNotFreed()
+        // rewrap re-binds fluent results to this wrapper instead of leaking the inner buffer.
+        return encoding.rewrap(inner.writeText(text, encoding), this)
     }
 
     override fun write(buffer: ReadBuffer) {

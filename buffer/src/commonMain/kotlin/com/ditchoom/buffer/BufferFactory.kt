@@ -2,18 +2,10 @@ package com.ditchoom.buffer
 
 import kotlin.math.roundToInt
 
-/** Largest code point encoded as a single UTF-8 byte (`0x7F`). */
-private const val UTF8_ONE_BYTE_MAX = 0x7F
-
-/** Largest code point encoded as two UTF-8 bytes (`0x7FF`). */
-private const val UTF8_TWO_BYTE_MAX = 0x7FF
-
-/** UTF-8 byte count for a code point that requires three bytes. */
-private const val UTF8_THREE_BYTES = 3
-
-/** UTF-8 byte count for a supplementary code point (surrogate pair → four bytes). */
-private const val UTF8_FOUR_BYTES = 4
-
+@Deprecated(
+    "Use utf8Size() for exact UTF-8 sizing, or toReadBuffer(Utf8.Lenient, SizeHint.UpperBound) " +
+        "for allocation. Removed in v7.",
+)
 fun CharSequence.maxBufferSize(charset: Charset): Int = (charset.maxBytesPerChar * this.length).roundToInt()
 
 /**
@@ -33,6 +25,8 @@ fun String.toReadBuffer(
     if (this == "") {
         return ReadBuffer.EMPTY_BUFFER
     }
+
+    @Suppress("DEPRECATION")
     val maxBytes = maxBufferSize(charset)
     val buffer = factory.allocate(maxBytes)
     buffer.writeString(this, charset)
@@ -40,26 +34,9 @@ fun String.toReadBuffer(
     return buffer.slice()
 }
 
-fun CharSequence.utf8Length(): Int {
-    var count = 0
-    var i = 0
-    val len = length
-    while (i < len) {
-        val ch = get(i)
-        if (ch.code <= UTF8_ONE_BYTE_MAX) {
-            count++
-        } else if (ch.code <= UTF8_TWO_BYTE_MAX) {
-            count += 2
-        } else if (ch.isHighSurrogate() && i + 1 < len && get(i + 1).isLowSurrogate()) {
-            // Valid surrogate pair: one supplementary code point, four UTF-8 bytes.
-            count += UTF8_FOUR_BYTES
-            ++i
-        } else {
-            // BMP code point — or an unpaired surrogate, which substituting encoders
-            // replace with U+FFFD (also three UTF-8 bytes).
-            count += UTF8_THREE_BYTES
-        }
-        i++
-    }
-    return count
-}
+@Deprecated(
+    "Use utf8Size(), whose count is guaranteed to match writeText(text, Utf8.Lenient) " +
+        "byte-for-byte on every platform. Removed in v7.",
+    ReplaceWith("this.utf8Size()", "com.ditchoom.buffer.utf8Size"),
+)
+fun CharSequence.utf8Length(): Int = Utf8TextEncoder.sizeSubstituting(this)
