@@ -77,13 +77,48 @@ internal fun peekBudgetFor(typeName: TypeName): Int? =
     }
 
 /**
+ * The emitted `peekFrameSize`, classified by whether the walker produced
+ * real framing or collapsed the shape to `PeekResult.NoFraming`.
+ *
+ * The classification is what decides *placement*, not shape: a [Framed]
+ * peek is codec-independent by construction (every receiver the walkers
+ * emit is a type name — a `FrameDetector` companion, a `VariableLengthCodec`
+ * object, a nested codec object — and every other operand is a local over
+ * `stream`), so it can sit on a companion where consumers reach it without
+ * an instance. An [Unframed] peek stays a member only: hoisting a constant
+ * `NoFraming` onto the companion would advertise a framing entry point that
+ * can never frame, turning a compile error into a runtime one.
+ *
+ * The `FunSpec` is identical in both placements — same `OVERRIDE` modifier,
+ * same signature — because every peek the processor emits overrides
+ * `FrameDetector.peekFrameSize`, whether it lands on a codec or a companion.
+ * That is why the emitter builds it once and chooses placement afterward.
+ */
+internal sealed interface PeekEmit {
+    val fn: FunSpec
+
+    /** The walker derived a frame size; safe to place on a companion. */
+    data class Framed(
+        override val fn: FunSpec,
+    ) : PeekEmit
+
+    /** The shape collapsed to `PeekResult.NoFraming`; member placement only. */
+    data class Unframed(
+        override val fn: FunSpec,
+    ) : PeekEmit
+}
+
+/**
  * Sum the `wireBytes` of every `FixedSize` field
  * in the list. Variable-length fields (`LengthPrefixed*`,
  * `Conditional`) contribute 0 and are filtered out by the
  * `filterIsInstance` step. Callers that require the result to
  * cover every field gate on terminal shape before calling.
  */
-internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
+internal fun buildPeekFrameFun(shape: CodecShape): FunSpec = buildPeekFrame(shape).fn
+
+/** [buildPeekFrameFun] plus the framing classification that decides placement. */
+internal fun buildPeekFrame(shape: CodecShape): PeekEmit {
     val builder =
         FunSpec
             .builder("peekFrameSize")
@@ -96,7 +131,7 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
     // wire shapes the walker can't express). Delegate and return.
     shape.customPeek?.let { customPeek ->
         builder.addStatement("return %T.peekFrameSize(stream, baseOffset)", customPeek)
-        return builder.build()
+        return PeekEmit.Framed(builder.build())
     }
     // Generic `@UseCodec` peek walker. When a
     // bounding `UseCodecScalar` field is present, the framework drives
@@ -143,7 +178,7 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
             // or a prior the walker can't size → NoFraming.
             if (budget == null || !priorAreFramable) {
                 builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
-                return builder.build()
+                return PeekEmit.Unframed(builder.build())
             }
             if (priorAreFixed) {
                 // All-fixed priors: the static-offset walker (byte-identical
@@ -154,7 +189,7 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
                 // discriminator): measure prior offsets at runtime.
                 appendPeekBoundingDynamicPrior(builder, shape, boundingField, budget)
             }
-            return builder.build()
+            return PeekEmit.Framed(builder.build())
         }
         // No bounding length: the remaining cases key off the first
         // `@UseCodec` field and require statically-sized priors.
@@ -164,7 +199,7 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
                 .all { it is FieldSpec.FixedSize }
         if (!priorAreFixed) {
             builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
-            return builder.build()
+            return PeekEmit.Unframed(builder.build())
         }
         // Self-delimiting variable-width value (VariableLengthCodec): the
         // value occupies only its own bytes, so total = prior + width +
@@ -180,15 +215,15 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
                     .all { it is FieldSpec.FixedSize }
             if (!suffixAreFixed) {
                 builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
-                return builder.build()
+                return PeekEmit.Unframed(builder.build())
             }
             appendPeekVariableLengthUseCodecScalar(builder, shape, ucsField)
-            return builder.build()
+            return PeekEmit.Framed(builder.build())
         }
         // Non-bounding, non-variable-length @UseCodec: no value-to-byte
         // mapping the walker can use.
         builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
-        return builder.build()
+        return PeekEmit.Unframed(builder.build())
     }
     // `@LengthPrefixed @UseCodec val: List<E>`
     // peek mirrors the bounding-`UseCodecScalar` walker: total =
@@ -210,10 +245,10 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
         val isTerminal = shape.fields.last() === lpUcField
         if (!priorAreFixed || !isTerminal) {
             builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
-            return builder.build()
+            return PeekEmit.Unframed(builder.build())
         }
         appendPeekLengthPrefixedUseCodecList(builder, shape, lpUcField, peekBudget = 5)
-        return builder.build()
+        return PeekEmit.Framed(builder.build())
     }
     // `@RemainingBytes List<@ProtocolMessage T>` and
     // `@RemainingBytes val: String` collapse peek to NoFraming. The
@@ -227,7 +262,7 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
         }
     ) {
         builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
-        return builder.build()
+        return PeekEmit.Unframed(builder.build())
     }
     // `@Count List<@ProtocolMessage T>` collapses peek to NoFraming. The
     // element-count prefix gives the number of elements, not a byte span, so
@@ -237,7 +272,7 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
     // shapes above.
     if (shape.fields.any { it is FieldSpec.CountPrefixedProtocolMessageList }) {
         builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
-        return builder.build()
+        return PeekEmit.Unframed(builder.build())
     }
     // Same NoFraming collapse for `@RemainingBytes @UseCodec val: P`. Body
     // byte count is whatever the user codec reads against the caller-set
@@ -251,7 +286,7 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
     // in the sequential walk below.
     if (shape.fields.any { it is FieldSpec.DeferredPayload && it.extent is PayloadExtent.ToLimit }) {
         builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
-        return builder.build()
+        return PeekEmit.Unframed(builder.build())
     }
     // Bare `val: T: @ProtocolMessage` collapses
     // peek to NoFraming. The body's byte count is determined by T's
@@ -261,7 +296,7 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
     // RL field via `appendPeekUseCodecScalar`.
     if (shape.fields.any { it is FieldSpec.ProtocolMessageScalar }) {
         builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
-        return builder.build()
+        return PeekEmit.Unframed(builder.build())
     }
     // An enum field's ordinal is a self-delimiting unsigned-LEB128 varint, so a SINGLE enum with
     // all-fixed priors + suffix frames exactly like the `isVariableLength` `@UseCodec` path:
@@ -279,10 +314,10 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
                 .all { it is FieldSpec.FixedSize }
         if (enumFields.size == 1 && priorsFixed && suffixFixed) {
             appendPeekEnum(builder, shape, enumField)
-        } else {
-            builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+            return PeekEmit.Framed(builder.build())
         }
-        return builder.build()
+        builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+        return PeekEmit.Unframed(builder.build())
     }
     // `@When("remaining <op> <int>")` collapses peek to
     // NoFraming when reached at this point. The grammar-2 predicate
@@ -309,7 +344,7 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
     // ack peek again handled by the bounding RL upstream.
     if (shape.fields.any { it.isPeekCollapsingConditional() }) {
         builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
-        return builder.build()
+        return PeekEmit.Unframed(builder.build())
     }
     // All-FixedSize messages collapse to a single arithmetic check —
     // no walk needed, and the generated code is significantly tighter
@@ -333,10 +368,10 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
             total,
             PEEK_RESULT_CN,
         )
-        return builder.build()
+        return PeekEmit.Framed(builder.build())
     }
     appendSequentialPeek(builder, shape)
-    return builder.build()
+    return PeekEmit.Framed(builder.build())
 }
 
 /**
