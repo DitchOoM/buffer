@@ -46,6 +46,16 @@ interface ByteSink {
     /**
      * Writes [buffer], waiting at most [deadline].
      *
+     * **Ownership is not transferred**: the sink borrows [buffer] for the duration of the call and
+     * never frees it — the caller frees it, or returns it to its pool, once the call returns. The
+     * same rule the datagram send half states (see the payload contract on
+     * [DatagramSink][com.ditchoom.buffer.flow.DatagramSink]), and the reason a caller may encode into
+     * a pooled or deterministic buffer and release it immediately after writing. A borrowing sink
+     * must therefore take no lasting reference on [buffer]: a sink that queues rather than transmits
+     * before returning has to copy, because the queued chunk outlives the borrow. Unlike a datagram
+     * send, a stream write *does* consume the cursor — the post-write position is the resume point
+     * for a partial write's residue.
+     *
      * @return number of bytes written
      */
     suspend fun write(

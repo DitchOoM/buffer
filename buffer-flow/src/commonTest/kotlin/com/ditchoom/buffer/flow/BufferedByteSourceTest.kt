@@ -186,11 +186,13 @@ class BufferedByteSourceTest {
     fun classifyingAnAcceptedStreamCopiesNothing() =
         runTest {
             val mux = MemoryByteStreamMux()
-            val sender = mux.openUnidirectional()
+            // Deliver as-is rather than through a ByteSink: identity has to survive to the reader
+            // for the assertSame below, and a sink borrows (so copies) what it writes.
+            val wire = mux.openUnidirectionalDelivering()
             val payloadSize = 4096
             val original = prefixedPayload(payloadSize)
-            sender.write(original)
-            sender.close()
+            wire.send(original)
+            wire.close()
 
             val counting = BufferFactory.Default.counting()
             val accepted = BufferedByteSource(mux.acceptUnidirectional(), counting)

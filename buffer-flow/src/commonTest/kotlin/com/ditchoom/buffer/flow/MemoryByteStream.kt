@@ -1,7 +1,10 @@
 package com.ditchoom.buffer.flow
 
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.managed
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -31,7 +34,16 @@ internal class ChannelByteSource(
     }
 }
 
-/** In-memory [ByteSink] over a channel of buffers. [close] closes the channel (a FIN). */
+/**
+ * In-memory [ByteSink] over a channel of buffers. [close] closes the channel (a FIN).
+ *
+ * Queues a **copy**: [ByteSink.write] only borrows its buffer, and the caller is free to release it
+ * the moment the call returns (`CodecSink.send` does exactly that), so a sink that hands the buffer
+ * onward instead of transmitting it before returning would be queuing freed memory. Real transports
+ * hand the bytes to the kernel/stack within the call; this one has to copy to stand in for that.
+ * A managed copy keeps the queued chunk off wasm linear memory, so a chunk the reader never
+ * consumes costs nothing from the pool.
+ */
 internal class ChannelByteSink(
     private val outbound: Channel<ReadBuffer>,
 ) : ByteSink {
@@ -44,7 +56,10 @@ internal class ChannelByteSink(
         deadline: Duration,
     ): BytesWritten {
         val size = buffer.remaining()
-        outbound.send(buffer)
+        val queued = BufferFactory.managed().allocate(size)
+        queued.write(buffer)
+        queued.resetForRead()
+        outbound.send(queued)
         return BytesWritten(size)
     }
 
@@ -101,6 +116,19 @@ internal class MemoryByteStreamMux : ByteStreamMux {
         val channel = Channel<ReadBuffer>(Channel.UNLIMITED)
         uniQueue.send(ChannelByteSource(channel))
         return ChannelByteSink(channel)
+    }
+
+    /**
+     * Opens a unidirectional stream and hands back its raw inbound channel, so buffers sent here
+     * reach the acceptor **as-is** — the read path's contract, where ownership transfers *out* of
+     * the transport to the reader. Use this over [openUnidirectional] to assert buffer identity
+     * across an accepted stream: a [ChannelByteSink] copies, because a sink only borrows what it
+     * writes and may not retain it.
+     */
+    suspend fun openUnidirectionalDelivering(): SendChannel<ReadBuffer> {
+        val channel = Channel<ReadBuffer>(Channel.UNLIMITED)
+        uniQueue.send(ChannelByteSource(channel))
+        return channel
     }
 
     override suspend fun acceptBidirectional(): ByteStream = bidiQueue.receive()
