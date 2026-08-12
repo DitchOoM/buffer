@@ -31,8 +31,9 @@ private const val INITIAL_DECODE_SCRATCH_CHARS = 1024
  * Decodes the UTF-8 bytes in native memory at [base] + [[startPosition], [endPosition]) into a
  * String. Read-side counterpart to [encodeUtf8ToNative]: it pulls each byte through [directGetByte]
  * — a raw native load with no per-byte `java.nio.Buffer.session()` scope check — instead of the JDK
- * `CharsetDecoder`, whose `decodeBufferLoop` (the only loop a *direct* ByteBuffer can take, since it
- * has no backing array) does a `DirectByteBuffer.get()` — and thus a session check — for every byte.
+ * `CharsetDecoder`, whose `decodeBufferLoop` (the loop `CharsetDecoder` selects when the source
+ * `hasArray()` is false — true for the FFM-backed direct ByteBuffers this path sees, which expose no
+ * backing array) does a `DirectByteBuffer.get()` — and thus a session check — for every byte.
  * On JVM 21+ [directGetByte] is FFM-backed; on 8–20 it is `Unsafe`.
  *
  * Validation is strict and matches the REPORT-mode UTF-8 decoder it replaces: overlong forms
