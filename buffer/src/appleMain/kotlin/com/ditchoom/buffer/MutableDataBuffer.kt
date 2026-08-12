@@ -295,7 +295,9 @@ class MutableDataBuffer private constructor(
 
         @Suppress("CAST_NEVER_SUCCEEDS")
         @OptIn(kotlinx.cinterop.BetaInteropApi::class)
-        val string = NSString.create(subdata, stringEncoding) as String
+        val string =
+            NSString.create(subdata, stringEncoding) as String?
+                ?: throw CharacterCodingException("Malformed $charset bytes")
         position += length
         return string
     }
@@ -442,11 +444,11 @@ class MutableDataBuffer private constructor(
         return this
     }
 
-    override fun <R> writeText(
+    override fun <W> writeText(
         text: CharSequence,
-        encoding: TextEncoding<R>,
-    ): R =
-        dispatchWriteText(text, encoding) { t ->
+        policy: TextPolicy<W, *>,
+    ): W =
+        dispatchWriteText(text, policy) { t ->
             // This platform's writeString(UTF8) already substitutes U+FFFD for unpaired
             // surrogates (pinned by TextEncodingTests), so it is the substituting core.
             val start = position()
@@ -925,7 +927,9 @@ class MutableDataBufferSlice(
 
         @Suppress("CAST_NEVER_SUCCEEDS")
         @OptIn(kotlinx.cinterop.BetaInteropApi::class)
-        val string = NSString.create(subdata, stringEncoding) as String
+        val string =
+            NSString.create(subdata, stringEncoding) as String?
+                ?: throw CharacterCodingException("Malformed $charset bytes")
         position += length
         return string
     }
@@ -1065,11 +1069,11 @@ class MutableDataBufferSlice(
         return this
     }
 
-    override fun <R> writeText(
+    override fun <W> writeText(
         text: CharSequence,
-        encoding: TextEncoding<R>,
-    ): R =
-        dispatchWriteText(text, encoding) { t ->
+        policy: TextPolicy<W, *>,
+    ): W =
+        dispatchWriteText(text, policy) { t ->
             // This platform's writeString(UTF8) already substitutes U+FFFD for unpaired
             // surrogates (pinned by TextEncodingTests), so it is the substituting core.
             val start = position()

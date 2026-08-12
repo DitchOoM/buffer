@@ -484,11 +484,11 @@ class NativeBuffer private constructor(
         return this
     }
 
-    override fun <R> writeText(
+    override fun <W> writeText(
         text: CharSequence,
-        encoding: TextEncoding<R>,
-    ): R =
-        dispatchWriteText(text, encoding) { t ->
+        policy: TextPolicy<W, *>,
+    ): W =
+        dispatchWriteText(text, policy) { t ->
             // simdutf transcodes well-formed text in one pass but whole-write no-ops on any
             // unpaired surrogate (position unchanged). The rare ill-formed case falls back to
             // the common substituting encoder so the U+FFFD byte contract still holds.
@@ -1103,11 +1103,11 @@ private class NativeBufferSlice(
         return this
     }
 
-    override fun <R> writeText(
+    override fun <W> writeText(
         text: CharSequence,
-        encoding: TextEncoding<R>,
-    ): R =
-        dispatchWriteText(text, encoding) { t ->
+        policy: TextPolicy<W, *>,
+    ): W =
+        dispatchWriteText(text, policy) { t ->
             // simdutf transcodes well-formed text in one pass but whole-write no-ops on any
             // unpaired surrogate (position unchanged). The rare ill-formed case falls back to
             // the common substituting encoder so the U+FFFD byte contract still holds.
@@ -1137,9 +1137,11 @@ private fun simdutfDecodeUtf8(
     length: Int,
 ): String {
     if (length == 0) return ""
-    // Validate UTF-8 before conversion -- simdutf silently replaces invalid sequences
+    // Validate UTF-8 before conversion -- simdutf silently replaces invalid sequences.
+    // CharacterCodingException matches what ByteArrayBuffer (managed) throws on this platform;
+    // this was IllegalArgumentException, making the failure type factory-dependent.
     if (buf_simdutf_validate_utf8(ptr, length.convert()) == 0) {
-        throw IllegalArgumentException("Invalid UTF-8 sequence")
+        throw CharacterCodingException("Malformed UTF-8 bytes")
     }
     val utf16Len = buf_simdutf_utf16_length_from_utf8(ptr, length.convert()).toInt()
     if (utf16Len == 0) return ""

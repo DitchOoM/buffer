@@ -37,6 +37,9 @@ internal object Utf8TextDecoder {
     private const val THREE_BYTE_PAYLOAD_MASK = 0x0F
     private const val FOUR_BYTE_PAYLOAD_MASK = 0x07
     private const val REPLACEMENT_CHAR = '�'
+    private const val TWO_BYTE_CONTINUATIONS = 1
+    private const val THREE_BYTE_CONTINUATIONS = 2
+    private const val FOUR_BYTE_CONTINUATIONS = 3
 
     /** Sentinel for [firstMalformedOffset]: the window is well-formed UTF-8. */
     const val WELL_FORMED = -1
@@ -51,9 +54,21 @@ internal object Utf8TextDecoder {
         length: Int,
     ): String {
         val sb = StringBuilder(length)
-        runMachine(bytes, offset, length, sb)
+        runMachine(bytes, offset, length, sb, stopOnMalformed = false)
         return sb.toString()
     }
+
+    /**
+     * Single-pass checked decode: fills [into] with the decoded text and returns [WELL_FORMED],
+     * or stops at the first ill-formed subsequence and returns its window-relative start offset
+     * (in which case [into]'s content is meaningless). One pass instead of validate-then-decode.
+     */
+    fun decodeInto(
+        into: StringBuilder,
+        bytes: ByteArray,
+        offset: Int,
+        length: Int,
+    ): Int = runMachine(bytes, offset, length, into, stopOnMalformed = true)
 
     /**
      * Byte offset (relative to [offset]) of the **start** of the first ill-formed subsequence,
@@ -64,7 +79,7 @@ internal object Utf8TextDecoder {
         bytes: ByteArray,
         offset: Int,
         length: Int,
-    ): Int = runMachine(bytes, offset, length, null)
+    ): Int = runMachine(bytes, offset, length, null, stopOnMalformed = true)
 
     /**
      * WHATWG UTF-8 decode loop. With [sb] non-null, substitutes U+FFFD per maximal subpart and
@@ -78,6 +93,7 @@ internal object Utf8TextDecoder {
         offset: Int,
         length: Int,
         sb: StringBuilder?,
+        stopOnMalformed: Boolean,
     ): Int {
         var i = offset
         val end = offset + length
@@ -92,19 +108,19 @@ internal object Utf8TextDecoder {
                 when {
                     b <= ASCII_MAX -> sb?.append(b.toChar())
                     b in TWO_BYTE_LEAD_MIN..TWO_BYTE_LEAD_MAX -> {
-                        needed = 1
+                        needed = TWO_BYTE_CONTINUATIONS
                         codePoint = b and TWO_BYTE_PAYLOAD_MASK
                         sequenceStart = i
                     }
                     b in THREE_BYTE_LEAD_E0..THREE_BYTE_LEAD_MAX -> {
-                        needed = 2
+                        needed = THREE_BYTE_CONTINUATIONS
                         codePoint = b and THREE_BYTE_PAYLOAD_MASK
                         if (b == THREE_BYTE_LEAD_E0) lower = E0_LOWER_BOUNDARY
                         if (b == THREE_BYTE_LEAD_ED) upper = ED_UPPER_BOUNDARY
                         sequenceStart = i
                     }
                     b in FOUR_BYTE_LEAD_F0..FOUR_BYTE_LEAD_F4 -> {
-                        needed = 3
+                        needed = FOUR_BYTE_CONTINUATIONS
                         codePoint = b and FOUR_BYTE_PAYLOAD_MASK
                         if (b == FOUR_BYTE_LEAD_F0) lower = F0_LOWER_BOUNDARY
                         if (b == FOUR_BYTE_LEAD_F4) upper = F4_UPPER_BOUNDARY
@@ -112,16 +128,16 @@ internal object Utf8TextDecoder {
                     }
                     else -> {
                         // Bare continuation, C0/C1, or F5..FF: one ill-formed byte, one U+FFFD.
-                        if (sb == null) return i - offset
-                        sb.append(REPLACEMENT_CHAR)
+                        if (stopOnMalformed) return i - offset
+                        sb?.append(REPLACEMENT_CHAR)
                     }
                 }
                 i++
             } else if (b < lower || b > upper) {
                 // The maximal subpart ends before this byte: substitute once, then reprocess
                 // this byte as a fresh lead (do not consume it).
-                if (sb == null) return sequenceStart - offset
-                sb.append(REPLACEMENT_CHAR)
+                if (stopOnMalformed) return sequenceStart - offset
+                sb?.append(REPLACEMENT_CHAR)
                 needed = 0
                 lower = CONTINUATION_LOWER_DEFAULT
                 upper = CONTINUATION_UPPER_DEFAULT
@@ -135,8 +151,8 @@ internal object Utf8TextDecoder {
         }
         if (needed != 0) {
             // Truncated sequence at end of window: one maximal subpart.
-            if (sb == null) return sequenceStart - offset
-            sb.append(REPLACEMENT_CHAR)
+            if (stopOnMalformed) return sequenceStart - offset
+            sb?.append(REPLACEMENT_CHAR)
         }
         return WELL_FORMED
     }

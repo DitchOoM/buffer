@@ -383,6 +383,26 @@ interface ReadBuffer : PositionBuffer {
         charset: Charset = Charset.UTF8,
     ): String
 
+    /**
+     * Reads [length] bytes as text under the given [policy].
+     *
+     * The result type is chosen by the policy — see [TextPolicy]. Guarantees, on every platform:
+     * - identical characters for identical `(bytes, policy)` inputs — [Utf8.Lenient] substitutes
+     *   U+FFFD per the WHATWG/Unicode maximal-subpart rule;
+     * - rejection ([Utf8.Strict] throwing [MalformedTextException], [Utf8.Checked] returning
+     *   [DecodedText.Malformed]) is atomic: position unchanged, nothing consumed;
+     * - on success the position advances by exactly [length].
+     *
+     * This is the only text-decode member; platform implementations may override it for fast
+     * paths that match the reference decoder byte-for-byte. The default stages through
+     * [readByteArray] and the common reference decoder, so it is correct for any implementation,
+     * including wrappers. The one-argument lenient form is provided as an extension.
+     */
+    fun <D> readText(
+        length: Int,
+        policy: TextPolicy<*, D>,
+    ): D = dispatchReadText(this, length, policy)
+
     @Deprecated(
         "Use readString instead",
         ReplaceWith("readString(bytes, Charset.UTF8)", "com.ditchoom.buffer.Charset"),

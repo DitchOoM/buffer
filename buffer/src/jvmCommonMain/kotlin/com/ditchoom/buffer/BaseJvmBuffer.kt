@@ -453,10 +453,10 @@ abstract class BaseJvmBuffer(
      */
     protected open fun tryWriteUtf8LenientToNative(text: CharSequence): Boolean = false
 
-    override fun <R> writeText(
+    override fun <W> writeText(
         text: CharSequence,
-        encoding: TextEncoding<R>,
-    ): R = dispatchWriteText(text, encoding) { t -> writeUtf8Substituting(t) }
+        policy: TextPolicy<W, *>,
+    ): W = dispatchWriteText(text, policy) { t -> writeUtf8Substituting(t) }
 
     /** Encodes with U+FFFD substitution and returns the bytes written. */
     private fun writeUtf8Substituting(text: CharSequence): Int {
