@@ -50,10 +50,13 @@ fun CharSequence.utf8Length(): Int {
             count++
         } else if (ch.code <= UTF8_TWO_BYTE_MAX) {
             count += 2
-        } else if (ch >= '\uD800' && ch.code < '\uDBFF'.code + 1) {
+        } else if (ch.isHighSurrogate() && i + 1 < len && get(i + 1).isLowSurrogate()) {
+            // Valid surrogate pair: one supplementary code point, four UTF-8 bytes.
             count += UTF8_FOUR_BYTES
             ++i
         } else {
+            // BMP code point — or an unpaired surrogate, which substituting encoders
+            // replace with U+FFFD (also three UTF-8 bytes).
             count += UTF8_THREE_BYTES
         }
         i++
