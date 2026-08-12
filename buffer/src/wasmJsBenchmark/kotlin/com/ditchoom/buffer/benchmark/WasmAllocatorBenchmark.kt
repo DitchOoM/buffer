@@ -73,6 +73,21 @@ open class WasmAllocatorBenchmark {
         return first.capacity + second.capacity
     }
 
+    /**
+     * Same as [allocateAndReleaseViaFreeList] but above the free list's array-backed size classes,
+     * so both the push and the pop go through the map-backed path.
+     */
+    @Benchmark
+    fun allocateAndReleaseViaFreeListLarge(): Int {
+        val first = BufferFactory.Default.allocate(LARGE_SIZE)
+        val second = BufferFactory.Default.allocate(LARGE_SIZE)
+        first.writeInt(SENTINEL_VALUE)
+        second.writeInt(SENTINEL_VALUE)
+        first.freeNativeMemory()
+        second.freeNativeMemory()
+        return first.capacity + second.capacity
+    }
+
     /** Pure bump allocation, never released — the pre-reclamation cost baseline. */
     @Benchmark
     fun allocateWithoutRelease(): Int {
@@ -104,7 +119,10 @@ open class WasmAllocatorBenchmark {
         private const val BUFFER_SIZE = 1024
         private const val SENTINEL_VALUE = 0x12345678
 
-        /** 32 MB of leaked 1 KiB blocks, well inside the 256 MB pool, then reset. */
+        /** Above the free list's array-backed size classes, so it takes the map-backed path. */
+        private const val LARGE_SIZE = 128 * 1024
+
+        /** 32 MB of leaked 1 KiB blocks, well inside the 256 MB growth ceiling, then reset. */
         private const val LEAK_BUDGET = 32 * 1024
     }
 }
