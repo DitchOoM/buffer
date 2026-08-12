@@ -462,21 +462,50 @@ abstract class BaseJvmBuffer(
         length: Int,
         policy: TextPolicy<*, D>,
     ): D {
-        // Direct buffers have no backing array; without help the common dispatch would allocate
-        // a staging ByteArray per call (caught by the codec allocation gate). Reuse a grown
-        // thread-local scratch instead — allocation-free at steady state.
-        val scratch =
-            if (length <= MAX_SCRATCH_BYTES) {
-                var array = readScratch.get()
-                if (array.size < length) {
-                    array = ByteArray(length.takeHighestOneBit() shl 1)
-                    readScratch.set(array)
+        if (policy is CustomTextPolicy) return dispatchReadText(this, length, policy)
+        val start = position()
+        if (remaining() < length) {
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read $length byte(s) at position $start " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
+        // Decode straight off the (possibly native) ByteBuffer with the JDK decoder in REPORT
+        // mode — one pass, no staging: for well-formed input any correct UTF-8 decoder produces
+        // identical UTF-16, so the cross-platform byte contract is safe. Only ill-formed input
+        // (the rare path) stages a copy for the reference decoder's canonical answer.
+        val window = byteBuffer.asReadOnlyBuffer()
+        (window as Buffer).limit(start + length)
+        return try {
+            val decoded = Charset.UTF8.toDecoder().decodeReusing(window, length)
+            buffer.position(start + length)
+            policy.decoded(decoded)
+        } catch (
+            @Suppress("SwallowedException") e: java.nio.charset.CharacterCodingException,
+        ) {
+            // Deliberately swallowed: the JDK error is only a detection signal — the canonical
+            // answer comes from the reference contract below.
+            when (policy) {
+                Utf8.Lenient -> {
+                    // The one staging copy in the read pipeline: U+FFFD placement is this
+                    // library's implementation-independent contract, so the reference decoder
+                    // (ByteArray-based) is the single authority — never the platform decoder,
+                    // whose replacement behavior varies across JDK versions and Android libcore.
+                    val bytes = ByteArray(length)
+                    val staging = byteBuffer.asReadOnlyBuffer()
+                    (staging as Buffer).limit(start + length)
+                    staging.get(bytes)
+                    val value = Utf8TextDecoder.decodeSubstituting(bytes, 0, length)
+                    buffer.position(start + length)
+                    policy.decoded(value)
                 }
-                array
-            } else {
-                null
+                // Zero-copy rejection: on a malformed result the JDK decoder leaves the input
+                // window's position at the START of the ill-formed sequence — exactly the
+                // offset the contract reports. Agreement with the reference decoder's answer
+                // is pinned by ReadTextTests' exotic vectors on every factory.
+                else -> policy.malformedRead(window.position() - start)
             }
-        return dispatchReadText(this, length, policy, scratch)
+        }
     }
 
     /** Encodes with U+FFFD substitution and returns the bytes written. */
@@ -830,16 +859,3 @@ fun ByteBuffer.toArray(size: Int = remaining()): ByteArray =
         get(byteArray)
         byteArray
     }
-
-/** Reused staging buffer for [BaseJvmBuffer.readText] over native memory. */
-private val readScratch =
-    object : ThreadLocal<ByteArray>() {
-        override fun initialValue(): ByteArray = ByteArray(INITIAL_SCRATCH_BYTES)
-
-        override fun get(): ByteArray = super.get()!!
-    }
-
-private const val INITIAL_SCRATCH_BYTES = 4096
-
-/** Above this, fall back to a one-off allocation rather than pinning huge thread-locals. */
-private const val MAX_SCRATCH_BYTES = 1 shl 20

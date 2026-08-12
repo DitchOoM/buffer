@@ -500,6 +500,31 @@ class NativeBuffer private constructor(
             position() - start
         }
 
+    override fun <D> readText(
+        length: Int,
+        policy: TextPolicy<*, D>,
+    ): D {
+        if (policy is CustomTextPolicy) return dispatchReadText(this, length, policy)
+        val start = position()
+        return try {
+            // simdutf decode straight from native memory — probe-verified to reject exactly
+            // the ill-formed vector set (typed CharacterCodingException, position unchanged).
+            policy.decoded(readString(length, Charset.UTF8))
+        } catch (@Suppress("SwallowedException") e: CharacterCodingException) {
+            // Rare path: stage once for the reference decoder's canonical answer.
+            val bytes = copyToByteArray(length)
+            position(start)
+            when (policy) {
+                Utf8.Lenient -> {
+                    val value = Utf8TextDecoder.decodeSubstituting(bytes, 0, length)
+                    position(start + length)
+                    policy.decoded(value)
+                }
+                else -> policy.malformedRead(Utf8TextDecoder.firstMalformedOffset(bytes, 0, length))
+            }
+        }
+    }
+
     // === Optimized bulk operations ===
 
     /**
@@ -1118,6 +1143,31 @@ private class NativeBufferSlice(
             }
             position() - start
         }
+
+    override fun <D> readText(
+        length: Int,
+        policy: TextPolicy<*, D>,
+    ): D {
+        if (policy is CustomTextPolicy) return dispatchReadText(this, length, policy)
+        val start = position()
+        return try {
+            // simdutf decode straight from native memory — probe-verified to reject exactly
+            // the ill-formed vector set (typed CharacterCodingException, position unchanged).
+            policy.decoded(readString(length, Charset.UTF8))
+        } catch (@Suppress("SwallowedException") e: CharacterCodingException) {
+            // Rare path: stage once for the reference decoder's canonical answer.
+            val bytes = copyToByteArray(length)
+            position(start)
+            when (policy) {
+                Utf8.Lenient -> {
+                    val value = Utf8TextDecoder.decodeSubstituting(bytes, 0, length)
+                    position(start + length)
+                    policy.decoded(value)
+                }
+                else -> policy.malformedRead(Utf8TextDecoder.firstMalformedOffset(bytes, 0, length))
+            }
+        }
+    }
 
     fun close() = Unit
 

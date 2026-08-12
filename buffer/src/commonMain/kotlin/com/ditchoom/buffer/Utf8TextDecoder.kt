@@ -59,18 +59,6 @@ internal object Utf8TextDecoder {
     }
 
     /**
-     * Single-pass checked decode: fills [into] with the decoded text and returns [WELL_FORMED],
-     * or stops at the first ill-formed subsequence and returns its window-relative start offset
-     * (in which case [into]'s content is meaningless). One pass instead of validate-then-decode.
-     */
-    fun decodeInto(
-        into: StringBuilder,
-        bytes: ByteArray,
-        offset: Int,
-        length: Int,
-    ): Int = runMachine(bytes, offset, length, into, stopOnMalformed = true)
-
-    /**
      * Byte offset (relative to [offset]) of the **start** of the first ill-formed subsequence,
      * or [WELL_FORMED]. For a truncated-at-end sequence this is the lead byte's offset. This is
      * the offset decode failures report.

@@ -338,11 +338,11 @@ internal inline fun <W> WriteBuffer.dispatchWriteText(
  * stage one copy through [ReadBuffer.readByteArray] — the only generic access path; platform
  * overrides may remove it with a measured-identical fast path.
  */
+@Suppress("ReturnCount") // early return per policy on the rare malformed path is the readable form
 internal fun <D> dispatchReadText(
     buffer: ReadBuffer,
     length: Int,
     policy: TextPolicy<*, D>,
-    scratch: ByteArray? = null,
 ): D {
     if (policy is CustomTextPolicy) {
         return policy.decoded(policy.customDecoder.decodeFrom(buffer, length))
@@ -360,36 +360,37 @@ internal fun <D> dispatchReadText(
         }
         bytes = managed.backingArray
         bytesOffset = managed.arrayOffset + start
-    } else if (scratch != null && scratch.size >= length) {
-        // Reused scratch (JVM native-memory path): copies without allocating per call.
-        buffer.readInto(scratch, 0, length) // advances; rewound below on rejection
-        bytes = scratch
-        bytesOffset = 0
     } else {
         bytes = buffer.readByteArray(length) // advances; rewound below on rejection
         bytesOffset = 0
     }
-    return when (policy) {
-        Utf8.Lenient -> {
-            val value = Utf8TextDecoder.decodeSubstituting(bytes, bytesOffset, length)
-            if (managed != null) buffer.position(start + length)
-            policy.decoded(value)
-        }
-        Utf8.Strict, Utf8.Checked -> {
-            // Single pass: decode while validating; discard on the first ill-formed byte.
-            val sb = StringBuilder(length)
-            val bad = Utf8TextDecoder.decodeInto(sb, bytes, bytesOffset, length)
-            if (bad == Utf8TextDecoder.WELL_FORMED) {
-                if (managed != null) buffer.position(start + length)
-                policy.decoded(sb.toString())
-            } else {
-                // Atomic rejection: nothing consumed.
-                buffer.position(start)
-                policy.malformedRead(bad)
+    // One pass on the happy path: the stdlib's STRICT decode validates while decoding, at
+    // native-optimized speed on every platform (the reference state machine's scalar scan is
+    // measured ~10x slower on Kotlin/Native). Exact for well-formed input by definition; the
+    // reference decoder runs only on the rare ill-formed path, where it is the single
+    // authority for offsets and U+FFFD placement.
+    val value =
+        try {
+            bytes.decodeToString(bytesOffset, bytesOffset + length, throwOnInvalidSequence = true)
+        } catch (
+            @Suppress("SwallowedException") e: CharacterCodingException,
+        ) {
+            return when (policy) {
+                Utf8.Lenient -> {
+                    val substituted = Utf8TextDecoder.decodeSubstituting(bytes, bytesOffset, length)
+                    if (managed != null) buffer.position(start + length)
+                    policy.decoded(substituted)
+                }
+                Utf8.Strict, Utf8.Checked -> {
+                    // Atomic rejection: nothing consumed.
+                    buffer.position(start)
+                    policy.malformedRead(Utf8TextDecoder.firstMalformedOffset(bytes, bytesOffset, length))
+                }
+                is CustomTextPolicy -> error("unreachable: handled above")
             }
         }
-        is CustomTextPolicy -> error("unreachable: handled above")
-    }
+    if (managed != null) buffer.position(start + length)
+    return policy.decoded(value)
 }
 
 /** Writes [text] as substituting UTF-8 — the drop-in replacement for `writeString(text)`. */

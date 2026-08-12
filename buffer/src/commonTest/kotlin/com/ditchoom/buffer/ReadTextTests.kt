@@ -126,6 +126,33 @@ class ReadTextTests {
     }
 
     @Test
+    fun strictOffsetsMatchReferenceForExoticIllFormedInput() {
+        // Pins that every platform's failure offset — including fast paths that derive it from
+        // a platform decoder's error position — agrees with the reference decoder's
+        // subpart-start semantics.
+        val cases =
+            listOf(
+                Triple("encodedSurrogate", bytes(0xED, 0xA0, 0x80), 0),
+                Triple("bareContinuationAfterValid", bytes(0xE2, 0x82, 0xAC, 0x41, 0x80), 4),
+                Triple("truncatedAtWindowEnd", bytes(0x41, 0xE2, 0x82), 1),
+                Triple("outOfRange", bytes(0x41, 0x42, 0xF4, 0x90, 0x80, 0x80), 2),
+                Triple("overlongLead", bytes(0xC0, 0xAF), 0),
+            )
+        for ((caseName, data, expected) in cases) {
+            for ((name, factory) in factories) {
+                withData(factory, data) { buffer ->
+                    val e =
+                        assertFailsWith<MalformedTextException.IllFormedBytes>("[$caseName/$name]") {
+                            buffer.readText(data.size, Utf8.Strict)
+                        }
+                    assertEquals(expected, e.byteOffset, "offset [$caseName/$name]")
+                    assertEquals(0, buffer.position(), "atomicity [$caseName/$name]")
+                }
+            }
+        }
+    }
+
+    @Test
     fun oneArgReadTextIsLenient() {
         withData(BufferFactory.Default, encodedSurrogate) { buffer ->
             assertEquals("���", buffer.readText(3))
