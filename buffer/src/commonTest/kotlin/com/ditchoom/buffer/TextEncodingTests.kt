@@ -22,15 +22,14 @@ import kotlin.test.assertTrue
  * 4. wrappers stay transparent and fluent results identify the wrapper, not the inner buffer.
  */
 class TextEncodingTests {
-
-// Unpaired-surrogate STRINGS must be constructed at runtime: the Kotlin/JS compiler's
+    // Unpaired-surrogate STRINGS must be constructed at runtime: the Kotlin/JS compiler's
 // clean-build codegen lossily rewrites unpaired surrogates in string LITERALS to '?'
 // (incremental builds emit them faithfully — the divergence was caught when a clean
 // rebuild flipped these tests). Char() is numeric and safe. Valid pairs are unaffected.
-private val loneHigh = Char(0xD800).toString()
-private val loneHighEnd = Char(0xDBFF).toString()
-private val loneLow = Char(0xDC00).toString()
-private val loneLowEnd = Char(0xDFFF).toString()
+    private val loneHigh = Char(0xD800).toString()
+    private val loneHighEnd = Char(0xDBFF).toString()
+    private val loneLow = Char(0xDC00).toString()
+    private val loneLowEnd = Char(0xDFFF).toString()
     private val wellFormed =
         listOf(
             "",
