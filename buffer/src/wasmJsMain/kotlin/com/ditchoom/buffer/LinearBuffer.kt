@@ -567,6 +567,18 @@ class LinearBuffer(
         return this
     }
 
+    override fun <R> writeText(
+        text: CharSequence,
+        encoding: TextEncoding<R>,
+    ): R =
+        dispatchWriteText(text, encoding) { t ->
+            // This platform's writeString(UTF8) already substitutes U+FFFD for unpaired
+            // surrogates (pinned by TextEncodingTests), so it is the substituting core.
+            val start = position()
+            writeString(t, Charset.UTF8)
+            position() - start
+        }
+
     /**
      * Optimized single byte indexOf using Long comparisons (8 bytes at a time).
      */

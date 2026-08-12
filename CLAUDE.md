@@ -230,6 +230,39 @@ buffer.fill(0x123456789ABCDEF0L) // fill with Long pattern
 buffer.xorMask(0x12345678)      // XOR remaining bytes with repeating 4-byte mask
 ```
 
+### Text Encoding (`writeText` / `TextEncoding`)
+
+**Prefer `writeText` over `writeString`** (which is deprecated toward it). The policy picks the
+result type, and `size(text)` reports exactly the bytes the write produces — on every platform:
+
+```kotlin
+// Lenient (substituting): cannot fail, fluent, identical bytes everywhere.
+// Unpaired surrogates become U+FFFD (3 bytes) — never platform-dependent.
+buffer.writeText(text)                          // same as writeText(text, Utf8.Lenient)
+buffer.writeText(text, Utf8.Lenient)
+val exact = Utf8.Lenient.size(text)             // == bytes writeText writes, exactly
+val exact2 = text.utf8Size()                    // convenience for the same number
+
+// Strict (validating): sealed result, atomic rejection (position unchanged).
+when (val r = buffer.writeText(text, Utf8.Strict)) {
+    is TextOutcome.Bytes -> framePayload(r.count)
+    is TextOutcome.Malformed -> reject(r.index)  // index of first unpaired surrogate
+}
+
+// Allocation with a sizing strategy:
+val rb = text.toReadBuffer(Utf8.Lenient, SizeHint.Exact)       // one measuring pass, minimal memory
+val rb2 = text.toReadBuffer(Utf8.Lenient, SizeHint.UpperBound) // no pass, up to 3x memory (default)
+```
+
+Guarantees (pinned by `TextEncodingTests` on every platform): `size == bytes written`; identical
+bytes for identical `(text, encoding)`; strict `Malformed` writes nothing; overflow throws and is
+unreachable when the buffer was sized from the same policy. Measured: `writeText` is at parity
+with `writeString` (JVM 0.86–1.14x, macOS 0.92–1.11x, same-run A/B). On Apple, the `size()` pass
+is slower than the Foundation encode itself — prefer `SizeHint.UpperBound` there unless memory-bound.
+
+Deprecated toward this API (removed in v7): `utf8Length()` → `utf8Size()`, `maxBufferSize()`
+→ `SizeHint`, `writeString` → `writeText` (once non-UTF-8 policies reach parity).
+
 ### Buffer Pool (`com.ditchoom.buffer.pool`)
 
 High-performance buffer pooling for minimizing allocations:

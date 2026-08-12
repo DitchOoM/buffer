@@ -399,6 +399,31 @@ interface WriteBuffer : PositionBuffer {
     ): WriteBuffer
 
     /**
+     * Writes [text] under the given [encoding] policy and advances position by the bytes written.
+     *
+     * The result type is chosen by the policy — see [TextEncoding]. Guarantees, on every platform:
+     * - the policy's `size(text)` reports exactly the bytes this call writes;
+     * - identical bytes for identical `(text, encoding)` inputs;
+     * - a strict policy rejecting ill-formed input writes nothing (position unchanged);
+     * - insufficient remaining capacity throws [BufferOverflowException] — unreachable when the
+     *   buffer was sized from the same policy.
+     *
+     * This is the only text-encode member; platform implementations override it for fast paths.
+     * The default routes through [writeBytes] using the common reference encoder, so it is correct
+     * for any implementation, including wrappers. No `writeText(text)` member will ever be added;
+     * the one-argument form is provided as an extension and stays an extension.
+     */
+    fun <R> writeText(
+        text: CharSequence,
+        encoding: TextEncoding<R>,
+    ): R =
+        dispatchWriteText(text, encoding) { t ->
+            val bytes = Utf8TextEncoder.encodeSubstituting(t)
+            writeBytes(bytes)
+            bytes.size
+        }
+
+    /**
      * Writes all remaining bytes from the source buffer and advances both positions.
      *
      * After this operation:

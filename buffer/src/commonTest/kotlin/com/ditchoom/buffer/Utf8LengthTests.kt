@@ -25,7 +25,11 @@ class Utf8LengthTests {
         expected: Int,
         text: String,
         message: String,
-    ) = assertEquals(expected, text.utf8Length(), message)
+    ) {
+        @Suppress("DEPRECATION")
+        assertEquals(expected, text.utf8Length(), message)
+        assertEquals(expected, text.utf8Size(), message)
+    }
 
     @Test
     fun wellFormedText() {

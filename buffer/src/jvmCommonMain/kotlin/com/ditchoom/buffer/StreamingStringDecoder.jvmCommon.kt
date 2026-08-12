@@ -94,8 +94,8 @@ private class JvmStreamingStringDecoder(
                         pendingCount = unconsumed
                         pendingLong = 0L
                         for (i in 0 until unconsumed) {
-                            val maskedByte = byteBuffer.get().toLong() and Utf8.BYTE_MASK.toLong()
-                            pendingLong = pendingLong or (maskedByte shl (i * Utf8.BITS_PER_BYTE))
+                            val maskedByte = byteBuffer.get().toLong() and Utf8Wire.BYTE_MASK.toLong()
+                            pendingLong = pendingLong or (maskedByte shl (i * Utf8Wire.BITS_PER_BYTE))
                         }
                     } else {
                         pendingCount = 0
@@ -175,7 +175,7 @@ private class JvmStreamingStringDecoder(
 
         // Add pending bytes first (unpack from Long)
         for (i in 0 until pendingCount) {
-            cb.put(((pendingLong ushr (i * Utf8.BITS_PER_BYTE)) and Utf8.BYTE_MASK.toLong()).toByte())
+            cb.put(((pendingLong ushr (i * Utf8Wire.BITS_PER_BYTE)) and Utf8Wire.BYTE_MASK.toLong()).toByte())
         }
         pendingCount = 0
 
@@ -202,7 +202,7 @@ private class JvmStreamingStringDecoder(
             }
             (cb as java.nio.Buffer).clear()
             for (i in 0 until pendingCount) {
-                cb.put(((pendingLong ushr (i * Utf8.BITS_PER_BYTE)) and Utf8.BYTE_MASK.toLong()).toByte())
+                cb.put(((pendingLong ushr (i * Utf8Wire.BITS_PER_BYTE)) and Utf8Wire.BYTE_MASK.toLong()).toByte())
             }
             (cb as java.nio.Buffer).flip()
             val byteBuffer = cb

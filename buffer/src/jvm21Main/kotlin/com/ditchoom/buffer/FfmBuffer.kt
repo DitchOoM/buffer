@@ -107,6 +107,13 @@ class FfmBuffer(
         return true
     }
 
+    override fun tryWriteUtf8LenientToNative(text: CharSequence): Boolean {
+        // Same freed-segment guard as the strict twin above.
+        if (isFreed) return false
+        position(encodeUtf8LenientToNative(text, position(), limit(), segment.address()))
+        return true
+    }
+
     // Read mirror of tryWriteUtf8ToNative: decode UTF-8 straight off the segment's native address
     // instead of taking the direct-ByteBuffer decodeBufferLoop. Falls back to the base CharsetDecoder
     // path for non-UTF-8, and for a freed segment (whose closed address must never be read).

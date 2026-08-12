@@ -116,8 +116,8 @@ private class LinuxStreamingStringDecoder(
             pendingLong = 0L
             val basePos = buffer.position() + bytesConsumed + boundary
             for (i in 0 until pendingCount) {
-                val maskedByte = buffer.get(basePos + i).toLong() and Utf8.BYTE_MASK.toLong()
-                pendingLong = pendingLong or (maskedByte shl (i * Utf8.BITS_PER_BYTE))
+                val maskedByte = buffer.get(basePos + i).toLong() and Utf8Wire.BYTE_MASK.toLong()
+                pendingLong = pendingLong or (maskedByte shl (i * Utf8Wire.BITS_PER_BYTE))
             }
         }
 
@@ -171,13 +171,13 @@ private class LinuxStreamingStringDecoder(
         destination: Appendable,
     ): DecodeResult {
         // Determine expected sequence length from lead byte
-        val leadByte = (pendingLong and Utf8.BYTE_MASK.toLong()).toInt()
+        val leadByte = (pendingLong and Utf8Wire.BYTE_MASK.toLong()).toInt()
         val expectedLen =
             when {
-                leadByte < Utf8.ASCII_LIMIT -> 1
-                leadByte and Utf8.TWO_BYTE_LEAD_MASK == Utf8.TWO_BYTE_LEAD -> 2
-                leadByte and Utf8.THREE_BYTE_LEAD_MASK == Utf8.THREE_BYTE_LEAD -> 3
-                leadByte and Utf8.FOUR_BYTE_LEAD_MASK == Utf8.FOUR_BYTE_LEAD -> 4
+                leadByte < Utf8Wire.ASCII_LIMIT -> 1
+                leadByte and Utf8Wire.TWO_BYTE_LEAD_MASK == Utf8Wire.TWO_BYTE_LEAD -> 2
+                leadByte and Utf8Wire.THREE_BYTE_LEAD_MASK == Utf8Wire.THREE_BYTE_LEAD -> 3
+                leadByte and Utf8Wire.FOUR_BYTE_LEAD_MASK == Utf8Wire.FOUR_BYTE_LEAD -> 4
                 else -> {
                     // Invalid lead byte
                     pendingCount = 0
@@ -193,8 +193,8 @@ private class LinuxStreamingStringDecoder(
             val basePos = buffer.position()
             for (i in 0 until available) {
                 val b = buffer.get(basePos + i)
-                val maskedByte = b.toLong() and Utf8.BYTE_MASK.toLong()
-                pendingLong = pendingLong or (maskedByte shl ((pendingCount + i) * Utf8.BITS_PER_BYTE))
+                val maskedByte = b.toLong() and Utf8Wire.BYTE_MASK.toLong()
+                pendingLong = pendingLong or (maskedByte shl ((pendingCount + i) * Utf8Wire.BITS_PER_BYTE))
             }
             pendingCount += available
             return DecodeResult(0, available)
@@ -205,7 +205,9 @@ private class LinuxStreamingStringDecoder(
         for (i in 0 until needed) {
             val b = buffer.get(basePos + i)
             pendingLong =
-                pendingLong or ((b.toLong() and Utf8.BYTE_MASK.toLong()) shl ((pendingCount + i) * Utf8.BITS_PER_BYTE))
+                pendingLong or (
+                    (b.toLong() and Utf8Wire.BYTE_MASK.toLong()) shl ((pendingCount + i) * Utf8Wire.BITS_PER_BYTE)
+                )
         }
         pendingCount = 0
 
@@ -218,19 +220,21 @@ private class LinuxStreamingStringDecoder(
         byteCount: Int,
         destination: Appendable,
     ): Int {
-        val b0 = (pendingLong and Utf8.BYTE_MASK.toLong()).toInt()
-        val b1 = if (byteCount > 1) ((pendingLong ushr 8) and Utf8.BYTE_MASK.toLong()).toInt() else 0
-        val b2 = if (byteCount > 2) ((pendingLong ushr 16) and Utf8.BYTE_MASK.toLong()).toInt() else 0
-        val b3 = if (byteCount > 3) ((pendingLong ushr 24) and Utf8.BYTE_MASK.toLong()).toInt() else 0
+        val b0 = (pendingLong and Utf8Wire.BYTE_MASK.toLong()).toInt()
+        val b1 = if (byteCount > 1) ((pendingLong ushr 8) and Utf8Wire.BYTE_MASK.toLong()).toInt() else 0
+        val b2 = if (byteCount > 2) ((pendingLong ushr 16) and Utf8Wire.BYTE_MASK.toLong()).toInt() else 0
+        val b3 = if (byteCount > 3) ((pendingLong ushr 24) and Utf8Wire.BYTE_MASK.toLong()).toInt() else 0
 
         // Validate continuation bytes
-        if (byteCount > 1 && (b1 and Utf8.CONTINUATION_MASK) != Utf8.CONTINUATION_MARKER) {
+        if (byteCount > 1 && (b1 and Utf8Wire.CONTINUATION_MASK) != Utf8Wire.CONTINUATION_MARKER) {
             return handleMalformedInput(destination).charsWritten
         }
-        if (byteCount > 2 && (b2 and Utf8.CONTINUATION_MASK) != Utf8.CONTINUATION_MARKER) {
+        if (byteCount > 2 && (b2 and Utf8Wire.CONTINUATION_MASK) != Utf8Wire.CONTINUATION_MARKER) {
             return handleMalformedInput(destination).charsWritten
         }
-        if (byteCount > FOURTH_BYTE_PRESENT_THRESHOLD && (b3 and Utf8.CONTINUATION_MASK) != Utf8.CONTINUATION_MARKER) {
+        if (byteCount > FOURTH_BYTE_PRESENT_THRESHOLD &&
+            (b3 and Utf8Wire.CONTINUATION_MASK) != Utf8Wire.CONTINUATION_MARKER
+        ) {
             return handleMalformedInput(destination).charsWritten
         }
 
@@ -238,39 +242,39 @@ private class LinuxStreamingStringDecoder(
             when (byteCount) {
                 1 -> b0
                 2 ->
-                    ((b0 and Utf8.TWO_BYTE_PAYLOAD_MASK) shl Utf8.CONTINUATION_SHIFT) or
-                        (b1 and Utf8.CONTINUATION_PAYLOAD_MASK)
+                    ((b0 and Utf8Wire.TWO_BYTE_PAYLOAD_MASK) shl Utf8Wire.CONTINUATION_SHIFT) or
+                        (b1 and Utf8Wire.CONTINUATION_PAYLOAD_MASK)
                 3 ->
-                    ((b0 and Utf8.THREE_BYTE_PAYLOAD_MASK) shl (Utf8.CONTINUATION_SHIFT * 2)) or
-                        ((b1 and Utf8.CONTINUATION_PAYLOAD_MASK) shl Utf8.CONTINUATION_SHIFT) or
-                        (b2 and Utf8.CONTINUATION_PAYLOAD_MASK)
+                    ((b0 and Utf8Wire.THREE_BYTE_PAYLOAD_MASK) shl (Utf8Wire.CONTINUATION_SHIFT * 2)) or
+                        ((b1 and Utf8Wire.CONTINUATION_PAYLOAD_MASK) shl Utf8Wire.CONTINUATION_SHIFT) or
+                        (b2 and Utf8Wire.CONTINUATION_PAYLOAD_MASK)
                 4 ->
-                    ((b0 and Utf8.FOUR_BYTE_PAYLOAD_MASK) shl (Utf8.CONTINUATION_SHIFT * 3)) or
-                        ((b1 and Utf8.CONTINUATION_PAYLOAD_MASK) shl (Utf8.CONTINUATION_SHIFT * 2)) or
-                        ((b2 and Utf8.CONTINUATION_PAYLOAD_MASK) shl Utf8.CONTINUATION_SHIFT) or
-                        (b3 and Utf8.CONTINUATION_PAYLOAD_MASK)
+                    ((b0 and Utf8Wire.FOUR_BYTE_PAYLOAD_MASK) shl (Utf8Wire.CONTINUATION_SHIFT * 3)) or
+                        ((b1 and Utf8Wire.CONTINUATION_PAYLOAD_MASK) shl (Utf8Wire.CONTINUATION_SHIFT * 2)) or
+                        ((b2 and Utf8Wire.CONTINUATION_PAYLOAD_MASK) shl Utf8Wire.CONTINUATION_SHIFT) or
+                        (b3 and Utf8Wire.CONTINUATION_PAYLOAD_MASK)
                 else -> return handleMalformedInput(destination).charsWritten
             }
 
         // Reject overlong encodings and surrogate codepoints
         val isValid =
             when (byteCount) {
-                2 -> codePoint >= Utf8.ASCII_LIMIT
+                2 -> codePoint >= Utf8Wire.ASCII_LIMIT
                 3 ->
-                    codePoint >= Utf8.THREE_BYTE_MIN &&
-                        (codePoint < Utf8.HIGH_SURROGATE_START || codePoint > Utf8.LOW_SURROGATE_END)
-                4 -> codePoint in Utf8.FOUR_BYTE_MIN..Utf8.MAX_CODE_POINT
+                    codePoint >= Utf8Wire.THREE_BYTE_MIN &&
+                        (codePoint < Utf8Wire.HIGH_SURROGATE_START || codePoint > Utf8Wire.LOW_SURROGATE_END)
+                4 -> codePoint in Utf8Wire.FOUR_BYTE_MIN..Utf8Wire.MAX_CODE_POINT
                 else -> true
             }
         if (!isValid) return handleMalformedInput(destination).charsWritten
 
-        return if (codePoint <= Utf8.BMP_MAX) {
+        return if (codePoint <= Utf8Wire.BMP_MAX) {
             destination.append(codePoint.toChar())
             1
         } else {
-            val adjusted = codePoint - Utf8.FOUR_BYTE_MIN
-            destination.append((Utf8.HIGH_SURROGATE_START + (adjusted shr Utf8.SURROGATE_SHIFT)).toChar())
-            destination.append((Utf8.LOW_SURROGATE_START + (adjusted and Utf8.LOW_SURROGATE_MASK)).toChar())
+            val adjusted = codePoint - Utf8Wire.FOUR_BYTE_MIN
+            destination.append((Utf8Wire.HIGH_SURROGATE_START + (adjusted shr Utf8Wire.SURROGATE_SHIFT)).toChar())
+            destination.append((Utf8Wire.LOW_SURROGATE_START + (adjusted and Utf8Wire.LOW_SURROGATE_MASK)).toChar())
             2
         }
     }
