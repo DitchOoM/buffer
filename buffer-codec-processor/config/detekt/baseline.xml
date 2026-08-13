@@ -27,7 +27,7 @@
     <ID>CyclomaticComplexMethod:CodecEmitterFields.kt:internal fun appendNaturalReadWithSwap</ID>
     <ID>CyclomaticComplexMethod:CodecEmitterPeek.kt:internal fun appendPeekScalar</ID>
     <ID>CyclomaticComplexMethod:CodecEmitterPeek.kt:internal fun appendSequentialPeek</ID>
-    <ID>CyclomaticComplexMethod:CodecEmitterPeek.kt:internal fun buildPeekFrameFun: FunSpec</ID>
+    <ID>CyclomaticComplexMethod:CodecEmitterPeek.kt:internal fun buildPeekFrame: PeekEmit</ID>
     <ID>CyclomaticComplexMethod:CodecEmitterWireSize.kt:internal fun buildWireSizeFun: FunSpec</ID>
     <ID>CyclomaticComplexMethod:CodecSchemaDescriptor.kt:CodecSchemaDescriptor$fun describeField: String</ID>
     <ID>CyclomaticComplexMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$override fun process: List&lt;KSAnnotated></ID>
@@ -73,7 +73,7 @@
     <ID>LongMethod:CodecEmitterPeek.kt:internal fun appendPeekScalar</ID>
     <ID>LongMethod:CodecEmitterPeek.kt:internal fun appendPeekUseCodecScalar</ID>
     <ID>LongMethod:CodecEmitterPeek.kt:internal fun appendSequentialPeek</ID>
-    <ID>LongMethod:CodecEmitterPeek.kt:internal fun buildPeekFrameFun: FunSpec</ID>
+    <ID>LongMethod:CodecEmitterPeek.kt:internal fun buildPeekFrame: PeekEmit</ID>
     <ID>LongMethod:CodecEmitterWireSize.kt:internal fun buildWireSizeFun: FunSpec</ID>
     <ID>LongMethod:EmitterDiagnosticsValidatorTest.kt:EmitterDiagnosticsValidatorTest$@Test fun acceptsDispatchOnMultiByteSignedAndULongDiscriminators</ID>
     <ID>LongMethod:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$override fun process: List&lt;KSAnnotated></ID>
@@ -133,7 +133,7 @@
     <ID>ReturnCount:CodecEmitter.kt:CodecEmitter$private fun framedByAfterField: FieldSpec?</ID>
     <ID>ReturnCount:CodecEmitter.kt:CodecEmitter$private fun shouldEmitPartial: Boolean</ID>
     <ID>ReturnCount:CodecEmitterFields.kt:internal fun appendEncodeGuard</ID>
-    <ID>ReturnCount:CodecEmitterPeek.kt:internal fun buildPeekFrameFun: FunSpec</ID>
+    <ID>ReturnCount:CodecEmitterPeek.kt:internal fun buildPeekFrame: PeekEmit</ID>
     <ID>ReturnCount:CodecEmitterWireSize.kt:internal fun buildWireSizeFun: FunSpec</ID>
     <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun hasPayloadTypeParameter: Boolean</ID>
     <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun implementsCodecOf: Boolean</ID>
