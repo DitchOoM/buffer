@@ -2000,6 +2000,59 @@ internal sealed interface CodecCompanion {
 }
 
 /**
+ * The peek body this companion hoists off the enclosing class, or null when
+ * the companion carries no framing.
+ */
+private fun CodecCompanion.hoistedPeek(): FunSpec? =
+    when (this) {
+        is CodecCompanion.None, is CodecCompanion.PartialOnly, is CodecCompanion.AggregatorOnly -> null
+        is CodecCompanion.FramingOnly -> peek
+        is CodecCompanion.PartialAndFraming -> peek
+        is CodecCompanion.AggregatorAndFraming -> peek
+    }
+
+/**
+ * Fail the processor run if a hoisted peek body names one of the enclosing
+ * class's instance properties.
+ *
+ * Companion placement rests on an invariant the walkers hold but the type
+ * system does not express: every receiver a peek emits is a type name
+ * (`%T`) and every other operand is a `__`-prefixed local over `stream`, so
+ * the body compiles just as well inside a companion, where the class's
+ * `payloadCodec` and per-variant codec fields are out of scope. If a future
+ * walker emits an instance-property reference and the shape still classifies
+ * [PeekEmit.Framed], KSP emits that body onto the companion happily and the
+ * break surfaces as an unresolved-reference error in generated source in a
+ * *consumer's* build. This turns that into a processor error naming the
+ * property and the rule it violated.
+ *
+ * The forbidden names are read off [properties] — the specs already added to
+ * the enclosing builder — rather than restated, so a new instance field is
+ * covered the moment it is added. Word-boundary matching is deliberately
+ * blunt; peek locals are `__`-prefixed (`__headerWireWidth`, `__framingPeek`),
+ * so there is no identifier a walker legitimately emits that this can
+ * collide with. It is a smoke alarm, not a proof: only the identifiers the
+ * enclosing class declares are checked, and only textually.
+ */
+private fun requireCodecIndependentPeek(
+    peek: FunSpec,
+    properties: List<String>,
+) {
+    val body = peek.body.toString()
+    val referenced = properties.filter { Regex("""\b${Regex.escape(it)}\b""").containsMatchIn(body) }
+    if (referenced.isNotEmpty()) {
+        error(
+            "peekFrameSize was classified PeekEmit.Framed — which hoists its body to the " +
+                "codec's companion — but the body references the enclosing class's instance " +
+                "${if (referenced.size == 1) "property" else "properties"} " +
+                "${referenced.joinToString(", ")}, which a companion cannot see. Either emit a " +
+                "type-name receiver instead, or classify the shape PeekEmit.Unframed so the body " +
+                "stays a member.",
+        )
+    }
+}
+
+/**
  * Add the companion described by [companion], if any.
  *
  * A companion carrying framing declares `: FrameDetector`, which is what
@@ -2007,9 +2060,14 @@ internal sealed interface CodecCompanion {
  * the same `FunSpec` serves both) and lets consumers pass the companion
  * itself wherever a [FRAME_DETECTOR_CN] is expected — not merely call a
  * same-named function on it.
+ *
+ * Call this *after* the enclosing class's properties are added:
+ * [requireCodecIndependentPeek] reads them off this builder to check what a
+ * hoisted peek is allowed to name.
  */
-internal fun TypeSpec.Builder.addCodecCompanion(companion: CodecCompanion): TypeSpec.Builder =
-    when (companion) {
+internal fun TypeSpec.Builder.addCodecCompanion(companion: CodecCompanion): TypeSpec.Builder {
+    companion.hoistedPeek()?.let { requireCodecIndependentPeek(it, propertySpecs.map { p -> p.name }) }
+    return when (companion) {
         is CodecCompanion.None -> this
         is CodecCompanion.PartialOnly ->
             addType(
@@ -2036,7 +2094,17 @@ internal fun TypeSpec.Builder.addCodecCompanion(companion: CodecCompanion): Type
                     .build(),
             )
         is CodecCompanion.AggregatorOnly -> addType(companion.aggregator)
-        is CodecCompanion.AggregatorAndFraming ->
+        is CodecCompanion.AggregatorAndFraming -> {
+            // The only arm that reuses a companion built elsewhere
+            // (`buildDispatchOnAggregatorCompanion`, via `toBuilder()`), so the
+            // only one where a name could arrive and survive. `memberPeekFun`'s
+            // forwarder calls `Companion.peekFrameSize(...)` — the implicit name
+            // of an unnamed companion — and a named one would not answer to it.
+            require(companion.aggregator.name == null) {
+                "The aggregator companion must stay unnamed: memberPeekFun forwards to " +
+                    "`Companion.peekFrameSize(...)`, which `${companion.aggregator.name}` " +
+                    "would not answer to. Name it only alongside a matching receiver there."
+            }
             addType(
                 companion.aggregator
                     .toBuilder()
@@ -2044,7 +2112,9 @@ internal fun TypeSpec.Builder.addCodecCompanion(companion: CodecCompanion): Type
                     .addFunction(companion.peek)
                     .build(),
             )
+        }
     }
+}
 
 /**
  * The codec's own `peekFrameSize` member.
@@ -2054,6 +2124,10 @@ internal fun TypeSpec.Builder.addCodecCompanion(companion: CodecCompanion): Type
  * is required: an unqualified call would resolve to this very member and
  * recurse. An unframed shape keeps its constant-`NoFraming` body inline,
  * since there is no companion copy to forward to.
+ *
+ * `Companion` is the *implicit* name of an unnamed companion, so this
+ * forwarder is coupled to every companion in [addCodecCompanion] being built
+ * nameless. That coupling is asserted there rather than left to chance.
  */
 internal fun memberPeekFun(peek: PeekEmit): FunSpec =
     when (peek) {

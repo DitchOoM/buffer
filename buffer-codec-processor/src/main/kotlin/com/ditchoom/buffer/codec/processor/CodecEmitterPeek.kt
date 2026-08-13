@@ -85,9 +85,12 @@ internal fun peekBudgetFor(typeName: TypeName): Int? =
  * emit is a type name — a `FrameDetector` companion, a `VariableLengthCodec`
  * object, a nested codec object — and every other operand is a local over
  * `stream`), so it can sit on a companion where consumers reach it without
- * an instance. An [Unframed] peek stays a member only: hoisting a constant
- * `NoFraming` onto the companion would advertise a framing entry point that
- * can never frame, turning a compile error into a runtime one.
+ * an instance. That construction is load-bearing and not expressed in any
+ * type, so `addCodecCompanion` re-checks it against the enclosing class's
+ * own property names before hoisting a body. An [Unframed] peek stays a
+ * member only: hoisting a constant `NoFraming` onto the companion would
+ * advertise a framing entry point that can never frame, turning a compile
+ * error into a runtime one.
  *
  * The `FunSpec` is identical in both placements — same `OVERRIDE` modifier,
  * same signature — because every peek the processor emits overrides
