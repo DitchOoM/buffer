@@ -122,6 +122,11 @@ internal fun analyze(symbol: KSClassDeclaration): AnalysisResult {
 
     val ownerSimpleName = symbol.simpleName.asString()
     val messageWireOrder = readMessageWireOrder(symbol)
+    val messageTextPolicy =
+        when (val parse = parseUseTextPolicy(symbol.annotations, symbol)) {
+            is TextPolicyParse.Resolved -> parse.ref
+            is TextPolicyParse.Invalid -> return AnalysisResult.Rejected(listOf(parse.diagnostic))
+        }
     val payloadTypeParameter = detectPayloadTypeParameter(symbol)
 
     val fields = mutableListOf<FieldSpec>()
@@ -138,6 +143,7 @@ internal fun analyze(symbol: KSClassDeclaration): AnalysisResult {
                     params = params,
                     index = index,
                     payloadTypeParameter = payloadTypeParameter,
+                    messageTextPolicy = messageTextPolicy,
                 )
         ) {
             is FieldAnalysis.Ok -> fields += fa.field
@@ -499,6 +505,7 @@ internal fun analyzeField(
     params: List<KSValueParameter>,
     index: Int,
     payloadTypeParameter: PayloadTypeParameter? = null,
+    messageTextPolicy: TextPolicyRef? = null,
 ): FieldAnalysis {
     // `@When` opens a separate analysis path: nullability is
     // required, the inner shape is built from the non-null type, and the
@@ -514,6 +521,7 @@ internal fun analyzeField(
             ownerSimpleName = ownerSimpleName,
             params = params,
             index = index,
+            messageTextPolicy = messageTextPolicy,
         )
     }
     var lengthPrefixed: KSAnnotation? = null
@@ -522,9 +530,11 @@ internal fun analyzeField(
     var wireBytesAnn: KSAnnotation? = null
     var useCodecAnn: KSAnnotation? = null
     var countAnn: KSAnnotation? = null
+    var useTextPolicyAnn: KSAnnotation? = null
     for (ann in param.annotations) {
         when (ann.shortName.asString()) {
             "WireOrder" -> { /* allowed on scalars */ }
+            "UseTextPolicy" -> useTextPolicyAnn = ann
             "LengthPrefixed" -> lengthPrefixed = ann
             "LengthFrom" -> lengthFromAnn = ann
             "RemainingBytes" -> remainingBytesAnn = ann
@@ -552,6 +562,29 @@ internal fun analyzeField(
             Diagnostic("nullable field type requires @When (T? without @When is unsupported)", param),
         )
     }
+
+    // `@UseTextPolicy` — parse, validate, and resolve precedence (field > message > context).
+    // Only String-shaped fields carry a text policy; anywhere else it is a mistake worth a
+    // compile error rather than a silent no-op.
+    val fieldTextPolicy =
+        when (val parse = parseUseTextPolicy(param.annotations, param)) {
+            is TextPolicyParse.Resolved -> parse.ref
+            is TextPolicyParse.Invalid -> return FieldAnalysis.Err(parse.diagnostic)
+        }
+    if (useTextPolicyAnn != null) {
+        val isStringShaped =
+            type.declaration.qualifiedName?.asString() == "kotlin.String" ||
+                valueClassOverStringWrapperOrNull(type) != null
+        if (!isStringShaped) {
+            return FieldAnalysis.Err(
+                Diagnostic(
+                    "@UseTextPolicy is only valid on String fields (or value classes over String)",
+                    param,
+                ),
+            )
+        }
+    }
+    val effectiveTextPolicy = fieldTextPolicy ?: messageTextPolicy ?: TextPolicyRef.FromContext
 
     // `@Count val: List<@ProtocolMessage T>` — an element-count-prefixed
     // list (varint(N) + N self-delimiting elements). Mutually exclusive with
@@ -633,7 +666,11 @@ internal fun analyzeField(
         // `@RemainingBytes` was introduced; the emitter branch landed here.
         if (typeQname == "kotlin.String") {
             return FieldAnalysis.Ok(
-                FieldSpec.RemainingBytesString(name = name, ownerSimpleName = ownerSimpleName),
+                FieldSpec.RemainingBytesString(
+                    name = name,
+                    ownerSimpleName = ownerSimpleName,
+                    textPolicy = effectiveTextPolicy,
+                ),
             )
         }
         // `@RemainingBytes val: <value class over String>` — wire-identical
@@ -645,6 +682,7 @@ internal fun analyzeField(
                     name = name,
                     ownerSimpleName = ownerSimpleName,
                     valueClass = wrapper,
+                    textPolicy = effectiveTextPolicy,
                 ),
             )
         }
@@ -710,6 +748,7 @@ internal fun analyzeField(
                     ownerSimpleName = ownerSimpleName,
                     params = params,
                     index = index,
+                    textPolicy = effectiveTextPolicy,
                 )
             "kotlin.collections.List" ->
                 analyzeLengthFromListField(
@@ -734,6 +773,7 @@ internal fun analyzeField(
                         params = params,
                         index = index,
                         valueClass = stringWrapper,
+                        textPolicy = effectiveTextPolicy,
                     )
                 } else {
                     analyzeLengthFromMessageField(
@@ -801,6 +841,7 @@ internal fun analyzeField(
                     ownerSimpleName = ownerSimpleName,
                     prefixWidth = prefixWidth,
                     prefixWireOrder = messageWireOrder,
+                    textPolicy = effectiveTextPolicy,
                 ),
             )
         }
@@ -818,6 +859,7 @@ internal fun analyzeField(
                     prefixWidth = prefixWidth,
                     prefixWireOrder = messageWireOrder,
                     valueClass = wrapper,
+                    textPolicy = effectiveTextPolicy,
                 ),
             )
         }
@@ -1172,6 +1214,7 @@ internal fun analyzeLengthFromStringField(
     params: List<KSValueParameter>,
     index: Int,
     valueClass: ValueClassStringWrapper? = null,
+    textPolicy: TextPolicyRef = TextPolicyRef.FromContext,
 ): FieldAnalysis {
     val name =
         param.name?.asString() ?: return FieldAnalysis.Err(Diagnostic("field has no name", param))
@@ -1203,6 +1246,7 @@ internal fun analyzeLengthFromStringField(
             ownerSimpleName = ownerSimpleName,
             source = source,
             valueClass = valueClass,
+            textPolicy = textPolicy,
         ),
     )
 }
@@ -2273,6 +2317,7 @@ internal fun analyzeConditionalField(
     ownerSimpleName: String,
     params: List<KSValueParameter>,
     index: Int,
+    messageTextPolicy: TextPolicyRef? = null,
 ): FieldAnalysis {
     if (!boundParameterIsConditionalShape(param)) {
         return FieldAnalysis.Err(
@@ -2291,7 +2336,7 @@ internal fun analyzeConditionalField(
                 Diagnostic("@When predicate does not resolve to a supported condition source", param),
             )
     val inner =
-        analyzeConditionalInner(param, messageWireOrder)
+        analyzeConditionalInner(param, messageWireOrder, messageTextPolicy ?: TextPolicyRef.FromContext)
             ?: return FieldAnalysis.Err(
                 Diagnostic("@When field's inner shape is not supported", param),
             )
@@ -2468,6 +2513,7 @@ internal fun resolveDottedCondition(
 internal fun analyzeConditionalInner(
     param: KSValueParameter,
     messageWireOrder: Endianness,
+    textPolicy: TextPolicyRef = TextPolicyRef.FromContext,
 ): ConditionalInner? {
     val lengthPrefixedAnn =
         param.annotations.firstOrNull { it.shortName.asString() == "LengthPrefixed" }
@@ -2512,6 +2558,7 @@ internal fun analyzeConditionalInner(
             return ConditionalInner.LengthPrefixedString(
                 prefixWidth = readLengthPrefix(lengthPrefixedAnn),
                 prefixWireOrder = messageWireOrder,
+                textPolicy = textPolicy,
             )
         }
         val stringWrapper = valueClassOverStringWrapperOrNull(innerType) ?: return null
@@ -2519,6 +2566,7 @@ internal fun analyzeConditionalInner(
             prefixWidth = readLengthPrefix(lengthPrefixedAnn),
             prefixWireOrder = messageWireOrder,
             valueClass = stringWrapper,
+            textPolicy = textPolicy,
         )
     }
     // Bare `@When val: T?` where T is a
@@ -3497,4 +3545,80 @@ internal sealed interface WhenExpression {
         val op: RemainingComparisonOp,
         val threshold: Int,
     ) : WhenExpression
+}
+
+private const val UTF8_LENIENT_QNAME = "com.ditchoom.buffer.Utf8.Lenient"
+private const val UTF8_STRICT_QNAME = "com.ditchoom.buffer.Utf8.Strict"
+private const val UTF8_CHECKED_QNAME = "com.ditchoom.buffer.Utf8.Checked"
+private const val TEXT_POLICY_PROVIDER_QNAME = "com.ditchoom.buffer.codec.TextPolicyProvider"
+
+/** Result of parsing a `@UseTextPolicy` annotation (field- or message-level). */
+internal sealed interface TextPolicyParse {
+    /** [ref] is null when the annotation is absent. */
+    data class Resolved(
+        val ref: TextPolicyRef?,
+    ) : TextPolicyParse
+
+    data class Invalid(
+        val diagnostic: Diagnostic,
+    ) : TextPolicyParse
+}
+
+/**
+ * Parses and validates `@UseTextPolicy` from [annotations]. Accepted policies: the built-in
+ * fluent singletons (`Utf8.Lenient`, `Utf8.Strict`) and Kotlin `object`s implementing
+ * `TextPolicyProvider`. `Utf8.Checked` is rejected with an explanation — generated linear
+ * codec bodies have no channel for a checked result (the same rule `TextPolicyKey`'s
+ * `FluentTextPolicy` bound enforces at runtime).
+ */
+@Suppress("ReturnCount") // one early return per rejected shape is the readable form for a validator
+internal fun parseUseTextPolicy(
+    annotations: Sequence<KSAnnotation>,
+    node: com.google.devtools.ksp.symbol.KSNode,
+): TextPolicyParse {
+    val ann =
+        annotations.firstOrNull { it.shortName.asString() == "UseTextPolicy" }
+            ?: return TextPolicyParse.Resolved(null)
+    val ksType =
+        ann.arguments.firstOrNull { it.name?.asString() == "policy" }?.value as? KSType
+            ?: return TextPolicyParse.Invalid(
+                Diagnostic("@UseTextPolicy requires a policy class reference", node),
+            )
+    val decl =
+        ksType.declaration as? KSClassDeclaration
+            ?: return TextPolicyParse.Invalid(
+                Diagnostic("@UseTextPolicy policy must reference a class", node),
+            )
+    val qualified = decl.qualifiedName?.asString()
+    return when {
+        qualified == UTF8_LENIENT_QNAME || qualified == UTF8_STRICT_QNAME ->
+            TextPolicyParse.Resolved(TextPolicyRef.Pinned(classNameOf(decl), isProvider = false))
+        qualified == UTF8_CHECKED_QNAME ->
+            TextPolicyParse.Invalid(
+                Diagnostic(
+                    "@UseTextPolicy(Utf8.Checked) is not allowed: generated codec bodies have no " +
+                        "channel for a checked result — use Utf8.Strict (throws, atomic) or " +
+                        "Utf8.Lenient (substitutes U+FFFD)",
+                    node,
+                ),
+            )
+        decl.classKind != ClassKind.OBJECT ->
+            TextPolicyParse.Invalid(
+                Diagnostic(
+                    "@UseTextPolicy policy must be a Kotlin object: a built-in policy " +
+                        "(Utf8.Lenient / Utf8.Strict) or an object implementing TextPolicyProvider",
+                    node,
+                ),
+            )
+        decl.getAllSuperTypes().any { it.declaration.qualifiedName?.asString() == TEXT_POLICY_PROVIDER_QNAME } ->
+            TextPolicyParse.Resolved(TextPolicyRef.Pinned(classNameOf(decl), isProvider = true))
+        else ->
+            TextPolicyParse.Invalid(
+                Diagnostic(
+                    "@UseTextPolicy policy must be Utf8.Lenient, Utf8.Strict, or an object " +
+                        "implementing TextPolicyProvider",
+                    node,
+                ),
+            )
+    }
 }

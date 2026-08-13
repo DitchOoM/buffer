@@ -2,9 +2,9 @@ package com.ditchoom.buffer.codec.test.protocols.mqtt
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
@@ -12,6 +12,7 @@ import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -43,7 +44,7 @@ public object MqttPacketConnectCodec : FrameDetector {
         throw DecodeException(fieldPath = "Connect.protocolName", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = protocolNamePrefix.toString())
       }
       val protocolNameLength = protocolNamePrefix.toInt()
-      val protocolName = buffer.readString(protocolNameLength, Charset.UTF8)
+      val protocolName = buffer.readText(protocolNameLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
       val __batch1 = buffer.readInt()
       val protocolLevel: kotlin.UByte
       val connectFlags: com.ditchoom.buffer.codec.test.protocols.mqtt.MqttConnectFlags
@@ -64,7 +65,7 @@ public object MqttPacketConnectCodec : FrameDetector {
         throw DecodeException(fieldPath = "Connect.clientId", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = clientIdPrefix.toString())
       }
       val clientIdLength = clientIdPrefix.toInt()
-      val clientId = buffer.readString(clientIdLength, Charset.UTF8)
+      val clientId = buffer.readText(clientIdLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
       val willTopic: String? = if (connectFlags.willPresent) {
         val willTopicPrefixB0 = buffer.readUByte().toUInt()
         val willTopicPrefixB1 = buffer.readUByte().toUInt()
@@ -73,7 +74,7 @@ public object MqttPacketConnectCodec : FrameDetector {
           throw DecodeException(fieldPath = "Connect.willTopic", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = willTopicPrefix.toString())
         }
         val willTopicLength = willTopicPrefix.toInt()
-        buffer.readString(willTopicLength, Charset.UTF8)
+        buffer.readText(willTopicLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
       } else {
         null
       }
@@ -111,7 +112,7 @@ public object MqttPacketConnectCodec : FrameDetector {
           throw DecodeException(fieldPath = "Connect.username", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = usernamePrefix.toString())
         }
         val usernameLength = usernamePrefix.toInt()
-        buffer.readString(usernameLength, Charset.UTF8)
+        buffer.readText(usernameLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
       } else {
         null
       }
@@ -171,7 +172,7 @@ public object MqttPacketConnectCodec : FrameDetector {
     val protocolNameSizePosition = buffer.position()
     repeat(2) { buffer.writeUByte(0u) }
     val protocolNameBodyStart = buffer.position()
-    buffer.writeString(value.protocolName, Charset.UTF8)
+    buffer.writeText(value.protocolName, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val protocolNameEndPosition = buffer.position()
     val protocolNameByteCount = protocolNameEndPosition - protocolNameBodyStart
     if (protocolNameByteCount > 65_535) {
@@ -190,7 +191,7 @@ public object MqttPacketConnectCodec : FrameDetector {
     val clientIdSizePosition = buffer.position()
     repeat(2) { buffer.writeUByte(0u) }
     val clientIdBodyStart = buffer.position()
-    buffer.writeString(value.clientId, Charset.UTF8)
+    buffer.writeText(value.clientId, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val clientIdEndPosition = buffer.position()
     val clientIdByteCount = clientIdEndPosition - clientIdBodyStart
     if (clientIdByteCount > 65_535) {
@@ -206,7 +207,7 @@ public object MqttPacketConnectCodec : FrameDetector {
       val willTopicSizePosition = buffer.position()
       repeat(2) { buffer.writeUByte(0u) }
       val willTopicBodyStart = buffer.position()
-      buffer.writeString(willTopicValue, Charset.UTF8)
+      buffer.writeText(willTopicValue, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
       val willTopicEndPosition = buffer.position()
       val willTopicByteCount = willTopicEndPosition - willTopicBodyStart
       if (willTopicByteCount > 65_535) {
@@ -240,7 +241,7 @@ public object MqttPacketConnectCodec : FrameDetector {
       val usernameSizePosition = buffer.position()
       repeat(2) { buffer.writeUByte(0u) }
       val usernameBodyStart = buffer.position()
-      buffer.writeString(usernameValue, Charset.UTF8)
+      buffer.writeText(usernameValue, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
       val usernameEndPosition = buffer.position()
       val usernameByteCount = usernameEndPosition - usernameBodyStart
       if (usernameByteCount > 65_535) {

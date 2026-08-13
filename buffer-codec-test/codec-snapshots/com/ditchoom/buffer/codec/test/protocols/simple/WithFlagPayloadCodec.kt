@@ -1,14 +1,15 @@
 package com.ditchoom.buffer.codec.test.protocols.simple
 
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
@@ -25,7 +26,7 @@ public object WithFlagPayloadCodec : Codec<WithFlagPayload> {
         throw DecodeException(fieldPath = "WithFlagPayload.payload", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = payloadPrefix.toString())
       }
       val payloadLength = payloadPrefix.toInt()
-      buffer.readString(payloadLength, Charset.UTF8)
+      buffer.readText(payloadLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     } else {
       null
     }
@@ -43,7 +44,7 @@ public object WithFlagPayloadCodec : Codec<WithFlagPayload> {
       val payloadSizePosition = buffer.position()
       repeat(2) { buffer.writeUByte(0u) }
       val payloadBodyStart = buffer.position()
-      buffer.writeString(payloadValue, Charset.UTF8)
+      buffer.writeText(payloadValue, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
       val payloadEndPosition = buffer.position()
       val payloadByteCount = payloadEndPosition - payloadBodyStart
       if (payloadByteCount > 65_535) {

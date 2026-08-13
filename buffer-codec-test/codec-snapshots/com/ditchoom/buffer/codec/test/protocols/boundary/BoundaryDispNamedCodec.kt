@@ -1,14 +1,15 @@
 package com.ditchoom.buffer.codec.test.protocols.boundary
 
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
@@ -22,7 +23,7 @@ public object BoundaryDispNamedCodec : Codec<BoundaryDisp.Named> {
       throw DecodeException(fieldPath = "Named.name", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = namePrefix.toString())
     }
     val nameLength = namePrefix.toInt()
-    val name = buffer.readString(nameLength, Charset.UTF8)
+    val name = buffer.readText(nameLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     return BoundaryDisp.Named(name = name)
   }
 
@@ -34,7 +35,7 @@ public object BoundaryDispNamedCodec : Codec<BoundaryDisp.Named> {
     val nameSizePosition = buffer.position()
     repeat(2) { buffer.writeUByte(0u) }
     val nameBodyStart = buffer.position()
-    buffer.writeString(value.name, Charset.UTF8)
+    buffer.writeText(value.name, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val nameEndPosition = buffer.position()
     val nameByteCount = nameEndPosition - nameBodyStart
     if (nameByteCount > 65_535) {

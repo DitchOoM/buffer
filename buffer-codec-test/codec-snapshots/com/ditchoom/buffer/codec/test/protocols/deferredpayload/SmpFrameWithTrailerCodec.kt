@@ -1,14 +1,15 @@
 package com.ditchoom.buffer.codec.test.protocols.deferredpayload
 
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.test.protocols.payload.TextPayloadCodec
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -52,7 +53,7 @@ public object SmpFrameWithTrailerCodec : Codec<SmpFrameWithTrailer> {
       throw DecodeException(fieldPath = "SmpFrameWithTrailer.note", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = notePrefix.toString())
     }
     val noteLength = notePrefix.toInt()
-    val note = buffer.readString(noteLength, Charset.UTF8)
+    val note = buffer.readText(noteLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     return SmpFrameWithTrailer(payloadLength = payloadLength, payload = payload, checksum = checksum, note = note)
   }
 
@@ -67,7 +68,7 @@ public object SmpFrameWithTrailerCodec : Codec<SmpFrameWithTrailer> {
     val noteSizePosition = buffer.position()
     repeat(2) { buffer.writeUByte(0u) }
     val noteBodyStart = buffer.position()
-    buffer.writeString(value.note, Charset.UTF8)
+    buffer.writeText(value.note, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val noteEndPosition = buffer.position()
     val noteByteCount = noteEndPosition - noteBodyStart
     if (noteByteCount > 65_535) {
@@ -131,7 +132,7 @@ public object SmpFrameWithTrailerCodec : Codec<SmpFrameWithTrailer> {
       throw DecodeException(fieldPath = "SmpFrameWithTrailer.note", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = notePrefix.toString())
     }
     val noteLength = notePrefix.toInt()
-    val note = buffer.readString(noteLength, Charset.UTF8)
+    val note = buffer.readText(noteLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     return Partial(payloadLength = payloadLength, checksum = checksum, note = note, payloadStart = __payloadStart, payloadEnd = __payloadEnd, buffer = buffer, context = context)
   }
 

@@ -1,13 +1,14 @@
 package com.ditchoom.buffer.codec.test.protocols.valueclassstring
 
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
@@ -23,7 +24,7 @@ public object LpIntValueClassIdCodec : Codec<LpIntValueClassId> {
       throw DecodeException(fieldPath = "LpIntValueClassId.id", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = idPrefix.toString())
     }
     val idLength = idPrefix.toInt()
-    val id = TraceId(buffer.readString(idLength, Charset.UTF8))
+    val id = TraceId(buffer.readText(idLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY)))
     return LpIntValueClassId(id = id)
   }
 
@@ -35,7 +36,7 @@ public object LpIntValueClassIdCodec : Codec<LpIntValueClassId> {
     val idSizePosition = buffer.position()
     repeat(4) { buffer.writeUByte(0u) }
     val idBodyStart = buffer.position()
-    buffer.writeString(value.id.hex, Charset.UTF8)
+    buffer.writeText(value.id.hex, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val idEndPosition = buffer.position()
     val idByteCount = idEndPosition - idBodyStart
     buffer.position(idSizePosition)

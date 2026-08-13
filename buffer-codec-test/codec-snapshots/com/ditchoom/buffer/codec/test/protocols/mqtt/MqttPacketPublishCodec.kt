@@ -1,10 +1,10 @@
 package com.ditchoom.buffer.codec.test.protocols.mqtt
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.Decoder
@@ -14,6 +14,7 @@ import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
@@ -46,7 +47,7 @@ public class MqttPacketPublishCodec<P : Payload>(
         throw DecodeException(fieldPath = "Publish.topic", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = topicPrefix.toString())
       }
       val topicLength = topicPrefix.toInt()
-      val topic = buffer.readString(topicLength, Charset.UTF8)
+      val topic = buffer.readText(topicLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
       val packetId: PacketId? = if (header.qosGreaterThanZero) PacketId(buffer.readUShort()) else null
       val payload = payloadCodec.decode(buffer, context)
       if (buffer.position() != __framingBound) {
@@ -79,7 +80,7 @@ public class MqttPacketPublishCodec<P : Payload>(
     val topicSizePosition = buffer.position()
     repeat(2) { buffer.writeUByte(0u) }
     val topicBodyStart = buffer.position()
-    buffer.writeString(value.topic, Charset.UTF8)
+    buffer.writeText(value.topic, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val topicEndPosition = buffer.position()
     val topicByteCount = topicEndPosition - topicBodyStart
     if (topicByteCount > 65_535) {
@@ -157,7 +158,7 @@ public class MqttPacketPublishCodec<P : Payload>(
         throw DecodeException(fieldPath = "Publish.topic", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = topicPrefix.toString())
       }
       val topicLength = topicPrefix.toInt()
-      val topic = buffer.readString(topicLength, Charset.UTF8)
+      val topic = buffer.readText(topicLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
       val packetId: PacketId? = if (header.qosGreaterThanZero) PacketId(buffer.readUShort()) else null
       return Partial<P>(header = header, topic = topic, packetId = packetId, outerLimit = __framingOuterLimit, buffer = buffer, context = context)
     }

@@ -21,6 +21,19 @@ import com.squareup.kotlinpoet.TypeName
  * verified by the snapshot suite.
  */
 
+/**
+ * The policy expression a String field's read/write uses. Pinned singletons and providers are
+ * static references (no runtime lookup); unpinned fields resolve `context[TextPolicyKey]` with
+ * the strict default.
+ */
+internal fun textPolicyExpr(ref: TextPolicyRef): CodeBlock =
+    when (ref) {
+        is TextPolicyRef.Pinned ->
+            if (ref.isProvider) CodeBlock.of("%T.policy", ref.className) else CodeBlock.of("%T", ref.className)
+        TextPolicyRef.FromContext ->
+            CodeBlock.of("(context[%T] ?: %M)", TEXT_POLICY_KEY_CN, DEFAULT_TEXT_POLICY_MN)
+    }
+
 internal fun CodecShape.scalarHeaderBytes(): Int = fields.sumOfFixedWireBytes().requireFixed("scalarHeaderBytes")
 
 internal fun appendDecodeScalar(
@@ -510,13 +523,13 @@ internal fun appendDecodeConditional(
                 )
             if (inner.valueClass != null) {
                 body.addStatement(
-                    "%T(buffer.readString(%L, %T.UTF8))",
+                    "%T(buffer.readText(%L, %L))",
                     inner.valueClass.valueClassType,
                     lengthVar,
-                    CHARSET_CN,
+                    textPolicyExpr(inner.textPolicy),
                 )
             } else {
-                body.addStatement("buffer.readString(%L, %T.UTF8)", lengthVar, CHARSET_CN)
+                body.addStatement("buffer.readText(%L, %L)", lengthVar, textPolicyExpr(inner.textPolicy))
             }
             body.nextControlFlow("else")
             body.addStatement("null")
@@ -697,6 +710,7 @@ internal fun appendEncodeConditional(
                     } else {
                         localName
                     },
+                textPolicy = inner.textPolicy,
             )
         is ConditionalInner.ValueClassScalar ->
             // Unwrap the value class via the
@@ -1215,7 +1229,7 @@ internal fun appendDecodeLengthPrefixedString(
             prefixWidth = field.prefixWidth,
             prefixWireOrder = field.prefixWireOrder,
         )
-    val read = CodeBlock.of("buffer.readString(%L, %T.UTF8)", lengthVar, CHARSET_CN)
+    val read = CodeBlock.of("buffer.readText(%L, %L)", lengthVar, textPolicyExpr(field.textPolicy))
     // Wrap the decoded String in the value class's primary constructor when
     // the field is a value class over String (wire-identical to bare String).
     if (field.valueClass != null) {
@@ -1273,6 +1287,7 @@ internal fun appendEncodeLengthPrefixedString(
             } else {
                 "value.${field.name}"
             },
+        textPolicy = field.textPolicy,
     )
 }
 
@@ -1295,6 +1310,7 @@ internal fun appendLengthPrefixedStringEncode(
     prefixWidth: Int,
     prefixWireOrder: Endianness,
     accessor: String,
+    textPolicy: TextPolicyRef,
 ) {
     // BackPatch pattern: reserve prefix slot, write
     // the body via the runtime's UTF-8 path, measure byte count from the
@@ -1311,9 +1327,9 @@ internal fun appendLengthPrefixedStringEncode(
     appendPrefixSlotReservation(body, prefixWidth)
     body.addStatement("val %L = buffer.position()", bodyStartVar)
     body.addStatement(
-        "buffer.writeString(%L, %T.UTF8)",
+        "buffer.writeText(%L, %L)",
         accessor,
-        CHARSET_CN,
+        textPolicyExpr(textPolicy),
     )
     body.addStatement("val %L = buffer.position()", endPosVar)
     body.addStatement("val %L = %L - %L", byteCountVar, endPosVar, bodyStartVar)
@@ -1384,7 +1400,7 @@ internal fun appendDecodeLengthFromString(
     // `<bound>Length` — a natural Kotlin convention that the
     // generated code must not break.
     val read =
-        CodeBlock.of("buffer.readString(%L, %T.UTF8)", field.source.decodeAccessor(), CHARSET_CN)
+        CodeBlock.of("buffer.readText(%L, %L)", field.source.decodeAccessor(), textPolicyExpr(field.textPolicy))
     if (field.valueClass != null) {
         body.addStatement("val %L = %T(%L)", field.name, field.valueClass.valueClassType, read)
     } else {
@@ -1412,9 +1428,9 @@ internal fun appendEncodeLengthFromString(
             "value.${field.name}"
         }
     body.addStatement(
-        "buffer.writeString(%L, %T.UTF8)",
+        "buffer.writeText(%L, %L)",
         accessor,
-        CHARSET_CN,
+        textPolicyExpr(field.textPolicy),
     )
 }
 
@@ -1736,14 +1752,14 @@ internal fun appendDecodeRemainingBytesString(
 ) {
     val read =
         if (field.reservedTrailingBytes == 0) {
-            CodeBlock.of("buffer.readString(buffer.remaining(), %T.UTF8)", CHARSET_CN)
+            CodeBlock.of("buffer.readText(buffer.remaining(), %L)", textPolicyExpr(field.textPolicy))
         } else {
             // Read the body byte count minus the reserved trailing
             // FixedSize bytes; the trailing field emits run normally after.
             CodeBlock.of(
-                "buffer.readString(buffer.remaining() - %L, %T.UTF8)",
+                "buffer.readText(buffer.remaining() - %L, %L)",
                 field.reservedTrailingBytes,
-                CHARSET_CN,
+                textPolicyExpr(field.textPolicy),
             )
         }
     if (field.valueClass != null) {
@@ -1771,9 +1787,9 @@ internal fun appendEncodeRemainingBytesString(
             "value.${field.name}"
         }
     body.addStatement(
-        "buffer.writeString(%L, %T.UTF8)",
+        "buffer.writeText(%L, %L)",
         accessor,
-        CHARSET_CN,
+        textPolicyExpr(field.textPolicy),
     )
 }
 

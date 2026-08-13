@@ -1,14 +1,15 @@
 package com.ditchoom.buffer.codec.test.protocols.lengthprefixedusecodec
 
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
@@ -22,7 +23,7 @@ public object StringTaggedPropertyCodec : Codec<StringTaggedProperty> {
       throw DecodeException(fieldPath = "StringTaggedProperty.tag", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = tagPrefix.toString())
     }
     val tagLength = tagPrefix.toInt()
-    val tag = buffer.readString(tagLength, Charset.UTF8)
+    val tag = buffer.readText(tagLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val value = buffer.readUByte()
     return StringTaggedProperty(tag = tag, value = value)
   }
@@ -35,7 +36,7 @@ public object StringTaggedPropertyCodec : Codec<StringTaggedProperty> {
     val tagSizePosition = buffer.position()
     repeat(2) { buffer.writeUByte(0u) }
     val tagBodyStart = buffer.position()
-    buffer.writeString(value.tag, Charset.UTF8)
+    buffer.writeText(value.tag, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val tagEndPosition = buffer.position()
     val tagByteCount = tagEndPosition - tagBodyStart
     if (tagByteCount > 65_535) {

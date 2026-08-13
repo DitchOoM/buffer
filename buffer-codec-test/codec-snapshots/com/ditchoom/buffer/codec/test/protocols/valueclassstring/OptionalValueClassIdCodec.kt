@@ -1,14 +1,15 @@
 package com.ditchoom.buffer.codec.test.protocols.valueclassstring
 
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
@@ -24,7 +25,7 @@ public object OptionalValueClassIdCodec : Codec<OptionalValueClassId> {
         throw DecodeException(fieldPath = "OptionalValueClassId.id", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = idPrefix.toString())
       }
       val idLength = idPrefix.toInt()
-      UserId(buffer.readString(idLength, Charset.UTF8))
+      UserId(buffer.readText(idLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY)))
     } else {
       null
     }
@@ -42,7 +43,7 @@ public object OptionalValueClassIdCodec : Codec<OptionalValueClassId> {
       val idSizePosition = buffer.position()
       repeat(2) { buffer.writeUByte(0u) }
       val idBodyStart = buffer.position()
-      buffer.writeString(idValue.value, Charset.UTF8)
+      buffer.writeText(idValue.value, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
       val idEndPosition = buffer.position()
       val idByteCount = idEndPosition - idBodyStart
       if (idByteCount > 65_535) {

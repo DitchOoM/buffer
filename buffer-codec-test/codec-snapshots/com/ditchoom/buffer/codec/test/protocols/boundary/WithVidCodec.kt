@@ -1,14 +1,15 @@
 package com.ditchoom.buffer.codec.test.protocols.boundary
 
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
@@ -22,7 +23,7 @@ public object WithVidCodec : Codec<WithVid> {
       throw DecodeException(fieldPath = "WithVid.pad", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = padPrefix.toString())
     }
     val padLength = padPrefix.toInt()
-    val pad = buffer.readString(padLength, Charset.UTF8)
+    val pad = buffer.readText(padLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val idPrefixB0 = buffer.readUByte().toUInt()
     val idPrefixB1 = buffer.readUByte().toUInt()
     val idPrefix = ((idPrefixB0 shl 8) or idPrefixB1)
@@ -30,7 +31,7 @@ public object WithVidCodec : Codec<WithVid> {
       throw DecodeException(fieldPath = "WithVid.id", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = idPrefix.toString())
     }
     val idLength = idPrefix.toInt()
-    val id = BoundaryVid(buffer.readString(idLength, Charset.UTF8))
+    val id = BoundaryVid(buffer.readText(idLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY)))
     return WithVid(pad = pad, id = id)
   }
 
@@ -42,7 +43,7 @@ public object WithVidCodec : Codec<WithVid> {
     val padSizePosition = buffer.position()
     repeat(2) { buffer.writeUByte(0u) }
     val padBodyStart = buffer.position()
-    buffer.writeString(value.pad, Charset.UTF8)
+    buffer.writeText(value.pad, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val padEndPosition = buffer.position()
     val padByteCount = padEndPosition - padBodyStart
     if (padByteCount > 65_535) {
@@ -56,7 +57,7 @@ public object WithVidCodec : Codec<WithVid> {
     val idSizePosition = buffer.position()
     repeat(2) { buffer.writeUByte(0u) }
     val idBodyStart = buffer.position()
-    buffer.writeString(value.id.value, Charset.UTF8)
+    buffer.writeText(value.id.value, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     val idEndPosition = buffer.position()
     val idByteCount = idEndPosition - idBodyStart
     if (idByteCount > 65_535) {

@@ -14,14 +14,14 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
- * Pins the [TextEncoding] contract on every platform:
+ * Pins the [TextPolicy] contract on every platform:
  *
  * 1. `size(text)` == bytes written by `writeText(text, policy)` — exactly, for any input;
  * 2. identical bytes for identical `(text, encoding)` on every platform (explicit vectors);
  * 3. strict rejection is atomic — position unchanged;
  * 4. wrappers stay transparent and fluent results identify the wrapper, not the inner buffer.
  */
-class TextEncodingTests {
+class TextPolicyTests {
     // Unpaired-surrogate STRINGS must be constructed at runtime: the Kotlin/JS compiler's
 // clean-build codegen lossily rewrites unpaired surrogates in string LITERALS to '?'
 // (incremental builds emit them faithfully — the divergence was caught when a clean
@@ -55,7 +55,12 @@ class TextEncodingTests {
             ("😀" + loneHigh) to 2,
         )
 
-    private val factories = listOf("default" to BufferFactory.Default, "managed" to BufferFactory.managed())
+    private val factories =
+        listOf(
+            "default" to BufferFactory.Default,
+            "managed" to BufferFactory.managed(),
+            "deterministic" to BufferFactory.deterministic(),
+        )
 
     // U+FFFD as UTF-8
     private val fffd = listOf(0xEF.toByte(), 0xBF.toByte(), 0xBD.toByte())
@@ -107,11 +112,11 @@ class TextEncodingTests {
     }
 
     @Test
-    fun strictAcceptsWellFormedWithSameBytesAsLenient() {
+    fun checkedAcceptsWellFormedWithSameBytesAsLenient() {
         for ((name, factory) in factories) {
             for (text in wellFormed) {
                 val buffer = factory.allocate(text.length * 3 + 8)
-                val outcome = buffer.writeText(text, Utf8.Strict)
+                val outcome = buffer.writeText(text, Utf8.Checked)
                 assertIs<TextOutcome.Bytes>(outcome, "well-formed must be accepted [$name]")
                 assertEquals(outcome.count, buffer.position(), "reported count must equal bytes written [$name]")
                 assertEquals(Utf8.Lenient.size(text), outcome.count, "strict and lenient agree on well-formed [$name]")
@@ -120,13 +125,13 @@ class TextEncodingTests {
     }
 
     @Test
-    fun strictRejectsIllFormedAtomically() {
+    fun checkedRejectsIllFormedAtomically() {
         for ((name, factory) in factories) {
             for ((text, expectedIndex) in illFormed) {
                 val buffer = factory.allocate(64)
                 buffer.writeInt(42) // non-zero starting position
                 val before = buffer.position()
-                val outcome = buffer.writeText(text, Utf8.Strict)
+                val outcome = buffer.writeText(text, Utf8.Checked)
                 assertIs<TextOutcome.Malformed>(outcome, "ill-formed must be rejected [$name]")
                 assertEquals(expectedIndex, outcome.index, "index of first unpaired surrogate [$name]")
                 assertEquals(before, buffer.position(), "rejection must not move position [$name]")
@@ -135,14 +140,14 @@ class TextEncodingTests {
     }
 
     @Test
-    fun strictSizeAgreesWithStrictWrite() {
+    fun checkedSizeAgreesWithCheckedWrite() {
         for (text in wellFormed) {
-            val sized = Utf8.Strict.size(text)
+            val sized = Utf8.Checked.size(text)
             assertIs<TextOutcome.Bytes>(sized)
             assertEquals(Utf8.Lenient.size(text), sized.count)
         }
         for ((text, expectedIndex) in illFormed) {
-            val sized = Utf8.Strict.size(text)
+            val sized = Utf8.Checked.size(text)
             assertIs<TextOutcome.Malformed>(sized)
             assertEquals(expectedIndex, sized.index)
         }
@@ -175,8 +180,8 @@ class TextEncodingTests {
                 val sliceReturned = slice.writeText("😀", Utf8.Lenient)
                 assertSame(slice, sliceReturned, "slice fluent result must be the tracked slice")
 
-                val strict = pooled.writeText(loneLow, Utf8.Strict)
-                assertIs<TextOutcome.Malformed>(strict)
+                val checked = pooled.writeText(loneLow, Utf8.Checked)
+                assertIs<TextOutcome.Malformed>(checked)
                 assertEquals(7, pooled.position(), "strict rejection through wrapper must not move position")
             }
         }
@@ -219,6 +224,34 @@ class TextEncodingTests {
         assertFailsWith<BufferOverflowException> {
             "€€€€€€€€".toReadBuffer(Utf8.Lenient, SizeHint.BytesPerChar(1f))
         }
+    }
+
+    /**
+     * Both ways `toReadBuffer` can fail *after* allocating, run against a native factory on
+     * every platform. The allocation is released before the exception propagates, so the
+     * release path itself is exercised here — on WASM the buffer's linear memory would
+     * otherwise be lost from a capped pool for the life of the module, and a wrong release
+     * (double-free, or freeing the returned slice's storage) surfaces on the native targets.
+     */
+    @Test
+    fun toReadBufferReleasesItsAllocationWhenTheWriteFails() {
+        assertFailsWith<MalformedTextException.UnpairedSurrogate> {
+            // UpperBound is the default: it allocates first, then the strict write rejects.
+            (loneHigh + "tail").toReadBuffer(Utf8.Strict, SizeHint.UpperBound, BufferFactory.Default)
+        }
+        assertFailsWith<BufferOverflowException> {
+            "€€€€€€€€".toReadBuffer(Utf8.Lenient, SizeHint.BytesPerChar(1f), BufferFactory.Default)
+        }
+    }
+
+    /** The success path still owns its bytes — the release above must not have been eager. */
+    @Test
+    fun toReadBufferSurvivesAFailedSiblingAllocation() {
+        assertFailsWith<MalformedTextException.UnpairedSurrogate> {
+            loneHigh.toReadBuffer(Utf8.Strict, SizeHint.UpperBound, BufferFactory.Default)
+        }
+        val readBuffer = "€ ok".toReadBuffer(Utf8.Strict, SizeHint.UpperBound, BufferFactory.Default)
+        assertEquals("€ ok", readBuffer.readText(readBuffer.remaining(), Utf8.Strict))
     }
 
     @Test

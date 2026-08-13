@@ -295,7 +295,9 @@ class MutableDataBuffer private constructor(
 
         @Suppress("CAST_NEVER_SUCCEEDS")
         @OptIn(kotlinx.cinterop.BetaInteropApi::class)
-        val string = NSString.create(subdata, stringEncoding) as String
+        val string =
+            NSString.create(subdata, stringEncoding) as String?
+                ?: throw CharacterCodingException("Malformed $charset bytes")
         position += length
         return string
     }
@@ -442,17 +444,55 @@ class MutableDataBuffer private constructor(
         return this
     }
 
-    override fun <R> writeText(
+    override fun <W> writeText(
         text: CharSequence,
-        encoding: TextEncoding<R>,
-    ): R =
-        dispatchWriteText(text, encoding) { t ->
+        policy: TextPolicy<W, *>,
+    ): W =
+        dispatchWriteText(text, policy) { t ->
             // This platform's writeString(UTF8) already substitutes U+FFFD for unpaired
             // surrogates (pinned by TextEncodingTests), so it is the substituting core.
             val start = position()
             writeString(t, Charset.UTF8)
             position() - start
         }
+
+    override fun <D> readText(
+        length: Int,
+        policy: TextPolicy<*, D>,
+    ): D {
+        if (policy is CustomTextPolicy) return dispatchReadText(this, length, policy)
+        val start = position()
+        // Explicit, before any decode or staging: a hostile length must raise the same catchable
+        // underflow here as on every other platform, rather than whatever identity the platform
+        // decoder happens to surface.
+        if (length < 0 || remaining() < length) {
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read $length byte(s) at position $start " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
+        return try {
+            // Foundation decode straight from native memory — probe-verified to reject exactly
+            // the ill-formed vector set (typed CharacterCodingException, position unchanged).
+            policy.decoded(readString(length, Charset.UTF8))
+        } catch (
+            @Suppress("SwallowedException") e: CharacterCodingException,
+        ) {
+            // Rare path: stage once for the reference decoder's canonical answer.
+            val bytes = copyToByteArray(length)
+            position(start)
+            when (policy) {
+                Utf8.Lenient -> {
+                    val value = Utf8TextDecoder.decodeSubstituting(bytes, 0, length)
+                    position(start + length)
+                    policy.decoded(value)
+                }
+                Utf8.Strict, Utf8.Checked ->
+                    policy.malformedRead(Utf8TextDecoder.firstMalformedOffset(bytes, 0, length))
+                is CustomTextPolicy -> error("unreachable: handled above")
+            }
+        }
+    }
 
     // endregion
 
@@ -925,7 +965,9 @@ class MutableDataBufferSlice(
 
         @Suppress("CAST_NEVER_SUCCEEDS")
         @OptIn(kotlinx.cinterop.BetaInteropApi::class)
-        val string = NSString.create(subdata, stringEncoding) as String
+        val string =
+            NSString.create(subdata, stringEncoding) as String?
+                ?: throw CharacterCodingException("Malformed $charset bytes")
         position += length
         return string
     }
@@ -1065,17 +1107,55 @@ class MutableDataBufferSlice(
         return this
     }
 
-    override fun <R> writeText(
+    override fun <W> writeText(
         text: CharSequence,
-        encoding: TextEncoding<R>,
-    ): R =
-        dispatchWriteText(text, encoding) { t ->
+        policy: TextPolicy<W, *>,
+    ): W =
+        dispatchWriteText(text, policy) { t ->
             // This platform's writeString(UTF8) already substitutes U+FFFD for unpaired
             // surrogates (pinned by TextEncodingTests), so it is the substituting core.
             val start = position()
             writeString(t, Charset.UTF8)
             position() - start
         }
+
+    override fun <D> readText(
+        length: Int,
+        policy: TextPolicy<*, D>,
+    ): D {
+        if (policy is CustomTextPolicy) return dispatchReadText(this, length, policy)
+        val start = position()
+        // Explicit, before any decode or staging: a hostile length must raise the same catchable
+        // underflow here as on every other platform, rather than whatever identity the platform
+        // decoder happens to surface.
+        if (length < 0 || remaining() < length) {
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read $length byte(s) at position $start " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
+        return try {
+            // Foundation decode straight from native memory — probe-verified to reject exactly
+            // the ill-formed vector set (typed CharacterCodingException, position unchanged).
+            policy.decoded(readString(length, Charset.UTF8))
+        } catch (
+            @Suppress("SwallowedException") e: CharacterCodingException,
+        ) {
+            // Rare path: stage once for the reference decoder's canonical answer.
+            val bytes = copyToByteArray(length)
+            position(start)
+            when (policy) {
+                Utf8.Lenient -> {
+                    val value = Utf8TextDecoder.decodeSubstituting(bytes, 0, length)
+                    position(start + length)
+                    policy.decoded(value)
+                }
+                Utf8.Strict, Utf8.Checked ->
+                    policy.malformedRead(Utf8TextDecoder.firstMalformedOffset(bytes, 0, length))
+                is CustomTextPolicy -> error("unreachable: handled above")
+            }
+        }
+    }
 
     fun close() = Unit
 

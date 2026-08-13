@@ -1,13 +1,14 @@
 package com.ditchoom.buffer.codec.test.protocols.websocket
 
 import com.ditchoom.buffer.ByteOrder
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.swapBytes
@@ -17,7 +18,7 @@ public object WsCloseBodyCodec : Codec<WsCloseBody> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): WsCloseBody {
     val statusCodeRaw = buffer.readShort()
     val statusCode = (if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) statusCodeRaw else swapBytes(statusCodeRaw)).toUShort()
-    val reason = buffer.readString(buffer.remaining(), Charset.UTF8)
+    val reason = buffer.readText(buffer.remaining(), (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     return WsCloseBody(statusCode = statusCode, reason = reason)
   }
 
@@ -28,7 +29,7 @@ public object WsCloseBodyCodec : Codec<WsCloseBody> {
   ) {
     val statusCodeRaw = value.statusCode.toShort()
     buffer.writeShort(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) statusCodeRaw else swapBytes(statusCodeRaw))
-    buffer.writeString(value.reason, Charset.UTF8)
+    buffer.writeText(value.reason, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
   }
 
   override fun wireSize(`value`: WsCloseBody, context: EncodeContext): WireSize = WireSize.BackPatch

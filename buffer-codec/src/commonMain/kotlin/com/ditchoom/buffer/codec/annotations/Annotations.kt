@@ -882,3 +882,35 @@ annotation class UnknownVariant
 @Target(AnnotationTarget.FIELD, AnnotationTarget.PROPERTY)
 @Retention(AnnotationRetention.BINARY)
 annotation class EnumDefault
+
+/**
+ * Pins the text policy for a `String` field (or a value class over `String`), or sets the
+ * message-level default when applied to a `@ProtocolMessage` class. One declaration governs
+ * BOTH directions — the generated encode and decode use the same policy, so a field's
+ * strictness cannot drift between them.
+ *
+ * Resolution precedence: field `@UseTextPolicy` → message `@UseTextPolicy` →
+ * `context[TextPolicyKey]` → `Utf8.Strict`.
+ *
+ * ```kotlin
+ * @ProtocolMessage
+ * data class Publish(
+ *     @UseTextPolicy(Utf8.Strict::class)     // malformed topic fails the encode, atomically
+ *     @LengthPrefixed val topic: String,
+ *     @UseTextPolicy(Utf8.Lenient::class)    // telemetry text: always encodes (U+FFFD)
+ *     @LengthPrefixed val debugNote: String,
+ *     @LengthPrefixed val payload: String,   // unpinned → context key → Utf8.Strict
+ * )
+ * ```
+ *
+ * @param policy A `KClass` referencing [com.ditchoom.buffer.Utf8.Lenient],
+ *   [com.ditchoom.buffer.Utf8.Strict], or a Kotlin `object` implementing
+ *   `TextPolicyProvider` (for `TextPolicy.custom` compositions — annotations cannot hold
+ *   instances). `Utf8.Checked` is rejected at compile time: generated linear codec bodies
+ *   have no channel for a checked result.
+ */
+@Target(AnnotationTarget.VALUE_PARAMETER, AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.BINARY)
+annotation class UseTextPolicy(
+    val policy: kotlin.reflect.KClass<*>,
+)

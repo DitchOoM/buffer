@@ -453,10 +453,65 @@ abstract class BaseJvmBuffer(
      */
     protected open fun tryWriteUtf8LenientToNative(text: CharSequence): Boolean = false
 
-    override fun <R> writeText(
+    override fun <W> writeText(
         text: CharSequence,
-        encoding: TextEncoding<R>,
-    ): R = dispatchWriteText(text, encoding) { t -> writeUtf8Substituting(t) }
+        policy: TextPolicy<W, *>,
+    ): W = dispatchWriteText(text, policy) { t -> writeUtf8Substituting(t) }
+
+    override fun <D> readText(
+        length: Int,
+        policy: TextPolicy<*, D>,
+    ): D {
+        if (policy is CustomTextPolicy) return dispatchReadText(this, length, policy)
+        val start = position()
+        if (length < 0 || remaining() < length) {
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read $length byte(s) at position $start " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
+        // Decode straight off the (possibly native) ByteBuffer with the JDK decoder in REPORT
+        // mode — one pass, no staging: for well-formed input any correct UTF-8 decoder produces
+        // identical UTF-16, so the cross-platform byte contract is safe. Only ill-formed input
+        // (the rare path) stages a copy for the reference decoder's canonical answer.
+        val window = byteBuffer.asReadOnlyBuffer()
+        (window as Buffer).limit(start + length)
+        return try {
+            val decoded = Charset.UTF8.toDecoder().decodeReusing(window, length)
+            buffer.position(start + length)
+            policy.decoded(decoded)
+        } catch (
+            @Suppress("SwallowedException") e: java.nio.charset.CharacterCodingException,
+        ) {
+            // Deliberately swallowed: the JDK error is only a detection signal — the canonical
+            // answer comes from the reference contract below.
+            //
+            // The one staging copy in the read pipeline, and it serves BOTH results. U+FFFD
+            // placement and the reported byte offset are this library's implementation-
+            // independent contract, so the reference decoder is the single authority for each —
+            // never the platform decoder, whose replacement behavior AND whose stopping point on
+            // ill-formed input both vary (JDK versions, Android libcore). Reading the offset off
+            // `window.position()` would make this the one platform whose `byteOffset` is produced
+            // by different code than the contract it must match, leaving agreement to hold only
+            // for the vectors someone remembered to test.
+            val bytes = ByteArray(length)
+            val staging = byteBuffer.asReadOnlyBuffer()
+            (staging as Buffer).limit(start + length)
+            staging.get(bytes)
+            when (policy) {
+                Utf8.Lenient -> {
+                    val value = Utf8TextDecoder.decodeSubstituting(bytes, 0, length)
+                    buffer.position(start + length)
+                    policy.decoded(value)
+                }
+                // Atomic rejection: the decode ran against `window`, a duplicate, so this
+                // buffer's position never left `start`.
+                Utf8.Strict, Utf8.Checked ->
+                    policy.malformedRead(Utf8TextDecoder.firstMalformedOffset(bytes, 0, length))
+                is CustomTextPolicy -> error("unreachable: handled above")
+            }
+        }
+    }
 
     /** Encodes with U+FFFD substitution and returns the bytes written. */
     private fun writeUtf8Substituting(text: CharSequence): Int {

@@ -484,11 +484,11 @@ class NativeBuffer private constructor(
         return this
     }
 
-    override fun <R> writeText(
+    override fun <W> writeText(
         text: CharSequence,
-        encoding: TextEncoding<R>,
-    ): R =
-        dispatchWriteText(text, encoding) { t ->
+        policy: TextPolicy<W, *>,
+    ): W =
+        dispatchWriteText(text, policy) { t ->
             // simdutf transcodes well-formed text in one pass but whole-write no-ops on any
             // unpaired surrogate (position unchanged). The rare ill-formed case falls back to
             // the common substituting encoder so the U+FFFD byte contract still holds.
@@ -499,6 +499,44 @@ class NativeBuffer private constructor(
             }
             position() - start
         }
+
+    override fun <D> readText(
+        length: Int,
+        policy: TextPolicy<*, D>,
+    ): D {
+        if (policy is CustomTextPolicy) return dispatchReadText(this, length, policy)
+        val start = position()
+        // Explicit, before any decode or staging: a hostile length must raise the same catchable
+        // underflow here as on every other platform, rather than whatever identity the platform
+        // decoder happens to surface.
+        if (length < 0 || remaining() < length) {
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read $length byte(s) at position $start " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
+        return try {
+            // simdutf decode straight from native memory — probe-verified to reject exactly
+            // the ill-formed vector set (typed CharacterCodingException, position unchanged).
+            policy.decoded(readString(length, Charset.UTF8))
+        } catch (
+            @Suppress("SwallowedException") e: CharacterCodingException,
+        ) {
+            // Rare path: stage once for the reference decoder's canonical answer.
+            val bytes = copyToByteArray(length)
+            position(start)
+            when (policy) {
+                Utf8.Lenient -> {
+                    val value = Utf8TextDecoder.decodeSubstituting(bytes, 0, length)
+                    position(start + length)
+                    policy.decoded(value)
+                }
+                Utf8.Strict, Utf8.Checked ->
+                    policy.malformedRead(Utf8TextDecoder.firstMalformedOffset(bytes, 0, length))
+                is CustomTextPolicy -> error("unreachable: handled above")
+            }
+        }
+    }
 
     // === Optimized bulk operations ===
 
@@ -1103,11 +1141,11 @@ private class NativeBufferSlice(
         return this
     }
 
-    override fun <R> writeText(
+    override fun <W> writeText(
         text: CharSequence,
-        encoding: TextEncoding<R>,
-    ): R =
-        dispatchWriteText(text, encoding) { t ->
+        policy: TextPolicy<W, *>,
+    ): W =
+        dispatchWriteText(text, policy) { t ->
             // simdutf transcodes well-formed text in one pass but whole-write no-ops on any
             // unpaired surrogate (position unchanged). The rare ill-formed case falls back to
             // the common substituting encoder so the U+FFFD byte contract still holds.
@@ -1118,6 +1156,44 @@ private class NativeBufferSlice(
             }
             position() - start
         }
+
+    override fun <D> readText(
+        length: Int,
+        policy: TextPolicy<*, D>,
+    ): D {
+        if (policy is CustomTextPolicy) return dispatchReadText(this, length, policy)
+        val start = position()
+        // Explicit, before any decode or staging: a hostile length must raise the same catchable
+        // underflow here as on every other platform, rather than whatever identity the platform
+        // decoder happens to surface.
+        if (length < 0 || remaining() < length) {
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read $length byte(s) at position $start " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
+        return try {
+            // simdutf decode straight from native memory — probe-verified to reject exactly
+            // the ill-formed vector set (typed CharacterCodingException, position unchanged).
+            policy.decoded(readString(length, Charset.UTF8))
+        } catch (
+            @Suppress("SwallowedException") e: CharacterCodingException,
+        ) {
+            // Rare path: stage once for the reference decoder's canonical answer.
+            val bytes = copyToByteArray(length)
+            position(start)
+            when (policy) {
+                Utf8.Lenient -> {
+                    val value = Utf8TextDecoder.decodeSubstituting(bytes, 0, length)
+                    position(start + length)
+                    policy.decoded(value)
+                }
+                Utf8.Strict, Utf8.Checked ->
+                    policy.malformedRead(Utf8TextDecoder.firstMalformedOffset(bytes, 0, length))
+                is CustomTextPolicy -> error("unreachable: handled above")
+            }
+        }
+    }
 
     fun close() = Unit
 
@@ -1137,9 +1213,11 @@ private fun simdutfDecodeUtf8(
     length: Int,
 ): String {
     if (length == 0) return ""
-    // Validate UTF-8 before conversion -- simdutf silently replaces invalid sequences
+    // Validate UTF-8 before conversion -- simdutf silently replaces invalid sequences.
+    // CharacterCodingException matches what ByteArrayBuffer (managed) throws on this platform;
+    // this was IllegalArgumentException, making the failure type factory-dependent.
     if (buf_simdutf_validate_utf8(ptr, length.convert()) == 0) {
-        throw IllegalArgumentException("Invalid UTF-8 sequence")
+        throw CharacterCodingException("Malformed UTF-8 bytes")
     }
     val utf16Len = buf_simdutf_utf16_length_from_utf8(ptr, length.convert()).toInt()
     if (utf16Len == 0) return ""
