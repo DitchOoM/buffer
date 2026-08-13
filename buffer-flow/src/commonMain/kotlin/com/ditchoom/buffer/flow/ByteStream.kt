@@ -37,6 +37,7 @@ interface ByteSource {
  * Mirrors [ByteSource]: the deadline policy is the [writePolicy] **val**, the explicit-deadline
  * overloads are abstract, and the no-arg overloads consult [writePolicy].
  */
+@MustUseReturnValues
 interface ByteSink {
     val isOpen: Boolean
 
@@ -68,14 +69,28 @@ interface ByteSink {
 
     /**
      * Writes multiple buffers in a single operation (gather write), waiting at most [deadline].
-     * Default implementation writes each buffer sequentially.
+     * Default implementation writes each buffer sequentially, **completing each one before moving to
+     * the next** ([writeFully]).
+     *
+     * That completion is the whole contract of a gather write, and the reason this default cannot
+     * simply sum [write] results: [write] may accept a buffer only in PART, so summing-and-advancing
+     * would emit the first buffer's prefix immediately followed by the SECOND buffer's bytes, dropping
+     * the remainder from the middle of the stream. Callers gather precisely because the pieces are
+     * adjacent — a header and its payload — so a hole at that seam splices payload bytes into the
+     * region the header just declared.
+     *
+     * @throws ByteSinkStalledException if the sink stops making progress with bytes still pending.
      */
     suspend fun writeGathered(
         buffers: List<ReadBuffer>,
         deadline: Duration,
     ): BytesWritten {
         var total = 0
-        for (buf in buffers) total += write(buf, deadline).count
+        for (buf in buffers) {
+            // Count before writing: writeFully drains the buffer, so remaining() is 0 afterwards.
+            total += buf.remaining()
+            writeFully(buf, deadline)
+        }
         return BytesWritten(total)
     }
 

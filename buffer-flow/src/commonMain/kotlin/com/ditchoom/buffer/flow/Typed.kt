@@ -113,7 +113,10 @@ private class CodecSink<T>(
     override suspend fun send(message: T) {
         val buffer = codec.encodeToPlatformBuffer(message, factory, context)
         try {
-            sink.write(buffer)
+            // writeFully, never a bare write: a sink may accept only PART of the buffer, and for a
+            // self-framing codec the dropped tail is corruption rather than loss — the peer reads on
+            // to the length this message already declared and swallows whatever follows.
+            sink.writeFully(buffer)
         } finally {
             buffer.freeNativeMemory()
         }
