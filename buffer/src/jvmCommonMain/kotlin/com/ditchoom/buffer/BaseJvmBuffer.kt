@@ -464,7 +464,7 @@ abstract class BaseJvmBuffer(
     ): D {
         if (policy is CustomTextPolicy) return dispatchReadText(this, length, policy)
         val start = position()
-        if (remaining() < length) {
+        if (length < 0 || remaining() < length) {
             throw BufferUnderflowException(
                 "Buffer underflow: cannot read $length byte(s) at position $start " +
                     "(limit=${limit()}, remaining=${remaining()})",

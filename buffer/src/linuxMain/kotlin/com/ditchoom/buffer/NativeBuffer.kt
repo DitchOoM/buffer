@@ -506,11 +506,22 @@ class NativeBuffer private constructor(
     ): D {
         if (policy is CustomTextPolicy) return dispatchReadText(this, length, policy)
         val start = position()
+        // Explicit, before any decode or staging: a hostile length must raise the same catchable
+        // underflow here as on every other platform, rather than whatever identity the platform
+        // decoder happens to surface.
+        if (length < 0 || remaining() < length) {
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read $length byte(s) at position $start " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
         return try {
             // simdutf decode straight from native memory — probe-verified to reject exactly
             // the ill-formed vector set (typed CharacterCodingException, position unchanged).
             policy.decoded(readString(length, Charset.UTF8))
-        } catch (@Suppress("SwallowedException") e: CharacterCodingException) {
+        } catch (
+            @Suppress("SwallowedException") e: CharacterCodingException,
+        ) {
             // Rare path: stage once for the reference decoder's canonical answer.
             val bytes = copyToByteArray(length)
             position(start)
@@ -1150,11 +1161,22 @@ private class NativeBufferSlice(
     ): D {
         if (policy is CustomTextPolicy) return dispatchReadText(this, length, policy)
         val start = position()
+        // Explicit, before any decode or staging: a hostile length must raise the same catchable
+        // underflow here as on every other platform, rather than whatever identity the platform
+        // decoder happens to surface.
+        if (length < 0 || remaining() < length) {
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read $length byte(s) at position $start " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
         return try {
             // simdutf decode straight from native memory — probe-verified to reject exactly
             // the ill-formed vector set (typed CharacterCodingException, position unchanged).
             policy.decoded(readString(length, Charset.UTF8))
-        } catch (@Suppress("SwallowedException") e: CharacterCodingException) {
+        } catch (
+            @Suppress("SwallowedException") e: CharacterCodingException,
+        ) {
             // Rare path: stage once for the reference decoder's canonical answer.
             val bytes = copyToByteArray(length)
             position(start)

@@ -462,6 +462,15 @@ class MutableDataBuffer private constructor(
     ): D {
         if (policy is CustomTextPolicy) return dispatchReadText(this, length, policy)
         val start = position()
+        // Explicit, before any decode or staging: a hostile length must raise the same catchable
+        // underflow here as on every other platform, rather than whatever identity the platform
+        // decoder happens to surface.
+        if (length < 0 || remaining() < length) {
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read $length byte(s) at position $start " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
         return try {
             // Foundation decode straight from native memory — probe-verified to reject exactly
             // the ill-formed vector set (typed CharacterCodingException, position unchanged).
@@ -1114,6 +1123,15 @@ class MutableDataBufferSlice(
     ): D {
         if (policy is CustomTextPolicy) return dispatchReadText(this, length, policy)
         val start = position()
+        // Explicit, before any decode or staging: a hostile length must raise the same catchable
+        // underflow here as on every other platform, rather than whatever identity the platform
+        // decoder happens to surface.
+        if (length < 0 || remaining() < length) {
+            throw BufferUnderflowException(
+                "Buffer underflow: cannot read $length byte(s) at position $start " +
+                    "(limit=${limit()}, remaining=${remaining()})",
+            )
+        }
         return try {
             // Foundation decode straight from native memory — probe-verified to reject exactly
             // the ill-formed vector set (typed CharacterCodingException, position unchanged).

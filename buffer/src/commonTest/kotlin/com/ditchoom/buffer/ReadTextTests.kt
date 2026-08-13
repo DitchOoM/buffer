@@ -187,6 +187,26 @@ class ReadTextTests {
     }
 
     @Test
+    fun hostileLengthUnderflowsInsteadOfAllocating() {
+        // A length prefix read off the wire is attacker-controlled. Every policy must raise a
+        // catchable underflow *before* staging, on every factory: on Kotlin/Wasm a ByteArray the
+        // runtime cannot serve is an uncatchable trap, so staging first takes the module down
+        // rather than failing the decode.
+        for ((name, factory) in factories) {
+            for (length in listOf(Int.MAX_VALUE, 0x7FFFFFF0, 1 shl 24, -1)) {
+                withData(factory, validAEuro) { buffer ->
+                    for (policy in listOf(Utf8.Lenient, Utf8.Strict, Utf8.Checked)) {
+                        assertFailsWith<BufferUnderflowException>("$policy len=$length [$name]") {
+                            buffer.readText(length, policy)
+                        }
+                        assertEquals(0, buffer.position(), "underflow is atomic [$name]")
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     fun customPolicyComposesHalves() {
         // Custom encoder (uppercases ASCII then delegates bytes) + library decoder.
         val shoutingEncoder =

@@ -348,16 +348,19 @@ internal fun <D> dispatchReadText(
         return policy.decoded(policy.customDecoder.decodeFrom(buffer, length))
     }
     val start = buffer.position()
+    // Bounds-check BEFORE any allocation: a hostile length prefix must raise a catchable
+    // underflow, never a `ByteArray(length)` the runtime cannot serve. On Kotlin/Wasm an
+    // oversized allocation is an uncatchable trap, so staging first would take the module down.
+    if (length < 0 || buffer.remaining() < length) {
+        throw BufferUnderflowException(
+            "Buffer underflow: cannot read $length byte(s) at position $start " +
+                "(limit=${buffer.limit()}, remaining=${buffer.remaining()})",
+        )
+    }
     val managed = buffer.managedMemoryAccess
     val bytes: ByteArray
     val bytesOffset: Int
     if (managed != null) {
-        if (buffer.remaining() < length) {
-            throw BufferUnderflowException(
-                "Buffer underflow: cannot read $length byte(s) at position $start " +
-                    "(limit=${buffer.limit()}, remaining=${buffer.remaining()})",
-            )
-        }
         bytes = managed.backingArray
         bytesOffset = managed.arrayOffset + start
     } else {
