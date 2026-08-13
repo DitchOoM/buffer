@@ -8,6 +8,7 @@ package com.ditchoom.buffer
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
@@ -262,6 +263,47 @@ class LinearMemoryReclamationTest {
             watermark(),
             "a warmed pool must satisfy further requests without new linear memory",
         )
+    }
+
+    /**
+     * `toReadBuffer` allocates before it writes, and the write can still fail: [Utf8.Strict] on
+     * ill-formed text under the default [SizeHint.UpperBound], or a [SizeHint.BytesPerChar] guess
+     * too small for the corpus. Dropping the buffer there is invisible on a GC-managed backend, so
+     * this is the one platform where the leak is observable — and where it matters, since linear
+     * memory is never returned to the engine and the pool is capped.
+     *
+     * Read off the watermark rather than inferred from an eventual OOM, so a regression names
+     * itself instead of surfacing as an unrelated allocation failure much later.
+     */
+    @Test
+    fun toReadBufferReclaimsItsAllocationWhenTheStrictWriteRejects() {
+        val before = watermark()
+        assertFailsWith<MalformedTextException.UnpairedSurrogate> {
+            ("\uD83D" + "tail").toReadBuffer(Utf8.Strict, SizeHint.UpperBound, BufferFactory.Default)
+        }
+        assertEquals(
+            before,
+            watermark(),
+            "a rejected strict write must hand its allocation back, not strand it in the pool",
+        )
+    }
+
+    @Test
+    fun toReadBufferReclaimsItsAllocationWhenTheGuessOverflows() {
+        val before = watermark()
+        assertFailsWith<BufferOverflowException> {
+            "€€€€€€€€".toReadBuffer(Utf8.Lenient, SizeHint.BytesPerChar(1f), BufferFactory.Default)
+        }
+        assertEquals(before, watermark(), "an overflowing sizing guess must not strand its allocation")
+    }
+
+    /** The success path still owns its bytes — the release above must not be eager. */
+    @Test
+    fun toReadBufferKeepsItsAllocationOnSuccess() {
+        val before = watermark()
+        val readBuffer = "€ ok".toReadBuffer(Utf8.Strict, SizeHint.UpperBound, BufferFactory.Default)
+        assertTrue(watermark() > before, "the returned buffer must still hold live linear memory")
+        assertEquals("€ ok", readBuffer.readText(readBuffer.remaining(), Utf8.Strict))
     }
 
     private fun alignUp(size: Int): Int = (size + ALIGN - 1) and (ALIGN - 1).inv()

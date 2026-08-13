@@ -127,9 +127,11 @@ class ReadTextTests {
 
     @Test
     fun strictOffsetsMatchReferenceForExoticIllFormedInput() {
-        // Pins that every platform's failure offset — including fast paths that derive it from
-        // a platform decoder's error position — agrees with the reference decoder's
-        // subpart-start semantics.
+        // Every platform derives its answer from the reference decoder — no fast path reads an
+        // offset off a platform decoder's error position any more, so agreement is structural
+        // rather than something these vectors have to catch. They still run on all three policies
+        // and every factory: the vectors are what would notice if a platform re-introduced its own
+        // authority, and what pins the subpart-start semantics itself.
         val cases =
             listOf(
                 Triple("encodedSurrogate", bytes(0xED, 0xA0, 0x80), 0),
@@ -147,6 +149,27 @@ class ReadTextTests {
                         }
                     assertEquals(expected, e.byteOffset, "offset [$caseName/$name]")
                     assertEquals(0, buffer.position(), "atomicity [$caseName/$name]")
+                }
+                // The two rejecting policies differ only in how the failure is delivered — thrown
+                // versus returned. Sweeping both pins that the offset itself does not depend on
+                // which one asked, on any platform.
+                withData(factory, data) { buffer ->
+                    val r = buffer.readText(data.size, Utf8.Checked)
+                    assertIs<DecodedText.Malformed>(r, "[$caseName/$name]")
+                    assertEquals(expected, r.byteOffset, "checked offset [$caseName/$name]")
+                    assertEquals(0, buffer.position(), "checked atomicity [$caseName/$name]")
+                }
+                // And the substituting policy's U+FFFD placement is the same contract read the
+                // other way: same vectors, same authority, so a platform decoder's own
+                // replacement behaviour can never leak into the result.
+                withData(factory, data) { buffer ->
+                    val substituted = buffer.readText(data.size, Utf8.Lenient)
+                    assertEquals(
+                        Utf8TextDecoder.decodeSubstituting(data, 0, data.size),
+                        substituted,
+                        "lenient substitution [$caseName/$name]",
+                    )
+                    assertEquals(data.size, buffer.position(), "lenient consumes all [$caseName/$name]")
                 }
             }
         }
