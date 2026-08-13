@@ -996,11 +996,18 @@ data class Packet<P : Payload>(
 // No Codec<P> anywhere in this loop — the payload codec is chosen from the
 // header, which is the whole reason for deferring it.
 while (true) {
-    val frame = PacketCodec.peekFrameSize(stream)
-    if (frame !is PeekResult.Complete) break
-    val packet = stream.readBufferScoped(frame.bytes) {
-        val partial = PacketCodec.partial<MyPayload>(this, DecodeContext.Empty)
-        partial.complete(codecFor(partial.group, partial.command))
+    when (val frame = PacketCodec.peekFrameSize(stream)) {
+        is PeekResult.Complete -> {
+            val packet = stream.readBufferScoped(frame.bytes) {
+                val partial = PacketCodec.partial<MyPayload>(this, DecodeContext.Empty)
+                partial.complete(codecFor(partial.group, partial.command))
+            }
+            handlePacket(packet)
+        }
+        PeekResult.NeedsMoreData -> {
+            stream.append(transport.receive() ?: break)  // pull more bytes, retry
+        }
+        PeekResult.NoFraming -> error("PacketCodec does not support stream framing")
     }
 }
 ```
@@ -1008,12 +1015,21 @@ while (true) {
 The companion implements `FrameDetector`, so it can also be *passed* to code
 that frames generically, not just called by name.
 
+This covers generic **codecs** and `@FramedBy` generic **dispatchers** (whose
+frame size comes from the length prefix, never from a variant codec). The one
+shape still requiring an instance is an *unframed* generic dispatcher: its
+peek routes through per-variant receivers, and for a generic variant that
+receiver is the constructor-injected codec field.
+
 Only shapes that actually frame get the companion entry point. A codec whose
 `peekFrameSize` returns `NoFraming` keeps framing as a member alone, so
 reaching for `FooCodec.peekFrameSize(...)` on an unframable shape is a compile
-error rather than a runtime `NoFraming`. Codecs emitted as `object`s (any
-message without a generic payload) are already their own static receiver and
-are unaffected.
+error rather than a runtime `NoFraming`. (A codec that delegates to a
+consumer-supplied `FrameDetector` companion is the exception — it gets the
+entry point on the strength of that declaration, and what the detector
+returns at runtime is the consumer's own contract.) Codecs emitted as
+`object`s — any message without a generic payload — are already their own
+static receiver and are unaffected.
 
 ## The Codec Interface
 

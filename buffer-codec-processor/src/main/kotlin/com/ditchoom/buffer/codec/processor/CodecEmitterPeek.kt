@@ -97,7 +97,16 @@ internal fun peekBudgetFor(typeName: TypeName): Int? =
 internal sealed interface PeekEmit {
     val fn: FunSpec
 
-    /** The walker derived a frame size; safe to place on a companion. */
+    /**
+     * The walker derived a frame size; safe to place on a companion.
+     *
+     * One arm is a claim of intent rather than derivation: a consumer-supplied
+     * `FrameDetector` (`shape.customPeek`) is `Framed` because the consumer
+     * declared framing for a wire shape the walker cannot express. Their
+     * detector may still answer `NoFraming` at runtime for a sub-shape — the
+     * compile-time guarantee below is that *the walker* did not give up, not
+     * that every call frames.
+     */
     data class Framed(
         override val fn: FunSpec,
     ) : PeekEmit

@@ -201,7 +201,8 @@ class SmpFrameCodecTest {
             assertEquals(PeekResult.Complete(totalBytes), SmpGenericFrameCodec.peekFrameSize(stream))
             val decoded =
                 stream.readBufferScoped(totalBytes) {
-                    SmpGenericFrameCodec.partial<TextPayload>(this, DecodeContext.Empty)
+                    SmpGenericFrameCodec
+                        .partial<TextPayload>(this, DecodeContext.Empty)
                         .complete(TextPayloadCodec)
                 }
             assertEquals(payload, decoded.payload)
