@@ -8,6 +8,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.Decoder
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
+import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
@@ -79,7 +80,7 @@ public class WsFramePingCodec<P : Payload>(
 
   override fun sizeHint(`value`: WsFrame.Ping<P>, context: EncodeContext): Int = 2
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = Companion.peekFrameSize(stream, baseOffset)
 
   public class Partial<P : Payload> internal constructor(
     public val byte1: FrameHeaderByte1,
@@ -96,7 +97,9 @@ public class WsFramePingCodec<P : Payload>(
     }
   }
 
-  public companion object {
+  public companion object : FrameDetector {
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
+
     public fun <P : Payload> partial(buffer: ReadBuffer, context: DecodeContext): Partial<P> {
       val __batch2 = buffer.readShort().toInt() and 0xFFFF
       val byte1: com.ditchoom.buffer.codec.test.protocols.websocket.FrameHeaderByte1

@@ -1021,15 +1021,15 @@ shape still requiring an instance is an *unframed* generic dispatcher: its
 peek routes through per-variant receivers, and for a generic variant that
 receiver is the constructor-injected codec field.
 
-Only shapes that actually frame get the companion entry point. A codec whose
-`peekFrameSize` returns `NoFraming` keeps framing as a member alone, so
-reaching for `FooCodec.peekFrameSize(...)` on an unframable shape is a compile
-error rather than a runtime `NoFraming`. (A codec that delegates to a
-consumer-supplied `FrameDetector` companion is the exception — it gets the
-entry point on the strength of that declaration, and what the detector
-returns at runtime is the consumer's own contract.) Codecs emitted as
-`object`s — any message without a generic payload — are already their own
-static receiver and are unaffected.
+Every other generic codec gets the companion entry point, whether or not its
+shape can frame — the same placement `object` codecs have always had, where
+`FooCodec.peekFrameSize(...)` resolves on any codec. **Framing is a runtime
+answer, not a static property.** `Codec` extends `FrameDetector`, whose default
+returns `NoFraming`, so a shape the walker cannot frame answers
+`PeekResult.NoFraming` rather than failing to compile. Handle that arm — the
+loop above does, with `error(...)`. Codecs emitted as `object`s — any message
+without a generic payload — are already their own static receiver and are
+unaffected.
 
 ## The Codec Interface
 

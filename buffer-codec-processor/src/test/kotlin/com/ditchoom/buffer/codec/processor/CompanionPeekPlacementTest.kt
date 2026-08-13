@@ -12,7 +12,7 @@ import kotlin.test.assertTrue
 
 /**
  * Guards on companion-side `peekFrameSize` placement (#348), exercised against
- * hand-built KotlinPoet specs so they pin the rule without paying a KSP compile.
+ * hand-built KotlinPoet specs so they pin the rules without paying a KSP compile.
  *
  * Hoisting a peek body onto a companion is sound only because every receiver the
  * peek walkers emit is a type name and every other operand is a `__`-prefixed
@@ -29,9 +29,7 @@ class CompanionPeekPlacementTest {
             assertFailsWith<IllegalStateException> {
                 genericCodecBuilder()
                     .addCodecCompanion(
-                        CodecCompanion.FramingOnly(
-                            peekFun("return payloadCodec.peekFrameSize(stream, baseOffset)"),
-                        ),
+                        peek = peekFun("return payloadCodec.peekFrameSize(stream, baseOffset)"),
                     )
             }
         val message = failure.message.orEmpty()
@@ -40,8 +38,8 @@ class CompanionPeekPlacementTest {
             "the error must name the offending property, was: $message",
         )
         assertTrue(
-            "PeekEmit.Unframed" in message,
-            "the error must name the alternative classification, was: $message",
+            "keep this shape's peek a member" in message,
+            "the error must name the way out, was: $message",
         )
     }
 
@@ -63,10 +61,8 @@ class CompanionPeekPlacementTest {
         val failure =
             assertFailsWith<IllegalStateException> {
                 builder.addCodecCompanion(
-                    CodecCompanion.PartialAndFraming(
-                        partial = partialFun(),
-                        peek = peekFun("return publishCodec.peekFrameSize(stream, baseOffset)"),
-                    ),
+                    peek = peekFun("return publishCodec.peekFrameSize(stream, baseOffset)"),
+                    partial = partialFun(),
                 )
             }
         assertTrue("publishCodec" in failure.message.orEmpty(), failure.message.orEmpty())
@@ -77,7 +73,7 @@ class CompanionPeekPlacementTest {
         val builder =
             genericCodecBuilder()
                 .addCodecCompanion(
-                    CodecCompanion.FramingOnly(
+                    peek =
                         peekFun(
                             """
                             |val __headerFrame = VarIntCodec.peekFrameSize(stream, baseOffset)
@@ -85,8 +81,23 @@ class CompanionPeekPlacementTest {
                             |return PeekResult.Complete(__total)
                             """.trimMargin(),
                         ),
-                    ),
                 )
+        val companion = builder.build().typeSpecs.single()
+        assertTrue(companion.isCompanion)
+        assertEquals(listOf("peekFrameSize"), companion.funSpecs.map { it.name })
+    }
+
+    /**
+     * A constant-`NoFraming` body hoists like any other. Placement follows what
+     * the body *can* reach, not whether the shape frames — the same rule an
+     * `object` codec has always followed, where `FooCodec.peekFrameSize(...)`
+     * resolves regardless and `NoFraming` is a runtime answer.
+     */
+    @Test
+    fun `an unframable shape hoists its constant body too`() {
+        val builder =
+            genericCodecBuilder()
+                .addCodecCompanion(peek = peekFun("return PeekResult.NoFraming"))
         val companion = builder.build().typeSpecs.single()
         assertTrue(companion.isCompanion)
         assertEquals(listOf("peekFrameSize"), companion.funSpecs.map { it.name })
@@ -101,34 +112,42 @@ class CompanionPeekPlacementTest {
     fun `a local whose name merely contains a property name does not trip the check`() {
         genericCodecBuilder()
             .addCodecCompanion(
-                CodecCompanion.FramingOnly(
+                peek =
                     peekFun(
                         """
                         |val __payloadCodecWidth = 4
                         |return PeekResult.Complete(__payloadCodecWidth)
                         """.trimMargin(),
                     ),
-                ),
             )
     }
 
     /**
-     * An `Unframed` peek is never hoisted, so its body is unconstrained — the
-     * check must key off placement, not off the mere presence of a peek.
+     * The unframed generic dispatcher's shape: its peek stays a member, so no
+     * `peek` is passed and nothing is checked. The guard must key off what is
+     * being hoisted, not off the codec having a peek at all.
      */
     @Test
-    fun `a member-only companion is not checked`() {
-        genericCodecBuilder()
-            .addCodecCompanion(CodecCompanion.PartialOnly(partialFun()))
+    fun `a companion with no hoisted peek is not checked`() {
+        val builder = genericCodecBuilder().addCodecCompanion(partial = partialFun())
+        val companion = builder.build().typeSpecs.single()
+        assertEquals(listOf("partial"), companion.funSpecs.map { it.name })
+        assertTrue(companion.superinterfaces.isEmpty(), "no framing ⇒ no FrameDetector")
+    }
+
+    @Test
+    fun `no entry points at all adds no companion`() {
+        val builder = genericCodecBuilder().addCodecCompanion()
+        assertTrue(builder.build().typeSpecs.isEmpty())
     }
 
     // ---- the forwarder's `Companion.` receiver ----------------------------
 
     /**
      * [memberPeekFun] forwards to `Companion.peekFrameSize(...)` — the implicit
-     * name of an *unnamed* companion. `AggregatorAndFraming` is the one arm that
-     * reuses a companion built elsewhere, so it is the one place a name could
-     * arrive and leave the forwarder calling a receiver that does not exist.
+     * name of an *unnamed* companion. An aggregator is the one companion built
+     * elsewhere, so it is the one that could arrive named and leave the
+     * forwarder calling a receiver that does not exist.
      */
     @Test
     fun `framing cannot be merged into a named aggregator companion`() {
@@ -141,10 +160,8 @@ class CompanionPeekPlacementTest {
             assertFailsWith<IllegalArgumentException> {
                 genericCodecBuilder()
                     .addCodecCompanion(
-                        CodecCompanion.AggregatorAndFraming(
-                            aggregator = named,
-                            peek = peekFun("return PeekResult.NoFraming"),
-                        ),
+                        peek = peekFun("return PeekResult.Complete(4)"),
+                        aggregator = named,
                     )
             }
         assertTrue("Companion" in failure.message.orEmpty(), failure.message.orEmpty())
@@ -155,20 +172,19 @@ class CompanionPeekPlacementTest {
         val builder =
             genericCodecBuilder()
                 .addCodecCompanion(
-                    CodecCompanion.AggregatorAndFraming(
-                        aggregator =
-                            TypeSpec
-                                .companionObjectBuilder()
-                                .addFunction(FunSpec.builder("decodeAggregating").build())
-                                .build(),
-                        peek = peekFun("return PeekResult.Complete(4)"),
-                    ),
+                    peek = peekFun("return PeekResult.Complete(4)"),
+                    aggregator =
+                        TypeSpec
+                            .companionObjectBuilder()
+                            .addFunction(FunSpec.builder("decodeAggregating").build())
+                            .build(),
                 )
         val companion = builder.build().typeSpecs.single()
         assertEquals(
             listOf("decodeAggregating", "peekFrameSize"),
             companion.funSpecs.map { it.name }.sorted(),
         )
+        assertEquals(1, companion.superinterfaces.size, "the companion is a FrameDetector value")
     }
 
     /**
@@ -177,7 +193,7 @@ class CompanionPeekPlacementTest {
      */
     @Test
     fun `the member forwarder qualifies its call with Companion`() {
-        val forwarder = memberPeekFun(PeekEmit.Framed(peekFun("return PeekResult.Complete(4)")))
+        val forwarder = memberPeekFun(peekFun("return PeekResult.Complete(4)"))
         assertTrue(
             "Companion.peekFrameSize(stream, baseOffset)" in forwarder.body.toString(),
             forwarder.body.toString(),

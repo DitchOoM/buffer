@@ -792,42 +792,32 @@ internal fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
                 // on the constructor-injected payloadCodec, so it omits the
                 // aggregator. (buildDispatchOnAggregatorCompanion requires a
                 // ValueClass discriminator and would otherwise error.)
-                val aggregates = shape.discriminator is Discriminator.ValueClass
+                val aggregator =
+                    if (shape.discriminator is Discriminator.ValueClass) {
+                        buildDispatchOnAggregatorCompanion(shape, binding)
+                    } else {
+                        null
+                    }
                 if (framed) {
                     builder.addFunction(buildFramedByDispatchOnEncodeFun(shape, parentTypeRef))
                     // A framed dispatcher's peek is one collapsed
                     // header-plus-length-prefix walk — it never reaches a
                     // variant codec, so it is as codec-independent as a
-                    // generic codec's and hoists the same way (#348). The
-                    // unframed dispatcher below cannot: its peek routes
-                    // through per-variant receivers, and the generic ones are
-                    // constructor-injected instance fields.
-                    val peek = PeekEmit.Framed(buildFramedByDispatchOnPeekFun(shape))
+                    // generic codec's and hoists the same way (#348).
+                    val peek = buildFramedByDispatchOnPeekFun(shape)
                     builder.addFunction(memberPeekFun(peek))
-                    builder.addCodecCompanion(
-                        if (aggregates) {
-                            CodecCompanion.AggregatorAndFraming(
-                                aggregator = buildDispatchOnAggregatorCompanion(shape, binding),
-                                peek = peek.fn,
-                            )
-                        } else {
-                            CodecCompanion.FramingOnly(peek.fn)
-                        },
-                    )
+                    builder.addCodecCompanion(peek = peek, aggregator = aggregator)
                 } else {
                     builder.addFunction(buildDispatchEncodeFun(shape))
                     builder.addFunction(buildDispatchWireSizeFun(shape))
                     builder.addFunction(buildDispatchSizeHintFun(shape))
+                    // The one shape whose peek genuinely cannot hoist: it routes
+                    // through per-variant receivers, and a generic variant's is a
+                    // constructor-injected instance field. Member-only, and no
+                    // `peek` passed below — `requireCodecIndependentPeek` would
+                    // reject this body on sight.
                     builder.addFunction(buildDispatchPeekFun(shape))
-                    builder.addCodecCompanion(
-                        if (aggregates) {
-                            CodecCompanion.AggregatorOnly(
-                                buildDispatchOnAggregatorCompanion(shape, binding),
-                            )
-                        } else {
-                            CodecCompanion.None
-                        },
-                    )
+                    builder.addCodecCompanion(aggregator = aggregator)
                 }
                 builder.build()
             }
