@@ -140,6 +140,7 @@
     <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun isBooleanReturningValProperty: Boolean</ID>
     <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun isIntReturningValProperty: Boolean</ID>
     <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun isListOfProtocolMessageDataClass: Boolean</ID>
+    <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateFramedBy</ID>
     <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun isNestedProtocolMessageType: Boolean</ID>
     <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateDispatchOnSealed</ID>
     <ID>ReturnCount:ProtocolMessageProcessor.kt:ProtocolMessageProcessor$private fun validateGenericPayloadVariantShape: Boolean</ID>
