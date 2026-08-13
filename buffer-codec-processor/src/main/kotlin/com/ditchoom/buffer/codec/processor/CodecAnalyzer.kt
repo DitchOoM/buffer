@@ -61,7 +61,7 @@ internal fun analyze(symbol: KSClassDeclaration): AnalysisResult {
     // buildDecodeFun returns the singleton via `return ObjectName`,
     // buildEncodeFun emits an empty body, buildWireSizeFun collapses
     // to `Exact(0)` via the empty-fields fall-through, and
-    // buildPeekFrameFun collapses to the all-FixedSize Complete(0)
+    // buildPeekFrame collapses to the all-FixedSize Complete(0)
     // path.
     //
     // When the singleton is a sealed

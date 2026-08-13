@@ -94,6 +94,7 @@ internal val DECODE_CONTEXT_CN = ClassName("com.ditchoom.buffer.codec", "DecodeC
 internal val ENCODE_CONTEXT_CN = ClassName("com.ditchoom.buffer.codec", "EncodeContext")
 internal val WIRE_SIZE_CN = ClassName("com.ditchoom.buffer.codec", "WireSize")
 internal val PEEK_RESULT_CN = ClassName("com.ditchoom.buffer.codec", "PeekResult")
+internal val FRAME_DETECTOR_CN = ClassName("com.ditchoom.buffer.codec", "FrameDetector")
 internal val STREAM_PROCESSOR_CN = ClassName("com.ditchoom.buffer.stream", "StreamProcessor")
 internal val DECODE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "DecodeException")
 internal val ENCODE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "EncodeException")

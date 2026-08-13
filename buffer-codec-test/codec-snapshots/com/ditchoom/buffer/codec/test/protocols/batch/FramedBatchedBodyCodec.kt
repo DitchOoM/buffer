@@ -7,6 +7,7 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.test.protocols.usecodecscalar.Le32LengthCodec
@@ -15,7 +16,7 @@ import com.ditchoom.buffer.swapBytes
 import kotlin.Int
 import kotlin.Throwable
 
-public object FramedBatchedBodyCodec {
+public object FramedBatchedBodyCodec : FrameDetector {
   public fun decode(buffer: ReadBuffer, context: DecodeContext): FramedBatchedBody {
     val __framingOuterLimit = buffer.limit()
     val __framingLength = Le32LengthCodec.decode(buffer, context)
@@ -63,7 +64,7 @@ public object FramedBatchedBodyCodec {
     buffer.writeLong(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch2 else swapBytes(__batch2))
   }
 
-  public fun peekFrameSize(stream: StreamProcessor, baseOffset: Int = 0): PeekResult {
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val __framingPeek = stream.peekBuffer(baseOffset + 0, 5) ?: return PeekResult.NeedsMoreData
     try {

@@ -976,6 +976,61 @@ hanging the receive loop.
 - Two or more variable-width fields where more than one is an enum (or an enum
   plus a variable-length suffix) — only a single variable field can frame
 
+### Framing a generic payload without its codec
+
+A codec for a message with a generic payload (`<P : Payload>`) takes the
+payload codec as a constructor parameter — but framing never consults it. The
+frame size comes from header scalars, so `peekFrameSize` is emitted on the
+codec's **companion**, right beside `partial()`, and is callable with no
+instance:
+
+```kotlin
+@ProtocolMessage(wireOrder = Endianness.Big)
+data class Packet<P : Payload>(
+    val group: UShort,
+    val command: UByte,
+    val length: UShort = 0u,
+    @LengthFrom("length") val payload: P,
+)
+
+// No Codec<P> anywhere in this loop — the payload codec is chosen from the
+// header, which is the whole reason for deferring it.
+while (true) {
+    when (val frame = PacketCodec.peekFrameSize(stream)) {
+        is PeekResult.Complete -> {
+            val packet = stream.readBufferScoped(frame.bytes) {
+                val partial = PacketCodec.partial<MyPayload>(this, DecodeContext.Empty)
+                partial.complete(codecFor(partial.group, partial.command))
+            }
+            handlePacket(packet)
+        }
+        PeekResult.NeedsMoreData -> {
+            stream.append(transport.receive() ?: break)  // pull more bytes, retry
+        }
+        PeekResult.NoFraming -> error("PacketCodec does not support stream framing")
+    }
+}
+```
+
+The companion implements `FrameDetector`, so it can also be *passed* to code
+that frames generically, not just called by name.
+
+This covers generic **codecs** and `@FramedBy` generic **dispatchers** (whose
+frame size comes from the length prefix, never from a variant codec). The one
+shape still requiring an instance is an *unframed* generic dispatcher: its
+peek routes through per-variant receivers, and for a generic variant that
+receiver is the constructor-injected codec field.
+
+Every other generic codec gets the companion entry point, whether or not its
+shape can frame — the same placement `object` codecs have always had, where
+`FooCodec.peekFrameSize(...)` resolves on any codec. **Framing is a runtime
+answer, not a static property.** `Codec` extends `FrameDetector`, whose default
+returns `NoFraming`, so a shape the walker cannot frame answers
+`PeekResult.NoFraming` rather than failing to compile. Handle that arm — the
+loop above does, with `error(...)`. Codecs emitted as `object`s — any message
+without a generic payload — are already their own static receiver and are
+unaffected.
+
 ## The Codec Interface
 
 `Codec<T>` is the union of three smaller interfaces. Send-only consumers can

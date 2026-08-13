@@ -16,7 +16,7 @@ import com.squareup.kotlinpoet.U_SHORT
 
 /*
  * CodecEmitterPeek — the peekFrameSize emit cluster extracted from
- * CodecEmitter (step 5): buildPeekFrameFun and its specialized walkers
+ * CodecEmitter (step 5): buildPeekFrame and its specialized walkers
  * (appendPeekUseCodecScalar / appendPeekBoundingDynamicPrior /
  * appendPeekVariableLengthUseCodecScalar / appendPeekLengthPrefixedUseCodecList /
  * appendSequentialPeek and its appendSequentialPeek* / appendPeek* helpers),
@@ -77,13 +77,30 @@ internal fun peekBudgetFor(typeName: TypeName): Int? =
     }
 
 /**
- * Sum the `wireBytes` of every `FixedSize` field
- * in the list. Variable-length fields (`LengthPrefixed*`,
- * `Conditional`) contribute 0 and are filtered out by the
- * `filterIsInstance` step. Callers that require the result to
- * cover every field gate on terminal shape before calling.
+ * Emit `peekFrameSize` for [shape].
+ *
+ * The body is a cascade of shape tests, ordered so that the framing signal
+ * with the widest reach wins: a bounding `@UseCodec` length anchors the frame
+ * wherever it sits, so it is consulted before the `@RemainingBytes` /
+ * to-limit collapses that would otherwise short-circuit the same shape. Each
+ * arm either delegates to a specialized walker or emits the constant
+ * `PeekResult.NoFraming`.
+ *
+ * Every arm's body is codec-independent: each receiver is a type name (a
+ * `FrameDetector` companion, a `VariableLengthCodec` object, a nested codec
+ * object) and every other operand is a `__`-prefixed local over `stream`.
+ * That is what lets a class-shaped codec hoist this whole function to its
+ * companion regardless of whether the walk derived a frame size —
+ * `addCodecCompanion` re-checks it there, since no type expresses it.
+ *
+ * The emitted `FunSpec` carries `OVERRIDE` and is identical in either
+ * placement, because `FrameDetector.peekFrameSize` is what it overrides
+ * whether it lands on a codec object, a codec class, or a companion.
+ *
+ * Stateless: no `batchCounter`, `codeGenerator`, or `logger`, so it is safe to
+ * call more than once per shape and yields identical output each time.
  */
-internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
+internal fun buildPeekFrame(shape: CodecShape): FunSpec {
     val builder =
         FunSpec
             .builder("peekFrameSize")
@@ -279,9 +296,9 @@ internal fun buildPeekFrameFun(shape: CodecShape): FunSpec {
                 .all { it is FieldSpec.FixedSize }
         if (enumFields.size == 1 && priorsFixed && suffixFixed) {
             appendPeekEnum(builder, shape, enumField)
-        } else {
-            builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
+            return builder.build()
         }
+        builder.addStatement("return %T.NoFraming", PEEK_RESULT_CN)
         return builder.build()
     }
     // `@When("remaining <op> <int>")` collapses peek to
@@ -599,7 +616,7 @@ internal fun appendPeekEnum(
  * Delegating to the codec means no peek budget is needed and the same path
  * composes through a generated value-class codec whose inner is a varint.
  *
- * Caller guarantees (in [buildPeekFrameFun]): every prior and suffix field
+ * Caller guarantees (in [buildPeekFrame]): every prior and suffix field
  * is `FixedSize`.
  */
 internal fun appendPeekVariableLengthUseCodecScalar(
@@ -835,19 +852,19 @@ internal fun appendSequentialPeek(
             is FieldSpec.RemainingBytesProtocolMessageList ->
                 error(
                     "RemainingBytesProtocolMessageList should be handled by " +
-                        "buildPeekFrameFun's upfront NoFraming short-circuit before reaching " +
+                        "buildPeekFrame's upfront NoFraming short-circuit before reaching " +
                         "the sequential walk.",
                 )
             is FieldSpec.CountPrefixedProtocolMessageList ->
                 error(
-                    "CountPrefixedProtocolMessageList should be handled by buildPeekFrameFun's " +
+                    "CountPrefixedProtocolMessageList should be handled by buildPeekFrame's " +
                         "upfront NoFraming short-circuit before reaching the sequential walk.",
                 )
             is FieldSpec.DeferredPayload ->
                 when (val extent = field.extent) {
                     is PayloadExtent.ToLimit ->
                         error(
-                            "A to-limit DeferredPayload should be handled by buildPeekFrameFun's " +
+                            "A to-limit DeferredPayload should be handled by buildPeekFrame's " +
                                 "upfront NoFraming short-circuit before reaching the sequential walk.",
                         )
                     // (issue #293) Peek shape identical to LengthFromString /
@@ -864,18 +881,18 @@ internal fun appendSequentialPeek(
                 }
             is FieldSpec.RemainingBytesString ->
                 error(
-                    "RemainingBytesString should be handled by buildPeekFrameFun's " +
+                    "RemainingBytesString should be handled by buildPeekFrame's " +
                         "upfront NoFraming short-circuit before reaching the sequential walk.",
                 )
             is FieldSpec.UseCodecScalar ->
                 error(
-                    "UseCodecScalar should be handled by buildPeekFrameFun's upfront " +
+                    "UseCodecScalar should be handled by buildPeekFrame's upfront " +
                         "NoFraming short-circuit before reaching the sequential walk; the " +
                         "generic @UseCodec peek walker is not implemented in the sequential path.",
                 )
             is FieldSpec.LengthPrefixedUseCodecList ->
                 error(
-                    "LengthPrefixedUseCodecList should be handled by buildPeekFrameFun's " +
+                    "LengthPrefixedUseCodecList should be handled by buildPeekFrame's " +
                         "upfront NoFraming short-circuit / dedicated peek emitter before " +
                         "reaching the sequential walk; the terminal-only peek walker is " +
                         "not implemented in the sequential path.",
@@ -895,14 +912,14 @@ internal fun appendSequentialPeek(
                 )
             is FieldSpec.ProtocolMessageScalar ->
                 error(
-                    "ProtocolMessageScalar should be handled by buildPeekFrameFun's " +
+                    "ProtocolMessageScalar should be handled by buildPeekFrame's " +
                         "upfront NoFraming short-circuit before reaching the sequential walk.",
                 )
             is FieldSpec.Conditional ->
                 appendSequentialPeekConditional(body, field)
             is FieldSpec.EnumScalar ->
                 error(
-                    "EnumScalar should be handled by buildPeekFrameFun's upfront NoFraming " +
+                    "EnumScalar should be handled by buildPeekFrame's upfront NoFraming " +
                         "short-circuit before reaching the sequential walk.",
                 )
         }
@@ -1091,11 +1108,11 @@ internal fun appendSequentialPeekConditional(
         is ConditionalInner.LengthPrefixedUseCodecList ->
             // Unreachable: any shape with this inner
             // collapses the whole frame to NoFraming via
-            // `buildPeekFrameFun`'s upfront short-circuit, so the
+            // `buildPeekFrame`'s upfront short-circuit, so the
             // sequential walk never reaches here.
             error(
                 "appendSequentialPeekConditional reached LengthPrefixedUseCodecList — " +
-                    "buildPeekFrameFun should have short-circuited the shape to NoFraming.",
+                    "buildPeekFrame should have short-circuited the shape to NoFraming.",
             )
         is ConditionalInner.LengthPrefixedUseCodecPayload ->
             // Peek walks the fixed-width
@@ -1113,11 +1130,11 @@ internal fun appendSequentialPeekConditional(
         is ConditionalInner.UseCodecScalar ->
             // Same NoFraming short-circuit as
             // LengthPrefixedUseCodecList. The user codec's wire width
-            // is opaque, so `buildPeekFrameFun` collapses the whole
+            // is opaque, so `buildPeekFrame` collapses the whole
             // frame; the sequential walk never visits this branch.
             error(
                 "appendSequentialPeekConditional reached UseCodecScalar — " +
-                    "buildPeekFrameFun should have short-circuited the shape to NoFraming.",
+                    "buildPeekFrame should have short-circuited the shape to NoFraming.",
             )
         is ConditionalInner.ProtocolMessageScalar ->
             // Same NoFraming short-circuit. The
@@ -1129,7 +1146,7 @@ internal fun appendSequentialPeekConditional(
             // off the RL value, so a per-field peek would be redundant.
             error(
                 "appendSequentialPeekConditional reached ProtocolMessageScalar — " +
-                    "buildPeekFrameFun should have short-circuited the shape to NoFraming.",
+                    "buildPeekFrame should have short-circuited the shape to NoFraming.",
             )
     }
     body.endControlFlow()

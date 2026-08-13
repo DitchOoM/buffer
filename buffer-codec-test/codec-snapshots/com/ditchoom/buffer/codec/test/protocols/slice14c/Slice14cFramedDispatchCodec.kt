@@ -6,13 +6,14 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
 import kotlin.Throwable
 
-public object Slice14cFramedDispatchCodec {
+public object Slice14cFramedDispatchCodec : FrameDetector {
   public fun decode(buffer: ReadBuffer, context: DecodeContext): Slice14cFramedDispatch {
     val discriminatorPosition = buffer.position()
     val __discriminator = Slice14cTinyHeaderCodec.decode(buffer, context)
@@ -36,7 +37,7 @@ public object Slice14cFramedDispatchCodec {
     is Slice14cFramedDispatch.B -> Slice14cFramedDispatchBCodec.encode(value, context, factory)
   }
 
-  public fun peekFrameSize(stream: StreamProcessor, baseOffset: Int = 0): PeekResult {
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 2) return PeekResult.NeedsMoreData
     val __framingPeek = stream.peekBuffer(baseOffset + 1, 5) ?: return PeekResult.NeedsMoreData
     try {

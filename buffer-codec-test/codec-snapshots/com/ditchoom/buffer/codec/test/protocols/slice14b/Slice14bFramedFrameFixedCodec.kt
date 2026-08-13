@@ -6,6 +6,7 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
@@ -13,7 +14,7 @@ import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
 import kotlin.Throwable
 
-public object Slice14bFramedFrameFixedCodec {
+public object Slice14bFramedFrameFixedCodec : FrameDetector {
   public fun decode(buffer: ReadBuffer, context: DecodeContext): Slice14bFramedFrameFixed {
     val __framingOuterLimit = buffer.limit()
     val __framingLength = MqttRemainingLengthCodec.decode(buffer, context)
@@ -58,7 +59,7 @@ public object Slice14bFramedFrameFixedCodec {
     buffer.writeUShort(value.tail)
   }
 
-  public fun peekFrameSize(stream: StreamProcessor, baseOffset: Int = 0): PeekResult {
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
     if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
     val __framingPeek = stream.peekBuffer(baseOffset + 0, 5) ?: return PeekResult.NeedsMoreData
     try {

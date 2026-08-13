@@ -8,11 +8,13 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.test.protocols.payload.TextPayload
 import com.ditchoom.buffer.codec.test.protocols.payload.TextPayloadCodec
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
+import com.ditchoom.buffer.utf8Size
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -173,37 +175,49 @@ class SmpFrameCodecTest {
     @Test
     fun genericFrameRoundTripsWithAnInjectedCodec() {
         val codec = SmpGenericFrameCodec(TextPayloadCodec)
-        val original =
-            SmpGenericFrame(
-                op = 0u,
-                flags = 0u,
-                payloadLength = 2u,
-                group = 9u,
-                sequence = 1u,
-                commandId = 3u,
-                payload = TextPayload("hi"),
-            )
+        val original = genericFrameFor(TextPayload("hi"))
         val buf = buildBuffer { codec.encode(it, original, EncodeContext.Empty) }
         buf.resetForRead()
         assertEquals(original, codec.decode(buf, DecodeContext.Empty))
+    }
+
+    /**
+     * The generic frame's declared length is a UTF-8 byte count, so a payload
+     * whose code-unit count differs from its byte count must still frame and
+     * round-trip. Guards the fixture helpers against drifting back to
+     * `text.length`, which would under-declare every non-ASCII frame.
+     */
+    @Test
+    fun genericFrameFramesAndRoundTripsMultiByteUtf8() {
+        val pool = BufferPool()
+        val payload = TextPayload("héllo")
+        assertEquals(6, payload.text.utf8Size(), "5 code units, 6 UTF-8 bytes")
+        val encoded = encodedGenericFrame(payload)
+        val totalBytes = encoded.remaining()
+        assertEquals(headerBytes + 6, totalBytes, "frame carries the byte count, not the code-unit count")
+        val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
+        try {
+            stream.append(encoded)
+            assertEquals(PeekResult.Complete(totalBytes), SmpGenericFrameCodec.peekFrameSize(stream))
+            val decoded =
+                stream.readBufferScoped(totalBytes) {
+                    SmpGenericFrameCodec
+                        .partial<TextPayload>(this, DecodeContext.Empty)
+                        .complete(TextPayloadCodec)
+                }
+            assertEquals(payload, decoded.payload)
+            assertEquals(0, stream.available(), "frame consumed exactly")
+        } finally {
+            stream.release()
+            pool.clear()
+        }
     }
 
     @Test
     fun genericFramePeeksWithoutTheInjectedCodec() {
         val pool = BufferPool()
         val codec = SmpGenericFrameCodec(TextPayloadCodec)
-        val original =
-            SmpGenericFrame(
-                op = 0u,
-                flags = 0u,
-                payloadLength = 3u,
-                group = 9u,
-                sequence = 1u,
-                commandId = 3u,
-                payload = TextPayload("abc"),
-            )
-        val encoded = buildBuffer { codec.encode(it, original, EncodeContext.Empty) }
-        encoded.resetForRead()
+        val encoded = encodedGenericFrame(TextPayload("abc"))
         val totalBytes = encoded.remaining()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
@@ -216,6 +230,80 @@ class SmpFrameCodecTest {
             pool.clear()
         }
     }
+
+    /**
+     * Issue #348 — the receiver, not the arithmetic.
+     *
+     * [genericFramePeeksWithoutTheInjectedCodec] proves the *body* ignores the
+     * payload codec, but it still had to construct `SmpGenericFrameCodec(...)`
+     * to get something to call. A consumer that defers the payload codec past
+     * header decode (the entire reason it reaches for `partial`) has no
+     * `Codec<P>` at framing time, so it was forced to fabricate a throwing one
+     * purely as a receiver. Framing now sits on the companion, next to
+     * `partial`, and is reachable with no instance in the expression.
+     *
+     * The `FrameDetector` binding is load-bearing too: the companion is a
+     * *value* that generic framing code can take, not just a name that happens
+     * to carry a same-shaped function.
+     */
+    @Test
+    fun genericFramePeeksOffTheCompanionWithNoCodecInstance() {
+        val pool = BufferPool()
+        val encoded = encodedGenericFrame(TextPayload("abc"))
+        val totalBytes = encoded.remaining()
+        val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
+        val detector: FrameDetector = SmpGenericFrameCodec
+        try {
+            stream.append(encoded)
+            assertEquals(PeekResult.Complete(totalBytes), SmpGenericFrameCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.Complete(totalBytes), detector.peekFrameSize(stream))
+        } finally {
+            stream.release()
+            pool.clear()
+        }
+    }
+
+    /**
+     * The streaming loop the issue asks for, start to finish, with no
+     * `Codec<P>` anywhere: frame off the companion, decode the header with
+     * `partial`, and only then pick the payload codec from what the header
+     * says. Two codec-free entry points on the same companion, which is why
+     * they belong together.
+     */
+    @Test
+    fun companionFramingFeedsPartialWithoutEverNamingAPayloadCodec() {
+        val pool = BufferPool()
+        val first = encodedGenericFrame(TextPayload("abc"))
+        val second = encodedGenericFrame(TextPayload("de"))
+        val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
+        try {
+            stream.append(first)
+            stream.append(second)
+            val payloads = mutableListOf<String>()
+            while (true) {
+                val frame = SmpGenericFrameCodec.peekFrameSize(stream)
+                if (frame !is PeekResult.Complete) break
+                val decoded =
+                    stream.readBufferScoped(frame.bytes) {
+                        val partial = SmpGenericFrameCodec.partial<TextPayload>(this, DecodeContext.Empty)
+                        // The header is in hand; *now* the codec gets chosen.
+                        assertEquals(9u.toUShort(), partial.group)
+                        partial.complete(TextPayloadCodec)
+                    }
+                payloads += decoded.payload.text
+            }
+            assertEquals(listOf("abc", "de"), payloads)
+            assertEquals(PeekResult.NeedsMoreData, SmpGenericFrameCodec.peekFrameSize(stream))
+        } finally {
+            stream.release()
+            pool.clear()
+        }
+    }
+
+    private fun encodedGenericFrame(payload: TextPayload): PlatformBuffer =
+        buildBuffer {
+            SmpGenericFrameCodec(TextPayloadCodec).encode(it, genericFrameFor(payload), EncodeContext.Empty)
+        }.also { it.resetForRead() }
 
     // ---- partial / complete deferral --------------------------------------
 
@@ -374,11 +462,23 @@ class SmpFrameCodecTest {
         SmpFrame(
             op = 0u,
             flags = 0u,
-            payloadLength =
-                payload.text
-                    .encodeToByteArray()
-                    .size
-                    .toUShort(),
+            payloadLength = payload.text.utf8Size().toUShort(),
+            group = 9u,
+            sequence = 1u,
+            commandId = 3u,
+            payload = payload,
+        )
+
+    /**
+     * `payloadLength` is the *encoded byte* count, never `text.length` —
+     * `roundTripsMultiByteUtf8Body` exercises this shape with non-ASCII, where
+     * the two disagree and a UTF-16 count would under-declare the frame.
+     */
+    private fun genericFrameFor(payload: TextPayload) =
+        SmpGenericFrame(
+            op = 0u,
+            flags = 0u,
+            payloadLength = payload.text.utf8Size().toUShort(),
             group = 9u,
             sequence = 1u,
             commandId = 3u,

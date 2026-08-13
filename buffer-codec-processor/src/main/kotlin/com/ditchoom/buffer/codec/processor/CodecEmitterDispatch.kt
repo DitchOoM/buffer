@@ -701,20 +701,27 @@ internal fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
  *   `OVERRIDE`). Covers the simple `@PacketType` path and the non-generic
  *   non-framed `@DispatchOn` path. No `Partial` member (neither legacy
  *   path emitted one here).
- * - **Monomorphic + Framed** — `object FooCodec` with NO `Codec<Parent>`
- *   superinterface, decode + framed encode + framed peek (single walker),
- *   NO wireSize (plan risk #6 triple-coupling).
+ * - **Monomorphic + Framed** — `object FooCodec` with `FrameDetector` in place
+ *   of the `Codec<Parent>` superinterface (the framed encode shape isn't a
+ *   `Codec`, but it does detect frames), decode + framed encode + framed peek
+ *   (single walker), NO wireSize (plan risk #6 triple-coupling). No companion:
+ *   an object is already its own static receiver.
  * - **Generic + Unframed** — `class FooCodec<P : Payload>(private val
  *   payloadCodec: Codec<P>) : Codec<Parent<P>>` + one private
  *   `val <field> = <VariantCodec>(payloadCodec)` per generic variant +
  *   decode/encode/wireSize/peek + the aggregator companion (`Partial<P>`).
- * - **Generic + Framed** — `class FooCodec<P>(payloadCodec)` with NO
- *   `Codec<Parent<P>>` superinterface + decode + framed encode + framed
- *   peek + aggregator companion, NO wireSize.
+ * - **Generic + Framed** — `class FooCodec<P>(payloadCodec)` with
+ *   `FrameDetector` in place of the `Codec<Parent<P>>` superinterface +
+ *   decode + framed encode + a forwarding peek whose body sits on the
+ *   companion beside the aggregator (#348 — the framed peek is one collapsed
+ *   header+prefix walk that never names a variant codec, so a consumer can
+ *   frame without supplying a `Codec<P>`), NO wireSize.
  *
  * Visibility comes from [DispatchShape.visibility] via [withVisibility].
- * `OVERRIDE` on the funs is handled inside the fun builders (Unframed →
- * override; framed encode/peek → none), so this shell never re-applies it.
+ * `OVERRIDE` on the funs is handled inside the fun builders — every emitted
+ * `peekFrameSize` overrides `FrameDetector.peekFrameSize` in both the framed
+ * and unframed shapes, and framed encode carries none — so this shell never
+ * re-applies it.
  */
 internal fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
     val parentTypeRef = shape.parentTypeRef()
@@ -726,9 +733,12 @@ internal fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
                     TypeSpec
                         .objectBuilder(shape.codecSimpleName)
                         .withVisibility(shape.visibility)
-                if (!framed) {
-                    builder.addSuperinterface(CODEC_CN.parameterizedBy(parentTypeRef))
-                }
+                // A framed dispatcher isn't a `Codec` (its encode returns a
+                // ReadBuffer), but it does detect frames — so it binds the one
+                // interface it genuinely satisfies rather than none at all.
+                builder.addSuperinterface(
+                    if (framed) FRAME_DETECTOR_CN else CODEC_CN.parameterizedBy(parentTypeRef),
+                )
                 builder.addFunction(buildDispatchDecodeFun(shape))
                 if (framed) {
                     builder.addFunction(buildFramedByDispatchOnEncodeFun(shape, parentTypeRef))
@@ -761,9 +771,9 @@ internal fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
                                 .initializer(binding.codecParameterName)
                                 .build(),
                         )
-                if (!framed) {
-                    builder.addSuperinterface(CODEC_CN.parameterizedBy(parentTypeRef))
-                }
+                builder.addSuperinterface(
+                    if (framed) FRAME_DETECTOR_CN else CODEC_CN.parameterizedBy(parentTypeRef),
+                )
                 for (variant in shape.variants) {
                     val ref = variant.codecRef as? VariantCodecRef.GenericInstance ?: continue
                     val fieldType = variant.codecClassName.parameterizedBy(typeVar)
@@ -775,15 +785,6 @@ internal fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
                     )
                 }
                 builder.addFunction(buildDispatchDecodeFun(shape))
-                if (framed) {
-                    builder.addFunction(buildFramedByDispatchOnEncodeFun(shape, parentTypeRef))
-                    builder.addFunction(buildFramedByDispatchOnPeekFun(shape))
-                } else {
-                    builder.addFunction(buildDispatchEncodeFun(shape))
-                    builder.addFunction(buildDispatchWireSizeFun(shape))
-                    builder.addFunction(buildDispatchSizeHintFun(shape))
-                    builder.addFunction(buildDispatchPeekFun(shape))
-                }
                 // The `decodeAggregating` companion (per-call payload-codec
                 // selection) is a ReReadByVariant/@DispatchOn construct — it
                 // peeks+rewinds the discriminator. A simple @PacketType
@@ -791,8 +792,32 @@ internal fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
                 // on the constructor-injected payloadCodec, so it omits the
                 // aggregator. (buildDispatchOnAggregatorCompanion requires a
                 // ValueClass discriminator and would otherwise error.)
-                if (shape.discriminator is Discriminator.ValueClass) {
-                    builder.addType(buildDispatchOnAggregatorCompanion(shape, binding))
+                val aggregator =
+                    if (shape.discriminator is Discriminator.ValueClass) {
+                        buildDispatchOnAggregatorCompanion(shape, binding)
+                    } else {
+                        null
+                    }
+                if (framed) {
+                    builder.addFunction(buildFramedByDispatchOnEncodeFun(shape, parentTypeRef))
+                    // A framed dispatcher's peek is one collapsed
+                    // header-plus-length-prefix walk — it never reaches a
+                    // variant codec, so it is as codec-independent as a
+                    // generic codec's and hoists the same way (#348).
+                    val peek = buildFramedByDispatchOnPeekFun(shape)
+                    builder.addFunction(memberPeekFun(peek))
+                    builder.addCodecCompanion(peek = peek, aggregator = aggregator)
+                } else {
+                    builder.addFunction(buildDispatchEncodeFun(shape))
+                    builder.addFunction(buildDispatchWireSizeFun(shape))
+                    builder.addFunction(buildDispatchSizeHintFun(shape))
+                    // The one shape whose peek genuinely cannot hoist: it routes
+                    // through per-variant receivers, and a generic variant's is a
+                    // constructor-injected instance field. Member-only, and no
+                    // `peek` passed below — `requireCodecIndependentPeek` would
+                    // reject this body on sight.
+                    builder.addFunction(buildDispatchPeekFun(shape))
+                    builder.addCodecCompanion(aggregator = aggregator)
                 }
                 builder.build()
             }
@@ -880,13 +905,10 @@ internal fun buildFramedByDispatchOnPeekFun(shape: DispatchShape): FunSpec {
     val builder =
         FunSpec
             .builder("peekFrameSize")
+            .addModifiers(KModifier.OVERRIDE)
             .addParameter("stream", STREAM_PROCESSOR_CN)
-            .addParameter(
-                com.squareup.kotlinpoet.ParameterSpec
-                    .builder("baseOffset", INT)
-                    .defaultValue("0")
-                    .build(),
-            ).returns(PEEK_RESULT_CN)
+            .addParameter("baseOffset", INT)
+            .returns(PEEK_RESULT_CN)
     val body = CodeBlock.builder()
     val headerWidthExpr: String
     if (shape.discriminator is Discriminator.Varint) {

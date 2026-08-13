@@ -7,6 +7,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.Decoder
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
@@ -43,7 +44,7 @@ public class Http2FrameDataCodec<P : Payload>(
 
   override fun sizeHint(`value`: Http2Frame.Data<P>, context: EncodeContext): Int = 9
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = Companion.peekFrameSize(stream, baseOffset)
 
   public class Partial<P : Payload> internal constructor(
     public val `header`: Http2LengthAndType,
@@ -58,7 +59,9 @@ public class Http2FrameDataCodec<P : Payload>(
     }
   }
 
-  public companion object {
+  public companion object : FrameDetector {
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
+
     public fun <P : Payload> partial(buffer: ReadBuffer, context: DecodeContext): Partial<P> {
       val headerRaw = buffer.readInt()
       val header = Http2LengthAndType((if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) headerRaw else swapBytes(headerRaw)).toUInt())

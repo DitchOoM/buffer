@@ -7,6 +7,7 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImage
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImageCodec
@@ -300,6 +301,79 @@ class MqttPacketCodecTest {
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
             assertEquals(PeekResult.NeedsMoreData, jpegDispatcher().peekFrameSize(stream))
+        } finally {
+            stream.release()
+            pool.clear()
+        }
+    }
+
+    /**
+     * Issue #348, dispatcher half. A `@FramedBy` dispatcher sizes a frame from
+     * the fixed header and the remaining-length prefix alone — it never reaches
+     * a variant codec — so framing must not require the `Codec<P>` that
+     * `MqttPacketCodec(...)` demands. A receiver deciding the payload codec
+     * from the decoded topic has no such codec at framing time.
+     *
+     * The `FrameDetector` binding is asserted as a value, not just called by
+     * name: the companion has to be passable to code that frames generically.
+     */
+    @Test
+    fun peekFrameSizeIsReachableOffTheCompanionWithNoDispatcherInstance() {
+        val pool = BufferPool()
+        val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
+        val detector: FrameDetector = MqttPacketCodec
+        try {
+            assertEquals(PeekResult.NeedsMoreData, MqttPacketCodec.peekFrameSize(stream))
+            val two = BufferFactory.Default.allocate(2)
+            two.writeByte(0xC0.toByte())
+            two.writeByte(0x00)
+            two.resetForRead()
+            stream.append(two)
+            assertEquals(PeekResult.Complete(2), MqttPacketCodec.peekFrameSize(stream))
+            assertEquals(PeekResult.Complete(2), detector.peekFrameSize(stream))
+            // Instance and companion agree — the member forwards to the body.
+            assertEquals(
+                jpegDispatcher().peekFrameSize(stream),
+                MqttPacketCodec.peekFrameSize(stream),
+            )
+        } finally {
+            stream.release()
+            pool.clear()
+        }
+    }
+
+    /**
+     * A frame carrying a real payload, framed off the companion and then
+     * decoded with a payload codec chosen afterwards — the deferral order the
+     * companion placement exists to permit.
+     */
+    @Test
+    fun companionFramesAPublishBeforeThePayloadCodecIsChosen() {
+        val pool = BufferPool()
+        val msg =
+            MqttPacket.Publish<JpegImage>(
+                header = MqttFixedHeader(0x32u),
+                topic = "t/1",
+                packetId = PacketId(0x002Au),
+                payload =
+                    JpegImage(
+                        width = 4u,
+                        height = 8u,
+                        data = byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte()),
+                    ),
+            )
+        val encoded = encode(msg)
+        val totalBytes = encoded.remaining()
+        val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
+        try {
+            stream.append(encoded)
+            assertEquals(PeekResult.Complete(totalBytes), MqttPacketCodec.peekFrameSize(stream))
+            val decoded =
+                stream.readBufferScoped(totalBytes) {
+                    jpegDispatcher().decode(this, DecodeContext.Empty)
+                }
+            assertEquals(msg, decoded)
+            assertEquals(0, stream.available(), "frame consumed exactly")
         } finally {
             stream.release()
             pool.clear()
