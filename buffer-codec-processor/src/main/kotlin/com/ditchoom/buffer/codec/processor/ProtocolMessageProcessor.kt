@@ -1838,6 +1838,54 @@ class ProtocolMessageProcessor(
 
         val isSealedParent = Modifier.SEALED in owner.modifiers && owner.classKind == ClassKind.INTERFACE
 
+        // E5 — framing must be uniform across a dispatch family.
+        //
+        // A dispatcher emits calls into its variant codecs, and a framed codec has a different
+        // encode signature from an unframed one (`encode(value, context, factory): ReadBuffer`
+        // versus `Codec.encode(buffer, value, context)`). The analyzer derives dispatcher-level
+        // framing only for `@DispatchOn` parents carrying `@FramedBy`, so the two ways to get a
+        // framed variant under an unframed dispatcher both emit a generated file that does not
+        // compile, with no diagnostic:
+        //
+        //   1. `@FramedBy` on a sealed parent dispatched by plain `@PacketType` — the variants
+        //      inherit framing, the dispatcher does not.
+        //   2. `@FramedBy` on an individual dispatch variant — that one variant is framed while
+        //      its dispatcher is not.
+        //
+        // Both are rejected here. See #359 for the alternative (deriving dispatcher framing for
+        // `@PacketType` too, which is a wire-layout decision rather than a cleanup).
+        if (isSealedParent && !owner.hasAnnotation(DISPATCH_ON_SHORT, DISPATCH_ON_QNAME)) {
+            logger.error(
+                "@FramedBy on $ownerName is a sealed dispatch parent without @DispatchOn. The " +
+                    "framing prefix has to follow a discriminator the wire format declares, and " +
+                    "under plain @PacketType the discriminator is a byte the dispatcher " +
+                    "synthesizes rather than a field — so the framing cannot be positioned " +
+                    "relative to it, and the emitted dispatcher would not compile. Give the " +
+                    "parent a value-class discriminator and dispatch on it: " +
+                    "`@DispatchOn(MyHeader::class)` with `@FramedBy(..., after = \"header\")`.",
+                owner,
+            )
+            return
+        }
+        val framedDispatchParent =
+            owner.dispatchParentOrNull()?.takeIf { parent ->
+                !parent.hasAnnotation(FRAMED_BY_SHORT, FRAMED_BY_QNAME)
+            }
+        if (framedDispatchParent != null) {
+            val parentName =
+                framedDispatchParent.qualifiedName?.asString() ?: framedDispatchParent.simpleName.asString()
+            logger.error(
+                "@FramedBy on $ownerName frames a single variant of the unframed dispatcher " +
+                    "$parentName. A dispatcher calls every variant codec through one encode " +
+                    "signature, and framing changes that signature, so the emitted $parentName " +
+                    "codec would not compile. Move @FramedBy onto $parentName (which requires " +
+                    "@DispatchOn there, so the framing prefix can follow the discriminator " +
+                    "field) — every variant then inherits it.",
+                owner,
+            )
+            return
+        }
+
         if (afterName.isEmpty()) {
             // E4 — @FramedBy with no `after` is incompatible with @PacketType dispatch.
             val variantsWithPacketType =
@@ -1934,6 +1982,21 @@ class ProtocolMessageProcessor(
                 )
             }
         }
+    }
+
+    /**
+     * The sealed `@ProtocolMessage` parent this class dispatches under, or null when it is not a
+     * dispatch variant. Only `@PacketType`-carrying subclasses participate in dispatch, so a
+     * sealed subclass without one (a plain nested type) is not a variant.
+     */
+    private fun KSClassDeclaration.dispatchParentOrNull(): KSClassDeclaration? {
+        if (!hasAnnotation(PACKET_TYPE_SHORT, PACKET_TYPE_QNAME)) return null
+        return superTypes
+            .mapNotNull { it.resolve().declaration as? KSClassDeclaration }
+            .firstOrNull { parent ->
+                Modifier.SEALED in parent.modifiers &&
+                    parent.hasAnnotation("ProtocolMessage", PROTOCOL_MESSAGE_QNAME)
+            }
     }
 
     private fun KSClassDeclaration.hasAnnotation(
