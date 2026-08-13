@@ -6,6 +6,7 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.ownedBytesFrom
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
@@ -101,6 +102,50 @@ class WsFramePeekCodecTest {
         assertDripPeek(binaryFrame(5, masked = true))
         assertDripPeek(binaryFrame(256, masked = false)) // 16-bit escape
         assertDripPeek(binaryFrame(256, masked = true))
+    }
+
+    /**
+     * A *variant* codec is class-shaped (it takes the payload codec) and its own shape
+     * cannot frame — the outer dispatcher owns framing. Its peek still answers from the
+     * companion, with no `Codec<P>` in the expression, exactly as an `object` codec's
+     * always has (#348).
+     *
+     * This is the behavioural statement of the placement rule: hoisting follows what a
+     * peek body can *reach*, not whether the shape frames, so `NoFraming` stays a runtime
+     * answer rather than an entry point that exists for some codec shapes and not others.
+     * The snapshot pins the emitted text; this pins what a consumer observes.
+     */
+    @Test
+    fun anUnframableVariantCodecStillAnswersFromItsCompanion() {
+        val pool = BufferPool()
+        val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
+        try {
+            stream.append(encodeToBuffer(binaryFrame(5, masked = false)))
+            // No instance, no payload codec — and the same answer the instance gives.
+            assertEquals(PeekResult.NoFraming, WsFrameBinaryCodec.peekFrameSize(stream))
+            assertEquals(
+                PeekResult.NoFraming,
+                WsFrameBinaryCodec(BinaryDataCodec).peekFrameSize(stream),
+            )
+        } finally {
+            stream.release()
+            pool.clear()
+        }
+    }
+
+    /** And the companion is a `FrameDetector` *value*, not merely a name carrying the function. */
+    @Test
+    fun anUnframableVariantCompanionIsAFrameDetectorValue() {
+        val detector: FrameDetector = WsFrameBinaryCodec
+        val pool = BufferPool()
+        val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
+        try {
+            stream.append(encodeToBuffer(binaryFrame(5, masked = false)))
+            assertEquals(PeekResult.NoFraming, detector.peekFrameSize(stream))
+        } finally {
+            stream.release()
+            pool.clear()
+        }
     }
 
     private fun fullyBufferedPeek(frame: WsFrame.Binary<BinaryData>): PeekResult {
