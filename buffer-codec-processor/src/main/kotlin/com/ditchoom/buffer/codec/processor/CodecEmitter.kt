@@ -1978,6 +1978,25 @@ internal sealed interface CodecCompanion {
         val partial: FunSpec,
         val peek: FunSpec,
     ) : CodecCompanion
+
+    /**
+     * A generic dispatcher's `decodeAggregating` companion, already built
+     * whole by `buildDispatchOnAggregatorCompanion`. Only `@DispatchOn`
+     * value-class discriminators emit one.
+     */
+    data class AggregatorOnly(
+        val aggregator: TypeSpec,
+    ) : CodecCompanion
+
+    /**
+     * The aggregator plus framing, for a `@FramedBy` generic dispatcher.
+     * Its peek is a single collapsed header+prefix walk that never names a
+     * variant codec, so it hoists exactly like a generic codec's.
+     */
+    data class AggregatorAndFraming(
+        val aggregator: TypeSpec,
+        val peek: FunSpec,
+    ) : CodecCompanion
 }
 
 /**
@@ -2014,6 +2033,15 @@ internal fun TypeSpec.Builder.addCodecCompanion(companion: CodecCompanion): Type
                     .addSuperinterface(FRAME_DETECTOR_CN)
                     .addFunction(companion.peek)
                     .addFunction(companion.partial)
+                    .build(),
+            )
+        is CodecCompanion.AggregatorOnly -> addType(companion.aggregator)
+        is CodecCompanion.AggregatorAndFraming ->
+            addType(
+                companion.aggregator
+                    .toBuilder()
+                    .addSuperinterface(FRAME_DETECTOR_CN)
+                    .addFunction(companion.peek)
                     .build(),
             )
     }
