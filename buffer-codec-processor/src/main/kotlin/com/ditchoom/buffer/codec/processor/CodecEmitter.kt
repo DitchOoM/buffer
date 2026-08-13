@@ -590,7 +590,9 @@ internal class CodecEmitter(
                     .addFunction(buildEncodeFun(shape))
                     .addFunction(buildWireSizeFun(shape))
                     .addFunction(buildSizeHintFun(shape))
-                    .addFunction(buildPeekFrameFun(shape))
+                    // An `object` codec is already its own static receiver, so
+                    // the body stays on it — no companion, framed or not.
+                    .addFunction(buildPeekFrame(shape).fn)
                     .also { builder ->
                         // Every codec carrying a typed payload field
                         // gets a `Partial` nested class plus a `partial(buffer,
@@ -681,6 +683,10 @@ internal class CodecEmitter(
         val typeVar = TypeVariableName(binding.typeVariableName, binding.bound)
         val parameterizedMessage = shape.messageClassName.parameterizedBy(typeVar)
         val codecOfP = CODEC_CN.parameterizedBy(typeVar)
+        // A framed shape always frames, so the classification is a statement of
+        // that invariant rather than a decision. Built once and reused for both
+        // placements.
+        val peek = PeekEmit.Framed(buildFramedByPeekFrameFun(shape, framedBy))
         return TypeSpec
             .classBuilder(shape.codecSimpleName)
             .withVisibility(shape.visibility)
@@ -698,24 +704,16 @@ internal class CodecEmitter(
             ).addSuperinterface(FRAME_DETECTOR_CN)
             .addFunction(buildFramedByDecodeFun(shape, framedBy, parameterizedMessage))
             .addFunction(buildFramedByEncodeFun(shape, framedBy, parameterizedMessage))
-            .addFunction(memberPeekFun(PeekEmit.Framed(buildFramedByPeekFrameFun(shape, framedBy))))
+            .addFunction(memberPeekFun(peek))
             .also { builder ->
-                // Same placement rule as the unframed generic codec: framing
-                // derives from the length prefix, never from the injected
-                // payload codec, so it belongs where a consumer without one
-                // can reach it.
-                val peek = buildFramedByPeekFrameFun(shape, framedBy)
+                // Same placement rule as the unframed generic codec, through the
+                // same helper: framing derives from the length prefix, never
+                // from the injected payload codec, so it belongs where a
+                // consumer without one can reach it.
                 if (shouldEmitPartial(shape)) {
                     builder.addType(buildPartialClassTypeSpec(shape, payloadTypeParameter = binding))
-                    builder.addCodecCompanion(
-                        CodecCompanion.PartialAndFraming(
-                            partial = buildPartialEntryFun(shape, binding),
-                            peek = peek,
-                        ),
-                    )
-                } else {
-                    builder.addCodecCompanion(CodecCompanion.FramingOnly(peek))
                 }
+                builder.addCodecCompanion(codecCompanionFor(shape, peek, binding))
             }.build()
     }
 
@@ -2032,15 +2030,26 @@ internal fun TypeSpec.Builder.addCodecCompanion(companion: CodecCompanion): Type
 internal fun memberPeekFun(peek: PeekEmit): FunSpec =
     when (peek) {
         is PeekEmit.Unframed -> peek.fn
-        is PeekEmit.Framed ->
+        is PeekEmit.Framed -> {
+            // Signature and argument list are derived from the companion's own
+            // spec rather than restated, so renaming a parameter (or adding
+            // one to `FrameDetector`) can't leave the forwarder calling with
+            // names that no longer exist — a mismatch KSP would emit happily
+            // and only the consumer's compile would catch.
+            val signature = peek.fn
             FunSpec
-                .builder("peekFrameSize")
-                .addModifiers(KModifier.OVERRIDE)
-                .addParameter("stream", STREAM_PROCESSOR_CN)
-                .addParameter("baseOffset", INT)
-                .returns(PEEK_RESULT_CN)
-                .addStatement("return Companion.peekFrameSize(stream, baseOffset)")
-                .build()
+                .builder(signature.name)
+                .addModifiers(signature.modifiers)
+                .addParameters(signature.parameters)
+                .returns(
+                    signature.returnType
+                        ?: error("peek FunSpec must declare a return type; got ${signature.name}"),
+                ).addStatement(
+                    "return Companion.%N(%L)",
+                    signature,
+                    signature.parameters.joinToString(", ") { it.name },
+                ).build()
+        }
     }
 
 /** Index of the (single) `DeferredPayload` field, or -1. */
