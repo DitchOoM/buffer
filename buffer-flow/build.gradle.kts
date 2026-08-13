@@ -356,3 +356,12 @@ dokka {
         reportUndocumented.set(false)
     }
 }
+
+// `check` mode: the return-value checker only inspects declarations explicitly marked
+// @MustUseReturnValues (here, ByteSink — see ByteStream.kt). It has to be non-disabled on the
+// DECLARING module for the marker to be emitted at all; consumers then opt in on their own side by
+// compiling with the same flag. Deliberately `check` rather than `full`, so this adds no diagnostics
+// beyond the one contract it is meant to protect: a discarded write count is a truncated message.
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask<*>>().configureEach {
+    compilerOptions.freeCompilerArgs.add("-Xreturn-value-checker=check")
+}

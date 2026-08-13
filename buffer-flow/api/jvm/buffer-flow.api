@@ -27,6 +27,12 @@ public final class com/ditchoom/buffer/flow/ByteSink$DefaultImpls {
 	public static fun writeGathered-egxuoLU (Lcom/ditchoom/buffer/flow/ByteSink;Ljava/util/List;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
+public final class com/ditchoom/buffer/flow/ByteSinkStalledException : java/lang/IllegalStateException {
+	public fun <init> (II)V
+	public final fun getAccepted ()I
+	public final fun getPending ()I
+}
+
 public abstract interface class com/ditchoom/buffer/flow/ByteSource {
 	public abstract fun getReadPolicy ()Lcom/ditchoom/buffer/flow/ReadPolicy;
 	public abstract fun isOpen ()Z
@@ -196,6 +202,11 @@ public final class com/ditchoom/buffer/flow/TypedKt {
 	public static synthetic fun typed$default (Lcom/ditchoom/buffer/flow/ByteSink;Lcom/ditchoom/buffer/codec/Codec;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/EncodeContext;ILjava/lang/Object;)Lcom/ditchoom/buffer/flow/Sender;
 	public static synthetic fun typed$default (Lcom/ditchoom/buffer/flow/ByteSource;Lcom/ditchoom/buffer/codec/Codec;Lcom/ditchoom/buffer/codec/DecodeContext;Lcom/ditchoom/buffer/ByteOrder;ILjava/lang/Object;)Lcom/ditchoom/buffer/flow/Receiver;
 	public static synthetic fun typed$default (Lcom/ditchoom/buffer/flow/ByteStream;Lcom/ditchoom/buffer/codec/Codec;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/DecodeContext;Lcom/ditchoom/buffer/codec/EncodeContext;Lcom/ditchoom/buffer/ByteOrder;ILjava/lang/Object;)Lcom/ditchoom/buffer/flow/Connection;
+}
+
+public final class com/ditchoom/buffer/flow/WriteFullyKt {
+	public static final fun writeFully (Lcom/ditchoom/buffer/flow/ByteSink;Lcom/ditchoom/buffer/ReadBuffer;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static final fun writeFully-exY8QGI (Lcom/ditchoom/buffer/flow/ByteSink;Lcom/ditchoom/buffer/ReadBuffer;JLkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
 public abstract interface class com/ditchoom/buffer/flow/WritePolicy {
