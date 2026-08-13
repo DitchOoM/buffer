@@ -487,7 +487,9 @@ class MutableDataBuffer private constructor(
                     position(start + length)
                     policy.decoded(value)
                 }
-                else -> policy.malformedRead(Utf8TextDecoder.firstMalformedOffset(bytes, 0, length))
+                Utf8.Strict, Utf8.Checked ->
+                    policy.malformedRead(Utf8TextDecoder.firstMalformedOffset(bytes, 0, length))
+                is CustomTextPolicy -> error("unreachable: handled above")
             }
         }
     }
@@ -1148,7 +1150,9 @@ class MutableDataBufferSlice(
                     position(start + length)
                     policy.decoded(value)
                 }
-                else -> policy.malformedRead(Utf8TextDecoder.firstMalformedOffset(bytes, 0, length))
+                Utf8.Strict, Utf8.Checked ->
+                    policy.malformedRead(Utf8TextDecoder.firstMalformedOffset(bytes, 0, length))
+                is CustomTextPolicy -> error("unreachable: handled above")
             }
         }
     }

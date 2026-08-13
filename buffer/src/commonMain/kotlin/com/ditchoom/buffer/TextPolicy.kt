@@ -152,6 +152,12 @@ object Utf8 {
      * Validating UTF-8 that reports failure as data: `writeText` returns [TextOutcome],
      * `readText` returns [DecodedText], rejection is atomic. For callers that branch on
      * malformed input programmatically (repair, truncate-at-index, protocol rejection).
+     *
+     * "As data" covers ill-formed *text*, not buffer bounds: a `length` the buffer cannot
+     * satisfy still throws [BufferUnderflowException] and a write past the limit still throws
+     * [BufferOverflowException], on this policy exactly as on the others. Those report a
+     * caller or protocol error rather than a property of the text, so they stay thrown —
+     * exhaustively matching [DecodedText] is not the same as handling every failure.
      */
     object Checked : TextPolicy<TextOutcome, DecodedText>() {
         /**
@@ -433,7 +439,29 @@ fun CharSequence.toReadBuffer(
             is SizeHint.BytesPerChar -> (length * sizing.ratio).toInt().coerceAtLeast(1)
         }
     val buffer = factory.allocate(capacity)
-    buffer.writeText(this, policy)
+    // The write can fail after the allocation succeeds — [Utf8.Strict] on ill-formed input
+    // under [SizeHint.UpperBound], or an undersized [SizeHint.BytesPerChar] guess overflowing.
+    // Dropping the buffer there is only harmless where the allocation is GC-managed, and
+    // `factory` is the caller's: on WASM a native buffer's linear memory is never reclaimed
+    // without an explicit release, so an exception would leak it out of a capped pool for the
+    // life of the module. Release before rethrowing; the success path hands ownership to the
+    // returned slice.
+    try {
+        buffer.writeText(this, policy)
+    } catch (
+        @Suppress("TooGenericExceptionCaught") e: Throwable,
+    ) {
+        // Same shape as `use`: the write's failure is the one worth reporting, so a release
+        // that also fails is attached as suppressed rather than replacing it.
+        try {
+            buffer.freeNativeMemory()
+        } catch (
+            @Suppress("TooGenericExceptionCaught") releaseFailure: Throwable,
+        ) {
+            e.addSuppressed(releaseFailure)
+        }
+        throw e
+    }
     buffer.resetForRead()
     return buffer.slice()
 }

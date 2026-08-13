@@ -485,25 +485,30 @@ abstract class BaseJvmBuffer(
         ) {
             // Deliberately swallowed: the JDK error is only a detection signal — the canonical
             // answer comes from the reference contract below.
+            //
+            // The one staging copy in the read pipeline, and it serves BOTH results. U+FFFD
+            // placement and the reported byte offset are this library's implementation-
+            // independent contract, so the reference decoder is the single authority for each —
+            // never the platform decoder, whose replacement behavior AND whose stopping point on
+            // ill-formed input both vary (JDK versions, Android libcore). Reading the offset off
+            // `window.position()` would make this the one platform whose `byteOffset` is produced
+            // by different code than the contract it must match, leaving agreement to hold only
+            // for the vectors someone remembered to test.
+            val bytes = ByteArray(length)
+            val staging = byteBuffer.asReadOnlyBuffer()
+            (staging as Buffer).limit(start + length)
+            staging.get(bytes)
             when (policy) {
                 Utf8.Lenient -> {
-                    // The one staging copy in the read pipeline: U+FFFD placement is this
-                    // library's implementation-independent contract, so the reference decoder
-                    // (ByteArray-based) is the single authority — never the platform decoder,
-                    // whose replacement behavior varies across JDK versions and Android libcore.
-                    val bytes = ByteArray(length)
-                    val staging = byteBuffer.asReadOnlyBuffer()
-                    (staging as Buffer).limit(start + length)
-                    staging.get(bytes)
                     val value = Utf8TextDecoder.decodeSubstituting(bytes, 0, length)
                     buffer.position(start + length)
                     policy.decoded(value)
                 }
-                // Zero-copy rejection: on a malformed result the JDK decoder leaves the input
-                // window's position at the START of the ill-formed sequence — exactly the
-                // offset the contract reports. Agreement with the reference decoder's answer
-                // is pinned by ReadTextTests' exotic vectors on every factory.
-                else -> policy.malformedRead(window.position() - start)
+                // Atomic rejection: the decode ran against `window`, a duplicate, so this
+                // buffer's position never left `start`.
+                Utf8.Strict, Utf8.Checked ->
+                    policy.malformedRead(Utf8TextDecoder.firstMalformedOffset(bytes, 0, length))
+                is CustomTextPolicy -> error("unreachable: handled above")
             }
         }
     }

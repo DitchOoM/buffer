@@ -226,6 +226,34 @@ class TextPolicyTests {
         }
     }
 
+    /**
+     * Both ways `toReadBuffer` can fail *after* allocating, run against a native factory on
+     * every platform. The allocation is released before the exception propagates, so the
+     * release path itself is exercised here — on WASM the buffer's linear memory would
+     * otherwise be lost from a capped pool for the life of the module, and a wrong release
+     * (double-free, or freeing the returned slice's storage) surfaces on the native targets.
+     */
+    @Test
+    fun toReadBufferReleasesItsAllocationWhenTheWriteFails() {
+        assertFailsWith<MalformedTextException.UnpairedSurrogate> {
+            // UpperBound is the default: it allocates first, then the strict write rejects.
+            (loneHigh + "tail").toReadBuffer(Utf8.Strict, SizeHint.UpperBound, BufferFactory.Default)
+        }
+        assertFailsWith<BufferOverflowException> {
+            "€€€€€€€€".toReadBuffer(Utf8.Lenient, SizeHint.BytesPerChar(1f), BufferFactory.Default)
+        }
+    }
+
+    /** The success path still owns its bytes — the release above must not have been eager. */
+    @Test
+    fun toReadBufferSurvivesAFailedSiblingAllocation() {
+        assertFailsWith<MalformedTextException.UnpairedSurrogate> {
+            loneHigh.toReadBuffer(Utf8.Strict, SizeHint.UpperBound, BufferFactory.Default)
+        }
+        val readBuffer = "€ ok".toReadBuffer(Utf8.Strict, SizeHint.UpperBound, BufferFactory.Default)
+        assertEquals("€ ok", readBuffer.readText(readBuffer.remaining(), Utf8.Strict))
+    }
+
     @Test
     fun overflowThrowsInsteadOfShortWrite() {
         val buffer = BufferFactory.Default.allocate(2)
