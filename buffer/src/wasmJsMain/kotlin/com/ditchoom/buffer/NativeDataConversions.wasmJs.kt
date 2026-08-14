@@ -81,13 +81,11 @@ actual fun PlatformBuffer.toMutableNativeData(): MutableNativeData {
     return MutableNativeData(
         when (unwrapped) {
             is LinearBuffer -> {
-                // Create a new non-owning LinearBuffer view sharing the same memory
-                LinearBuffer(
-                    unwrapped.baseOffset + unwrapped.position(),
-                    unwrapped.remaining(),
-                    unwrapped.byteOrder,
-                    owned = false,
-                )
+                // A non-owning view over the same memory. Taken via slice() rather than built by
+                // hand — the two produce the same window, but slice() links the view to the owning
+                // buffer, so using this handle after that buffer is released throws instead of
+                // reading whatever the allocator has since reissued the block to.
+                unwrapped.slice(unwrapped.byteOrder)
             }
             else -> {
                 val bytes = toByteArray()

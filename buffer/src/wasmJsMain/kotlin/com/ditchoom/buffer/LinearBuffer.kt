@@ -131,6 +131,10 @@ private external fun copyToJsArray(
  * @param owned whether releasing this buffer returns its block to [LinearMemoryAllocator]. Defaults
  *   to `false` so that a construction site that has not thought about ownership fails safe by
  *   leaking rather than by double-freeing.
+ * @param owner the buffer whose block this one aliases, for non-owning views taken with [slice]. A
+ *   view has no release of its own, so its liveness IS its owner's; see [checkNotFreed]. Null for an
+ *   owning buffer and for [PlatformBuffer.wrapNativeAddress], whose memory belongs to somebody
+ *   outside this allocator entirely and whose lifetime this class cannot speak for.
  */
 @Suppress("TooManyFunctions")
 class LinearBuffer(
@@ -138,6 +142,7 @@ class LinearBuffer(
     capacity: Int,
     byteOrder: ByteOrder,
     private val owned: Boolean = false,
+    private val owner: LinearBuffer? = null,
 ) : BaseWebBuffer(capacity, byteOrder),
     NativeMemoryAccess,
     CloseableBuffer {
@@ -216,12 +221,20 @@ class LinearBuffer(
      * parked block's next-link, and the resulting `memory access out of bounds` surfaces at an
      * unrelated allocation later.
      *
-     * Non-owning views ([slice], [PlatformBuffer.wrapNativeAddress]) never set the flag, so this
-     * does not catch a slice outliving a released parent — that needs the parent's liveness, which
-     * is issue #362's territory, not this check's.
+     * A non-owning view never sets its own flag — releasing one is a no-op — so its liveness is its
+     * [owner]'s, and the check follows the link. [slice] points every view straight at the owning
+     * buffer rather than at the buffer it was taken from, so this is one field read and one branch
+     * however many times a slice has been sliced, and never a chain walk.
+     *
+     * [PlatformBuffer.wrapNativeAddress] has no owner to consult: that memory belongs to something
+     * outside this allocator, and guessing at its lifetime would be worse than declining to.
      */
     private fun checkNotFreed() {
         if (freed) throw IllegalStateException("Buffer has been freed")
+        val owningBuffer = owner
+        if (owningBuffer != null && owningBuffer.freed) {
+            throw IllegalStateException("Buffer has been freed: this is a view of a buffer that was released")
+        }
     }
 
     /**
@@ -439,8 +452,14 @@ class LinearBuffer(
     /**
      * A zero-copy view of the remaining bytes, sharing this buffer's linear memory.
      *
-     * The slice is non-owning: releasing it does nothing, and it must not outlive this buffer —
-     * once the parent is released its block can be reissued to an unrelated allocation.
+     * The slice is non-owning: releasing it does nothing, and it must not outlive this buffer — once
+     * the owner is released its block can be reissued to an unrelated allocation, and a write through
+     * a stale view then lands on somebody else's bytes, or on a parked block's next-link. The view
+     * carries a link to the owning buffer so that using it after that point throws instead.
+     *
+     * The link points at the *owner*, not at the buffer `slice()` was called on: a view of a view
+     * aliases the same block and the same lifetime, so flattening keeps [checkNotFreed] to a single
+     * branch regardless of depth.
      */
     override fun slice(byteOrder: ByteOrder): LinearBuffer {
         checkNotFreed()
@@ -451,6 +470,7 @@ class LinearBuffer(
             limitValue - positionValue,
             byteOrder,
             owned = false,
+            owner = if (owned) this else owner,
         )
     }
 
