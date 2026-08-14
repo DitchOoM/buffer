@@ -112,26 +112,59 @@ class LinearMemoryRuntimeScratchTest {
      */
     @Test
     fun aCorruptedNextLinkIsReportedInsteadOfTrapping() {
-        val parked = BufferFactory.Default.allocate(1056)
-        val keepAbove = BufferFactory.Default.allocate(1056)
-        val parkedAddress = (parked as NativeMemoryAccess).nativeAddress.toInt()
+        assertCorruptLinkIsReportedAndRecovers(sizeBytes = 1056, corruptLink = Int.MIN_VALUE)
+    }
+
+    /**
+     * The same tripwire with a link near `Int.MAX_VALUE`, which is the value class the bound has to
+     * be written carefully to catch: `offset + aligned > nextOffset` overflows to a negative for
+     * anything up there and silently passes, so the guard would wave through exactly the wild
+     * offsets it exists to reject and the allocation would trap in `Pointer.loadInt` after all.
+     * Fails against the `+ aligned >` form, passes against `> nextOffset - aligned`.
+     */
+    @Test
+    fun aCorruptedNextLinkNearIntMaxIsReportedInsteadOfTrapping() {
+        assertCorruptLinkIsReportedAndRecovers(sizeBytes = 1064, corruptLink = Int.MAX_VALUE - 255)
+    }
+
+    /**
+     * Park a block of [sizeBytes], scribble [corruptLink] over its intrusive next-link exactly as a
+     * stale write through a released view would, and require the next allocation of that size class
+     * to report it rather than trap.
+     *
+     * Then require the class to still be usable. The allocator drops the corrupt chain before
+     * throwing precisely so one bad link is a single reported incident and not a permanent one — if
+     * the head were left installed, every later allocation of this class would re-read it and throw
+     * for the life of the process. That recovery is asserted here rather than papered over by
+     * repairing linear memory by hand, which would also have to guess the link it overwrote.
+     */
+    private fun assertCorruptLinkIsReportedAndRecovers(
+        sizeBytes: Int,
+        corruptLink: Int,
+    ) {
+        val parked = BufferFactory.Default.allocate(sizeBytes)
+        val keepAbove = BufferFactory.Default.allocate(sizeBytes)
+        val access =
+            checkNotNull(parked.nativeMemoryAccess) {
+                "BufferFactory.Default must yield native memory on wasmJs"
+            }
+        val parkedAddress = access.nativeAddress.toInt()
         parked.freeNativeMemory()
 
-        // Exactly what a stale write through a released view does to the intrusive link.
-        Pointer(parkedAddress.toUInt()).storeInt(Int.MIN_VALUE)
+        Pointer(parkedAddress.toUInt()).storeInt(corruptLink)
 
         val failure =
             assertFailsWith<IllegalStateException> {
-                BufferFactory.Default.allocate(1056)
+                BufferFactory.Default.allocate(sizeBytes)
             }
         assertTrue(
             failure.message!!.contains("free list is corrupt"),
             "expected a diagnosable message, got: ${failure.message}",
         )
 
-        // Put the chain back so the shared allocator is usable by the rest of the suite.
-        Pointer(parkedAddress.toUInt()).storeInt(-1)
-        BufferFactory.Default.allocate(1056).freeNativeMemory()
+        // The chain was dropped on the way out of the throw, so the class allocates again.
+        val recovered = BufferFactory.Default.allocate(sizeBytes)
+        recovered.freeNativeMemory()
         keepAbove.freeNativeMemory()
     }
 }

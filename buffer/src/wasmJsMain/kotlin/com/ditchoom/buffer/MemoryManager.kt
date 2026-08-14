@@ -287,13 +287,19 @@ object LinearMemoryAllocator {
             // `link` came out of the freed block's own first four bytes, which is *linear memory*
             // and therefore writable by anything holding a stale address. A wild value here traps
             // inside `Pointer.loadInt`, naming nothing; a throw names the offset and the state.
-            if (recycled < heapBase || recycled + aligned > nextOffset) {
-                failCorruptFreeList("head", recycled, aligned)
+            //
+            // The upper bound is `> nextOffset - aligned`, never `+ aligned > nextOffset`: the
+            // corrupt values this guard exists to catch are arbitrary, so the addition form wraps
+            // for anything near Int.MAX_VALUE and lets exactly those through to the trap. Both
+            // operands here are pool offsets bounded by the 256MB ceiling, so the subtraction
+            // cannot underflow into a false positive.
+            if (recycled < heapBase || recycled > nextOffset - aligned) {
+                failCorruptFreeList("head", recycled, aligned, NO_BLOCK)
             }
             // The block's first 4 bytes hold the next link; reading it releases the block entirely.
             val link = Pointer(recycled.toUInt()).loadInt()
-            if (link != NO_BLOCK && (link < heapBase || link + aligned > nextOffset)) {
-                failCorruptFreeList("link out of block $recycled", link, aligned)
+            if (link != NO_BLOCK && (link < heapBase || link > nextOffset - aligned)) {
+                failCorruptFreeList("link", link, aligned, recycled)
             }
             setHead(aligned, link)
             freeListBytes -= aligned
@@ -319,26 +325,45 @@ object LinearMemoryAllocator {
     }
 
     /**
-     * Report a free-list entry that does not point into the pool. Its own function so the message
-     * building stays off [allocateOffset]'s hot path — only the compares are inlined there.
+     * Drop the corrupt size class, then report it. Its own function so neither the message building
+     * nor the chain surgery lands in [allocateOffset]'s body — only the compares are inlined there,
+     * which is also why [what] and [inBlock] arrive as plain arguments rather than as an
+     * interpolated string built at the call site.
+     *
+     * The chain is dropped *before* throwing because the head slot is what the next allocation of
+     * this size class reads. Leaving a corrupt head installed turns one report into a permanent one:
+     * every subsequent allocation of that class re-reads the same bad offset and throws again, for
+     * the life of the process, which is a wedged allocator rather than a reported incident.
+     *
+     * Dropping it leaks the chain. The links are precisely what is untrustworthy here, so the chain
+     * cannot be walked to count or re-park its blocks; those bytes stay counted in [freeListBytes]
+     * and are never handed out again. That is the honest post-corruption state — the alternative is
+     * following the same links this function exists to reject — and it is bounded by the pool
+     * ceiling, unlike the wedge.
      */
     private fun failCorruptFreeList(
         what: String,
         offset: Int,
         aligned: Int,
-    ): Nothing =
+        inBlock: Int,
+    ): Nothing {
+        setHead(aligned, NO_BLOCK)
+        val where = if (inBlock == NO_BLOCK) what else "$what out of block $inBlock"
         throw IllegalStateException(
-            "LinearMemoryAllocator free list is corrupt: $what = $offset " +
+            "LinearMemoryAllocator free list is corrupt: $where = $offset " +
                 "(0x${offset.toUInt().toString(HEX_RADIX)}) is outside the $aligned-byte size " +
                 "class's pool [$heapBase, $nextOffset). Something wrote into a block after it was " +
                 "released — the free list's next-link lives in the first four bytes of a released " +
                 "block, so a stale write lands on it. Usual causes: a slice() or wrapNativeAddress() " +
                 "view used after its owner was released, a retained nativeAddress, or a scoped " +
                 "allocation from the Kotlin/Wasm runtime larger than the pool's base offset. " +
+                "The $aligned-byte free chain has been dropped so allocation can continue; its " +
+                "blocks are leaked for the life of the process. " +
                 "Pool: heapBase=$heapBase nextOffset=$nextOffset heapEnd=$heapEnd " +
                 "poolBytes=$poolBytes freeListBytes=$freeListBytes reusedBlocks=$reusedBlocks " +
                 "runtimeScratchReserveBytes=$RUNTIME_SCRATCH_RESERVE_BYTES",
         )
+    }
 
     /**
      * Grow the pool so it can satisfy an [aligned]-byte allocation, in [GROWTH_PAGES]-page steps.
