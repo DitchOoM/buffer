@@ -154,10 +154,12 @@ object LinearMemoryAllocator {
      * with *every* subsequent scoped allocation.
      *
      * The reserve is address space only: WASM commits pages on first touch, and these are pages the
-     * runtime touches anyway. It is not a hard guarantee — a single scoped allocation larger than
-     * the reserve would still reach the pool — but it puts the floor far above anything interop
-     * scratch does, and [allocateOffset] now reports a breach as a diagnosable error instead of a
-     * trap.
+     * runtime touches anyway. It is a floor, not a guarantee, and what must fit under it is the
+     * **total** allocated within one top-level scope across any nested scopes — a scope
+     * bump-allocates cumulatively, so many small allocations breach it exactly as one large one
+     * does. No constant can bound a scope that stages a payload, which is why the fix for such a
+     * caller is to allocate from the pool instead (see `buffer-compression`'s wasmJs interop) rather
+     * than to widen this. [writeCanary] is what reports a breach that happens anyway.
      */
     val runtimeScratchReserveBytes: Int get() = LinearMemoryConfig.runtimeScratchReserveMB * BYTES_PER_MB
 
@@ -508,7 +510,7 @@ object LinearMemoryAllocator {
         val sizeBytes = jsMemorySize()
         val reserve = runtimeScratchReserveBytes
         // Grow far enough that [base, base + initial) exists, where base clears the reserve.
-        val base = if (sizeBytes > reserve) sizeBytes else reserve
+        val base = poolBaseFor(sizeBytes, reserve)
         val pagesToGrow = (base + initialPages * PAGE_SIZE - sizeBytes) / PAGE_SIZE
         val previousSizePages = jsMemoryGrow(pagesToGrow)
         if (previousSizePages < 0) {
@@ -516,7 +518,7 @@ object LinearMemoryAllocator {
         }
         // Re-derive from what the engine actually reported rather than from the pre-grow read.
         val grantedBase = previousSizePages * PAGE_SIZE
-        heapBase = if (grantedBase > reserve) grantedBase else reserve
+        heapBase = poolBaseFor(grantedBase, reserve)
         // The canary occupies the very bottom of the pool, so allocations start above it.
         writeCanary()
         nextOffset = poolFloor
@@ -527,6 +529,19 @@ object LinearMemoryAllocator {
         poolBytes = pagesToGrow * PAGE_SIZE
         initialized = true
     }
+
+    /**
+     * Where the pool starts, given the current top of linear memory and the reserve.
+     *
+     * Two branches, and only one of them runs in any given process: a module that has not touched
+     * linear memory reports a top of 0 and gets the reserve, while one whose interop ran first gets
+     * whatever already exists. The allocator initialises once per process, so neither branch can be
+     * covered by driving the singleton — hence the rule lives here, where both are reachable.
+     */
+    internal fun poolBaseFor(
+        topOfMemoryBytes: Int,
+        reserveBytes: Int,
+    ): Int = if (topOfMemoryBytes > reserveBytes) topOfMemoryBytes else reserveBytes
 
     /**
      * Stamp the canary words at the bottom of the pool.

@@ -210,3 +210,35 @@ class LinearMemoryRuntimeScratchTest {
         keepAbove.freeNativeMemory()
     }
 }
+
+/**
+ * Both branches of the pool-base rule.
+ *
+ * [LinearMemoryAllocator] initialises exactly once per process, so whichever branch runs first is
+ * the only one a test driving the singleton can ever reach — which is how the "interop already grew
+ * memory" branch shipped unexercised. The rule is a pure function precisely so both are reachable.
+ */
+class PoolBaseRuleTest {
+    @Test
+    fun aModuleThatHasNotTouchedLinearMemoryStartsAtTheReserve() {
+        // memory.grow returns 0 pages for a WasmGC module that has needed no linear memory yet.
+        assertEquals(1024 * 1024, LinearMemoryAllocator.poolBaseFor(0, 1024 * 1024))
+    }
+
+    @Test
+    fun aModuleWhoseInteropRanFirstStartsAboveWhatExists() {
+        // The branch that reproduces the pre-fix placement, and so has to be deliberate.
+        assertEquals(4 * 1024 * 1024, LinearMemoryAllocator.poolBaseFor(4 * 1024 * 1024, 1024 * 1024))
+    }
+
+    @Test
+    fun theReserveWinsUpToItsOwnSize() {
+        assertEquals(1024 * 1024, LinearMemoryAllocator.poolBaseFor(1024 * 1024, 1024 * 1024))
+        assertEquals(1024 * 1024, LinearMemoryAllocator.poolBaseFor(1024 * 1024 - 1, 1024 * 1024))
+    }
+
+    @Test
+    fun aRaisedReserveMovesTheFloor() {
+        assertEquals(8 * 1024 * 1024, LinearMemoryAllocator.poolBaseFor(2 * 1024 * 1024, 8 * 1024 * 1024))
+    }
+}

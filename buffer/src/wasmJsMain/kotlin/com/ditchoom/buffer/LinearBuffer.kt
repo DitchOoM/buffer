@@ -147,7 +147,11 @@ class LinearBuffer(
      * The offset in WASM linear memory for zero-copy JS interop.
      * Use with `new DataView(wasmExports.memory.buffer, nativeAddress, nativeSize)`.
      */
-    override val nativeAddress: Long get() = baseOffset.toLong()
+    override val nativeAddress: Long get(): Long {
+        // Handing out the address of a released block is how stale views are born.
+        checkNotFreed()
+        return baseOffset.toLong()
+    }
 
     /**
      * The size of the native memory region in bytes.
@@ -158,7 +162,10 @@ class LinearBuffer(
      * Get the linear memory offset for the current position.
      * This can be passed to JavaScript for zero-copy access via DataView.
      */
-    val linearMemoryOffset: Int get() = baseOffset + positionValue
+    val linearMemoryOffset: Int get(): Int {
+        checkNotFreed()
+        return baseOffset + positionValue
+    }
 
     /**
      * Write from a JS Int8Array into this buffer.
@@ -173,6 +180,7 @@ class LinearBuffer(
         srcOffset: Int = 0,
         length: Int,
     ): LinearBuffer {
+        checkNotFreed()
         copyFromJsArray(jsArray, baseOffset + positionValue, srcOffset, length)
         positionValue += length
         return this
@@ -191,15 +199,42 @@ class LinearBuffer(
         dstOffset: Int = 0,
         length: Int,
     ) {
+        checkNotFreed()
         copyToJsArray(jsArray, baseOffset + positionValue, dstOffset, length)
         positionValue += length
     }
 
     /**
+     * Fails fast if this buffer's block has already gone back to [LinearMemoryAllocator].
+     *
+     * [CloseableBuffer.isFreed] documents that "once true, all read/write operations on this buffer
+     * will throw", and every other platform enforces exactly that — `NativeBuffer.checkOpen()` on
+     * Linux, an accessor that throws on the JVM's deterministic buffers, the JDK arena under
+     * `FfmBuffer`. wasmJs was the one that set the flag and never read it, so a read or write after
+     * release quietly touched whatever the allocator had since handed the block to. That is worse
+     * here than anywhere else: since the free list is intrusive, a stale write also rewrites a
+     * parked block's next-link, and the resulting `memory access out of bounds` surfaces at an
+     * unrelated allocation later.
+     *
+     * Non-owning views ([slice], [PlatformBuffer.wrapNativeAddress]) never set the flag, so this
+     * does not catch a slice outliving a released parent — that needs the parent's liveness, which
+     * is issue #362's territory, not this check's.
+     */
+    private fun checkNotFreed() {
+        if (freed) throw IllegalStateException("Buffer has been freed")
+    }
+
+    /**
      * Get a Pointer to the specified offset within this buffer.
      * Pointer is a value class - no allocation, compiles to raw address arithmetic.
+     *
+     * The single choke point for every scalar load and store, which is why the liveness check lives
+     * here rather than being repeated across the eight primitives [BaseWebBuffer] dispatches to.
      */
-    private fun ptr(offset: Int): Pointer = Pointer((baseOffset + offset).toUInt())
+    private fun ptr(offset: Int): Pointer {
+        checkNotFreed()
+        return Pointer((baseOffset + offset).toUInt())
+    }
 
     // Native memory access using Pointer operations
     override fun loadByte(index: Int): Byte = ptr(index).loadByte()
@@ -342,6 +377,7 @@ class LinearBuffer(
         mask: Int,
         maskOffset: Int,
     ) {
+        checkNotFreed()
         val size = source.remaining()
         if (size == 0) return
         if (mask == 0) {
@@ -407,6 +443,7 @@ class LinearBuffer(
      * once the parent is released its block can be reissued to an unrelated allocation.
      */
     override fun slice(byteOrder: ByteOrder): LinearBuffer {
+        checkNotFreed()
         // Create a new LinearBuffer view of the remaining portion
         // This is zero-copy - just creates a new view with different base offset
         return LinearBuffer(
@@ -510,6 +547,7 @@ class LinearBuffer(
     }
 
     override fun write(buffer: ReadBuffer) {
+        checkNotFreed()
         val size = buffer.remaining()
         checkWriteBounds(size)
         val actual = buffer.unwrapFully()
@@ -536,6 +574,7 @@ class LinearBuffer(
         length: Int,
         charset: Charset,
     ): String {
+        checkNotFreed()
         if (length == 0) return ""
         requireReadable(length)
         val encoding =

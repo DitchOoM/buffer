@@ -72,7 +72,9 @@ physical pages on first touch, so a large *reservation* is not a large upfront f
 
 ### The bottom of linear memory belongs to the runtime
 
-The pool is based **1MB above address 0**, and never at whatever `memory.grow` returns on its own.
+The pool is based at **`max(current top of linear memory, 1MB)`** — never at whatever `memory.grow`
+returns on its own. In a module that has not touched linear memory yet, that is the 1MB reserve; if
+interop ran first and memory already extends past it, the pool starts above what exists.
 
 That return value — the page count before the grow — reads like a watermark above which the new
 address space is exclusively the caller's. It is not one. The stdlib's own allocator, the one behind
@@ -92,10 +94,46 @@ This is not an ordering hazard you can dodge by allocating late. A Kotlin/Wasm m
 `memory.grow` returns 0 on the first allocation and a naive pool is based at address 0 — colliding
 with every subsequent scoped allocation.
 
-The reserve costs address space only, on pages the runtime touches anyway. It is a floor rather than
-a guarantee: a single scoped allocation larger than 1MB would still reach the pool. Should that ever
-happen, the allocator bounds-checks each free-list entry before dereferencing it and raises an
-`IllegalStateException` naming the offset and the pool state, instead of trapping.
+The reserve costs address space only, on pages the runtime touches anyway.
+
+It is a floor, not a guarantee. What has to fit under it is the **total** allocated within one
+top-level `withScopedMemoryAllocator` scope, across any nested scopes — not the size of any single
+`allocate` call, since the scope bump-allocates cumulatively. So 512 allocations of 4KB breach a 1MB
+reserve just as surely as one 2MB allocation does.
+
+Two things catch a breach rather than leaving it to be inferred from corrupted data:
+
+- A **canary** at the pool's base. The runtime bumps upward from address 0, so any contiguous scratch
+  write that reaches the pool crosses it first, whatever it goes on to overwrite. It is checked on
+  each allocation — one load and one compare — and reported as
+  `LinearMemoryFault.RuntimeScratchBreach`. This is the only thing that catches scratch landing on
+  *live buffer bytes*; the free-list check below sees only writes that hit a released block.
+- A **bounds check** on every free-list entry before it is dereferenced, reported as
+  `LinearMemoryFault.FreeListCorruption`, instead of trapping in `Pointer.loadInt` with a stack that
+  names nothing.
+
+Both are `sealed class LinearMemoryFault` (which extends `IllegalStateException`), so branch on the
+type and read the fields rather than parsing the message:
+
+```kotlin
+try {
+    process(BufferFactory.Default.allocate(size))
+} catch (fault: LinearMemoryFault.RuntimeScratchBreach) {
+    telemetry.report(fault.overwrittenWords, fault.reserveBytes)
+    dropCachedBuffers()
+}
+```
+
+Both are contained before they are thrown — the corrupt free chain is dropped, the canary is
+re-stamped — so the allocator keeps working and keeps detecting. Containment covers the *allocator*,
+not your data: either fault means something wrote into memory the pool had handed out, so discard
+state derived from buffers rather than simply retrying.
+
+**Do not stage payloads through `withScopedMemoryAllocator`.** Scratch is as large as whatever you
+put through it, so a payload-sized staging buffer beats any reserve you pick. Allocate from a
+`BufferFactory` instead — that memory is the pool's, and the collision cannot arise. If you must,
+raise the floor with `configureWasmMemory(runtimeScratchReserveMB = ...)` before the first
+allocation.
 
 ### Releasing is required
 
