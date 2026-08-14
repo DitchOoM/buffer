@@ -79,6 +79,19 @@ object LinearMemoryConfig {
      */
     var maxSizeMB: Int = 256
         internal set
+
+    /**
+     * Bytes kept below the pool for the Kotlin/Wasm runtime's own scratch, in megabytes.
+     *
+     * See [LinearMemoryAllocator.runtimeScratchReserveBytes] for why the bottom of linear memory is
+     * not the pool's to take. This is a floor, not a guarantee — a single top-level
+     * `withScopedMemoryAllocator` scope that allocates more than this in total still reaches the pool
+     * — so it is configurable for workloads that stage large payloads through the runtime's
+     * allocator. [LinearMemoryAllocator.checkRuntimeScratchCanary] is what tells you the default was
+     * not enough, rather than leaving it to be inferred from corrupted data.
+     */
+    var runtimeScratchReserveMB: Int = 1
+        internal set
 }
 
 /**
@@ -89,7 +102,7 @@ object LinearMemoryConfig {
  *
  * The allocation strategy:
  * 1. Call memory.grow() to add pages - returns previous size
- * 2. Base the pool above both that previous size and [RUNTIME_SCRATCH_RESERVE_BYTES]
+ * 2. Base the pool above both that previous size and [LinearMemoryAllocator.runtimeScratchReserveBytes]
  *    (see [runtimeScratchReserveBytes] for why the bottom of linear memory is not ours to take)
  * 3. Subsequent allocations reuse an exact-fit block from the free list, or bump from there
  * 4. [free] returns a block: rewinding the bump pointer if it is the top allocation, otherwise
@@ -107,6 +120,13 @@ object LinearMemoryConfig {
 object LinearMemoryAllocator {
     private var initialized = false
     private var heapBase: Int = 0
+
+    /**
+     * Lowest offset the pool will hand out: the canary occupies `[heapBase, poolFloor)`. Everything
+     * that rewinds or bounds the bump pointer measures from here, so no path can walk back over the
+     * canary and destroy the one thing that reports a breach.
+     */
+    private val poolFloor: Int get() = heapBase + CANARY_BYTES
     private var nextOffset: Int = 0
     private var heapEnd: Int = 0
 
@@ -139,7 +159,7 @@ object LinearMemoryAllocator {
      * scratch does, and [allocateOffset] now reports a breach as a diagnosable error instead of a
      * trap.
      */
-    val runtimeScratchReserveBytes: Int get() = RUNTIME_SCRATCH_RESERVE_BYTES
+    val runtimeScratchReserveBytes: Int get() = LinearMemoryConfig.runtimeScratchReserveMB * BYTES_PER_MB
 
     /**
      * Size-classed free list, exact fit: a freed 8 KiB block never satisfies a 4 KiB request. That
@@ -217,6 +237,7 @@ object LinearMemoryAllocator {
     fun configure(
         initialSizeMB: Int = 16,
         maxSizeMB: Int = 256,
+        runtimeScratchReserveMB: Int = 1,
     ) {
         if (initialized) {
             throw IllegalStateException(
@@ -228,8 +249,10 @@ object LinearMemoryAllocator {
         require(maxSizeMB >= initialSizeMB) {
             "maxSizeMB ($maxSizeMB) must be at least initialSizeMB ($initialSizeMB)"
         }
+        require(runtimeScratchReserveMB > 0) { "runtimeScratchReserveMB must be positive" }
         LinearMemoryConfig.initialSizeMB = initialSizeMB
         LinearMemoryConfig.maxSizeMB = maxSizeMB
+        LinearMemoryConfig.runtimeScratchReserveMB = runtimeScratchReserveMB
     }
 
     /**
@@ -272,6 +295,13 @@ object LinearMemoryAllocator {
             initializeMemory()
         }
 
+        // One i32 load and one compare: has the runtime's scratch grown across the pool base since
+        // the last allocation? Cheaper than the four free-list compares below, and unlike them it
+        // catches a write that landed on live buffer bytes rather than on a parked block's link.
+        if (Pointer(heapBase.toUInt()).loadInt() != CANARY_VALUE) {
+            failRuntimeScratchBreach()
+        }
+
         // 8-byte alignment for optimal memory access
         val aligned = (size + ALIGN_8_MASK) and ALIGN_8_MASK.inv()
         lastAlignedSize = aligned
@@ -293,13 +323,13 @@ object LinearMemoryAllocator {
             // for anything near Int.MAX_VALUE and lets exactly those through to the trap. Both
             // operands here are pool offsets bounded by the 256MB ceiling, so the subtraction
             // cannot underflow into a false positive.
-            if (recycled < heapBase || recycled > nextOffset - aligned) {
-                failCorruptFreeList("head", recycled, aligned, NO_BLOCK)
+            if (recycled < poolFloor || recycled > nextOffset - aligned) {
+                failCorruptFreeList(LinearMemoryFault.FreeListCorruption.Site.Head, recycled, aligned, NO_BLOCK)
             }
             // The block's first 4 bytes hold the next link; reading it releases the block entirely.
             val link = Pointer(recycled.toUInt()).loadInt()
-            if (link != NO_BLOCK && (link < heapBase || link > nextOffset - aligned)) {
-                failCorruptFreeList("link", link, aligned, recycled)
+            if (link != NO_BLOCK && (link < poolFloor || link > nextOffset - aligned)) {
+                failCorruptFreeList(LinearMemoryFault.FreeListCorruption.Site.Link, link, aligned, recycled)
             }
             setHead(aligned, link)
             freeListBytes -= aligned
@@ -342,26 +372,21 @@ object LinearMemoryAllocator {
      * ceiling, unlike the wedge.
      */
     private fun failCorruptFreeList(
-        what: String,
+        site: LinearMemoryFault.FreeListCorruption.Site,
         offset: Int,
         aligned: Int,
         inBlock: Int,
     ): Nothing {
         setHead(aligned, NO_BLOCK)
-        val where = if (inBlock == NO_BLOCK) what else "$what out of block $inBlock"
-        throw IllegalStateException(
-            "LinearMemoryAllocator free list is corrupt: $where = $offset " +
-                "(0x${offset.toUInt().toString(HEX_RADIX)}) is outside the $aligned-byte size " +
-                "class's pool [$heapBase, $nextOffset). Something wrote into a block after it was " +
-                "released — the free list's next-link lives in the first four bytes of a released " +
-                "block, so a stale write lands on it. Usual causes: a slice() or wrapNativeAddress() " +
-                "view used after its owner was released, a retained nativeAddress, or a scoped " +
-                "allocation from the Kotlin/Wasm runtime larger than the pool's base offset. " +
-                "The $aligned-byte free chain has been dropped so allocation can continue; its " +
-                "blocks are leaked for the life of the process. " +
-                "Pool: heapBase=$heapBase nextOffset=$nextOffset heapEnd=$heapEnd " +
-                "poolBytes=$poolBytes freeListBytes=$freeListBytes reusedBlocks=$reusedBlocks " +
-                "runtimeScratchReserveBytes=$RUNTIME_SCRATCH_RESERVE_BYTES",
+        throw LinearMemoryFault.FreeListCorruption(
+            site = site,
+            offset = offset,
+            sizeClassBytes = aligned,
+            inBlock = inBlock,
+            heapBase = heapBase,
+            nextOffset = nextOffset,
+            heapEnd = heapEnd,
+            poolBytes = poolBytes,
         )
     }
 
@@ -413,7 +438,11 @@ object LinearMemoryAllocator {
             // read and write; releasing one now fails the bounds check and leaks it, which is the
             // safe direction. This branch is defensive — nothing else grows linear memory today.
             heapBase = grantedStart
-            nextOffset = grantedStart
+            // The new base needs its own canary before anything is handed out above it, or the
+            // check in allocateOffset reads whatever the engine left there and reports a phantom
+            // breach on the next allocation.
+            writeCanary()
+            nextOffset = poolFloor
             heapEnd = grantedStart + pages * PAGE_SIZE
             // Every parked block lies in the region we just left, and the invariant the rest of this
             // object relies on is that a free-list entry is always within [heapBase, nextOffset).
@@ -477,8 +506,9 @@ object LinearMemoryAllocator {
      */
     private fun initializeMemory() {
         val sizeBytes = jsMemorySize()
+        val reserve = runtimeScratchReserveBytes
         // Grow far enough that [base, base + initial) exists, where base clears the reserve.
-        val base = if (sizeBytes > RUNTIME_SCRATCH_RESERVE_BYTES) sizeBytes else RUNTIME_SCRATCH_RESERVE_BYTES
+        val base = if (sizeBytes > reserve) sizeBytes else reserve
         val pagesToGrow = (base + initialPages * PAGE_SIZE - sizeBytes) / PAGE_SIZE
         val previousSizePages = jsMemoryGrow(pagesToGrow)
         if (previousSizePages < 0) {
@@ -486,11 +516,74 @@ object LinearMemoryAllocator {
         }
         // Re-derive from what the engine actually reported rather than from the pre-grow read.
         val grantedBase = previousSizePages * PAGE_SIZE
-        heapBase = if (grantedBase > RUNTIME_SCRATCH_RESERVE_BYTES) grantedBase else RUNTIME_SCRATCH_RESERVE_BYTES
-        nextOffset = heapBase
+        heapBase = if (grantedBase > reserve) grantedBase else reserve
+        // The canary occupies the very bottom of the pool, so allocations start above it.
+        writeCanary()
+        nextOffset = poolFloor
         heapEnd = grantedBase + pagesToGrow * PAGE_SIZE
-        poolBytes = if (heapEnd > heapBase) heapEnd - heapBase else 0
+        // Bytes this allocator took from the engine — NOT the usable span, which excludes the reserve
+        // and the canary. LinearMemoryConfig.maxSizeMB bounds what is claimed, so it has to be
+        // measured the same way or the ceiling silently admits the reserve on top of the limit.
+        poolBytes = pagesToGrow * PAGE_SIZE
         initialized = true
+    }
+
+    /**
+     * Stamp the canary words at the bottom of the pool.
+     *
+     * Deliberately inside the pool rather than just below [heapBase]: the bytes below the pool may
+     * still be live runtime scratch, and writing a canary into them would be the very corruption this
+     * is meant to detect. Sitting at the pool's own base costs [CANARY_BYTES] of pool space and is
+     * memory nothing else claims.
+     */
+    private fun writeCanary() {
+        var word = 0
+        while (word < CANARY_WORDS) {
+            Pointer((heapBase + word * Int.SIZE_BYTES).toUInt()).storeInt(CANARY_VALUE)
+            word++
+        }
+    }
+
+    /**
+     * Whether the runtime's scratch has grown into the pool.
+     *
+     * The Kotlin/Wasm runtime bump-allocates its interop scratch upward from address 0 on every
+     * top-level `withScopedMemoryAllocator` scope, so a scope large enough to reach the pool writes
+     * across [heapBase] — and the canary sits exactly there. Returns false once that has happened.
+     *
+     * This detects a *contiguous* write that crosses the pool base, which is what copying a payload
+     * into scratch does. A scope that allocates past the pool but writes only sparsely, above the
+     * canary, is not caught — no cheap check can see that, and it is not what interop staging does.
+     *
+     * Costs one i32 load and one compare, which is why only the first word is consulted here; the
+     * full set is used to characterise the breach in [failRuntimeScratchBreach].
+     */
+    fun checkRuntimeScratchCanary(): Boolean = !initialized || Pointer(heapBase.toUInt()).loadInt() == CANARY_VALUE
+
+    /**
+     * Report scratch that reached the pool, then re-stamp the canary.
+     *
+     * Re-stamping matters: leaving it broken would make every later allocation throw, wedging the
+     * allocator over a condition that has already been reported once — the same failure mode
+     * [failCorruptFreeList] avoids by dropping its chain.
+     */
+    private fun failRuntimeScratchBreach(): Nothing {
+        var intact = 0
+        var word = 0
+        while (word < CANARY_WORDS) {
+            if (Pointer((heapBase + word * Int.SIZE_BYTES).toUInt()).loadInt() == CANARY_VALUE) intact++
+            word++
+        }
+        writeCanary()
+        throw LinearMemoryFault.RuntimeScratchBreach(
+            overwrittenWords = CANARY_WORDS - intact,
+            totalWords = CANARY_WORDS,
+            reserveBytes = runtimeScratchReserveBytes,
+            heapBase = heapBase,
+            nextOffset = nextOffset,
+            heapEnd = heapEnd,
+            poolBytes = poolBytes,
+        )
     }
 
     /**
@@ -567,7 +660,7 @@ object LinearMemoryAllocator {
         return AllocationStats(
             heapBase = heapBase,
             nextOffset = nextOffset,
-            totalAllocated = nextOffset - heapBase,
+            totalAllocated = nextOffset - poolFloor,
             freeListBytes = freeListBytes,
             reusedBlocks = reusedBlocks,
             poolBytes = poolBytes,
@@ -581,11 +674,13 @@ object LinearMemoryAllocator {
     fun reset() {
         if (initialized) {
             // Zero out previously used memory
-            val usedBytes = nextOffset - heapBase
+            val usedBytes = nextOffset - poolFloor
             if (usedBytes > 0) {
-                zeroMemory(heapBase, usedBytes)
+                zeroMemory(poolFloor, usedBytes)
             }
-            nextOffset = heapBase
+            nextOffset = poolFloor
+            // Zeroing stops at poolFloor, but re-stamp anyway so reset() is a full repair.
+            writeCanary()
         }
         smallHeads.fill(NO_BLOCK)
         largeHeads.clear()
@@ -595,11 +690,13 @@ object LinearMemoryAllocator {
 
     private const val NO_BLOCK = -1
 
-    /**
-     * 1 MiB floor under [heapBase] — the region the Kotlin/Wasm runtime bump-allocates its interop
-     * scratch from on every `withScopedMemoryAllocator` scope. See [runtimeScratchReserveBytes].
-     */
-    private const val RUNTIME_SCRATCH_RESERVE_BYTES = 1024 * 1024
+    /** Words of canary at the pool's base, and the value each holds. See [writeCanary]. */
+    private const val CANARY_WORDS = 8
+
+    private const val CANARY_BYTES = CANARY_WORDS * Int.SIZE_BYTES
+
+    /** Arbitrary but recognisable in a memory dump, and not a value the allocator ever stores. */
+    private const val CANARY_VALUE = 0x5EC0FFEE
 
     private const val HEX_RADIX = 16
 

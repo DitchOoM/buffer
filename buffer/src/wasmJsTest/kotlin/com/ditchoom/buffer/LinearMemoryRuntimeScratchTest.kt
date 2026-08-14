@@ -106,6 +106,46 @@ class LinearMemoryRuntimeScratchTest {
     }
 
     /**
+     * The canary: scratch that crosses the pool's base is reported, and the allocator keeps working.
+     *
+     * This is the half the free-list guard cannot cover. That guard only fires when a stray write
+     * happens to land on a released block's first four bytes; a write that lands on *live* buffer
+     * bytes is invisible to it. The canary sits at the pool's base, and the runtime bump-allocates
+     * upward from address 0, so any contiguous scratch write that reaches the pool at all crosses it
+     * first — whatever it goes on to overwrite.
+     *
+     * Clobbering the canary by hand is exactly what a scope past the reserve does to it.
+     */
+    @Test
+    fun scratchCrossingThePoolBaseIsReportedAndTheAllocatorRecovers() {
+        BufferFactory.Default.allocate(1072).freeNativeMemory()
+        val heapBase = LinearMemoryAllocator.getAllocationStats().heapBase
+        Pointer(heapBase.toUInt()).storeInt(0x0BAD_BEEF)
+        assertTrue(
+            !LinearMemoryAllocator.checkRuntimeScratchCanary(),
+            "the canary should read as breached once its first word is overwritten",
+        )
+
+        val fault =
+            assertFailsWith<LinearMemoryFault.RuntimeScratchBreach> {
+                BufferFactory.Default.allocate(1072)
+            }
+        assertEquals(1, fault.overwrittenWords, "one word was clobbered, so one should be reported")
+        assertEquals(
+            LinearMemoryAllocator.runtimeScratchReserveBytes,
+            fault.reserveBytes,
+            "the fault should name the reserve that proved too small",
+        )
+
+        // Re-stamped on the way out: a breach is one reported incident, not a wedged allocator.
+        assertTrue(
+            LinearMemoryAllocator.checkRuntimeScratchCanary(),
+            "the canary should be re-stamped before the fault is thrown",
+        )
+        BufferFactory.Default.allocate(1072).freeNativeMemory()
+    }
+
+    /**
      * The tripwire, which is what makes a residual breach diagnosable: corrupt a parked block's
      * next-link by hand and require the next allocation of that class to report it, rather than trap
      * inside `Pointer.loadInt` with a stack that names nothing.
@@ -153,14 +193,16 @@ class LinearMemoryRuntimeScratchTest {
 
         Pointer(parkedAddress.toUInt()).storeInt(corruptLink)
 
-        val failure =
-            assertFailsWith<IllegalStateException> {
+        // Typed, and asserted on the fields rather than the message — the message is a log
+        // summary whose wording is not API.
+        val fault =
+            assertFailsWith<LinearMemoryFault.FreeListCorruption> {
                 BufferFactory.Default.allocate(sizeBytes)
             }
-        assertTrue(
-            failure.message!!.contains("free list is corrupt"),
-            "expected a diagnosable message, got: ${failure.message}",
-        )
+        assertEquals(LinearMemoryFault.FreeListCorruption.Site.Link, fault.site)
+        assertEquals(corruptLink, fault.offset, "the fault should name the offset it rejected")
+        assertEquals(sizeBytes, fault.sizeClassBytes)
+        assertEquals(parkedAddress, fault.inBlock, "the fault should name the block the link came from")
 
         // The chain was dropped on the way out of the throw, so the class allocates again.
         val recovered = BufferFactory.Default.allocate(sizeBytes)
