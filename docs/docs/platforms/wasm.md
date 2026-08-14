@@ -70,6 +70,33 @@ Growing is cheap in the other direction: `memory.grow` reserves address space an
 physical pages on first touch, so a large *reservation* is not a large upfront footprint. What
 `initialSizeMB` buys is avoiding the growth step itself, not memory you would otherwise pay for.
 
+### The bottom of linear memory belongs to the runtime
+
+The pool is based **1MB above address 0**, and never at whatever `memory.grow` returns on its own.
+
+That return value — the page count before the grow — reads like a watermark above which the new
+address space is exclusively the caller's. It is not one. The stdlib's own allocator, the one behind
+`kotlin.wasm.unsafe.withScopedMemoryAllocator` that every byte-exchanging piece of interop goes
+through, opens each top-level scope as `ScopedMemoryAllocator(startAddress = 0)`. It bump-allocates
+upward **from address 0** every time and grows memory only when its own pointer would run past the
+current size; it never consults, and cannot be told about, memory somebody else grew. So the low end
+of linear memory is the runtime's, repeatedly and forever.
+
+A pool based there is handed out on top of live interop scratch, and the corruption goes both ways:
+the runtime's writes trash buffer contents, and because the free list's next-link lives in the first
+four bytes of a released block, they turn the free list into wild offsets that trap the *next*
+allocation of that size class as `memory access out of bounds` — far from the write that caused it.
+
+This is not an ordering hazard you can dodge by allocating late. A Kotlin/Wasm module can start with
+**zero** pages of linear memory (it is WasmGC; nothing but the unsafe API puts anything there), so
+`memory.grow` returns 0 on the first allocation and a naive pool is based at address 0 — colliding
+with every subsequent scoped allocation.
+
+The reserve costs address space only, on pages the runtime touches anyway. It is a floor rather than
+a guarantee: a single scoped allocation larger than 1MB would still reach the pool. Should that ever
+happen, the allocator bounds-checks each free-list entry before dereferencing it and raises an
+`IllegalStateException` naming the offset and the pool state, instead of trapping.
+
 ### Releasing is required
 
 Linear memory is **not** garbage collected — it lives outside the Wasm-GC heap, and a `LinearBuffer`

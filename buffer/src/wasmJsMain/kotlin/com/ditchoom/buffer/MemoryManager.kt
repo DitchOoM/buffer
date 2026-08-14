@@ -89,7 +89,8 @@ object LinearMemoryConfig {
  *
  * The allocation strategy:
  * 1. Call memory.grow() to add pages - returns previous size
- * 2. Use the offset (previousSize * 64KB) as our heap base
+ * 2. Base the pool above both that previous size and [RUNTIME_SCRATCH_RESERVE_BYTES]
+ *    (see [runtimeScratchReserveBytes] for why the bottom of linear memory is not ours to take)
  * 3. Subsequent allocations reuse an exact-fit block from the free list, or bump from there
  * 4. [free] returns a block: rewinding the bump pointer if it is the top allocation, otherwise
  *    parking it on the size-classed free list
@@ -99,7 +100,7 @@ object LinearMemoryConfig {
  * is explicitly released via `freeNativeMemory()` / `use { }`; dropping the reference leaks it.
  *
  * This is safe because:
- * - memory.grow() returns pages that weren't previously mapped
+ * - the pool sits above the region the Kotlin/Wasm runtime allocates its own scratch from
  * - Kotlin/WASM uses WasmGC for objects (separate from linear memory)
  * - Pointer operations compile to native i32.load/i32.store
  */
@@ -108,6 +109,37 @@ object LinearMemoryAllocator {
     private var heapBase: Int = 0
     private var nextOffset: Int = 0
     private var heapEnd: Int = 0
+
+    /**
+     * Bytes at the bottom of linear memory the pool must never claim, because the Kotlin/Wasm
+     * runtime allocates its own scratch there.
+     *
+     * `memory.grow()` returning the previous page count reads like a watermark above which the
+     * new address space is exclusively ours. It is not. The stdlib's own allocator — the one
+     * behind `kotlin.wasm.unsafe.withScopedMemoryAllocator`, which every piece of interop that
+     * exchanges bytes with the host goes through — opens each top-level scope as
+     * `ScopedMemoryAllocator(startAddress = 0)`. It bump-allocates upward **from address 0** every
+     * time, and grows memory only when its bump pointer would run past the current size. It never
+     * consults, and cannot be told about, memory somebody else grew.
+     *
+     * So the low end of linear memory is the runtime's, permanently and repeatedly. A pool based
+     * there is handed out on top of live interop scratch, in both directions: the runtime's writes
+     * corrupt buffer contents, and — since the free list's next-link lives in the first four bytes
+     * of a parked block — they corrupt the free list itself into wild offsets that trap the next
+     * allocation of that size class as `memory access out of bounds`.
+     *
+     * That is not a theoretical ordering hazard. A Kotlin/Wasm module can start with **zero** pages
+     * of linear memory (it is WasmGC; nothing but the unsafe API puts anything there), in which case
+     * `memory.grow` returns 0 on the first allocation and the pool is based at address 0 — colliding
+     * with *every* subsequent scoped allocation.
+     *
+     * The reserve is address space only: WASM commits pages on first touch, and these are pages the
+     * runtime touches anyway. It is not a hard guarantee — a single scoped allocation larger than
+     * the reserve would still reach the pool — but it puts the floor far above anything interop
+     * scratch does, and [allocateOffset] now reports a breach as a diagnosable error instead of a
+     * trap.
+     */
+    val runtimeScratchReserveBytes: Int get() = RUNTIME_SCRATCH_RESERVE_BYTES
 
     /**
      * Size-classed free list, exact fit: a freed 8 KiB block never satisfies a 4 KiB request. That
@@ -206,19 +238,7 @@ object LinearMemoryAllocator {
      */
     private fun ensureInitialized() {
         if (initialized) return
-
-        // Grow memory to get pages exclusively for our use
-        val previousSizePages = jsMemoryGrow(initialPages)
-        if (previousSizePages == -1) {
-            throw OutOfMemoryError("Failed to grow WASM memory for buffer allocation")
-        }
-
-        // Our heap starts at the old memory boundary
-        heapBase = previousSizePages * PAGE_SIZE
-        nextOffset = heapBase
-        heapEnd = heapBase + (initialPages * PAGE_SIZE)
-        poolBytes = initialPages * PAGE_SIZE
-        initialized = true
+        initializeMemory()
     }
 
     // Store the last aligned size for callers that need it
@@ -261,8 +281,21 @@ object LinearMemoryAllocator {
         // Use BufferFactory.secure() (or zeroInit) when the contents must start at zero.
         val recycled = headOf(aligned)
         if (recycled != NO_BLOCK) {
+            // Four integer compares standing between a corrupted free list and an unlabelled
+            // `memory access out of bounds` trap. Both reads below dereference an offset that only
+            // the allocator's own bookkeeping vouches for: `recycled` came from a head slot, and
+            // `link` came out of the freed block's own first four bytes, which is *linear memory*
+            // and therefore writable by anything holding a stale address. A wild value here traps
+            // inside `Pointer.loadInt`, naming nothing; a throw names the offset and the state.
+            if (recycled < heapBase || recycled + aligned > nextOffset) {
+                failCorruptFreeList("head", recycled, aligned)
+            }
             // The block's first 4 bytes hold the next link; reading it releases the block entirely.
-            setHead(aligned, Pointer(recycled.toUInt()).loadInt())
+            val link = Pointer(recycled.toUInt()).loadInt()
+            if (link != NO_BLOCK && (link < heapBase || link + aligned > nextOffset)) {
+                failCorruptFreeList("link out of block $recycled", link, aligned)
+            }
+            setHead(aligned, link)
             freeListBytes -= aligned
             reusedBlocks++
             return recycled
@@ -284,6 +317,28 @@ object LinearMemoryAllocator {
         nextOffset += aligned
         return offset
     }
+
+    /**
+     * Report a free-list entry that does not point into the pool. Its own function so the message
+     * building stays off [allocateOffset]'s hot path — only the compares are inlined there.
+     */
+    private fun failCorruptFreeList(
+        what: String,
+        offset: Int,
+        aligned: Int,
+    ): Nothing =
+        throw IllegalStateException(
+            "LinearMemoryAllocator free list is corrupt: $what = $offset " +
+                "(0x${offset.toUInt().toString(HEX_RADIX)}) is outside the $aligned-byte size " +
+                "class's pool [$heapBase, $nextOffset). Something wrote into a block after it was " +
+                "released — the free list's next-link lives in the first four bytes of a released " +
+                "block, so a stale write lands on it. Usual causes: a slice() or wrapNativeAddress() " +
+                "view used after its owner was released, a retained nativeAddress, or a scoped " +
+                "allocation from the Kotlin/Wasm runtime larger than the pool's base offset. " +
+                "Pool: heapBase=$heapBase nextOffset=$nextOffset heapEnd=$heapEnd " +
+                "poolBytes=$poolBytes freeListBytes=$freeListBytes reusedBlocks=$reusedBlocks " +
+                "runtimeScratchReserveBytes=$RUNTIME_SCRATCH_RESERVE_BYTES",
+        )
 
     /**
      * Grow the pool so it can satisfy an [aligned]-byte allocation, in [GROWTH_PAGES]-page steps.
@@ -388,16 +443,28 @@ object LinearMemoryAllocator {
         }
     }
 
-    // Helper for test functions that need initialization
+    /**
+     * Claim the initial pool, based above both the current top of linear memory and the runtime's
+     * scratch reserve — see [runtimeScratchReserveBytes] for why the second bound is not optional.
+     *
+     * Called from a cold branch of [allocateOffset] exactly once; the `@JsFun` calls are why it has
+     * to be its own function (see the note on [allocateOffset]).
+     */
     private fun initializeMemory() {
-        val previousSizePages = jsMemoryGrow(initialPages)
-        if (previousSizePages == -1) {
+        val sizeBytes = jsMemorySize()
+        // Grow far enough that [base, base + initial) exists, where base clears the reserve.
+        val base = if (sizeBytes > RUNTIME_SCRATCH_RESERVE_BYTES) sizeBytes else RUNTIME_SCRATCH_RESERVE_BYTES
+        val pagesToGrow = (base + initialPages * PAGE_SIZE - sizeBytes) / PAGE_SIZE
+        val previousSizePages = jsMemoryGrow(pagesToGrow)
+        if (previousSizePages < 0) {
             throw OutOfMemoryError("Failed to grow WASM memory for buffer allocation")
         }
-        heapBase = previousSizePages * PAGE_SIZE
+        // Re-derive from what the engine actually reported rather than from the pre-grow read.
+        val grantedBase = previousSizePages * PAGE_SIZE
+        heapBase = if (grantedBase > RUNTIME_SCRATCH_RESERVE_BYTES) grantedBase else RUNTIME_SCRATCH_RESERVE_BYTES
         nextOffset = heapBase
-        heapEnd = heapBase + (initialPages * PAGE_SIZE)
-        poolBytes = initialPages * PAGE_SIZE
+        heapEnd = grantedBase + pagesToGrow * PAGE_SIZE
+        poolBytes = if (heapEnd > heapBase) heapEnd - heapBase else 0
         initialized = true
     }
 
@@ -502,6 +569,14 @@ object LinearMemoryAllocator {
     }
 
     private const val NO_BLOCK = -1
+
+    /**
+     * 1 MiB floor under [heapBase] — the region the Kotlin/Wasm runtime bump-allocates its interop
+     * scratch from on every `withScopedMemoryAllocator` scope. See [runtimeScratchReserveBytes].
+     */
+    private const val RUNTIME_SCRATCH_RESERVE_BYTES = 1024 * 1024
+
+    private const val HEX_RADIX = 16
 
     /** `log2(8)` — turns an 8-byte-aligned size into its [smallHeads] index. */
     private const val ALIGN_8_SHIFT = 3
