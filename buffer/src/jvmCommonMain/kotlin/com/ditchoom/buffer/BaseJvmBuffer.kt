@@ -527,7 +527,31 @@ abstract class BaseJvmBuffer(
                         "${position()} (limit=${limit()}, remaining=${remaining()})",
                 )
             }
-            // REPLACE mode cannot produce malformed/unmappable results for UTF-8.
+            // REPLACE mode cannot produce malformed/unmappable results for UTF-8, so `result` needs no
+            // malformed/unmappable branch — but the encode is not finished until `flush`, and skipping
+            // it silently dropped a TRAILING unpaired surrogate's replacement on Android.
+            //
+            // `CharsetEncoder` requires flush after the final `encode` (endOfInput = true), and the two
+            // JDKs disagree about how much that call is still owed. A trailing high surrogate leaves the
+            // encoder holding the pending half: the JDK emits its replacement during `encode`, so the
+            // omission was invisible for years, while Android's ICU-backed encoder emits it only here.
+            // Measured on ART (API 33), encoding a lone surrogate with a U+FFFD replacement:
+            //
+            //     encode -> UNDERFLOW, wrote 0, input fully consumed
+            //     flush  -> UNDERFLOW, wrote 3
+            //
+            // So `Utf8.Lenient` — documented "identical bytes on every platform" — wrote nothing at all
+            // on Android for any text ENDING in an unpaired surrogate, while `utf8Size()` still counted
+            // the three bytes it promises to match. Text with a surrogate anywhere but last was already
+            // correct, because the following char forces the encoder to resolve it during `encode`;
+            // that is why this hid behind every corpus whose ill-formed cases were not final.
+            val flushed = encoder.flush(byteBuffer)
+            if (flushed.isOverflow) {
+                throw BufferOverflowException(
+                    "Buffer overflow: cannot flush UTF-8 encoding of ${text.length} char(s) at position " +
+                        "${position()} (limit=${limit()}, remaining=${remaining()})",
+                )
+            }
         }
         return position() - start
     }
