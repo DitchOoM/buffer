@@ -98,18 +98,59 @@ class LinearBufferUseAfterFreeTest {
     }
 
     /**
-     * A slice of a *released* parent is deliberately NOT covered. Non-owning views never set the
-     * flag, so catching this needs the parent's liveness rather than the view's — the propagation
-     * issue #362 proposes, and out of scope for a check that only fixes wasmJs's divergence from
-     * every other platform's contract. Pinned so the gap is a recorded decision rather than an
-     * assumption someone makes later.
+     * A view of a released buffer refuses access, which is the case that actually corrupts memory:
+     * the owner's block goes back to the allocator and is reissued, so a write through the stale
+     * view lands on an unrelated buffer — or on a parked block's next-link, which is not noticed
+     * until some later allocation of that size class dereferences it.
+     *
+     * The view's own flag stays false, because releasing a non-owning view is a no-op and that
+     * remains true. Liveness is the owner's, and the view consults it.
      */
     @Test
-    fun aSliceOfAReleasedParentIsNotCaughtYet() {
+    fun aViewOfAReleasedBufferRefusesAccess() {
         val parent = BufferFactory.Default.allocate(64)
-        val slice = parent.slice()
+        parent.writeInt(0x1234_5678)
+        parent.resetForRead()
+        val view = parent.slice()
+        assertEquals(0x1234_5678, view.readInt(), "the view reads fine while its owner is live")
+        view.resetForRead()
+
         parent.freeNativeMemory()
-        assertTrue(!slice.isFreedOrFail(), "a non-owning view does not carry its parent's flag")
+
+        assertTrue(!view.isFreedOrFail(), "releasing a non-owning view is still a no-op")
+        assertFailsWith<IllegalStateException> { view.readInt() }
+        assertFailsWith<IllegalStateException> { view.writeInt(1) }
+        assertFailsWith<IllegalStateException> { view.slice() }
+    }
+
+    /**
+     * A view of a view is linked to the owner, not to the buffer it was taken from — so the check
+     * stays one branch however deep the slicing goes, and a released owner is still caught.
+     */
+    @Test
+    fun aViewOfAViewIsLinkedToTheOwner() {
+        val parent = BufferFactory.Default.allocate(64)
+        val view = parent.slice().slice().slice()
+        parent.freeNativeMemory()
+        assertFailsWith<IllegalStateException> { view.readByte() }
+    }
+
+    /**
+     * Releasing the *view* must not disturb the owner: a view has no block of its own to give back,
+     * so this is the direction that would break ordinary `use { }` code if it were symmetric.
+     */
+    @Test
+    fun releasingAViewLeavesItsOwnerUsable() {
+        val parent = BufferFactory.Default.allocate(64)
+        try {
+            val view = parent.slice()
+            view.freeNativeMemory()
+            parent.writeInt(0x0BAD_F00D)
+            parent.resetForRead()
+            assertEquals(0x0BAD_F00D, parent.readInt())
+        } finally {
+            parent.freeNativeMemory()
+        }
     }
 
     private fun PlatformBuffer.isFreedOrFail(): Boolean = (this as CloseableBuffer).isFreed
