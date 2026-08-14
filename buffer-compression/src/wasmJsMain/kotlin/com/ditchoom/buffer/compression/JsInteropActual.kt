@@ -3,8 +3,10 @@
 package com.ditchoom.buffer.compression
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.NativeMemoryAccess
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.managedMemoryAccess
+import com.ditchoom.buffer.nativeMemoryAccess
 import kotlinx.coroutines.await
 import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.js.Promise
@@ -61,14 +63,22 @@ internal actual fun ReadBuffer.toJsByteArray(): JsByteArray {
     if (remaining == 0) return emptyJsByteArray()
     // Single copy from WASM linear memory to a new JS Uint8Array.
     // Safe for async operations — the copy won't be invalidated by memory.grow().
-    val native = (this as? NativeMemoryAccess)
+    val native = nativeMemoryAccess
     if (native != null) {
         val offset = native.nativeAddress.toInt() + position()
         position(position() + remaining)
         return JsByteArray(jsCopyFromWasmMemory(offset, remaining))
     }
+    // Managed backing: copy straight out of the backing array, one copy rather than the two a
+    // readByteArray() round-trip costs. See [stageManaged] for why a copy is unavoidable at all.
+    val managed = managedMemoryAccess
+    if (managed != null) {
+        val start = managed.arrayOffset + position()
+        position(position() + remaining)
+        return stageManaged(managed.backingArray, start, remaining)
+    }
     val bytes = readByteArray(remaining)
-    return bytes.toJsByteArray()
+    return stageManaged(bytes, 0, bytes.size)
 }
 
 @JsFun(
@@ -89,29 +99,59 @@ internal actual fun ReadBuffer.toJsByteArrayView(): JsByteArray {
     // Zero-copy view on WASM linear memory. Only safe for synchronous consumption —
     // memory.grow() would invalidate this view. Sync zlib calls (gzipSync, etc.)
     // consume the input before returning, so no Kotlin allocation can intervene.
-    val native = (this as? NativeMemoryAccess)
+    val native = nativeMemoryAccess
     if (native != null) {
         val offset = native.nativeAddress.toInt() + position()
         position(position() + remaining)
         return JsByteArray(jsViewWasmMemory(offset, remaining))
     }
     // Non-native buffer: must copy (no linear memory to view)
+    val managed = managedMemoryAccess
+    if (managed != null) {
+        val start = managed.arrayOffset + position()
+        position(position() + remaining)
+        return stageManaged(managed.backingArray, start, remaining)
+    }
     val bytes = readByteArray(remaining)
-    return bytes.toJsByteArray()
+    return stageManaged(bytes, 0, bytes.size)
 }
 
-@OptIn(kotlin.wasm.unsafe.UnsafeWasmMemoryApi::class)
-private fun ByteArray.toJsByteArray(): JsByteArray {
-    if (isEmpty()) return emptyJsByteArray()
-    // ByteArray in Kotlin/WASM is stored in linear memory.
-    // Use withScopedMemoryAllocator to pin and copy.
-    val size = this.size
-    kotlin.wasm.unsafe.withScopedMemoryAllocator { allocator ->
-        val ptr = allocator.allocate(size)
-        for (i in 0 until size) {
-            (ptr + i).storeByte(this[i])
-        }
-        return JsByteArray(jsCopyFromWasmMemory(ptr.address.toInt(), size))
+/**
+ * Copy [length] bytes of a Kotlin-heap [bytes] array, from [offset], into a JS `Uint8Array`.
+ *
+ * The copy is not avoidable, and specifically **cannot be replaced by pinning**. Kotlin/Wasm is
+ * WasmGC: a `ByteArray` is a GC object living in the GC heap, which is a different address space
+ * from linear memory and is not reachable through `wasmExports.memory.buffer`. There is no
+ * `usePinned` equivalent to hand JS a stable address for it, the way Kotlin/Native can. So bytes
+ * that start on the Kotlin heap have to be written into linear memory before JS can see them, and
+ * the only question is how many times they get copied on the way. Going through
+ * [ManagedMemoryAccess][com.ditchoom.buffer.ManagedMemoryAccess] at the call sites makes it once.
+ *
+ * The staging block comes from buffer's own pool, deliberately NOT from
+ * `kotlin.wasm.unsafe.withScopedMemoryAllocator`. That allocator opens every top-level scope at
+ * address 0 and bump-allocates upward, and cannot be told the pool exists — so staging a payload
+ * through it writes across whatever the pool has already handed out. The reserve under the pool does
+ * not rescue this path either: what gets staged here is caller data, so the scratch is as large as
+ * the payload and no fixed constant can be sized to clear it. `LinearMemoryAllocator` hands back
+ * memory the pool owns, which is the one region nothing else claims.
+ */
+private fun stageManaged(
+    bytes: ByteArray,
+    offset: Int,
+    length: Int,
+): JsByteArray {
+    if (length == 0) return emptyJsByteArray()
+    val staging = BufferFactory.Default.allocate(length)
+    try {
+        val address =
+            checkNotNull(staging.nativeMemoryAccess) {
+                "BufferFactory.Default must yield native memory on wasmJs"
+            }.nativeAddress.toInt()
+        staging.writeBytes(bytes, offset, length)
+        return JsByteArray(jsCopyFromWasmMemory(address, length))
+    } finally {
+        // Linear memory is not garbage collected — the staging block has to go back explicitly.
+        staging.freeNativeMemory()
     }
 }
 
@@ -182,23 +222,29 @@ internal actual fun JsByteArray.toPlatformBuffer(bufferFactory: BufferFactory): 
     // If the buffer has native memory access (LinearBuffer), copy JS data directly
     // into its WASM linear memory region. Single copy, no ByteArray intermediate.
     val buf = bufferFactory.allocate(length)
-    val native = (buf as? NativeMemoryAccess)
+    val native = buf.nativeMemoryAccess
     if (native != null) {
         jsCopyToWasmMemory(ref, native.nativeAddress.toInt())
         buf.position(length)
         buf.resetForRead()
     } else {
-        // Fallback: should not happen on wasmJs, but be safe
-        val bytes = ByteArray(length)
-        @OptIn(kotlin.wasm.unsafe.UnsafeWasmMemoryApi::class)
-        kotlin.wasm.unsafe.withScopedMemoryAllocator { allocator ->
-            val ptr = allocator.allocate(length)
-            jsCopyToWasmMemory(ref, ptr.address.toInt())
-            for (i in 0 until length) {
-                bytes[i] = (ptr + i).loadByte()
-            }
+        // The caller's factory did not hand back native memory (BufferFactory.managed(), say), so
+        // the JS bytes have to land somewhere addressable first. Stage that through the pool for the
+        // same reason as ByteArray.toJsByteArray above — the runtime's scoped allocator must never
+        // carry a payload — then bulk-copy across instead of the byte-at-a-time loop this replaced.
+        val staging = BufferFactory.Default.allocate(length)
+        try {
+            val address =
+                checkNotNull(staging.nativeMemoryAccess) {
+                    "BufferFactory.Default must yield native memory on wasmJs"
+                }.nativeAddress.toInt()
+            jsCopyToWasmMemory(ref, address)
+            staging.position(length)
+            staging.resetForRead()
+            buf.write(staging)
+        } finally {
+            staging.freeNativeMemory()
         }
-        for (b in bytes) buf.writeByte(b)
         buf.resetForRead()
     }
     return buf
