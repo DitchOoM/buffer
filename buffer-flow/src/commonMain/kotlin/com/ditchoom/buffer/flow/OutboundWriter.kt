@@ -136,20 +136,17 @@ class OutboundClosedException(
  * *wait*, not the message.
  */
 @ExperimentalFanoutApi
-class OutboundWriter<T> internal constructor(
+class OutboundWriter<T>(
     private val mode: SendMode<T>,
     private val transmit: suspend (Outgoing<T>) -> TransmitOutcome,
     /**
-     * Where the writer coroutine runs. Internal seam only: tests inject a test dispatcher so the
-     * writer is under the scheduler's control instead of racing it on [Dispatchers.Default].
+     * Where the writer coroutine runs. Public on purpose: an adopter's virtual-time test can only
+     * observe "send completed" deterministically if the writer itself runs under the test
+     * scheduler, so the seam must reach adopters, not just this module's own tests. Production
+     * code leaves the default.
      */
-    writerContext: CoroutineContext,
+    writerContext: CoroutineContext = Dispatchers.Default,
 ) {
-    constructor(
-        mode: SendMode<T>,
-        transmit: suspend (Outgoing<T>) -> TransmitOutcome,
-    ) : this(mode, transmit, Dispatchers.Default)
-
     private val currentPhase = MutableStateFlow<ConnectionPhase>(ConnectionPhase.Open)
 
     /** The send/close lifecycle, reactively. Single source of truth — there is no separate flag. */
