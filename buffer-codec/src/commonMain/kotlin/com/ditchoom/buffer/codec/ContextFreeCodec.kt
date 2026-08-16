@@ -40,7 +40,14 @@ class SharedFrame<T>(
     /** The encoded bytes; refcounted, read through per-consumer [SharedBytes.view] cursors. */
     val bytes: SharedBytes,
 ) {
-    /** Releases the creator's reference. Call exactly once, after distributing the frame. */
+    /**
+     * Releases the creator's reference. Call **exactly once**, after distributing the frame.
+     *
+     * Deliberately NOT idempotent: a second close throws, because silently absorbing it would
+     * mask the same accounting bug that silently absorbing an over-release would — the refcount
+     * is strict everywhere or trustworthy nowhere. Don't pair with `use`-style helpers that may
+     * close twice.
+     */
     fun close(): Unit = bytes.release()
 }
 
@@ -55,4 +62,14 @@ class SharedFrame<T>(
 fun <T> ContextFreeCodec<T>.encodeShared(
     message: T,
     factory: BufferFactory = BufferFactory.Default,
-): SharedFrame<T> = TODO("implemented by the shared-send work")
+): SharedFrame<T> {
+    // EncodeContext.Empty is the honest argument: a ContextFreeCodec encodes identically for every
+    // context by contract, so threading a caller's context would only imply an influence that is
+    // declared not to exist.
+    //
+    // encodeToPlatformBuffer already hands back a buffer positioned for reading (position = 0,
+    // limit = encoded size) and frees it on any encode failure. Do NOT resetForRead() again —
+    // a second reset flips limit to the current position (0) and would adopt an empty frame.
+    val encoded = encodeToPlatformBuffer(message, factory, EncodeContext.Empty)
+    return SharedFrame(message, SharedBytes.adopt(encoded))
+}
