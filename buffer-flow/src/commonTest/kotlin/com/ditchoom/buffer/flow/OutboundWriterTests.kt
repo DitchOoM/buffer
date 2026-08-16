@@ -18,6 +18,9 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 
+@OptIn(ExperimentalFanoutApi::class)
+private typealias TestTransmit = suspend (Outgoing<String>) -> TransmitOutcome
+
 /** A transport failure: transmit *throws* these, and they fail the writer. */
 private class TransmitBoom(
     message: String,
@@ -83,7 +86,7 @@ private fun assertExactlyOnce(
 }
 
 @OptIn(ExperimentalFanoutApi::class, ExperimentalCoroutinesApi::class)
-private fun TestScope.awaitWrittenWriter(transmit: suspend (Outgoing<String>) -> TransmitOutcome): OutboundWriter<String> =
+private fun TestScope.awaitWrittenWriter(transmit: TestTransmit): OutboundWriter<String> =
     OutboundWriter(SendMode.AwaitWritten, transmit, StandardTestDispatcher(testScheduler))
 
 @OptIn(ExperimentalFanoutApi::class, ExperimentalCoroutinesApi::class)
@@ -704,7 +707,8 @@ class OutboundWriterTests {
     // ----- Exactly-once sweep ------------------------------------------------------------------
 
     @Test
-    @Suppress("LongMethod") // one narrative on purpose: the sweep exercises three loss paths against ONE ledger contract
+    // One narrative on purpose: three loss paths exercised against ONE ledger contract.
+    @Suppress("LongMethod")
     fun exactlyOnceSweepAcrossEveryLossPath() =
         runTest {
             // Eviction under DropOldest, then a graceful close of what survived.

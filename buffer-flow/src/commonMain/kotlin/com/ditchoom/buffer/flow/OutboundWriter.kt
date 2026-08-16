@@ -285,7 +285,10 @@ class OutboundWriter<T> internal constructor(
     }
 
     /** Terminal-phase cause, for reporting. Callers settle first, so the fallback is unreachable. */
-    private fun terminalCause(): CloseCause = (currentPhase.value as? ConnectionPhase.Closed)?.cause ?: CloseCause.Aborted
+    private fun terminalCause(): CloseCause {
+        val settled = currentPhase.value as? ConnectionPhase.Closed
+        return settled?.cause ?: CloseCause.Aborted
+    }
 
     /**
      * The cause a refused sender sees. `Draining` is closed to senders and its eventual cause is
