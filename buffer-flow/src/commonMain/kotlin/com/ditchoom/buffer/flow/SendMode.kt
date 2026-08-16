@@ -58,6 +58,11 @@ sealed interface SendMode<in T> {
          * Invoked exactly once for every accepted message that will not reach the wire —
          * capacity eviction, close-time discard, or a message that failed to encode. Runs
          * outside the queue lock: re-entrant `send`/`close` from the handler is legal.
+         *
+         * **Must not throw.** A handler that throws on the writer's reporting path fails the
+         * writer with the thrown error (`CloseCause.Failed`) — surfaced loudly rather than left
+         * as a dead writer under an Open phase — and any reports still owed become best-effort.
+         * Count, log, hand off; do not raise.
          */
         val onNotSent: suspend (T, NotSentReason) -> Unit,
     ) : SendMode<T>

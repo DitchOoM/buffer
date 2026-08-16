@@ -183,7 +183,21 @@ class OutboundWriter<T> internal constructor(
 
     private val writerJob: Job =
         scope.launch(mark) {
-            strategy.drive()
+            try {
+                strategy.drive()
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                // Only a throwing user handler (onNotSent) reaches here — drive() settles its own
+                // transmit failures. The writer cannot continue, but it must not die with the
+                // phase still Open: senders would keep filling a queue nobody drains, the silent
+                // hang this component exists to kill. Surface the error through the API — phase
+                // Closed(Failed(t)), every subsequent send refused with the same cause — and
+                // best-effort the owed reports. Deliberately NOT rethrown: the error is already
+                // loud where consumers look, and an uncaught writer exception would only reach
+                // the process-level CoroutineExceptionHandler (a crash on some platforms).
+                failWriter(t)
+                runCatching { strategy.discardQueued(terminalCause()) }
+            }
             // A normal loop exit means the queue drained after close() opened the window. Whoever
             // settled first keeps their cause; this only fills in the graceful case.
             settle(CloseCause.Graceful)

@@ -777,3 +777,41 @@ class OutboundWriterTests {
             assertExactlyOnce(encodingAccepted, encoding)
         }
 }
+
+/**
+ * The handler-contract hardening: `onNotSent` must not throw, and when it does anyway the writer
+ * fails LOUDLY — `Closed(Failed(handlerError))`, senders refused — instead of dying under an Open
+ * phase with senders still filling a queue nobody drains (the silent hang the component exists to
+ * kill).
+ */
+@OptIn(ExperimentalFanoutApi::class, ExperimentalCoroutinesApi::class)
+class OutboundWriterHandlerContractTests {
+    @Test
+    fun throwingOnNotSentFailsTheWriterInsteadOfHangingIt() =
+        runTest {
+            val handlerBoom = TransmitBoom("handler threw")
+            val writer =
+                handoffWriter(capacity = 4, onCapacity = CapacityBehavior.Suspend, onNotSent = { _, _ ->
+                    throw handlerBoom
+                }) { outgoing ->
+                    // First element hits the writer's reporting path via a per-message encode
+                    // failure; the throwing handler then escapes drive() itself.
+                    if (originOf(outgoing) == "poison") {
+                        TransmitOutcome.EncodeFailed(TransmitBoom("cannot encode"))
+                    } else {
+                        TransmitOutcome.Written
+                    }
+                }
+            writer.send("poison")
+            advanceUntilIdle()
+
+            val settled = writer.phase.value
+            assertTrue(settled is ConnectionPhase.Closed, "phase must not stay Open under a dead writer, was $settled")
+            val cause = settled.cause
+            assertTrue(cause is CloseCause.Failed, "handler error must surface as Failed, was $cause")
+            assertSame(handlerBoom, cause.cause)
+
+            val refused = assertFailsWith<OutboundClosedException> { writer.send("after") }
+            assertSame(handlerBoom, (refused.closeCause as CloseCause.Failed).cause)
+        }
+}
