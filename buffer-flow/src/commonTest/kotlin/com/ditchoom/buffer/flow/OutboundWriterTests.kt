@@ -73,7 +73,11 @@ private fun assertExactlyOnce(
     ledger: Ledger,
 ) {
     val outcomes = ledger.transmitted + ledger.lost
-    assertEquals(accepted.size, outcomes.size, "accepted=$accepted transmitted=${ledger.transmitted} lost=${ledger.lost}")
+    assertEquals(
+        accepted.size,
+        outcomes.size,
+        "accepted=$accepted transmitted=${ledger.transmitted} lost=${ledger.lost}",
+    )
     assertEquals(accepted.toSet(), outcomes.toSet(), "every accepted message must leave exactly once")
     assertTrue(ledger.transmitted.none { it in ledger.lost }, "a message left through both paths")
 }
@@ -634,7 +638,11 @@ class OutboundWriterTests {
             closing.join()
             aborting.join()
 
-            assertEquals(ConnectionPhase.Closed(CloseCause.Aborted), writer.phase.value, "the first terminal cause wins")
+            assertEquals(
+                ConnectionPhase.Closed(CloseCause.Aborted),
+                writer.phase.value,
+                "the first terminal cause wins",
+            )
             assertEquals(accepted, ledger.lost)
             assertExactlyOnce(accepted, ledger)
         }
@@ -696,6 +704,7 @@ class OutboundWriterTests {
     // ----- Exactly-once sweep ------------------------------------------------------------------
 
     @Test
+    @Suppress("LongMethod") // one narrative on purpose: the sweep exercises three loss paths against ONE ledger contract
     fun exactlyOnceSweepAcrossEveryLossPath() =
         runTest {
             // Eviction under DropOldest, then a graceful close of what survived.

@@ -106,7 +106,10 @@ sealed interface CapacityBehavior {
  */
 @ExperimentalFanoutApi
 sealed interface Linger {
-    /** Drain until the queue is empty, however long the writes take (each still bounded by the sink's `WritePolicy`). */
+    /**
+     * Drain until the queue is empty, however long the writes take (each still bounded by
+     * the sink's `WritePolicy`).
+     */
     @ExperimentalFanoutApi
     data object UntilDrained : Linger
 
@@ -116,7 +119,9 @@ sealed interface Linger {
         val timeout: Duration,
     ) : Linger {
         init {
-            require(timeout.isPositive()) { "linger timeout must be positive: $timeout (zero linger is spelled abort())" }
+            require(timeout.isPositive()) {
+                "linger timeout must be positive: $timeout (zero linger is spelled abort())"
+            }
         }
     }
 }

@@ -181,6 +181,9 @@ class OutboundWriter<T> internal constructor(
             is SendMode.Handoff -> mode.linger
         }
 
+    // Broad catches below are the component boundary: ANY non-cancellation throwable from user
+    // code or transport must fail the writer with its cause, never escape uncategorized.
+    @Suppress("TooGenericExceptionCaught")
     private val writerJob: Job =
         scope.launch(mark) {
             try {
@@ -341,6 +344,7 @@ class OutboundWriter<T> internal constructor(
             element.ack.await()
         }
 
+        @Suppress("TooGenericExceptionCaught") // any transmit throwable = transport failure, fails the writer
         override suspend fun drive() {
             for (element in handoffs) {
                 val outcome =
@@ -419,26 +423,27 @@ class OutboundWriter<T> internal constructor(
         }
 
         /** Decides the fate of [payload] under [lock] — phase check and enqueue in one step. */
-        private fun admit(payload: OutboundPayload<T>): Admission<T> {
-            if (currentPhase.value !== ConnectionPhase.Open) return Admission.Refused
-            if (queue.size < capacity) {
+        private fun admit(payload: OutboundPayload<T>): Admission<T> =
+            if (currentPhase.value !== ConnectionPhase.Open) {
+                Admission.Refused
+            } else if (queue.size < capacity) {
                 enqueue(payload)
-                return Admission.Accepted
-            }
-            return when (handoff.onCapacity) {
-                CapacityBehavior.Suspend -> {
-                    val sender = ParkedSend(payload)
-                    parked.addLast(sender)
-                    Admission.Parked(sender)
+                Admission.Accepted
+            } else {
+                when (handoff.onCapacity) {
+                    CapacityBehavior.Suspend -> {
+                        val sender = ParkedSend(payload)
+                        parked.addLast(sender)
+                        Admission.Parked(sender)
+                    }
+                    CapacityBehavior.DropOldest -> {
+                        val victim = queue.removeFirst()
+                        enqueue(payload)
+                        Admission.Displaced(victim)
+                    }
+                    CapacityBehavior.DropNewest -> Admission.Displaced(payload)
                 }
-                CapacityBehavior.DropOldest -> {
-                    val victim = queue.removeFirst()
-                    enqueue(payload)
-                    Admission.Displaced(victim)
-                }
-                CapacityBehavior.DropNewest -> Admission.Displaced(payload)
             }
-        }
 
         /** Under [lock]. */
         private fun enqueue(payload: OutboundPayload<T>) {
@@ -451,6 +456,7 @@ class OutboundWriter<T> internal constructor(
          * whether an admitter already moved it into the queue — the only question that matters on
          * every exit path (admitted, refused, or cancelled).
          */
+        @Suppress("TooGenericExceptionCaught") // the await outcome is re-thrown after ownership settles
         private suspend fun awaitSlot(
             sender: ParkedSend<T>,
             payload: OutboundPayload<T>,
@@ -474,6 +480,7 @@ class OutboundWriter<T> internal constructor(
             if (failure != null) throw failure
         }
 
+        @Suppress("TooGenericExceptionCaught") // any transmit throwable = transport failure, fails the writer
         override suspend fun drive() {
             while (true) {
                 val next = lock.withLock { dequeue() }
