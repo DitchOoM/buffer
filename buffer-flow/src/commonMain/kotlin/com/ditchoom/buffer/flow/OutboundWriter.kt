@@ -3,7 +3,25 @@ package com.ditchoom.buffer.flow
 import com.ditchoom.buffer.ExperimentalFanoutApi
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.pool.SharedBytes
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ClosedSendChannelException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 
 /**
  * The element the writer hands to [OutboundWriter]'s `transmit` stage: either a message still to
@@ -88,6 +106,12 @@ class OutboundClosedException(
  * whichever path the element takes. Capacity eviction, linger expiry, `close()` racing
  * `abort()`, and writer failure are all instances of the same rule, not special cases.
  *
+ * "Accepted" is the pivot: a message is accepted the instant it enters the writer's queue (in
+ * `Handoff`) or reaches the writer's hands (in `AwaitWritten`). A sender cancelled *before* that
+ * instant never sent anything and is reported nowhere — its `send` simply unwinds. A frame the
+ * writer took and then could not finish (an [abort] mid-transmit, a linger expiry) *is* accepted,
+ * so it takes the loss path like any other.
+ *
  * ## Close ladder
  *
  * [close] is graceful: the phase moves to [ConnectionPhase.Draining] (the phase transition and
@@ -97,41 +121,523 @@ class OutboundClosedException(
  * reaches [ConnectionPhase.Closed]. [abort] is immediate: cancel the writer wherever it is —
  * truncating a frame on a dying connection harms nobody, which is the whole point of the
  * ownership design — and report the queue not-sent. Both are idempotent and converge under
- * concurrent calls.
+ * concurrent calls: the **first** terminal cause to settle wins and is never overwritten, so a
+ * writer failure racing a `close()` reports [CloseCause.Failed], not [CloseCause.Graceful].
+ *
+ * Senders that arrive during [ConnectionPhase.Draining] are refused with
+ * [OutboundClosedException] carrying [CloseCause.Graceful]: draining is closed to senders, and
+ * the graceful cause is the one the phase is on its way to.
  *
  * The prompt-cancellation edge, stated once: in `AwaitWritten`, a sender whose handoff succeeded
  * may still unwind with `CancellationException` while the writer finishes the frame — "cancelled"
  * does not imply "not sent". The writer completes every taken element's acknowledgement exactly
- * once regardless of whether anyone is still listening.
+ * once regardless of whether anyone is still listening. `Handoff`'s parked senders have the same
+ * edge at the same boundary: a sender cancelled after a freed slot admitted its message loses the
+ * *wait*, not the message.
  */
 @ExperimentalFanoutApi
-class OutboundWriter<T>(
+class OutboundWriter<T> internal constructor(
     private val mode: SendMode<T>,
     private val transmit: suspend (Outgoing<T>) -> TransmitOutcome,
+    /**
+     * Where the writer coroutine runs. Internal seam only: tests inject a test dispatcher so the
+     * writer is under the scheduler's control instead of racing it on [Dispatchers.Default].
+     */
+    writerContext: CoroutineContext,
 ) {
+    constructor(
+        mode: SendMode<T>,
+        transmit: suspend (Outgoing<T>) -> TransmitOutcome,
+    ) : this(mode, transmit, Dispatchers.Default)
+
+    private val currentPhase = MutableStateFlow<ConnectionPhase>(ConnectionPhase.Open)
+
     /** The send/close lifecycle, reactively. Single source of truth — there is no separate flag. */
     val phase: StateFlow<ConnectionPhase>
-        get() = TODO("implemented by the writer-component work")
+        get() = currentPhase
+
+    /**
+     * Guards the phase *and* the queue, so "is this writer still open?" and "is this message in
+     * the queue?" are decided in one step and the send-after-close TOCTOU cannot exist. User code
+     * ([SendMode.Handoff.onNotSent]) and [transmit] are never invoked while it is held.
+     */
+    private val lock = Mutex()
+
+    /** Identity marker for re-entrancy detection; see [insideWriter]. */
+    private val mark = WriterMark(this)
+
+    private val scope = CoroutineScope(writerContext + Job())
+
+    private val strategy: OutboundStrategy<T> =
+        when (mode) {
+            SendMode.AwaitWritten -> AwaitWrittenStrategy()
+            is SendMode.Handoff -> HandoffStrategy(mode)
+        }
+
+    /** How long a graceful close may drain. Only `Handoff` has an unattended queue to bound. */
+    private val linger: Linger =
+        when (mode) {
+            SendMode.AwaitWritten -> Linger.UntilDrained
+            is SendMode.Handoff -> mode.linger
+        }
+
+    private val writerJob: Job =
+        scope.launch(mark) {
+            strategy.drive()
+            // A normal loop exit means the queue drained after close() opened the window. Whoever
+            // settled first keeps their cause; this only fills in the graceful case.
+            settle(CloseCause.Graceful)
+        }
 
     /**
      * Sends [message] per the [mode]'s completion semantics. Throws [OutboundClosedException]
      * once the writer is not [ConnectionPhase.Open].
      */
-    suspend fun send(message: T): Unit = TODO("implemented by the writer-component work")
+    suspend fun send(message: T): Unit = strategy.send(MessageSend(message))
 
     /**
      * Sends already-encoded shared bytes. **Transfers one [SharedBytes] reference** — the caller
      * retains for this call, and this component releases exactly once on whichever path the
      * element takes. [origin] is the message the bytes encode, for loss reporting.
+     *
+     * The transfer is unconditional: the reference is released even when this call throws
+     * [OutboundClosedException], because a refused send is one of the paths the element can take.
      */
     suspend fun sendShared(
         bytes: SharedBytes,
         origin: T,
-    ): Unit = TODO("implemented by the writer-component work")
+    ): Unit = strategy.send(SharedSend(bytes, origin))
 
     /** Graceful close: drain per mode, join the writer, settle at [ConnectionPhase.Closed]. */
-    suspend fun close(): Unit = TODO("implemented by the writer-component work")
+    suspend fun close() {
+        lock.withLock {
+            if (currentPhase.value === ConnectionPhase.Open) {
+                // One atomic step: the phase leaves Open and the strategy stops accepting in the
+                // same critical section, so no send can slip into a queue that is already draining.
+                currentPhase.value = ConnectionPhase.Draining
+                strategy.refuseSends()
+            }
+        }
+        if (insideWriter()) {
+            // Re-entrant close from a handler running on the writer coroutine: the drain *is* this
+            // coroutine, so opening the window is the whole job. Joining here would join ourselves.
+            return
+        }
+        when (val bound = linger) {
+            Linger.UntilDrained -> writerJob.join()
+            is Linger.Bounded ->
+                if (withTimeoutOrNull(bound.timeout) { writerJob.join() } == null) {
+                    // Linger expired with the queue unflushed: the ladder's last rung.
+                    abort()
+                    return
+                }
+        }
+        settle(CloseCause.Graceful)
+        scope.cancel()
+    }
 
     /** Immediate close: cancel the writer, report the queue not-sent, settle at [ConnectionPhase.Closed]. */
-    suspend fun abort(): Unit = TODO("implemented by the writer-component work")
+    suspend fun abort() {
+        lock.withLock {
+            if (currentPhase.value !is ConnectionPhase.Closed) {
+                currentPhase.value = ConnectionPhase.Closed(CloseCause.Aborted)
+            }
+            strategy.refuseSends()
+        }
+        val cause = terminalCause()
+        val reentrant = insideWriter()
+        // The discard must complete even if the caller is itself being cancelled — a dropped
+        // discard is a lost report, which is exactly what exactly-once forbids.
+        withContext(NonCancellable) {
+            if (!reentrant) {
+                writerJob.cancel()
+                writerJob.join()
+            }
+            strategy.discardQueued(cause)
+        }
+        if (!reentrant) scope.cancel()
+    }
+
+    /** Settles the terminal phase. The first cause wins; later ones are dropped, never overwritten. */
+    private suspend fun settle(cause: CloseCause) {
+        lock.withLock {
+            if (currentPhase.value !is ConnectionPhase.Closed) {
+                currentPhase.value = ConnectionPhase.Closed(cause)
+            }
+        }
+    }
+
+    /** Terminal-phase cause, for reporting. Callers settle first, so the fallback is unreachable. */
+    private fun terminalCause(): CloseCause = (currentPhase.value as? ConnectionPhase.Closed)?.cause ?: CloseCause.Aborted
+
+    /**
+     * The cause a refused sender sees. `Draining` is closed to senders and its eventual cause is
+     * graceful, so a send racing a graceful close reports [CloseCause.Graceful] rather than
+     * inventing a phase-specific one.
+     */
+    private fun senderCloseCause(): CloseCause =
+        when (val observed = currentPhase.value) {
+            is ConnectionPhase.Closed -> observed.cause
+            else -> CloseCause.Graceful
+        }
+
+    /** True when the calling coroutine *is* this component's writer (a re-entrant user handler). */
+    private suspend fun insideWriter(): Boolean = currentCoroutineContext()[WriterMark]?.owner === this
+
+    /**
+     * Fails the writer: terminal phase first, then refusal, so anyone who observes the failure
+     * already sees the terminal cause. Loss reporting is the caller's (mode-specific) job.
+     */
+    private suspend fun failWriter(cause: Throwable) {
+        lock.withLock {
+            if (currentPhase.value !is ConnectionPhase.Closed) {
+                currentPhase.value = ConnectionPhase.Closed(CloseCause.Failed(cause))
+            }
+            strategy.refuseSends()
+        }
+    }
+
+    /**
+     * `AwaitWritten`: a rendezvous handoff whose queue is its suspended senders.
+     *
+     * kotlinx's rendezvous channel is used here — and only here — because its semantics *are* the
+     * contract: an element is either taken by the writer or it never happened, and
+     * `onUndeliveredElement` fires on exactly the paths where it never happened (sender cancelled
+     * before the rendezvous, or the channel closed under a parked sender). No buffering, hence
+     * none of the `BufferOverflow` gaps that force [HandoffStrategy] to hand-roll its deque.
+     */
+    private inner class AwaitWrittenStrategy : OutboundStrategy<T> {
+        private val handoffs =
+            Channel<AckedSend<T>>(
+                capacity = Channel.RENDEZVOUS,
+                onUndeliveredElement = { undelivered -> undelivered.discard(senderCloseCause()) },
+            )
+
+        override suspend fun send(payload: OutboundPayload<T>) {
+            val element = AckedSend(payload, CompletableDeferred())
+            try {
+                handoffs.send(element)
+            } catch (closed: ClosedSendChannelException) {
+                // The element never reached the writer; `onUndeliveredElement` already released the
+                // transferred reference, so this path only reports.
+                throw OutboundClosedException(senderCloseCause()).apply { addSuppressed(closed) }
+            }
+            // Past this point the writer owns the element: cancelling here abandons the wait, not
+            // the write, and the ack is completed exactly once whether or not anyone is listening.
+            element.ack.await()
+        }
+
+        override suspend fun drive() {
+            for (element in handoffs) {
+                val outcome =
+                    try {
+                        transmit(element.payload.toOutgoing())
+                    } catch (cancellation: CancellationException) {
+                        // abort() cancelled us mid-frame. The frame may be truncated on a dying
+                        // connection (by design); the sender still gets its exactly-one answer.
+                        element.discard(terminalCause())
+                        throw cancellation
+                    } catch (failure: Throwable) {
+                        element.payload.release()
+                        failWriter(failure)
+                        element.ack.completeExceptionally(failure)
+                        return
+                    }
+                element.payload.release()
+                when (outcome) {
+                    TransmitOutcome.Written -> element.ack.complete(Unit)
+                    // Encode failure is per-message: the sender hears it, the connection lives.
+                    is TransmitOutcome.EncodeFailed -> element.ack.completeExceptionally(outcome.cause)
+                }
+            }
+        }
+
+        override fun refuseSends() {
+            handoffs.close()
+        }
+
+        override suspend fun discardQueued(cause: CloseCause) {
+            // Nothing is ever buffered here: the queue is the suspended senders, and closing for
+            // send hands every one of them back through `onUndeliveredElement`.
+            handoffs.close()
+        }
+    }
+
+    /**
+     * `Handoff`: a hand-rolled bounded deque plus parked senders, drained by the writer.
+     *
+     * Hand-rolled on purpose. `onNotSent` is a *suspend* handler that must fire for evictions, and
+     * kotlinx's only loss hook (`onUndeliveredElement`) is non-suspend *and* skipped entirely for
+     * `DROP_OLDEST`, so this mode's promised contract is inexpressible on a `BufferedChannel`.
+     *
+     * There are no permits: the deque's own size is the accounting, and a slot is handed to a
+     * parked sender under [lock] in the same step that enqueues its message. A sender cancelled
+     * between grant and enqueue therefore cannot leak capacity — the two are not separable.
+     */
+    private inner class HandoffStrategy(
+        private val handoff: SendMode.Handoff<T>,
+    ) : OutboundStrategy<T> {
+        private val capacity = handoff.capacity.messages
+
+        /** Accepted-but-unwritten messages. Guarded by [lock]. */
+        private val queue = ArrayDeque<OutboundPayload<T>>()
+
+        /** Senders parked for space, in arrival order. Guarded by [lock]. */
+        private val parked = ArrayDeque<ParkedSend<T>>()
+
+        /** Reactive writer wakeup. Conflated: a wakeup is never lost and never accumulates. */
+        private val wakeup = Channel<Unit>(Channel.CONFLATED)
+
+        override suspend fun send(payload: OutboundPayload<T>) {
+            when (val admission = lock.withLock { admit(payload) }) {
+                Admission.Accepted -> Unit
+                Admission.Refused -> {
+                    payload.release()
+                    throw OutboundClosedException(senderCloseCause())
+                }
+                // User code, deliberately outside the lock: re-entrant send/close is legal.
+                is Admission.Displaced -> {
+                    admission.victim.release()
+                    handoff.onNotSent(admission.victim.origin, NotSentReason.CapacityExceeded)
+                }
+                is Admission.Parked -> awaitSlot(admission.sender, payload)
+            }
+        }
+
+        /** Decides the fate of [payload] under [lock] — phase check and enqueue in one step. */
+        private fun admit(payload: OutboundPayload<T>): Admission<T> {
+            if (currentPhase.value !== ConnectionPhase.Open) return Admission.Refused
+            if (queue.size < capacity) {
+                enqueue(payload)
+                return Admission.Accepted
+            }
+            return when (handoff.onCapacity) {
+                CapacityBehavior.Suspend -> {
+                    val sender = ParkedSend(payload)
+                    parked.addLast(sender)
+                    Admission.Parked(sender)
+                }
+                CapacityBehavior.DropOldest -> {
+                    val victim = queue.removeFirst()
+                    enqueue(payload)
+                    Admission.Displaced(victim)
+                }
+                CapacityBehavior.DropNewest -> Admission.Displaced(payload)
+            }
+        }
+
+        /** Under [lock]. */
+        private fun enqueue(payload: OutboundPayload<T>) {
+            queue.addLast(payload)
+            wakeup.trySend(Unit)
+        }
+
+        /**
+         * Waits for a slot. Ownership of [payload] is settled once, under [lock], by asking
+         * whether an admitter already moved it into the queue — the only question that matters on
+         * every exit path (admitted, refused, or cancelled).
+         */
+        private suspend fun awaitSlot(
+            sender: ParkedSend<T>,
+            payload: OutboundPayload<T>,
+        ) {
+            var failure: Throwable? = null
+            try {
+                sender.slot.await()
+            } catch (t: Throwable) {
+                failure = t
+            }
+            val ours =
+                withContext(NonCancellable) {
+                    lock.withLock {
+                        parked.remove(sender)
+                        !sender.enqueued
+                    }
+                }
+            // Never accepted: the transferred reference dies with the send, unreported (nothing
+            // was ever queued to lose).
+            if (ours) payload.release()
+            if (failure != null) throw failure
+        }
+
+        override suspend fun drive() {
+            while (true) {
+                val next = lock.withLock { dequeue() }
+                if (next == null) {
+                    // Drained. Only close()/abort()/failure move the phase off Open, so this is
+                    // the graceful exit; otherwise park until there is work or the phase moves.
+                    if (currentPhase.value !== ConnectionPhase.Open) return
+                    wakeup.receive()
+                    continue
+                }
+                val outcome =
+                    try {
+                        transmit(next.toOutgoing())
+                    } catch (cancellation: CancellationException) {
+                        next.release()
+                        // Accepted but unfinished: it owes exactly one report even though we are
+                        // being torn down mid-frame.
+                        withContext(NonCancellable) {
+                            handoff.onNotSent(next.origin, NotSentReason.ConnectionClosed(terminalCause()))
+                        }
+                        throw cancellation
+                    } catch (failure: Throwable) {
+                        next.release()
+                        failWriter(failure)
+                        val cause = terminalCause()
+                        handoff.onNotSent(next.origin, NotSentReason.ConnectionClosed(cause))
+                        discardQueued(cause)
+                        return
+                    }
+                next.release()
+                if (outcome is TransmitOutcome.EncodeFailed) {
+                    handoff.onNotSent(next.origin, NotSentReason.EncodeFailed(outcome.cause))
+                }
+            }
+        }
+
+        /** Under [lock]: take the head and hand the freed slot straight to the longest-parked sender. */
+        private fun dequeue(): OutboundPayload<T>? {
+            val next = queue.removeFirstOrNull() ?: return null
+            admitParked()
+            return next
+        }
+
+        /** Under [lock]: FIFO slot handoff. Grant and enqueue are the same step, so nothing leaks. */
+        private fun admitParked() {
+            while (queue.size < capacity) {
+                val sender = parked.removeFirstOrNull() ?: return
+                sender.enqueued = true
+                enqueue(sender.payload)
+                sender.slot.complete(Unit)
+            }
+        }
+
+        override fun refuseSends() {
+            // Parked senders were never accepted, so they leave through their own call site with
+            // OutboundClosedException — not through onNotSent.
+            while (true) {
+                val sender = parked.removeFirstOrNull() ?: break
+                sender.slot.completeExceptionally(OutboundClosedException(senderCloseCause()))
+            }
+            wakeup.trySend(Unit)
+        }
+
+        override suspend fun discardQueued(cause: CloseCause) {
+            while (true) {
+                val lost = lock.withLock { queue.removeFirstOrNull() } ?: return
+                lost.release()
+                handoff.onNotSent(lost.origin, NotSentReason.ConnectionClosed(cause))
+            }
+        }
+    }
+}
+
+/**
+ * The per-mode machinery behind [OutboundWriter]. Each arm owns its own element type and queue,
+ * so the states the other arm would make possible — an acknowledgement with no waiter, a bounded
+ * deque with no loss handler — are unconstructible rather than merely unused.
+ */
+@ExperimentalFanoutApi
+private interface OutboundStrategy<T> {
+    /** The caller's side of the mode's completion semantics. */
+    suspend fun send(payload: OutboundPayload<T>)
+
+    /** The writer coroutine's loop. Returns when the queue is drained and the phase left Open. */
+    suspend fun drive()
+
+    /** Stop accepting. Called under the writer's lock, atomically with the phase transition. */
+    fun refuseSends()
+
+    /** Report every still-queued element as lost, exactly once, with user code outside the lock. */
+    suspend fun discardQueued(cause: CloseCause)
+}
+
+/**
+ * What the writer holds per accepted message: the message itself plus, for `sendShared`, the one
+ * transferred [SharedBytes] reference this component owes exactly one [release] to.
+ */
+@ExperimentalFanoutApi
+private sealed interface OutboundPayload<T> {
+    val origin: T
+
+    fun toOutgoing(): Outgoing<T>
+
+    fun release()
+}
+
+@ExperimentalFanoutApi
+private class MessageSend<T>(
+    override val origin: T,
+) : OutboundPayload<T> {
+    override fun toOutgoing(): Outgoing<T> = Outgoing.Encode(origin)
+
+    override fun release() = Unit
+}
+
+@ExperimentalFanoutApi
+private class SharedSend<T>(
+    private val bytes: SharedBytes,
+    override val origin: T,
+) : OutboundPayload<T> {
+    /** The private-cursor view is minted on the writer, immediately before the write. */
+    override fun toOutgoing(): Outgoing<T> = Outgoing.Prewritten(bytes.view(), origin)
+
+    override fun release() = bytes.release()
+}
+
+/** `AwaitWritten`'s element: a payload plus the acknowledgement its sender is waiting on. */
+@ExperimentalFanoutApi
+private class AckedSend<T>(
+    val payload: OutboundPayload<T>,
+    val ack: CompletableDeferred<Unit>,
+) {
+    /** The loss path: release the transferred reference, then answer the sender exactly once. */
+    fun discard(cause: CloseCause) {
+        payload.release()
+        ack.completeExceptionally(OutboundClosedException(cause))
+    }
+}
+
+/** `Handoff`'s parked sender: a payload waiting for a slot, plus the grant it is suspended on. */
+@ExperimentalFanoutApi
+private class ParkedSend<T>(
+    val payload: OutboundPayload<T>,
+) {
+    /** Set under the writer's lock in the same step that moves [payload] into the queue. */
+    var enqueued: Boolean = false
+
+    /** Completes on admission, fails with [OutboundClosedException] on refusal. */
+    val slot = CompletableDeferred<Unit>()
+}
+
+/** The fate `Handoff` decides for a message under the lock, acted on once the lock is released. */
+@ExperimentalFanoutApi
+private sealed interface Admission<out T> {
+    /** Queued. */
+    data object Accepted : Admission<Nothing>
+
+    /** The writer is no longer open. */
+    data object Refused : Admission<Nothing>
+
+    /** Capacity policy chose a victim: the queue head (DropOldest) or the arrival (DropNewest). */
+    class Displaced<T>(
+        val victim: OutboundPayload<T>,
+    ) : Admission<T>
+
+    /** The sender waits for a slot. */
+    class Parked<T>(
+        val sender: ParkedSend<T>,
+    ) : Admission<T>
+}
+
+/**
+ * Identity marker installed in the writer coroutine's context so a re-entrant `close()`/`abort()`
+ * from a user handler can tell "I *am* the writer" and initiate instead of joining itself. It
+ * survives `withContext(NonCancellable)`, which replaces only the job.
+ */
+private class WriterMark(
+    val owner: Any,
+) : AbstractCoroutineContextElement(WriterMark) {
+    companion object Key : CoroutineContext.Key<WriterMark>
 }
