@@ -55,4 +55,14 @@ class SharedFrame<T>(
 fun <T> ContextFreeCodec<T>.encodeShared(
     message: T,
     factory: BufferFactory = BufferFactory.Default,
-): SharedFrame<T> = TODO("implemented by the shared-send work")
+): SharedFrame<T> {
+    // EncodeContext.Empty is the honest argument: a ContextFreeCodec encodes identically for every
+    // context by contract, so threading a caller's context would only imply an influence that is
+    // declared not to exist.
+    //
+    // encodeToPlatformBuffer already hands back a buffer positioned for reading (position = 0,
+    // limit = encoded size) and frees it on any encode failure. Do NOT resetForRead() again —
+    // a second reset flips limit to the current position (0) and would adopt an empty frame.
+    val encoded = encodeToPlatformBuffer(message, factory, EncodeContext.Empty)
+    return SharedFrame(message, SharedBytes.adopt(encoded))
+}
