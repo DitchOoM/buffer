@@ -11,11 +11,19 @@ package com.ditchoom.buffer.flow
  * 2. [send] is **serialized** — concurrent `send`s on one connection never interleave their
  *    bytes.
  *
- * Every implementation in this ecosystem conforms (they own their writer — see `OutboundWriter`
- * for the reusable component). Third-party implementations written against the pre-6.x contract
- * ("not assumed thread-safe, bring your own Mutex") remain *callable* but are not conforming;
- * v7 makes the guarantee mandatory for all implementors. Callers should already treat the two
- * properties above as the contract and stop wrapping sends in external locks.
+ * `OutboundWriter` is the reusable component that provides both, and the socket library's
+ * `CodecConnection`/`CodecSender` are built on it.
+ *
+ * **Not every implementation conforms yet, and the exceptions matter.** In this module,
+ * [ByteSink.typed] and [ByteStream.typed] encode and `writeFully` on the *caller's* coroutine with
+ * no serialization: two concurrent sends can interleave partial writes, and for a self-framing
+ * codec the peer then reads a length prefix across the splice point — a silent, permanent stream
+ * desync. **Keep your external `Mutex` around sends through those two**, and do not read the
+ * guarantee above as already true of them. Third-party implementations written against the pre-6.x
+ * contract ("not assumed thread-safe, bring your own Mutex") are in the same position.
+ *
+ * v7 makes the guarantee mandatory for all implementors; retrofitting this module's typed views
+ * onto `OutboundWriter` is tracked as part of that milestone.
  *
  * Combines [Sender] and [Receiver] with lifecycle management. This is the primary
  * interface that protocol libraries code against -- they don't need to know whether

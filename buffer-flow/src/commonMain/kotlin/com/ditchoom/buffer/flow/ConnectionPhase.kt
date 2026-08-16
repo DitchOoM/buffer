@@ -1,5 +1,7 @@
 package com.ditchoom.buffer.flow
 
+import com.ditchoom.buffer.ExperimentalFanoutApi
+
 /**
  * The send/close lifecycle of a connection that owns its writer, exposed reactively as a
  * `StateFlow<ConnectionPhase>`.
@@ -12,7 +14,13 @@ package com.ditchoom.buffer.flow
  * (Initialized/Connecting/Connected/Disconnected in socket implementations): that vocabulary
  * describes reaching the peer; this one describes the writer-owning connection's send/close
  * ladder. The coexistence is intent, not drift.
+ *
+ * Experimental alongside every producer and consumer of it ([OutboundWriter.phase],
+ * [OutboundClosedException], [NotSentReason.ConnectionClosed]). Freezing an exhaustively-`when`-able
+ * hierarchy on day one is what makes a later discovery — a needed arm, a renamed cause — a major
+ * version instead of an experimental-round correction. It costs zero stable consumers today.
  */
+@ExperimentalFanoutApi
 sealed interface ConnectionPhase {
     /** Accepting sends; the writer is live. */
     data object Open : ConnectionPhase
@@ -26,7 +34,8 @@ sealed interface ConnectionPhase {
     ) : ConnectionPhase
 }
 
-/** Why a connection reached [ConnectionPhase.Closed]. */
+/** Why a connection reached [ConnectionPhase.Closed]. Experimental for the same reason. */
+@ExperimentalFanoutApi
 sealed interface CloseCause {
     /** Graceful close completed: every accepted frame reached the wire. */
     data object Graceful : CloseCause

@@ -59,10 +59,21 @@ sealed interface SendMode<in T> {
          * capacity eviction, close-time discard, or a message that failed to encode. Runs
          * outside the queue lock: re-entrant `send`/`close` from the handler is legal.
          *
-         * **Must not throw.** A handler that throws on the writer's reporting path fails the
-         * writer with the thrown error (`CloseCause.Failed`) — surfaced loudly rather than left
-         * as a dead writer under an Open phase — and any reports still owed become best-effort.
-         * Count, log, hand off; do not raise.
+         * **Must be thread-safe — it can run concurrently with itself.** "Exactly once per
+         * message" is not "one at a time": reports are raised from three different coroutine
+         * identities (an evicting *sender*, the *writer*, and an *abort* caller), deliberately
+         * without mutual exclusion, so on a multi-threaded dispatcher two can be in flight at
+         * once. A plain `MutableList`/counter here will silently lose updates — exactly the
+         * under-counted ledger the exactly-once guarantee exists to prevent. Use an atomic, a
+         * concurrent collection, or a channel `trySend`.
+         *
+         * Note that guarding the handler body with a `Mutex` is *not* the fix: it deadlocks the
+         * re-entrant send-from-handler pattern documented as legal above.
+         *
+         * **Must not throw.** A handler that throws on any reporting path fails the writer with
+         * the thrown error (`CloseCause.Failed`) — surfaced loudly rather than left as a dead
+         * writer under an Open phase — and that message's own report degrades to best-effort.
+         * Reports owed to *other* messages are still delivered. Count, log, hand off; do not raise.
          */
         val onNotSent: suspend (T, NotSentReason) -> Unit,
     ) : SendMode<T>

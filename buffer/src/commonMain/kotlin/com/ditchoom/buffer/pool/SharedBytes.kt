@@ -128,7 +128,50 @@ class SharedBytes private constructor(
         /**
          * Takes ownership of [buffer] (already `resetForRead()`) and returns a `SharedBytes`
          * holding the creator's single reference.
+         *
+         * **[buffer] must not be written or have its cursor moved after this call.** Views are
+         * slices of a stable `position..limit` window, and every consumer reads that window
+         * concurrently; mutating it afterwards races every live view.
+         *
+         * **A pooled [buffer] must come from a [ThreadingMode.MultiThreaded] pool**, enforced
+         * here. The whole point of this type is that the *last* reference may be dropped on any
+         * thread, and that release returns the chunk to its pool — against
+         * [ThreadingMode.SingleThreaded]'s unsynchronized freelist that is a silent corruption
+         * (a mangled freelist, or one chunk handed to two owners). `BufferPool()` defaults to
+         * single-threaded, so this is the easy mistake to make and the reason it fails loudly
+         * here rather than sporadically at some later acquire.
          */
-        fun adopt(buffer: PlatformBuffer): SharedBytes = SharedBytes(buffer)
+        fun adopt(buffer: PlatformBuffer): SharedBytes {
+            val pool = poolOf(buffer)
+            require(pool == null || pool.threadingMode == ThreadingMode.MultiThreaded) {
+                "SharedBytes.adopt() requires a ThreadingMode.MultiThreaded BufferPool: shared " +
+                    "references are released from arbitrary threads, and a SingleThreaded pool's " +
+                    "freelist is not safe to return a chunk to off its owning thread."
+            }
+            return SharedBytes(buffer)
+        }
+
+        /**
+         * The pool backing [buffer], found by walking the same wrapper layers [unwrapFully]
+         * resolves through. `null` for unpooled buffers, which have no freelist to corrupt.
+         */
+        @Suppress("DEPRECATION")
+        private fun poolOf(buffer: PlatformBuffer): BufferPool? {
+            var current: ReadBuffer? = buffer
+            var found: BufferPool? = null
+            while (found == null && current != null) {
+                // Each step either identifies the pool or descends one wrapper; `null` means the
+                // walk bottomed out at a plain buffer that carries no pool identity.
+                current =
+                    when (val layer = current) {
+                        // Specific wrappers first: both also satisfy `is PlatformBuffer`.
+                        is PooledBuffer -> null.also { found = layer.pool }
+                        is TrackedSlice -> null.also { found = layer.parentPool }
+                        is PlatformBuffer -> layer.unwrap().takeIf { it !== layer }
+                        else -> null
+                    }
+            }
+            return found
+        }
     }
 }

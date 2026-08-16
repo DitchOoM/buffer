@@ -323,6 +323,40 @@ class SharedBytesTests {
     // Helpers
     // ========================================================================
 
+    // ========================================================================
+    // 4. adopt() refuses storage it could not safely free
+    // ========================================================================
+
+    /**
+     * `BufferPool()` defaults to [ThreadingMode.SingleThreaded], whose freelist is a plain
+     * `ArrayDeque`. Sharing is precisely the case where the *last* release lands on an arbitrary
+     * thread, so adopting single-threaded storage would race that unsynchronized freelist against
+     * its owner — a mangled list, or one chunk handed to two owners, surfacing much later at an
+     * innocent `acquire`. Fail at the boundary where the mistake is made instead.
+     *
+     * These tests hardcode [ThreadingMode.MultiThreaded] everywhere else, which is exactly why the
+     * requirement went unnoticed and needs its own pin.
+     */
+    @Test
+    fun adoptRejectsSingleThreadedPoolStorage() {
+        withPool(threadingMode = ThreadingMode.SingleThreaded, defaultBufferSize = POOL_BUFFER_SIZE) { pool ->
+            val chunk = pool.acquire(PAYLOAD_SIZE) as PlatformBuffer
+            fillPattern(chunk)
+            assertFailsWith<IllegalArgumentException>("single-threaded pool storage must be refused loudly") {
+                SharedBytes.adopt(chunk)
+            }
+            chunk.freeNativeMemory()
+        }
+    }
+
+    /** The unpooled case stays legal: no freelist exists to corrupt. */
+    @Test
+    fun adoptAcceptsUnpooledStorage() {
+        val buffer = BufferFactory.Default.allocate(PAYLOAD_SIZE)
+        fillPattern(buffer)
+        SharedBytes.adopt(buffer).release()
+    }
+
     private fun newPool(): BufferPool =
         BufferPool(
             threadingMode = ThreadingMode.MultiThreaded,

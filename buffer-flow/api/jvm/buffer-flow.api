@@ -80,9 +80,6 @@ public final class com/ditchoom/buffer/flow/BytesWritten {
 	public final synthetic fun unbox-impl ()I
 }
 
-public abstract interface class com/ditchoom/buffer/flow/CloseCause {
-}
-
 public final class com/ditchoom/buffer/flow/CloseCause$Aborted : com/ditchoom/buffer/flow/CloseCause {
 	public static final field INSTANCE Lcom/ditchoom/buffer/flow/CloseCause$Aborted;
 	public fun equals (Ljava/lang/Object;)Z
@@ -116,9 +113,6 @@ public abstract interface class com/ditchoom/buffer/flow/Connection : com/ditcho
 
 public final class com/ditchoom/buffer/flow/Connection$DefaultImpls {
 	public static fun abort (Lcom/ditchoom/buffer/flow/Connection;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
-}
-
-public abstract interface class com/ditchoom/buffer/flow/ConnectionPhase {
 }
 
 public final class com/ditchoom/buffer/flow/ConnectionPhase$Closed : com/ditchoom/buffer/flow/ConnectionPhase {

@@ -4,6 +4,8 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ExperimentalFanoutApi
 import com.ditchoom.buffer.pool.SharedBytes
+import kotlin.concurrent.atomics.AtomicBoolean
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
 /**
  * A [Codec] whose encoding is **connection-independent**: [encode] and [wireSize] must produce
@@ -19,6 +21,7 @@ import com.ditchoom.buffer.pool.SharedBytes
  * Implementors: only declare this when the contract genuinely holds for every value of [T].
  * Generated codecs qualify whenever their schema reads no context keys in the encode direction.
  */
+@ExperimentalFanoutApi
 interface ContextFreeCodec<T> : Codec<T>
 
 /**
@@ -34,6 +37,7 @@ interface ContextFreeCodec<T> : Codec<T>
  * N + 1 references; the last release frees the storage.
  */
 @ExperimentalFanoutApi
+@OptIn(ExperimentalAtomicApi::class)
 class SharedFrame<T>(
     /** The message these bytes encode — the value loss reporting hands back. */
     val origin: T,
@@ -41,14 +45,33 @@ class SharedFrame<T>(
     val bytes: SharedBytes,
 ) {
     /**
+     * Whether the creator's reference has already been dropped. Atomic because a frame is
+     * distributed across connections on unrelated threads, and the whole point of the flag is to
+     * make the second close a *diagnosis* rather than a race.
+     */
+    private val closed = AtomicBoolean(false)
+
+    /**
      * Releases the creator's reference. Call **exactly once**, after distributing the frame.
      *
      * Deliberately NOT idempotent: a second close throws, because silently absorbing it would
      * mask the same accounting bug that silently absorbing an over-release would — the refcount
      * is strict everywhere or trustworthy nowhere. Don't pair with `use`-style helpers that may
      * close twice.
+     *
+     * The flag is what makes that promise true. Delegating straight to [SharedBytes.release]
+     * would only throw when the count is already at zero — with consumer references still
+     * outstanding, a double close would instead *steal one of theirs*, freeing the storage an
+     * entire reference early and surfacing as another connection's bytes on the wire, far from
+     * the buggy call.
      */
-    fun close(): Unit = bytes.release()
+    fun close() {
+        check(closed.compareAndSet(expectedValue = false, newValue = true)) {
+            "SharedFrame.close() called more than once: the creator holds exactly one reference, " +
+                "and a second close would consume a consumer's reference instead of its own."
+        }
+        bytes.release()
+    }
 }
 
 /**

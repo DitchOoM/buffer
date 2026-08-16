@@ -15,6 +15,7 @@ import kotlinx.coroutines.channels.ClosedSendChannelException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -222,14 +223,24 @@ class OutboundWriter<T>(
         origin: T,
     ): Unit = strategy.send(SharedSend(bytes, origin))
 
-    /** Graceful close: drain per mode, join the writer, settle at [ConnectionPhase.Closed]. */
+    /**
+     * Graceful close: drain per mode, join the writer, settle at [ConnectionPhase.Closed].
+     *
+     * Cancellation-safe by construction. The canonical teardown is `finally { close() }` from a
+     * scope that is *already* cancelled, so every step that must happen — leaving [Open],
+     * refusing senders, and escalating to [abort] when the drain cannot be waited on — runs under
+     * [NonCancellable]. Only the *waiting* is cancellable, and losing the wait escalates rather
+     * than abandoning the ladder half-climbed.
+     */
     suspend fun close() {
-        lock.withLock {
-            if (currentPhase.value === ConnectionPhase.Open) {
-                // One atomic step: the phase leaves Open and the strategy stops accepting in the
-                // same critical section, so no send can slip into a queue that is already draining.
-                currentPhase.value = ConnectionPhase.Draining
-                strategy.refuseSends()
+        withContext(NonCancellable) {
+            lock.withLock {
+                if (currentPhase.value === ConnectionPhase.Open) {
+                    // One atomic step: the phase leaves Open and the strategy stops accepting in
+                    // the same critical section, so no send can slip into a draining queue.
+                    currentPhase.value = ConnectionPhase.Draining
+                    strategy.refuseSends()
+                }
             }
         }
         if (insideWriter()) {
@@ -237,36 +248,57 @@ class OutboundWriter<T>(
             // coroutine, so opening the window is the whole job. Joining here would join ourselves.
             return
         }
-        when (val bound = linger) {
-            Linger.UntilDrained -> writerJob.join()
-            is Linger.Bounded ->
-                if (withTimeoutOrNull(bound.timeout) { writerJob.join() } == null) {
-                    // Linger expired with the queue unflushed: the ladder's last rung.
-                    abort()
-                    return
-                }
+        var lingerExpired = false
+        try {
+            when (val bound = linger) {
+                Linger.UntilDrained -> writerJob.join()
+                is Linger.Bounded ->
+                    lingerExpired = withTimeoutOrNull(bound.timeout) { writerJob.join() } == null
+            }
+        } catch (cancellation: CancellationException) {
+            // The *caller* was cancelled mid-drain (`finally { close() }` from a dead scope). The
+            // drain can no longer be waited on, but the queue's exactly-once obligations are not
+            // the caller's to drop: escalate to the ladder's last rung, then unwind as asked.
+            abort()
+            throw cancellation
+        }
+        if (lingerExpired) {
+            // Linger expired with the queue unflushed: the ladder's last rung.
+            abort()
+            return
         }
         settle(CloseCause.Graceful)
         scope.cancel()
     }
 
-    /** Immediate close: cancel the writer, report the queue not-sent, settle at [ConnectionPhase.Closed]. */
+    /**
+     * Immediate close: cancel the writer, report the queue not-sent, settle at
+     * [ConnectionPhase.Closed].
+     *
+     * The **entire** body is [NonCancellable]. Everything inside is bounded, and this is the API's
+     * escape hatch: a caller reaching for it is usually already being cancelled (a watchdog, a
+     * `finally`), and an abort that silently no-ops because its caller was cancelled first is
+     * worse than no escape hatch at all.
+     */
     suspend fun abort() {
-        lock.withLock {
-            if (currentPhase.value !is ConnectionPhase.Closed) {
-                currentPhase.value = ConnectionPhase.Closed(CloseCause.Aborted)
-            }
-            strategy.refuseSends()
-        }
-        val cause = terminalCause()
+        // Whether we are the writer's own lineage decides only whether we may *join* — see
+        // [insideWriter]. Read it outside NonCancellable so it reflects the caller's context.
         val reentrant = insideWriter()
-        // The discard must complete even if the caller is itself being cancelled — a dropped
-        // discard is a lost report, which is exactly what exactly-once forbids.
         withContext(NonCancellable) {
-            if (!reentrant) {
-                writerJob.cancel()
-                writerJob.join()
+            lock.withLock {
+                if (currentPhase.value !is ConnectionPhase.Closed) {
+                    currentPhase.value = ConnectionPhase.Closed(CloseCause.Aborted)
+                }
+                strategy.refuseSends()
             }
+            val cause = terminalCause()
+            // Always cancel, even from the writer's own lineage: an abort that does not stop the
+            // writer is not an abort. Only the join is lineage-conditional — joining a job we are
+            // (or descend from) would deadlock.
+            writerJob.cancel()
+            if (!reentrant) writerJob.join()
+            // The discard must complete even if the caller is itself being cancelled — a dropped
+            // discard is a lost report, which is exactly what exactly-once forbids.
             strategy.discardQueued(cause)
         }
         if (!reentrant) scope.cancel()
@@ -298,19 +330,31 @@ class OutboundWriter<T>(
             else -> CloseCause.Graceful
         }
 
-    /** True when the calling coroutine *is* this component's writer (a re-entrant user handler). */
+    /**
+     * True when the caller is the writer coroutine **or a coroutine launched from it** — the
+     * marker is a context element, so it is inherited by children of `transmit`/`onNotSent`.
+     * Lineage is deliberately the right question for the only thing this gates: whether [abort]
+     * may `join` the writer. A child of the writer joining it deadlocks exactly as the writer
+     * itself would. It must never gate whether the writer is *cancelled* — see [abort].
+     */
     private suspend fun insideWriter(): Boolean = currentCoroutineContext()[WriterMark]?.owner === this
 
     /**
      * Fails the writer: terminal phase first, then refusal, so anyone who observes the failure
      * already sees the terminal cause. Loss reporting is the caller's (mode-specific) job.
+     *
+     * [NonCancellable]: this runs on paths that are already unwinding (a transmit throw racing an
+     * [abort]), and a phase transition lost to the caller's cancellation leaves a dead writer
+     * under an [ConnectionPhase.Open] phase — the silent hang this component exists to kill.
      */
     private suspend fun failWriter(cause: Throwable) {
-        lock.withLock {
-            if (currentPhase.value !is ConnectionPhase.Closed) {
-                currentPhase.value = ConnectionPhase.Closed(CloseCause.Failed(cause))
+        withContext(NonCancellable) {
+            lock.withLock {
+                if (currentPhase.value !is ConnectionPhase.Closed) {
+                    currentPhase.value = ConnectionPhase.Closed(CloseCause.Failed(cause))
+                }
+                strategy.refuseSends()
             }
-            strategy.refuseSends()
         }
     }
 
@@ -347,25 +391,47 @@ class OutboundWriter<T>(
         @Suppress("TooGenericExceptionCaught") // any transmit throwable = transport failure, fails the writer
         override suspend fun drive() {
             for (element in handoffs) {
-                val outcome =
-                    try {
-                        transmit(element.payload.toOutgoing())
-                    } catch (cancellation: CancellationException) {
-                        // abort() cancelled us mid-frame. The frame may be truncated on a dying
-                        // connection (by design); the sender still gets its exactly-one answer.
-                        element.discard(terminalCause())
-                        throw cancellation
-                    } catch (failure: Throwable) {
-                        element.payload.release()
-                        failWriter(failure)
-                        element.ack.completeExceptionally(failure)
-                        return
+                try {
+                    val outcome =
+                        try {
+                            transmit(element.payload.toOutgoing())
+                        } catch (cancellation: CancellationException) {
+                            if (currentCoroutineContext().isActive) {
+                                // NOT our cancellation: the adopter's transmit raised it itself (a
+                                // `withTimeout` around the sink write). That is a transport
+                                // failure, and misreading it as an abort would leave a dead writer
+                                // under an Open phase.
+                                element.ack.completeExceptionally(cancellation)
+                                failWriter(cancellation)
+                                return
+                            }
+                            // abort() cancelled us mid-frame. The frame may be truncated on a dying
+                            // connection (by design); the sender still gets its exactly-one answer.
+                            element.ack.completeExceptionally(OutboundClosedException(terminalCause()))
+                            throw cancellation
+                        } catch (failure: Throwable) {
+                            // The sender's answer is settled BEFORE any cancellable suspension: an
+                            // abort racing this throw must not be able to strand it in await().
+                            element.ack.completeExceptionally(failure)
+                            failWriter(failure)
+                            return
+                        }
+                    when (outcome) {
+                        TransmitOutcome.Written -> element.ack.complete(Unit)
+                        // Encode failure is per-message: the sender hears it, the connection lives.
+                        is TransmitOutcome.EncodeFailed -> element.ack.completeExceptionally(outcome.cause)
                     }
-                element.payload.release()
-                when (outcome) {
-                    TransmitOutcome.Written -> element.ack.complete(Unit)
-                    // Encode failure is per-message: the sender hears it, the connection lives.
-                    is TransmitOutcome.EncodeFailed -> element.ack.completeExceptionally(outcome.cause)
+                } finally {
+                    // The two obligations every taken element carries, on every exit path — which
+                    // is what makes "released exactly once" and "never hangs its sender"
+                    // structural rather than a property of every branch remembering to spell
+                    // them. The `isCompleted` guard is not correctness (completeExceptionally is
+                    // already a no-op on a settled ack) but allocation: this is the hot path, and
+                    // the success case must not build an exception it will immediately discard.
+                    element.payload.release()
+                    if (!element.ack.isCompleted) {
+                        element.ack.completeExceptionally(OutboundClosedException(terminalCause()))
+                    }
                 }
             }
         }
@@ -406,17 +472,32 @@ class OutboundWriter<T>(
         /** Reactive writer wakeup. Conflated: a wakeup is never lost and never accumulates. */
         private val wakeup = Channel<Unit>(Channel.CONFLATED)
 
+        @Suppress("TooGenericExceptionCaught") // the transferred reference is owed a release on every path
         override suspend fun send(payload: OutboundPayload<T>) {
-            when (val admission = lock.withLock { admit(payload) }) {
+            val admission =
+                try {
+                    lock.withLock { admit(payload) }
+                } catch (t: Throwable) {
+                    // Cancelled (or failed) while suspended on the contended lock: nothing was ever
+                    // queued, so nothing is reported — but the reference this call took ownership of
+                    // still owes its single release. `AwaitWritten` covers the identical window via
+                    // `onUndeliveredElement`; this is Handoff's equivalent.
+                    payload.release()
+                    throw t
+                }
+            when (admission) {
                 Admission.Accepted -> Unit
                 Admission.Refused -> {
                     payload.release()
                     throw OutboundClosedException(senderCloseCause())
                 }
-                // User code, deliberately outside the lock: re-entrant send/close is legal.
+                // User code, deliberately outside the lock: re-entrant send/close is legal. The
+                // victim was *already accepted*, so its exactly-once report is not this sender's
+                // to drop — [reportLost] is NonCancellable and routes a throwing handler to the
+                // writer rather than to the unrelated call site that triggered the eviction.
                 is Admission.Displaced -> {
                     admission.victim.release()
-                    handoff.onNotSent(admission.victim.origin, NotSentReason.CapacityExceeded)
+                    reportLost(admission.victim, NotSentReason.CapacityExceeded)
                 }
                 is Admission.Parked -> awaitSlot(admission.sender, payload)
             }
@@ -480,39 +561,81 @@ class OutboundWriter<T>(
             if (failure != null) throw failure
         }
 
-        @Suppress("TooGenericExceptionCaught") // any transmit throwable = transport failure, fails the writer
         override suspend fun drive() {
-            while (true) {
+            var alive = true
+            while (alive) {
                 val next = lock.withLock { dequeue() }
                 if (next == null) {
                     // Drained. Only close()/abort()/failure move the phase off Open, so this is
                     // the graceful exit; otherwise park until there is work or the phase moves.
                     if (currentPhase.value !== ConnectionPhase.Open) return
                     wakeup.receive()
-                    continue
+                } else {
+                    alive = transmitOne(next)
                 }
+            }
+        }
+
+        /**
+         * Transmits one element and discharges its obligations. Returns `false` when the writer
+         * must stop — a transport failure, whose queue this has already discarded.
+         */
+        @Suppress("TooGenericExceptionCaught") // any transmit throwable = transport failure, fails the writer
+        private suspend fun transmitOne(next: OutboundPayload<T>): Boolean {
+            var alive = true
+            try {
                 val outcome =
                     try {
                         transmit(next.toOutgoing())
                     } catch (cancellation: CancellationException) {
-                        next.release()
-                        // Accepted but unfinished: it owes exactly one report even though we are
-                        // being torn down mid-frame.
-                        withContext(NonCancellable) {
-                            handoff.onNotSent(next.origin, NotSentReason.ConnectionClosed(terminalCause()))
+                        if (!currentCoroutineContext().isActive) {
+                            // Accepted but unfinished: it owes exactly one report even though we
+                            // are being torn down mid-frame.
+                            reportLost(next, NotSentReason.ConnectionClosed(terminalCause()))
+                            throw cancellation
                         }
-                        throw cancellation
+                        // NOT our cancellation — the adopter's own transmit raised it. A transport
+                        // failure, not an abort; see the AwaitWritten twin.
+                        failWriter(cancellation)
+                        alive = false
+                        null
                     } catch (failure: Throwable) {
-                        next.release()
                         failWriter(failure)
-                        val cause = terminalCause()
-                        handoff.onNotSent(next.origin, NotSentReason.ConnectionClosed(cause))
-                        discardQueued(cause)
-                        return
+                        alive = false
+                        null
                     }
+                when {
+                    !alive -> {
+                        val cause = terminalCause()
+                        reportLost(next, NotSentReason.ConnectionClosed(cause))
+                        discardQueued(cause)
+                    }
+                    outcome is TransmitOutcome.EncodeFailed ->
+                        reportLost(next, NotSentReason.EncodeFailed(outcome.cause))
+                }
+            } finally {
+                // One release site per strategy: the load-bearing exactly-once-release invariant
+                // is structural, not a property of every exit path remembering to spell it.
                 next.release()
-                if (outcome is TransmitOutcome.EncodeFailed) {
-                    handoff.onNotSent(next.origin, NotSentReason.EncodeFailed(outcome.cause))
+            }
+            return alive
+        }
+
+        /**
+         * The writer's loss-report path: [NonCancellable] so a teardown cannot swallow an owed
+         * report, and guarded so a throwing handler fails the writer rather than unwinding the
+         * loop past the releases it still owes.
+         */
+        @Suppress("TooGenericExceptionCaught") // handler contract: a throw fails the writer, never escapes
+        private suspend fun reportLost(
+            payload: OutboundPayload<T>,
+            reason: NotSentReason,
+        ) {
+            withContext(NonCancellable) {
+                try {
+                    handoff.onNotSent(payload.origin, reason)
+                } catch (t: Throwable) {
+                    if (t !is CancellationException) failWriter(t)
                 }
             }
         }
@@ -544,11 +667,21 @@ class OutboundWriter<T>(
             wakeup.trySend(Unit)
         }
 
+        /**
+         * Drains the queue's obligations. Every element is released unconditionally and reported
+         * under its own guard, so one throwing handler degrades *its own* report to best-effort
+         * (as documented) without stranding the references and reports of everything behind it.
+         */
         override suspend fun discardQueued(cause: CloseCause) {
-            while (true) {
-                val lost = lock.withLock { queue.removeFirstOrNull() } ?: return
-                lost.release()
-                handoff.onNotSent(lost.origin, NotSentReason.ConnectionClosed(cause))
+            withContext(NonCancellable) {
+                while (true) {
+                    val lost = lock.withLock { queue.removeFirstOrNull() } ?: break
+                    try {
+                        runCatching { handoff.onNotSent(lost.origin, NotSentReason.ConnectionClosed(cause)) }
+                    } finally {
+                        lost.release()
+                    }
+                }
             }
         }
     }
