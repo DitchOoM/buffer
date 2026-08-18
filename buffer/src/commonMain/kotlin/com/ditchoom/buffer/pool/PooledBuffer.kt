@@ -8,6 +8,8 @@ import com.ditchoom.buffer.TextPolicy
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.bufferEquals
 import com.ditchoom.buffer.bufferHashCode
+import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
 /**
  * A buffer wrapper that returns its inner buffer to a pool when all references are released.
@@ -21,32 +23,76 @@ import com.ditchoom.buffer.bufferHashCode
  * All read/write operations throw [IllegalStateException] after [freeNativeMemory] is called,
  * preventing use-after-free bugs where the inner buffer may have been reused by another caller.
  */
+@OptIn(ExperimentalAtomicApi::class)
 internal class PooledBuffer(
     internal val inner: PlatformBuffer,
     internal val pool: BufferPool,
 ) : PlatformBuffer by inner {
-    private var freed = false
-    private var refCount = 1 // 1 for the chunk reference in StreamProcessor
+    /**
+     * Whether this chunk's references may be taken and dropped from more than one thread.
+     *
+     * Atomic reference counting is **not free**: on x86_64 it measured ~33% slower on the
+     * slice/read/release path (70.4M -> 47.5M ops/s, medians over three alternating rounds), and
+     * neither a CAS retry loop nor a single fetch-and-add avoided that — the cost is the atomic
+     * RMW itself, not the choice of primitive. On ARM64 (LSE) it was free. So the count is atomic
+     * exactly when correctness requires it and plain otherwise, rather than everywhere or nowhere.
+     *
+     * `SingleThreaded` is [BufferPool]'s default and the single-consumer hot path; it keeps the
+     * plain counter and is unchanged. `MultiThreaded` pools — the ones a buffer shared and
+     * released across more than one thread or coroutine must come from — pay for the safety they
+     * actually need.
+     */
+    private val shared = pool.threadingMode == ThreadingMode.MultiThreaded
+
+    // Exactly one of these two is live, chosen by [shared]. Both are always allocated: `AtomicInt`
+    // is a heap object on JVM/JS and PooledBuffer is constructed per `acquire()`, so making the
+    // atomic conditional would trade a branch for an allocation on the hot path.
+    private var plainRefCount = 1 // 1 for the chunk reference in StreamProcessor
+    private val sharedRefCount = AtomicInt(1)
+
+    private var plainFreed = false
+    private val sharedFreed = AtomicInt(0)
 
     private fun checkNotFreed() {
-        if (freed) throw IllegalStateException("Buffer has been freed and returned to pool")
+        val isFreed = if (shared) sharedFreed.load() != 0 else plainFreed
+        if (isFreed) throw IllegalStateException("Buffer has been freed and returned to pool")
     }
 
     internal fun addRef() {
-        refCount++
+        if (!shared) {
+            plainRefCount++
+            return
+        }
+        // Resurrection from zero is refused: it would hand out a slice onto storage another
+        // acquirer already owns. Detected after the increment and undone, because reaching it at
+        // all is a caller bug rather than a race to tolerate.
+        val previous = sharedRefCount.fetchAndAdd(1)
+        if (previous <= 0) {
+            sharedRefCount.fetchAndAdd(-1)
+            throw IllegalStateException("PooledBuffer.addRef() after the last reference was released")
+        }
     }
 
     internal fun releaseRef() {
-        if (--refCount == 0) {
-            pool.release(inner)
-        }
+        val remaining =
+            if (shared) {
+                sharedRefCount.fetchAndAdd(-1) - 1
+            } else {
+                --plainRefCount
+            }
+        check(remaining >= 0) { "PooledBuffer.releaseRef() called more times than it was retained" }
+        // Exactly one caller observes the 1 -> 0 transition, so the chunk is returned once.
+        if (remaining == 0) pool.release(inner)
     }
 
     override fun freeNativeMemory() {
-        if (!freed) {
-            freed = true
-            releaseRef()
-        }
+        val alreadyFreed =
+            if (shared) {
+                sharedFreed.exchange(1) != 0
+            } else {
+                plainFreed.also { plainFreed = true }
+            }
+        if (!alreadyFreed) releaseRef()
     }
 
     override fun slice(byteOrder: ByteOrder): PlatformBuffer {
