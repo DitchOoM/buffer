@@ -12,8 +12,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.yield
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -163,10 +163,11 @@ class SharedBytesTests {
         val shared = SharedBytes.adopt(pooledPayload(pool))
 
         var escaped: ReadBuffer? = null
-        val firstByte = shared.withView { borrowed ->
-            escaped = borrowed
-            borrowed.readByte()
-        }
+        val firstByte =
+            shared.withView { borrowed ->
+                escaped = borrowed
+                borrowed.readByte()
+            }
         assertEquals(patternByte(0), firstByte, "the borrow reads correctly inside its block")
 
         assertFailsWith<IllegalStateException>("a borrow that escaped its block must be revoked") {

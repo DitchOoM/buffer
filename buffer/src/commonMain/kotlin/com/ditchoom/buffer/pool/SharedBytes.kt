@@ -47,7 +47,6 @@ import kotlin.concurrent.atomics.ExperimentalAtomicApi
 class SharedBytes private constructor(
     private val adopted: PlatformBuffer,
 ) {
-
     /**
      * Live reference count. Atomic because references are taken and dropped from unrelated
      * connection coroutines, which may be on different threads.
