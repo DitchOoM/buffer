@@ -394,7 +394,7 @@ class OutboundWriter<T>(
                 try {
                     val outcome =
                         try {
-                            transmit(element.payload.toOutgoing())
+                            element.payload.withOutgoing { transmit(it) }
                         } catch (cancellation: CancellationException) {
                             if (currentCoroutineContext().isActive) {
                                 // NOT our cancellation: the adopter's transmit raised it itself (a
@@ -586,7 +586,7 @@ class OutboundWriter<T>(
             try {
                 val outcome =
                     try {
-                        transmit(next.toOutgoing())
+                        next.withOutgoing { transmit(it) }
                     } catch (cancellation: CancellationException) {
                         if (!currentCoroutineContext().isActive) {
                             // Accepted but unfinished: it owes exactly one report even though we
@@ -715,7 +715,15 @@ private interface OutboundStrategy<T> {
 private sealed interface OutboundPayload<T> {
     val origin: T
 
-    fun toOutgoing(): Outgoing<T>
+    /**
+     * Lends this payload's [Outgoing] to [block] for exactly the duration of the write.
+     *
+     * Scoped rather than returned because `sendShared`'s outgoing borrows a view of shared bytes:
+     * a returned view would outlive the reference that keeps its storage alive, which is a
+     * use-after-free the moment the last reference drops mid-write. The borrow ends when the
+     * write does.
+     */
+    suspend fun <R> withOutgoing(block: suspend (Outgoing<T>) -> R): R
 
     fun release()
 }
@@ -724,7 +732,7 @@ private sealed interface OutboundPayload<T> {
 private class MessageSend<T>(
     override val origin: T,
 ) : OutboundPayload<T> {
-    override fun toOutgoing(): Outgoing<T> = Outgoing.Encode(origin)
+    override suspend fun <R> withOutgoing(block: suspend (Outgoing<T>) -> R): R = block(Outgoing.Encode(origin))
 
     override fun release() = Unit
 }
@@ -734,8 +742,9 @@ private class SharedSend<T>(
     private val bytes: SharedBytes,
     override val origin: T,
 ) : OutboundPayload<T> {
-    /** The private-cursor view is minted on the writer, immediately before the write. */
-    override fun toOutgoing(): Outgoing<T> = Outgoing.Prewritten(bytes.view(), origin)
+    /** The private-cursor view is borrowed on the writer for exactly the span of the write. */
+    override suspend fun <R> withOutgoing(block: suspend (Outgoing<T>) -> R): R =
+        bytes.withView { view -> block(Outgoing.Prewritten(view, origin)) }
 
     override fun release() = bytes.release()
 }

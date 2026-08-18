@@ -3,7 +3,7 @@ package com.ditchoom.buffer.pool
 import com.ditchoom.buffer.ExperimentalFanoutApi
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.unwrapFully
+import com.ditchoom.buffer.use
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
@@ -47,31 +47,6 @@ import kotlin.concurrent.atomics.ExperimentalAtomicApi
 class SharedBytes private constructor(
     private val adopted: PlatformBuffer,
 ) {
-    /**
-     * The raw buffer under [adopted]'s wrapper layers, captured once at [adopt].
-     *
-     * [view] slices **this**, not [adopted], and that is the whole reason this class exists.
-     * `PooledBuffer.slice()` (and `TrackedSlice.slice()`) bumps a plain, non-atomic `refCount`
-     * field before delegating, so two threads calling `view()` through a pooled wrapper would race
-     * on that increment and lose one — the pooled chunk would then return to its pool while a live
-     * view still aliased it. Slicing the unwrapped buffer sidesteps the wrapper's per-slice
-     * tracking entirely: every plain buffer's `slice()` only *reads* the parent's position/limit
-     * and allocates a new view object (verified on `HeapJvmBuffer`/`DirectJvmBuffer` →
-     * `ByteBuffer.slice()`, `FfmBuffer` → `MemorySegment.asSlice`, `NativeBuffer`/`ByteArrayBuffer`
-     * → offset arithmetic, `MutableDataBuffer` → pointer arithmetic, `JsBuffer` → `subarray`,
-     * `LinearBuffer` → base-offset arithmetic), so concurrent slicing of a buffer whose cursor
-     * never moves is race-free.
-     *
-     * Bypassing the wrapper's own count is deliberate and safe here because `SharedBytes`' atomic
-     * [refCount] is the sole authority on lifetime. What gets released at zero is still [adopted],
-     * the *wrapper* — so a pooled buffer goes back to its pool instead of being freed outright —
-     * and it is released exactly once, by the single thread whose [release] drives the count to
-     * zero.
-     *
-     * Invariant: nothing may move [adopted]'s (and therefore this buffer's) cursor after [adopt].
-     * Views are slices of a stable `position..limit` window.
-     */
-    private val storage: ReadBuffer = adopted.unwrapFully()
 
     /**
      * Live reference count. Atomic because references are taken and dropped from unrelated
@@ -79,8 +54,8 @@ class SharedBytes private constructor(
      */
     private val refCount = AtomicInt(1)
 
-    /** Total readable bytes (every [view] starts with exactly this many remaining). */
-    val size: Int = storage.remaining()
+    /** Total readable bytes (every [withView] borrow starts with exactly this many remaining). */
+    val size: Int = adopted.remaining()
 
     /** Adds a reference. Throws [IllegalStateException] if the count already reached zero. */
     fun retain(): SharedBytes {
@@ -113,15 +88,31 @@ class SharedBytes private constructor(
     }
 
     /**
-     * A read-only slice with an independent cursor over the shared storage.
-     * The caller must hold an undropped reference for the view's whole lifetime.
+     * Borrows a read-only view with an independent cursor for the duration of [block], and revokes
+     * it on the way out.
+     *
+     * This is the only way to read shared bytes, and the scope is the safety mechanism rather than
+     * a convention. The borrow is sliced **through** [adopted] rather than through unwrapped
+     * storage, so it is a `TrackedSlice` that re-checks liveness on every read and holds a
+     * reference on the pooled chunk while the block runs; [use] drops that reference on exit, so
+     * nothing is pinned afterwards. A view smuggled out of [block] is therefore *revoked* — reading
+     * it throws instead of silently aliasing whatever the pool handed the next acquirer.
+     *
+     * An earlier unscoped `view()` returned a plain slice of unwrapped storage. That slice is
+     * non-owning, so `freeNativeMemory()` on it — and therefore `use {}` around it — was a silent
+     * no-op: the API looked lifetime-managed and was not. Scoping it is what makes `use` mean
+     * something here.
+     *
+     * Inline so [block] may suspend: a writer opens its borrow at the moment it writes, not when
+     * it enqueues.
      */
-    fun view(): ReadBuffer {
-        // Guards view *creation* only. Per the class contract a view handed out while the count
-        // was positive is not individually tracked afterwards; the caller's reference is what
-        // keeps it valid.
-        check(refCount.load() > 0) { "SharedBytes.view() after the last reference was released" }
-        return storage.slice()
+    inline fun <R> withView(block: (ReadBuffer) -> R): R = borrowView().use { block(it) }
+
+    /** Backing for [withView]; internal-but-published only because [withView] is inline. */
+    @PublishedApi
+    internal fun borrowView(): PlatformBuffer {
+        check(refCount.load() > 0) { "SharedBytes.withView() after the last reference was released" }
+        return adopted.slice()
     }
 
     companion object {

@@ -99,14 +99,14 @@ class ContextFreeCodecTests {
         val frame = GreetingCodec.encodeShared(message)
         try {
             assertEquals(plain.remaining(), frame.bytes.size, "shared frame length must match a plain encode")
-            assertTrue(plain.contentEquals(frame.bytes.view()), "shared frame bytes must match a plain encode")
+            assertTrue(frame.bytes.withView { plain.contentEquals(it) }, "shared frame bytes must match a plain encode")
 
             // contentEquals is non-consuming, so compare the raw bytes independently too.
             val expected = plain.copyToByteArray(plain.remaining())
-            val actual = frame.bytes.view().copyToByteArray(frame.bytes.size)
+            val actual = frame.bytes.withView { it.copyToByteArray(frame.bytes.size) }
             assertContentEquals(expected, actual)
 
-            assertEquals(message, GreetingCodec.decode(frame.bytes.view(), DecodeContext.Empty))
+            assertEquals(message, frame.bytes.withView { GreetingCodec.decode(it, DecodeContext.Empty) })
         } finally {
             plain.freeNativeMemory()
             frame.close()
@@ -119,8 +119,8 @@ class ContextFreeCodecTests {
         val frame = GrowingGreetingCodec.encodeShared(message)
         try {
             assertEquals(plain.remaining(), frame.bytes.size)
-            assertTrue(plain.contentEquals(frame.bytes.view()))
-            assertEquals(message, GrowingGreetingCodec.decode(frame.bytes.view(), DecodeContext.Empty))
+            assertTrue(frame.bytes.withView { plain.contentEquals(it) })
+            assertEquals(message, frame.bytes.withView { GrowingGreetingCodec.decode(it, DecodeContext.Empty) })
         } finally {
             plain.freeNativeMemory()
             frame.close()
@@ -142,10 +142,10 @@ class ContextFreeCodecTests {
             // Fan-out reference protocol: retain on transfer, read through an own cursor, release
             // exactly once when that connection is done with the bytes.
             val shared = frame.bytes.retain()
-            perConsumerBytes += shared.view().copyToByteArray(shared.size)
+            perConsumerBytes += shared.withView { it.copyToByteArray(shared.size) }
             assertEquals(
                 message,
-                GreetingCodec.decode(shared.view(), DecodeContext.Empty),
+                shared.withView { GreetingCodec.decode(it, DecodeContext.Empty) },
                 "consumer $consumer decoded a different value",
             )
             shared.release()
@@ -187,7 +187,7 @@ class ContextFreeCodecTests {
             GreetingCodec.wireSize(message, EncodeContext.Empty),
             "the frame holds exactly the encoded bytes, not the pooled chunk's capacity",
         )
-        assertEquals(message, GreetingCodec.decode(frame.bytes.view(), DecodeContext.Empty), "round-trip")
+        assertEquals(message, frame.bytes.withView { GreetingCodec.decode(it, DecodeContext.Empty) }, "round-trip")
 
         frame.close()
         assertEquals(1, pool.stats().currentPoolSize, "close() must return the pooled chunk to its pool")
@@ -206,7 +206,7 @@ class ContextFreeCodecTests {
         repeat(CYCLES) {
             val frame = GreetingCodec.encodeShared(message, pool)
             val shared = frame.bytes.retain()
-            assertEquals(message, GreetingCodec.decode(shared.view(), DecodeContext.Empty))
+            assertEquals(message, shared.withView { GreetingCodec.decode(it, DecodeContext.Empty) })
             shared.release()
             frame.close()
 

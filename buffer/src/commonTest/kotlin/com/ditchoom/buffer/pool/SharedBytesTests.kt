@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.withContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -79,7 +80,7 @@ class SharedBytesTests {
         shared.retain()
         shared.release()
         assertFalse(closeable.isFreed, "one outstanding reference must keep native memory alive")
-        assertPattern(shared.view(), "view while still referenced")
+        shared.withView { assertPattern(it, "view while still referenced") }
 
         shared.release()
         assertTrue(closeable.isFreed, "the last release must free the native memory")
@@ -139,9 +140,80 @@ class SharedBytesTests {
         val shared = SharedBytes.adopt(pooledPayload(pool))
         shared.release()
 
-        assertFailsWith<IllegalStateException> { shared.view() }
+        assertFailsWith<IllegalStateException> { shared.withView { } }
         pool.clear()
     }
+
+    /**
+     * A borrow smuggled out of its block is **revoked**, not merely undefined.
+     *
+     * This is the case that used to be silent corruption: the unscoped `view()` this API replaced
+     * returned a non-owning slice of unwrapped storage, so a view held past the last release read
+     * whatever the pool handed the next acquirer. A deterministic canary against that API read the
+     * next acquirer's poison byte instead of its own data. Slicing through the wrapper instead
+     * makes the borrow a `TrackedSlice`, which fails fast — and `use {}` inside [SharedBytes.withView]
+     * is what ends its life at the block boundary.
+     *
+     * Kotlin has no borrow checker, so the escape itself cannot be prevented. Making it throw is
+     * the guarantee that is actually available.
+     */
+    @Test
+    fun aBorrowSmuggledOutOfItsBlockIsRevoked() {
+        val pool = newPool()
+        val shared = SharedBytes.adopt(pooledPayload(pool))
+
+        var escaped: ReadBuffer? = null
+        val firstByte = shared.withView { borrowed ->
+            escaped = borrowed
+            borrowed.readByte()
+        }
+        assertEquals(patternByte(0), firstByte, "the borrow reads correctly inside its block")
+
+        assertFailsWith<IllegalStateException>("a borrow that escaped its block must be revoked") {
+            escaped!!.readByte()
+        }
+
+        shared.release()
+        pool.clear()
+    }
+
+    /** A borrow pins the chunk for the span of its block, and releases it on the way out. */
+    @Test
+    fun aBorrowPinsTheChunkOnlyForTheSpanOfItsBlock() {
+        val pool = newPool()
+        val shared = SharedBytes.adopt(pooledPayload(pool))
+
+        shared.withView { it.readByte() }
+        assertEquals(0, pool.stats().currentPoolSize, "the creator's reference still pins the chunk")
+
+        shared.release()
+        assertEquals(1, pool.stats().currentPoolSize, "the last release returns the chunk to the pool")
+        pool.clear()
+    }
+
+    /**
+     * A borrow survives being handed to a suspending consumer.
+     *
+     * [SharedBytes.withView] is `inline` precisely so a writer can open its borrow at the moment it
+     * writes rather than when it enqueues; if that stopped compiling, the fan-out writer would be
+     * forced back to taking a view early and holding it across a handoff.
+     */
+    @Test
+    fun aBorrowMayBeReadFromASuspendingBlock() =
+        runTest {
+            val pool = newPool()
+            val shared = SharedBytes.adopt(pooledPayload(pool))
+
+            val copied =
+                shared.withView { view ->
+                    yield()
+                    ByteArray(PAYLOAD_SIZE) { view.readByte() }
+                }
+            assertTrue(copied.indices.all { copied[it] == patternByte(it) }, "suspended borrow read the payload")
+
+            shared.release()
+            pool.clear()
+        }
 
     // ========================================================================
     // 3. Concurrent stress
@@ -159,7 +231,7 @@ class SharedBytesTests {
                         launch {
                             repeat(ITERATIONS) { iteration ->
                                 shared.retain()
-                                assertPattern(shared.view(), "raced view")
+                                shared.withView { assertPattern(it, "raced view") }
                                 shared.release()
                                 if (iteration % POOL_PROBE_INTERVAL == 0) {
                                     assertEquals(
@@ -206,12 +278,13 @@ class SharedBytesTests {
                             repeat(ITERATIONS) {
                                 // Every worker builds its own view concurrently with the others and
                                 // walks only its own window — the cursors must never interfere.
-                                val view = shared.view()
-                                view.position(start)
-                                for (i in start until start + region) {
-                                    assertEquals(patternByte(i), view.readByte(), "worker $worker byte $i")
+                                shared.withView { view ->
+                                    view.position(start)
+                                    for (i in start until start + region) {
+                                        assertEquals(patternByte(i), view.readByte(), "worker $worker byte $i")
+                                    }
+                                    assertEquals(PAYLOAD_SIZE - start - region, view.remaining())
                                 }
-                                assertEquals(PAYLOAD_SIZE - start - region, view.remaining())
                             }
                         }
                     }
@@ -233,25 +306,28 @@ class SharedBytesTests {
         fillPattern(buffer)
         val shared = SharedBytes.adopt(buffer)
 
-        val first = shared.view()
-        val second = shared.view()
-        assertEquals(PAYLOAD_SIZE, first.remaining())
-        assertEquals(PAYLOAD_SIZE, second.remaining())
+        // Two borrows live at once: nesting is how concurrent consumers overlap.
+        shared.withView { first ->
+            shared.withView { second ->
+                assertEquals(PAYLOAD_SIZE, first.remaining())
+                assertEquals(PAYLOAD_SIZE, second.remaining())
 
-        // Drain the first view halfway; the second must be untouched.
-        repeat(PAYLOAD_SIZE / 2) { i -> assertEquals(patternByte(i), first.readByte()) }
-        assertEquals(PAYLOAD_SIZE / 2, first.position(), "first view advanced")
-        assertEquals(0, second.position(), "second view must not see the first view's cursor")
-        assertEquals(PAYLOAD_SIZE, second.remaining())
+                // Drain the first view halfway; the second must be untouched.
+                repeat(PAYLOAD_SIZE / 2) { i -> assertEquals(patternByte(i), first.readByte()) }
+                assertEquals(PAYLOAD_SIZE / 2, first.position(), "first view advanced")
+                assertEquals(0, second.position(), "second view must not see the first view's cursor")
+                assertEquals(PAYLOAD_SIZE, second.remaining())
 
-        // Both views still read the full, correct content from their own positions.
-        for (i in PAYLOAD_SIZE / 2 until PAYLOAD_SIZE) {
-            assertEquals(patternByte(i), first.readByte(), "first view tail byte $i")
+                // Both views still read the full, correct content from their own positions.
+                for (i in PAYLOAD_SIZE / 2 until PAYLOAD_SIZE) {
+                    assertEquals(patternByte(i), first.readByte(), "first view tail byte $i")
+                }
+                assertPattern(second, "second view read in full afterwards")
+            }
         }
-        assertPattern(second, "second view read in full afterwards")
 
-        // A third view minted after the other two are drained still starts at the beginning.
-        assertPattern(shared.view(), "third view")
+        // A third borrow taken after the other two ended still starts at the beginning.
+        shared.withView { assertPattern(it, "third view") }
         shared.release()
     }
 
@@ -262,14 +338,15 @@ class SharedBytesTests {
         val expected = ByteArray(PAYLOAD_SIZE) { patternByte(it) }
 
         val shared = SharedBytes.adopt(source)
-        val view = shared.view()
-        assertEquals(expected.size, view.remaining())
-        assertTrue(
-            view.contentEquals(BufferFactory.Default.wrap(expected)),
-            "a view must expose exactly the adopted bytes",
-        )
-        // contentEquals is non-consuming, so the same view still reads the same bytes byte-by-byte.
-        assertPattern(view, "view after contentEquals")
+        shared.withView { view ->
+            assertEquals(expected.size, view.remaining())
+            assertTrue(
+                view.contentEquals(BufferFactory.Default.wrap(expected)),
+                "a view must expose exactly the adopted bytes",
+            )
+            // contentEquals is non-consuming, so the same borrow still reads the same bytes.
+            assertPattern(view, "view after contentEquals")
+        }
         shared.release()
     }
 
@@ -288,11 +365,11 @@ class SharedBytesTests {
 
         // Before the final release the chunk is still checked out and views read correctly.
         assertEquals(0, pool.stats().currentPoolSize)
-        assertPattern(shared.view(), "view while the chunk is checked out")
+        shared.withView { assertPattern(it, "view while the chunk is checked out") }
 
         shared.release()
         assertEquals(0, pool.stats().currentPoolSize, "one reference left — the chunk stays checked out")
-        assertPattern(shared.view(), "view with the last reference still held")
+        shared.withView { assertPattern(it, "view with the last reference still held") }
 
         shared.release()
         assertEquals(1, pool.stats().currentPoolSize, "the chunk is back in the pool")
@@ -307,12 +384,12 @@ class SharedBytesTests {
 
     @Test
     fun adoptingAPooledChunkDoesNotDisturbTheWrappersOwnRefcount() {
-        // view() slices the UNWRAPPED buffer on purpose, so it must not bump PooledBuffer's
-        // non-atomic per-slice count — if it did, the chunk would be pinned forever by views that
-        // nobody can release (view() hands back a read-only type with no release channel).
+        // A borrow pins the chunk only for the span of its block. Sixteen sequential borrows
+        // must therefore leave the chunk exactly as they found it — pinned by the creator's
+        // reference alone, and returned to the pool by that reference's release and no other.
         val pool = newPool()
         val shared = SharedBytes.adopt(pooledPayload(pool))
-        repeat(16) { assertPattern(shared.view(), "view $it") }
+        repeat(16) { i -> shared.withView { assertPattern(it, "view $i") } }
 
         shared.release()
         assertEquals(1, pool.stats().currentPoolSize, "outstanding views must not pin the chunk")

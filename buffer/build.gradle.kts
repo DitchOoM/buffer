@@ -531,6 +531,13 @@ benchmark {
             iterationTimeUnit = "ms"
             include("largeBufferOperations")
         }
+        register("refcount") {
+            warmups = 3
+            iterations = 5
+            iterationTime = 500
+            iterationTimeUnit = "ms"
+            include("PooledRefCount")
+        }
         register("pool") {
             warmups = 3
             iterations = 5
