@@ -54,7 +54,7 @@ jobs:
           restore-keys: gradle-linux-
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
         with:
           languages: java-kotlin
           # Kotlin extraction requires a traced compile — build-mode "none" sees no source
@@ -71,6 +71,6 @@ jobs:
       - name: Perform CodeQL analysis
         # Parked for Kotlin 2.4.0 (see job banner). Non-fatal until CODEQL_KOTLIN_240_SUPPORTED=true.
         continue-on-error: ${{ vars.CODEQL_KOTLIN_240_SUPPORTED != 'true' }}
-        uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
         with:
           category: "/language:java-kotlin"
