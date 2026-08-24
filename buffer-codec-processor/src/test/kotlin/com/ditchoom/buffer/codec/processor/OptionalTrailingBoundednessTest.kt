@@ -141,60 +141,7 @@ class OptionalTrailingBoundednessTest {
         // A @FramedBy parent narrows the limit around each variant, so the variants' guards are
         // bounded by construction. This is the MQTT v5 ack-cascade shape; rejecting it would
         // break every already-shipped consumer of grammar 2.
-        val result =
-            compile(
-                """
-                package test
-
-                import com.ditchoom.buffer.ReadBuffer
-                import com.ditchoom.buffer.WriteBuffer
-                import com.ditchoom.buffer.codec.BoundingLengthCodec
-                import com.ditchoom.buffer.codec.DecodeContext
-                import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
-                import com.ditchoom.buffer.codec.annotations.DispatchOn
-                import com.ditchoom.buffer.codec.annotations.DispatchValue
-                import com.ditchoom.buffer.codec.annotations.FramedBy
-                import com.ditchoom.buffer.codec.annotations.PacketType
-                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
-                import com.ditchoom.buffer.codec.annotations.When
-                import kotlin.jvm.JvmInline
-
-                object LenCodec : BoundingLengthCodec<UInt> {
-                    override fun decode(buffer: ReadBuffer, context: DecodeContext): UInt =
-                        buffer.readUByte().toUInt()
-                    override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
-                        buffer.writeUByte(value.toUByte())
-                    }
-                    override fun wireSize(value: UInt, context: EncodeContext): WireSize =
-                        WireSize.Exact(1)
-                    override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
-                        buffer.setLimit(buffer.position() + decodedValue.toInt())
-                    }
-                    override val maxWireSize: Int = 1
-                }
-
-                @JvmInline
-                @ProtocolMessage
-                value class Header(val raw: UByte) {
-                    @DispatchValue
-                    val kind: Int get() = raw.toUInt().shr(4).toInt()
-                }
-
-                @DispatchOn(Header::class)
-                @FramedBy(LenCodec::class, after = "header")
-                @ProtocolMessage
-                sealed interface Frame {
-                    @PacketType(value = 1, wire = 0x10)
-                    @ProtocolMessage
-                    data class Ack(
-                        val header: Header,
-                        val id: Int,
-                        @When("remaining >= 4") val reason: Int? = null,
-                    ) : Frame
-                }
-                """.trimIndent(),
-            )
+        val result = compile(FRAMED_SEALED_PARENT)
         assertEquals(
             KotlinCompilation.ExitCode.OK,
             result.exitCode,
@@ -304,5 +251,62 @@ class OptionalTrailingBoundednessTest {
                 }
             }
         return compilation.compile()
+    }
+
+    private companion object {
+        /** MQTT-shaped framed dispatch parent: value-class discriminator + bounding length codec. */
+        @Language("kotlin")
+        private val FRAMED_SEALED_PARENT =
+            """
+            package test
+
+            import com.ditchoom.buffer.ReadBuffer
+            import com.ditchoom.buffer.WriteBuffer
+            import com.ditchoom.buffer.codec.BoundingLengthCodec
+            import com.ditchoom.buffer.codec.DecodeContext
+            import com.ditchoom.buffer.codec.EncodeContext
+            import com.ditchoom.buffer.codec.WireSize
+            import com.ditchoom.buffer.codec.annotations.DispatchOn
+            import com.ditchoom.buffer.codec.annotations.DispatchValue
+            import com.ditchoom.buffer.codec.annotations.FramedBy
+            import com.ditchoom.buffer.codec.annotations.PacketType
+            import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+            import com.ditchoom.buffer.codec.annotations.When
+            import kotlin.jvm.JvmInline
+
+            object LenCodec : BoundingLengthCodec<UInt> {
+                override fun decode(buffer: ReadBuffer, context: DecodeContext): UInt =
+                    buffer.readUByte().toUInt()
+                override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
+                    buffer.writeUByte(value.toUByte())
+                }
+                override fun wireSize(value: UInt, context: EncodeContext): WireSize =
+                    WireSize.Exact(1)
+                override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
+                    buffer.setLimit(buffer.position() + decodedValue.toInt())
+                }
+                override val maxWireSize: Int = 1
+            }
+
+            @JvmInline
+            @ProtocolMessage
+            value class Header(val raw: UByte) {
+                @DispatchValue
+                val kind: Int get() = raw.toUInt().shr(4).toInt()
+            }
+
+            @DispatchOn(Header::class)
+            @FramedBy(LenCodec::class, after = "header")
+            @ProtocolMessage
+            sealed interface Frame {
+                @PacketType(value = 1, wire = 0x10)
+                @ProtocolMessage
+                data class Ack(
+                    val header: Header,
+                    val id: Int,
+                    @When("remaining >= 4") val reason: Int? = null,
+                ) : Frame
+            }
+            """.trimIndent()
     }
 }
