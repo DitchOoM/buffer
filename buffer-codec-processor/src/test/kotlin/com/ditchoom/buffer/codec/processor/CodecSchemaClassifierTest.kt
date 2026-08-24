@@ -95,7 +95,26 @@ class CodecSchemaClassifierTest {
     // ---- message fields ---------------------------------------------------
 
     @Test
-    fun `append message field is safe`() {
+    fun `append optional message field is safe`() {
+        val drift =
+            soleDrift(
+                msgRec("p.M", field(0, "a", "scalar:Int wire=4B order=Big")),
+                msgRec(
+                    "p.M",
+                    field(0, "a", "scalar:Int wire=4B order=Big"),
+                    field(1, "b", "since=2 scalar:UByte wire=1B order=Big", optional = true),
+                ),
+            )
+        assertEquals(DriftSeverity.SAFE, drift.severity)
+    }
+
+    @Test
+    fun `append REQUIRED message field is breaking`() {
+        // The pattern this classifier previously blessed: appending a field with a Kotlin
+        // default, believing older producers still decode. They do not — the generated decoder
+        // reads every required field unconditionally, so an existing peer's frame now runs off
+        // the end mid-decode. Only an absent-tolerant field (@SinceVersion / @When) is safe to
+        // append, and this is the gate that has to say so.
         val drift =
             soleDrift(
                 msgRec("p.M", field(0, "a", "scalar:Int wire=4B order=Big")),
@@ -105,7 +124,8 @@ class CodecSchemaClassifierTest {
                     field(1, "b", "scalar:UByte wire=1B order=Big"),
                 ),
             )
-        assertEquals(DriftSeverity.SAFE, drift.severity)
+        assertEquals(DriftSeverity.BREAKING, drift.severity)
+        assertTrue(drift.detail.contains("@SinceVersion"), "must name the fix: ${drift.detail}")
     }
 
     @Test

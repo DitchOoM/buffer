@@ -316,6 +316,7 @@ internal fun analyze(symbol: KSClassDeclaration): AnalysisResult {
             payloadTypeParameter = payloadTypeParameter,
             framedBy = detectFramedBy(symbol),
             customPeek = detectCustomFramePeek(symbol),
+            optionalTrailing = detectOptionalTrailing(ctor.parameters, fields),
         ),
     )
 }
@@ -534,6 +535,10 @@ internal fun analyzeField(
     for (ann in param.annotations) {
         when (ann.shortName.asString()) {
             "WireOrder" -> { /* allowed on scalars */ }
+            // Wire-transparent: `@SinceVersion` changes nothing about how the field is READ,
+            // only whether the decoder reaches the read at all. The guard is emitted from the
+            // shape-level `optionalTrailing` run, so the field itself analyzes as ordinary.
+            SINCE_VERSION_SHORT -> { /* handled by detectOptionalTrailing */ }
             "UseTextPolicy" -> useTextPolicyAnn = ann
             "LengthPrefixed" -> lengthPrefixed = ann
             "LengthFrom" -> lengthFromAnn = ann
@@ -3621,4 +3626,50 @@ internal fun parseUseTextPolicy(
                 ),
             )
     }
+}
+
+/** Fully-qualified name of the `@SinceVersion` annotation. */
+internal const val SINCE_VERSION_QNAME = "com.ditchoom.buffer.codec.annotations.SinceVersion"
+internal const val SINCE_VERSION_SHORT = "SinceVersion"
+
+/** True when [param] carries `@SinceVersion`. */
+internal fun KSValueParameter.hasSinceVersion() = annotations.any { it.shortName.asString() == SINCE_VERSION_SHORT }
+
+/** The `version` argument of `@SinceVersion`, or null when absent/malformed. */
+internal fun KSValueParameter.sinceVersionValue(): Int? =
+    annotations
+        .firstOrNull { it.shortName.asString() == SINCE_VERSION_SHORT }
+        ?.arguments
+        ?.firstOrNull { it.name?.asString() == "version" }
+        ?.value as? Int
+
+/**
+ * Build the `@SinceVersion` trailing run for a message, or null when the message has
+ * none — or when the run is malformed in a way the validator has already reported.
+ *
+ * Deliberately silent on every failure: `analyze` runs alongside the validators rather
+ * than after them, so a shape that `validateSinceVersion` rejects still reaches here.
+ * Returning null degrades to today's read-every-field decoder, which is the correct
+ * fallback for a build that is failing anyway — the alternative (emitting a guard from a
+ * half-understood shape) would be unsound code attached to a broken build.
+ */
+internal fun detectOptionalTrailing(
+    params: List<KSValueParameter>,
+    fields: List<FieldSpec>,
+): OptionalTrailingRun? {
+    // The IR field list must line up 1:1 with the constructor parameters for the index
+    // arithmetic below to mean anything; bail when a shape collapsed params into fields.
+    if (params.size != fields.size) return null
+    val firstIndex = params.indexOfFirst { it.hasSinceVersion() }
+    if (firstIndex < 0) return null
+    // Must be a contiguous trailing run — validator reports a gap.
+    if (!params.drop(firstIndex).all { it.hasSinceVersion() }) return null
+    val entries =
+        params.drop(firstIndex).mapIndexed { offset, param ->
+            val name = param.name?.asString() ?: return null
+            val version = param.sinceVersionValue() ?: return null
+            val minBytes = fields[firstIndex + offset].minimumWireBytesOrNull() ?: return null
+            OptionalTrailingField(name = name, version = version, minWireBytes = minBytes)
+        }
+    return OptionalTrailingRun(firstIndex = firstIndex, fields = entries)
 }
