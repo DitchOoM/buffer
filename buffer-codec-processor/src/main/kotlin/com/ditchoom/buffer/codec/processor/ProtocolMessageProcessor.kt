@@ -997,12 +997,11 @@ class ProtocolMessageProcessor(
     private fun minWireBytesForParam(param: KSValueParameter): Int? {
         val narrowed =
             param.annotations
-                .firstOrNull { it.shortName.asString() == "WireBytes" }
+                .firstOrNull { it.shortName.asString() == WIRE_BYTES_SHORT }
                 ?.arguments
                 ?.firstOrNull { it.name?.asString() == "value" }
                 ?.value as? Int
-        if (narrowed != null) return narrowed
-        return minWireBytesForType(param.type.resolve(), depth = 0)
+        return narrowed ?: minWireBytesForType(param.type.resolve(), depth = 0)
     }
 
     private fun minWireBytesForType(
@@ -1012,16 +1011,20 @@ class ProtocolMessageProcessor(
         if (depth > VALUE_CLASS_UNWRAP_LIMIT) return null
         val decl = type.declaration
         val qname = decl.qualifiedName?.asString()
-        NATURAL_WIDTHS[qname]?.let { return it }
-        if (qname == BOOLEAN_QNAME) return 1
-        if (decl !is KSClassDeclaration) return null
-        // An enum ordinal rides as an unsigned LEB128 varint — one byte at the floor.
-        if (decl.classKind == ClassKind.ENUM_CLASS) return 1
-        if (decl.isValueClassDecl()) {
-            val inner = decl.primaryConstructor?.parameters?.singleOrNull() ?: return null
-            return minWireBytesForType(inner.type.resolve(), depth + 1)
+        val natural = NATURAL_WIDTHS[qname]
+        return when {
+            natural != null -> natural
+            qname == BOOLEAN_QNAME -> 1
+            decl !is KSClassDeclaration -> null
+            // An enum ordinal rides as an unsigned LEB128 varint — one byte at the floor.
+            decl.classKind == ClassKind.ENUM_CLASS -> 1
+            decl.isValueClassDecl() ->
+                decl.primaryConstructor
+                    ?.parameters
+                    ?.singleOrNull()
+                    ?.let { minWireBytesForType(it.type.resolve(), depth + 1) }
+            else -> null
         }
-        return null
     }
 
     /** True when [param] carries `@When` with a grammar-2 (`remaining …`) predicate. */
@@ -1031,9 +1034,8 @@ class ProtocolMessageProcessor(
                 .firstOrNull { it.shortName.asString() == "When" }
                 ?.arguments
                 ?.firstOrNull { it.name?.asString() == "predicate" }
-                ?.value as? String ?: return false
-        val trimmed = predicate.trim()
-        return trimmed == "remaining" || trimmed.startsWith("remaining")
+                ?.value as? String
+        return predicate?.trim()?.startsWith("remaining") == true
     }
 
     /**
@@ -1042,15 +1044,16 @@ class ProtocolMessageProcessor(
      * this resolves across module boundaries and a downstream module nesting the type still
      * gets the boundedness diagnostic.
      */
-    private fun declaresOptionalTrailing(decl: KSClassDeclaration): Boolean {
+    private fun declaresOptionalTrailing(decl: KSClassDeclaration): Boolean =
         if (Modifier.SEALED in decl.modifiers) {
             // A `@FramedBy` parent narrows the limit around each variant — bounded by construction.
-            if (decl.annotations.any { it.shortName.asString() == "FramedBy" }) return false
-            return decl.getSealedSubclasses().any { declaresOptionalTrailing(it) }
+            decl.annotations.none { it.shortName.asString() == "FramedBy" } &&
+                decl.getSealedSubclasses().any { declaresOptionalTrailing(it) }
+        } else {
+            decl.primaryConstructor
+                ?.parameters
+                ?.any { it.hasSinceVersion() || hasRemainingWhen(it) } == true
         }
-        val ctor = decl.primaryConstructor ?: return false
-        return ctor.parameters.any { it.hasSinceVersion() || hasRemainingWhen(it) }
-    }
 
     /**
      * **The boundedness rule.** A message whose decoder tests `remaining()` for trailing fields
@@ -1072,55 +1075,85 @@ class ProtocolMessageProcessor(
         parameters: List<KSValueParameter>,
     ) {
         val ownerName = owner.simpleName.asString()
-        for (param in parameters) {
-            val fieldName = param.name?.asString() ?: continue
-            val type = param.type.resolve()
-            if (type.isError) continue
+        parameters.forEach { validateOptionalTrailingBoundednessField(ownerName, it) }
+    }
 
-            // A list element can never be bounded from its successor, whatever frames the list.
-            val elementDecl =
-                type.arguments
-                    .firstOrNull()
-                    ?.type
-                    ?.resolve()
-                    ?.declaration as? KSClassDeclaration
-            if (elementDecl != null && declaresOptionalTrailing(elementDecl)) {
-                logger.error(
-                    "$ownerName.$fieldName is a list of ${elementDecl.simpleName.asString()}, which " +
-                        "decodes optional trailing fields by testing the buffer's remaining() " +
-                        "(@SinceVersion / @When(\"remaining …\")). List elements are not bounded from " +
-                        "one another: element k's trailing guard would see element k+1's bytes and " +
-                        "consume them, so every element after the first would decode from the wrong " +
-                        "offset. Framing the list as a whole does not fix this. Either drop the " +
-                        "optional trailing fields from ${elementDecl.simpleName.asString()}, or give " +
-                        "the element its own length prefix so each one is individually bounded.",
-                    param,
-                )
-                continue
-            }
-
-            val decl = type.declaration as? KSClassDeclaration ?: continue
-            if (!declaresOptionalTrailing(decl)) continue
-            val bounded =
-                param.annotations.any { ann ->
-                    ann.shortName.asString() == "LengthPrefixed" || ann.shortName.asString() == "LengthFrom"
-                }
-            if (bounded) continue
-            logger.error(
-                "$ownerName.$fieldName nests ${decl.simpleName.asString()}, which decodes optional " +
-                    "trailing fields by testing the buffer's remaining() (@SinceVersion / " +
-                    "@When(\"remaining …\")). Nested here it is UNBOUNDED: remaining() would count " +
-                    "$ownerName's own later fields, so the trailing guard reads them and both fields " +
-                    "decode wrong — silently, on a well-formed frame. To bound it, move " +
-                    "$fieldName to be the LAST field of $ownerName and add @LengthPrefixed (or " +
-                    "@LengthFrom) — a length-prefixed nested @ProtocolMessage is terminal-only, so " +
-                    "it cannot be bounded in the middle of a message. If $fieldName must stay where " +
-                    "it is, ${decl.simpleName.asString()} cannot carry optional trailing fields at " +
-                    "this use site; give it a required field instead, or wrap it in a length-framed " +
-                    "message of its own.",
-                param,
-            )
+    private fun validateOptionalTrailingBoundednessField(
+        ownerName: String,
+        param: KSValueParameter,
+    ) {
+        val fieldName = param.name?.asString() ?: return
+        val type = param.type.resolve()
+        val element = optionalTrailingListElement(type)
+        val nested = optionalTrailingNested(type)
+        when {
+            type.isError -> Unit
+            element != null -> reportUnboundedListElement(ownerName, fieldName, element, param)
+            nested != null && !isBoundedSlot(param) ->
+                reportUnboundedNesting(ownerName, fieldName, nested, param)
+            else -> Unit
         }
+    }
+
+    /** The element declaration when [type] is a list whose element decodes optional trailing fields. */
+    private fun optionalTrailingListElement(type: KSType): KSClassDeclaration? =
+        (
+            type.arguments
+                .firstOrNull()
+                ?.type
+                ?.resolve()
+                ?.declaration as? KSClassDeclaration
+        )?.takeIf { declaresOptionalTrailing(it) }
+
+    /** [type]'s own declaration when it decodes optional trailing fields. */
+    private fun optionalTrailingNested(type: KSType): KSClassDeclaration? =
+        (type.declaration as? KSClassDeclaration)?.takeIf { declaresOptionalTrailing(it) }
+
+    /** True when the slot narrows `buffer.limit()` around the nested message before decoding it. */
+    private fun isBoundedSlot(param: KSValueParameter): Boolean =
+        param.annotations.any { ann ->
+            ann.shortName.asString() == LENGTH_PREFIXED_SHORT || ann.shortName.asString() == LENGTH_FROM_SHORT
+        }
+
+    private fun reportUnboundedListElement(
+        ownerName: String,
+        fieldName: String,
+        elementDecl: KSClassDeclaration,
+        param: KSValueParameter,
+    ) {
+        val element = elementDecl.simpleName.asString()
+        logger.error(
+            "$ownerName.$fieldName is a list of $element, which decodes optional trailing fields " +
+                "by testing the buffer's remaining() (@SinceVersion / @When(\"remaining …\")). " +
+                "List elements are not bounded from one another: element k's trailing guard would " +
+                "see element k+1's bytes and consume them, so every element after the first would " +
+                "decode from the wrong offset. Framing the list as a whole does not fix this. " +
+                "Either drop the optional trailing fields from $element, or give the element its " +
+                "own length prefix so each one is individually bounded.",
+            param,
+        )
+    }
+
+    private fun reportUnboundedNesting(
+        ownerName: String,
+        fieldName: String,
+        decl: KSClassDeclaration,
+        param: KSValueParameter,
+    ) {
+        val nested = decl.simpleName.asString()
+        logger.error(
+            "$ownerName.$fieldName nests $nested, which decodes optional trailing fields by " +
+                "testing the buffer's remaining() (@SinceVersion / @When(\"remaining …\")). " +
+                "Nested here it is UNBOUNDED: remaining() would count $ownerName's own later " +
+                "fields, so the trailing guard reads them and both fields decode wrong — silently, " +
+                "on a well-formed frame. To bound it, move $fieldName to be the LAST field of " +
+                "$ownerName and add @LengthPrefixed (or @LengthFrom) — a length-prefixed nested " +
+                "@ProtocolMessage is terminal-only, so it cannot be bounded in the middle of a " +
+                "message. If $fieldName must stay where it is, $nested cannot carry optional " +
+                "trailing fields at this use site; give it a required field instead, or wrap it " +
+                "in a length-framed message of its own.",
+            param,
+        )
     }
 
     /**
@@ -1131,9 +1164,9 @@ class ProtocolMessageProcessor(
         owner: KSClassDeclaration,
         parameters: List<KSValueParameter>,
     ) {
-        val ownerName = owner.simpleName.asString()
         val firstIndex = parameters.indexOfFirst { it.hasSinceVersion() }
         if (firstIndex < 0) return
+        val ownerName = owner.simpleName.asString()
 
         if (owner.isValueClassDecl()) {
             logger.error(
@@ -1145,13 +1178,30 @@ class ProtocolMessageProcessor(
             return
         }
 
-        // Trailing run must be contiguous to the end: absence means "fields k..N are missing",
-        // which is only well-defined when nothing required follows an optional field.
+        validateSinceVersionIsTrailing(ownerName, parameters, firstIndex)
+
+        var previousVersion: Int? = null
+        for (index in firstIndex until parameters.size) {
+            val param = parameters[index]
+            if (!param.hasSinceVersion()) continue
+            previousVersion = validateSinceVersionField(ownerName, param, previousVersion)
+        }
+    }
+
+    /**
+     * The trailing run must be contiguous to the end: absence means "fields k..N are missing",
+     * which is only well-defined when nothing required follows an optional field.
+     */
+    private fun validateSinceVersionIsTrailing(
+        ownerName: String,
+        parameters: List<KSValueParameter>,
+        firstIndex: Int,
+    ) {
+        val firstName = parameters[firstIndex].name?.asString() ?: "<unnamed>"
         for (index in (firstIndex + 1) until parameters.size) {
             val param = parameters[index]
             if (param.hasSinceVersion()) continue
             val fieldName = param.name?.asString() ?: continue
-            val firstName = parameters[firstIndex].name?.asString() ?: "<unnamed>"
             logger.error(
                 "$ownerName.$fieldName is declared after the @SinceVersion field $ownerName." +
                     "$firstName but is not itself @SinceVersion. Optional fields fill in " +
@@ -1161,78 +1211,79 @@ class ProtocolMessageProcessor(
                 param,
             )
         }
-
-        var previousVersion: Int? = null
-        for (index in firstIndex until parameters.size) {
-            val param = parameters[index]
-            if (!param.hasSinceVersion()) continue
-            val fieldName = param.name?.asString() ?: continue
-
-            if (hasRemainingWhen(param) || param.annotations.any { it.shortName.asString() == "When" }) {
-                logger.error(
-                    "$ownerName.$fieldName carries both @SinceVersion and @When. They are two " +
-                        "spellings of the same slot: @SinceVersion derives its guard and keeps the " +
-                        "field non-null, @When takes an explicit predicate and requires a nullable. " +
-                        "Pick one.",
-                    param,
-                )
-                continue
-            }
-
-            if (!param.hasDefault) {
-                logger.error(
-                    "@SinceVersion on $ownerName.$fieldName requires a Kotlin default (e.g. " +
-                        "`val $fieldName: Int = 0`). Absence is encoded by OMITTING the argument " +
-                        "from the generated constructor call, so without a default there is no " +
-                        "value for a frame that predates the field to decode to.",
-                    param,
-                )
-                continue
-            }
-
-            if (param.type.resolve().isMarkedNullable) {
-                logger.error(
-                    "@SinceVersion on $ownerName.$fieldName requires a NON-nullable type. `null` " +
-                        "would model absence as a value the protocol does not have, and would push " +
-                        "the real default out to every read site. Drop the `?` and let the Kotlin " +
-                        "default carry the meaning of absence — or use @When(\"remaining >= n\") " +
-                        "with a nullable if absence is genuinely distinct information the encoder " +
-                        "must reproduce.",
-                    param,
-                )
-                continue
-            }
-
-            if (minWireBytesForParam(param) == null) {
-                logger.error(
-                    "@SinceVersion on $ownerName.$fieldName is not supported for this type: its " +
-                        "decode has no compile-time minimum width, so no `remaining()` threshold " +
-                        "can gate it. Supported: scalars, value classes over scalars, and enums. " +
-                        "For a variable-width trailing field (length-prefixed string, list, nested " +
-                        "message) use @When(\"remaining >= n\") with a nullable, which tests " +
-                        "remaining() after each preceding read instead of ahead of all of them.",
-                    param,
-                )
-                continue
-            }
-
-            val version = param.sinceVersionValue()
-            if (version != null) {
-                val previous = previousVersion
-                if (previous != null && version < previous) {
-                    logger.error(
-                        "@SinceVersion($version) on $ownerName.$fieldName is lower than the " +
-                            "preceding optional field's @SinceVersion($previous). Optional fields " +
-                            "fill in declaration order, so a field introduced earlier cannot appear " +
-                            "after one introduced later — a peer that has $fieldName necessarily " +
-                            "has every optional field before it.",
-                        param,
-                    )
-                }
-                previousVersion = version
-            }
-        }
     }
+
+    /**
+     * Per-field `@SinceVersion` rules. Returns the field's version so the caller can carry it
+     * forward as the monotonicity floor, or [previousVersion] unchanged when the field is
+     * rejected (a rejected field must not move the floor).
+     */
+    private fun validateSinceVersionField(
+        ownerName: String,
+        param: KSValueParameter,
+        previousVersion: Int?,
+    ): Int? {
+        val fieldName = param.name?.asString()
+        val rejection = fieldName?.let { sinceVersionRejection(ownerName, it, param) }
+        if (fieldName == null || rejection != null) {
+            rejection?.let { logger.error(it, param) }
+            return previousVersion
+        }
+        val version = param.sinceVersionValue()
+        if (version != null && previousVersion != null && version < previousVersion) {
+            logger.error(
+                "@SinceVersion($version) on $ownerName.$fieldName is lower than the preceding " +
+                    "optional field's @SinceVersion($previousVersion). Optional fields fill in " +
+                    "declaration order, so a field introduced earlier cannot appear after one " +
+                    "introduced later — a peer that has $fieldName necessarily has every " +
+                    "optional field before it.",
+                param,
+            )
+        }
+        return version ?: previousVersion
+    }
+
+    /**
+     * The first `@SinceVersion` rule [param] violates, as a ready-to-log message, or null when the
+     * field is well-formed. Ordered most-fundamental-first so the author sees the root problem
+     * rather than a downstream symptom of it.
+     */
+    private fun sinceVersionRejection(
+        ownerName: String,
+        fieldName: String,
+        param: KSValueParameter,
+    ): String? =
+        when {
+            param.annotations.any { it.shortName.asString() == "When" } ->
+                "$ownerName.$fieldName carries both @SinceVersion and @When. They are two " +
+                    "spellings of the same slot: @SinceVersion derives its guard and keeps the " +
+                    "field non-null, @When takes an explicit predicate and requires a nullable. " +
+                    "Pick one."
+
+            !param.hasDefault ->
+                "@SinceVersion on $ownerName.$fieldName requires a Kotlin default (e.g. " +
+                    "`val $fieldName: Int = 0`). Absence is encoded by OMITTING the argument " +
+                    "from the generated constructor call, so without a default there is no " +
+                    "value for a frame that predates the field to decode to."
+
+            param.type.resolve().isMarkedNullable ->
+                "@SinceVersion on $ownerName.$fieldName requires a NON-nullable type. `null` " +
+                    "would model absence as a value the protocol does not have, and would push " +
+                    "the real default out to every read site. Drop the `?` and let the Kotlin " +
+                    "default carry the meaning of absence — or use @When(\"remaining >= n\") " +
+                    "with a nullable if absence is genuinely distinct information the encoder " +
+                    "must reproduce."
+
+            minWireBytesForParam(param) == null ->
+                "@SinceVersion on $ownerName.$fieldName is not supported for this type: its " +
+                    "decode has no compile-time minimum width, so no `remaining()` threshold " +
+                    "can gate it. Supported: scalars, value classes over scalars, and enums. " +
+                    "For a variable-width trailing field (length-prefixed string, list, nested " +
+                    "message) use @When(\"remaining >= n\") with a nullable, which tests " +
+                    "remaining() after each preceding read instead of ahead of all of them."
+
+            else -> null
+        }
 
     private fun validateAdjacentLengthFrom(
         owner: KSClassDeclaration,

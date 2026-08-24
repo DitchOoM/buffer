@@ -3657,19 +3657,37 @@ internal fun detectOptionalTrailing(
     params: List<KSValueParameter>,
     fields: List<FieldSpec>,
 ): OptionalTrailingRun? {
-    // The IR field list must line up 1:1 with the constructor parameters for the index
-    // arithmetic below to mean anything; bail when a shape collapsed params into fields.
-    if (params.size != fields.size) return null
     val firstIndex = params.indexOfFirst { it.hasSinceVersion() }
-    if (firstIndex < 0) return null
-    // Must be a contiguous trailing run — validator reports a gap.
-    if (!params.drop(firstIndex).all { it.hasSinceVersion() }) return null
+    // The IR field list must line up 1:1 with the constructor parameters for the index
+    // arithmetic below to mean anything; and the run must be contiguous to the end (the
+    // validator reports a gap). Bail on either.
+    val wellFormed =
+        params.size == fields.size &&
+            firstIndex >= 0 &&
+            params.drop(firstIndex).all { it.hasSinceVersion() }
+    if (!wellFormed) return null
     val entries =
         params.drop(firstIndex).mapIndexed { offset, param ->
-            val name = param.name?.asString() ?: return null
-            val version = param.sinceVersionValue() ?: return null
-            val minBytes = fields[firstIndex + offset].minimumWireBytesOrNull() ?: return null
-            OptionalTrailingField(name = name, version = version, minWireBytes = minBytes)
+            optionalTrailingField(param, fields[firstIndex + offset])
         }
-    return OptionalTrailingRun(firstIndex = firstIndex, fields = entries)
+    return if (entries.any { it == null }) {
+        null
+    } else {
+        OptionalTrailingRun(firstIndex = firstIndex, fields = entries.filterNotNull())
+    }
+}
+
+/** One entry of a [OptionalTrailingRun], or null when the shape is not gateable. */
+private fun optionalTrailingField(
+    param: KSValueParameter,
+    field: FieldSpec,
+): OptionalTrailingField? {
+    val name = param.name?.asString()
+    val version = param.sinceVersionValue()
+    val minBytes = field.minimumWireBytesOrNull()
+    return if (name == null || version == null || minBytes == null) {
+        null
+    } else {
+        OptionalTrailingField(name = name, version = version, minWireBytes = minBytes)
+    }
 }
