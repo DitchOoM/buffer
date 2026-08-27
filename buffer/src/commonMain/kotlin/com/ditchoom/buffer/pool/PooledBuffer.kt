@@ -64,12 +64,22 @@ internal class PooledBuffer(
             return
         }
         // Resurrection from zero is refused: it would hand out a slice onto storage another
-        // acquirer already owns. Detected after the increment and undone, because reaching it at
-        // all is a caller bug rather than a race to tolerate.
-        val previous = sharedRefCount.fetchAndAdd(1)
-        if (previous <= 0) {
-            sharedRefCount.fetchAndAdd(-1)
-            throw IllegalStateException("PooledBuffer.addRef() after the last reference was released")
+        // acquirer already owns. Increment-if-nonzero, not increment-then-undo: the undo published a
+        // transient count that a concurrent addRef() could read as a live reference and accept, so
+        // the refusal leaked exactly the reference it existed to prevent. Lincheck's counterexample
+        // (PooledBufferLincheckTest): both callers race addRef() on a fully released chunk; one
+        // increments 0 -> 1 and is descheduled before undoing, the second reads `previous == 1`,
+        // passes this guard and returns normally, and the count is left at 1 so the next
+        // releaseRef() hands `inner` back to the pool a second time — #374's double release by
+        // another route. A CAS loop never makes a rejected reference visible, and costs the same:
+        // the measurement in [shared] found the atomic RMW itself to be the expense, with a retry
+        // loop and a single fetch-and-add indistinguishable.
+        while (true) {
+            val current = sharedRefCount.load()
+            if (current <= 0) {
+                throw IllegalStateException("PooledBuffer.addRef() after the last reference was released")
+            }
+            if (sharedRefCount.compareAndSet(current, current + 1)) return
         }
     }
 

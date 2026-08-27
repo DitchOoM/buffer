@@ -11,6 +11,11 @@ simdutf = "8.0.0"
 simdutfSha256 = "3d9eef727f088abaeaae4d40962a1ca09871c6bbe6d23de7930488c43ab77643"
 mavenPublish = "0.37.0"
 atomicfu = "0.33.0"
+# Lincheck — model checks concurrent code by enumerating thread interleavings and reporting a
+# minimal failing schedule, rather than sampling them the way a stress test does. JVM-only, so
+# it exercises commonMain data structures through the jvm target. Group id is
+# `org.jetbrains.lincheck` as of 3.x (was `org.jetbrains.kotlinx`).
+lincheck = "3.7"
 dokka = "2.2.0"
 kover = "0.9.9"
 kotlinxCoroutines = "1.11.0"
@@ -50,6 +55,7 @@ kotlinpoet = { module = "com.squareup:kotlinpoet", version.ref = "kotlinpoet" }
 kotlinpoet-ksp = { module = "com.squareup:kotlinpoet-ksp", version.ref = "kotlinpoet" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
+lincheck = { module = "org.jetbrains.lincheck:lincheck", version.ref = "lincheck" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 kotlinx-io-core = { module = "org.jetbrains.kotlinx:kotlinx-io-core", version.ref = "kotlinxIo" }
 ktor-io = { module = "io.ktor:ktor-io", version.ref = "ktor" }

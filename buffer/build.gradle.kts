@@ -327,6 +327,9 @@ kotlin {
             }
         }
 
+        jvmTest.dependencies {
+            implementation(libs.lincheck)
+        }
         jsMain.dependencies {
             implementation(libs.kotlin.web)
             implementation(libs.kotlin.js)
@@ -797,6 +800,44 @@ tasks.withType<Test>().configureEach {
     )
     if (!isBenchmark) {
         jvmArgs("-ea")
+    }
+}
+
+// Lincheck runs in its own test task because Kover's coverage agent and Lincheck's
+// instrumentation cannot both hook the same classes. With the agent attached, every class Lincheck
+// tries to transform fails with `IndexOutOfBoundsException` inside ASM's `AnalyzerAdapter`, and
+// Lincheck logs "proceeding without instrumentation" and then *passes* — a model-checking run that
+// reports success while exploring no interleavings at all.
+//
+// This is not a theoretical hazard: it is why [LincheckHarnessProbe] exists. A deliberately broken
+// non-atomic counter passes under `jvmTest` and fails here, so the probe pins the difference.
+tasks.register<Test>("lincheckTest") {
+    description = "Model checks concurrent data structures with Lincheck (runs without the coverage agent)"
+    group = "verification"
+    dependsOn("compileTestKotlinJvm")
+}
+
+afterEvaluate {
+    val jvmTestTask = tasks.named<Test>("jvmTest").get()
+    tasks.named<Test>("lincheckTest") {
+        testClassesDirs = jvmTestTask.testClassesDirs
+        classpath = jvmTestTask.classpath
+        filter { includeTestsMatching("*Lincheck*") }
+    }
+    // Kept out of jvmTest so they are never run under the agent that silences them.
+    tasks.named<Test>("jvmTest") {
+        filter {
+            excludeTestsMatching("*Lincheck*")
+            isFailOnNoMatchingTests = false
+        }
+    }
+}
+
+kover {
+    currentProject {
+        instrumentation {
+            disabledForTestTasks.add("lincheckTest")
+        }
     }
 }
 
