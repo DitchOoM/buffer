@@ -50,7 +50,9 @@ jobs:
           # The KSP processor's own compile-time validation suite plus the JVM buffer
           # tests. Pure JVM — no SDK, no browser, no cross-toolchain.
           - name: jvm
-            tasks: ":buffer-codec-processor:test jvmTest"
+            # lincheckTest is a SEPARATE task (Kover's agent silences Lincheck), so it must be
+            # named explicitly here — `check` does not depend on it and jvmTest excludes it.
+            tasks: ":buffer-codec-processor:test jvmTest :buffer:lincheckTest"
           - name: js-wasm
             tasks: "jsNodeTest jsBrowserTest wasmJsNodeTest wasmJsBrowserTest"
           # The host-JVM Android unit tasks run here so contributors can reproduce them on
