@@ -8,6 +8,8 @@ import com.ditchoom.buffer.TextPolicy
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.bufferEquals
 import com.ditchoom.buffer.bufferHashCode
+import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
 /**
  * Slice of a pooled buffer that tracks parent lifetime via reference counting.
@@ -42,12 +44,28 @@ import com.ditchoom.buffer.bufferHashCode
  * [remaining]) are intentionally left to delegation: they touch no backing bytes,
  * so reading them on a released slice cannot corrupt memory.
  */
+@OptIn(ExperimentalAtomicApi::class)
 internal class TrackedSlice(
     internal val inner: PlatformBuffer,
     private val parent: PooledBuffer,
 ) : PlatformBuffer by inner,
     PoolReleasable {
-    private var released = false
+    // Mirrors [PooledBuffer]'s atomic-exactly-when-needed choice, and for the same reason: a
+    // plain flag here is a lost update. Two threads releasing the SAME slice could both read
+    // `released == false` before either wrote it, and each then call `parent.releaseRef()` — two
+    // decrements for one slice, so the chunk returns to the pool while the acquirer still holds
+    // its own reference. That is a use-after-free, and it is not hypothetical: it is what
+    // `TrackedSliceDoubleReleaseLincheckTest` reproduces.
+    //
+    // As in [PooledBuffer], both fields are always allocated and exactly one is live — an
+    // `AtomicInt` is a heap object and a slice is constructed per `slice()` call, so making the
+    // atomic conditional would trade a branch for an allocation.
+    private val shared = parent.shared
+    private var plainReleased = false
+    private val sharedReleased = AtomicInt(0)
+
+    private val isReleased: Boolean
+        get() = if (shared) sharedReleased.load() != 0 else plainReleased
 
     /**
      * Fails fast if this slice has been released back to the pool. Mirrors
@@ -56,14 +74,18 @@ internal class TrackedSlice(
      * resolution on it.
      */
     internal fun checkNotReleased() {
-        if (released) throw IllegalStateException("Buffer slice has been released back to the pool")
+        if (isReleased) throw IllegalStateException("Buffer slice has been released back to the pool")
     }
 
     override fun releaseToPool() {
-        if (!released) {
-            released = true
-            parent.releaseRef()
-        }
+        // Claim the release before acting on it, so exactly one caller ever reaches releaseRef().
+        val alreadyReleased =
+            if (shared) {
+                sharedReleased.exchange(1) != 0
+            } else {
+                plainReleased.also { plainReleased = true }
+            }
+        if (!alreadyReleased) parent.releaseRef()
     }
 
     // PlatformBuffer-by-delegation would resolve freeNativeMemory() to inner.slice()'s

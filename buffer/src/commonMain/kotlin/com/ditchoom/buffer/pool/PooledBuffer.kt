@@ -41,8 +41,12 @@ internal class PooledBuffer(
      * plain counter and is unchanged. `MultiThreaded` pools — the ones a buffer shared and
      * released across more than one thread or coroutine must come from — pay for the safety they
      * actually need.
+     *
+     * `internal` rather than private: [TrackedSlice] makes the same atomic-exactly-when-needed
+     * choice for its own released flag, and it must make it the same way this does — a slice whose
+     * guard is plain while its parent's is atomic is a lost update waiting to happen.
      */
-    private val shared = pool.threadingMode == ThreadingMode.MultiThreaded
+    internal val shared = pool.threadingMode == ThreadingMode.MultiThreaded
 
     // Exactly one of these two is live, chosen by [shared]. Both are always allocated: `AtomicInt`
     // is a heap object on JVM/JS and PooledBuffer is constructed per `acquire()`, so making the
