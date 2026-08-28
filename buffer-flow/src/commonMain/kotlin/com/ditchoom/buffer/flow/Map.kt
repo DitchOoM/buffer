@@ -35,4 +35,10 @@ fun <A, B> Connection<A>.mapNotNull(
         override fun receive(): Flow<B> = this@mapNotNull.receive().mapNotNull { decode(it) }
 
         override suspend fun close() = this@mapNotNull.close()
+
+        // Any decorator that overrides close() MUST override abort(). Without this, abort() on the
+        // wrapper resolves to Connection's default — which is close() — silently turning the
+        // escape hatch for a stalled peer back into the graceful drain it exists to break out of,
+        // even when the wrapped connection has a real abort.
+        override suspend fun abort() = this@mapNotNull.abort()
     }

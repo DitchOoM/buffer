@@ -28,6 +28,10 @@ apiValidation {
     // breaking change (RFC §11.2). The marker is dropped — and the surface enters the dump — only
     // once conformance is green across every witness and platform.
     nonPublicMarkers.add("com.ditchoom.buffer.flow.ExperimentalDatagramApi")
+    // The fan-out/shared-send surface (SendMode.Handoff and its policy types, sendShared) is
+    // incubating under the same rule: gated out of the locked ABI until its sealed hierarchies
+    // are finalized (buffer#370), then stabilized into the dump.
+    nonPublicMarkers.add("com.ditchoom.buffer.ExperimentalFanoutApi")
     klib {
         enabled = false
     }

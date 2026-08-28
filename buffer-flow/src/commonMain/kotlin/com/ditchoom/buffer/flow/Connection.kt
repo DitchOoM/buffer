@@ -3,9 +3,27 @@ package com.ditchoom.buffer.flow
 /**
  * A typed, bidirectional message connection with a stable identity.
  *
- * **Thread safety:** Implementations are NOT assumed to be thread-safe. Concurrent
- * calls to [send] or concurrent collectors of [receive] require external synchronization.
- * In coroutine code, confine send/receive to their respective coroutines or use a `Mutex`.
+ * **Send contract (staged toward v7):** a *conforming* implementation guarantees, with no
+ * external synchronization from callers, that
+ *
+ * 1. [send] is **atomic** — a message reaches the peer whole or not at all; cancelling a sender
+ *    can never leave a partial frame on the wire; and
+ * 2. [send] is **serialized** — concurrent `send`s on one connection never interleave their
+ *    bytes.
+ *
+ * `OutboundWriter` is the reusable component that provides both, and the socket library's
+ * `CodecConnection`/`CodecSender` are built on it.
+ *
+ * **Not every implementation conforms yet, and the exceptions matter.** In this module,
+ * [ByteSink.typed] and [ByteStream.typed] encode and `writeFully` on the *caller's* coroutine with
+ * no serialization: two concurrent sends can interleave partial writes, and for a self-framing
+ * codec the peer then reads a length prefix across the splice point — a silent, permanent stream
+ * desync. **Keep your external `Mutex` around sends through those two**, and do not read the
+ * guarantee above as already true of them. Third-party implementations written against the pre-6.x
+ * contract ("not assumed thread-safe, bring your own Mutex") are in the same position.
+ *
+ * v7 makes the guarantee mandatory for all implementors; retrofitting this module's typed views
+ * onto `OutboundWriter` is tracked as part of that milestone.
  *
  * Combines [Sender] and [Receiver] with lifecycle management. This is the primary
  * interface that protocol libraries code against -- they don't need to know whether
@@ -35,4 +53,18 @@ interface Connection<T> :
 
     /** Close the whole connection (re-abstracts [Sender.close], which is send-side-only). */
     override suspend fun close()
+
+    /**
+     * Close the whole connection **immediately**, without draining queued sends — the RST-like
+     * counterpart to the graceful [close], mirroring the byte layer's [Resettable] against
+     * [ByteStream.close]'s FIN. Queued-but-unwritten messages are equivalent to messages lost by
+     * the network; implementations report them through their loss path where one exists.
+     *
+     * Defaults to [close] so existing implementations remain source- and behavior-compatible;
+     * implementations with a real abort (a transport reset, an owned writer to cancel) override.
+     * Idempotent.
+     */
+    suspend fun abort() {
+        close()
+    }
 }
