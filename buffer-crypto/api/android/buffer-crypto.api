@@ -1697,6 +1697,7 @@ public final class com/ditchoom/buffer/crypto/SecureBuffer : com/ditchoom/buffer
 	public fun readShorts (I)[S
 	public fun readShorts ([SII)V
 	public fun readString (ILcom/ditchoom/buffer/Charset;)Ljava/lang/String;
+	public fun readText (ILcom/ditchoom/buffer/TextPolicy;)Ljava/lang/Object;
 	public fun readUByte-w2LRezQ ()B
 	public fun readUInt-pVg5ArA ()I
 	public fun readULong-s-VKNKU ()J
@@ -1760,6 +1761,7 @@ public final class com/ditchoom/buffer/crypto/SecureBuffer : com/ditchoom/buffer
 	public fun writeShorts ([S)Lcom/ditchoom/buffer/WriteBuffer;
 	public fun writeShorts ([SII)Lcom/ditchoom/buffer/WriteBuffer;
 	public fun writeString (Ljava/lang/CharSequence;Lcom/ditchoom/buffer/Charset;)Lcom/ditchoom/buffer/WriteBuffer;
+	public fun writeText (Ljava/lang/CharSequence;Lcom/ditchoom/buffer/TextPolicy;)Ljava/lang/Object;
 	public fun writeToParcel (Landroid/os/Parcel;I)V
 	public fun writeUByte-7apg3OU (B)Lcom/ditchoom/buffer/WriteBuffer;
 	public fun writeUInt-WZ4Q5Ns (I)Lcom/ditchoom/buffer/WriteBuffer;
