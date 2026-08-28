@@ -44,8 +44,41 @@ expect class OwnedBytesHandle
 expect fun ownedBytesFrom(bytes: PlatformBuffer): OwnedBytesHandle
 
 /**
- * Returns a [ReadBuffer] view over the bytes storage, position reset to 0.
- * The returned view aliases the handle's internal buffer — do not free.
+ * Returns the handle's own buffer, rewound to position 0 with the limit set to
+ * capacity. Do not free it — the handle owns it.
+ *
+ * **This is not an independent view, and every call returns the same buffer
+ * instance.** The name reads like a per-consumer view mint; it is not one.
+ * Because each call rewinds that single shared buffer, a second call while a
+ * first read is still in progress silently rewinds the first reader:
+ *
+ * ```kotlin
+ * val a = handle.asReadBuffer()   // remaining == 8
+ * a.readByteArray(8)              // remaining == 0
+ * val b = handle.asReadBuffer()   // remaining == 8  (rewound, as documented)
+ * a.remaining()                   // == 8  <-- 'a' was rewound too; a and b are the same object
+ * ```
+ *
+ * So this is safe for **one reader at a time, read to completion**, and unsafe
+ * for anything else — two interleaved readers consume each other's bytes, and
+ * two concurrent readers race on one cursor. A fan-out that hands each of N
+ * consumers the result of its own `asReadBuffer()` call is the shape this
+ * catches out, especially when the consumers suspend between reads.
+ *
+ * For independent readers over the same bytes, take a [ReadBuffer.slice] per
+ * reader. A slice is still zero-copy and still aliases the handle's storage,
+ * but it carries **its own position**, so draining one leaves the others
+ * untouched:
+ *
+ * ```kotlin
+ * val base = handle.asReadBuffer()
+ * val first = base.slice()
+ * val second = base.slice()
+ * first.readByteArray(8)          // second.remaining() is still 8
+ * ```
+ *
+ * Slices alias, so they must not outlive the handle. If a consumer's bytes need
+ * to outlive it, copy instead — see [ReadBuffer.slice]'s own note on aliasing.
  */
 expect fun OwnedBytesHandle.asReadBuffer(): ReadBuffer
 
