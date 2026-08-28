@@ -38,7 +38,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up JDK 21
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:
           distribution: "zulu"
           java-version: "21"
@@ -54,7 +54,7 @@ jobs:
           restore-keys: gradle-linux-
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        uses: github/codeql-action/init@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
         with:
           languages: java-kotlin
           # Kotlin extraction requires a traced compile — build-mode "none" sees no source
@@ -71,6 +71,6 @@ jobs:
       - name: Perform CodeQL analysis
         # Parked for Kotlin 2.4.0 (see job banner). Non-fatal until CODEQL_KOTLIN_240_SUPPORTED=true.
         continue-on-error: ${{ vars.CODEQL_KOTLIN_240_SUPPORTED != 'true' }}
-        uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        uses: github/codeql-action/analyze@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
         with:
           category: "/language:java-kotlin"
