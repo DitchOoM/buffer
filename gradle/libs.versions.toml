@@ -26,7 +26,7 @@ kotlinxSerialization = "1.11.0"
 kotlinxIo = "0.9.1"
 # Ktor 3.x — buffer-ktor ContentConverter, channel bridges, and WebSocket masking helpers.
 ktor = "3.5.2"
-kotlinxBenchmark = "0.4.17"
+kotlinxBenchmark = "0.4.19"
 androidxBenchmark = "1.4.1"
 androidxTestRunner = "1.7.0"
 androidxTestRules = "1.7.0"
