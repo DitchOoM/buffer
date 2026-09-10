@@ -5,6 +5,8 @@ package com.ditchoom.buffer
 import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.wasm.unsafe.Pointer
 import kotlin.wasm.unsafe.UnsafeWasmMemoryApi
+import kotlin.wasm.unsafe.WebAssembly
+import kotlin.wasm.unsafe.wasmMemory
 
 private const val PAGE_SIZE = 65536 // 64KB per WASM page
 
@@ -31,18 +33,27 @@ data class AllocationStats(
 
 /**
  * JavaScript interop for memory growth.
- * Uses the WASM module's exported memory object.
  *
- * The @JsFun body is a single JS expression string that cannot be wrapped without breaking interop.
+ * The memory object is passed in from Kotlin as [kotlin.wasm.unsafe.wasmMemory] rather than read off
+ * the `wasmExports` global: as of Kotlin 2.4.20 that global is a deprecated `Proxy`, and calling
+ * `grow()` through it throws `TypeError: Receiver is not a WebAssembly.Memory` because a Proxy does
+ * not carry the receiver's internal slots.
+ *
+ * Returns -1 when the engine refuses, which is the contract [claimPages] and [initializeMemory] are
+ * written against. `WebAssembly.Memory.grow()` signals refusal by throwing a RangeError rather than
+ * returning a negative size, so without this catch an exhausted pool escapes as an opaque
+ * `JsException` and skips [allocateOffset]'s diagnostic — the one that tells the caller linear
+ * memory is not garbage collected and points at `use { }` and `configureWasmMemory`.
  */
-@Suppress("MaxLineLength")
-@JsFun("(pages) => { if (typeof wasmExports !== 'undefined' && wasmExports.memory) { return wasmExports.memory.grow(pages); } return -1; }")
-private external fun jsMemoryGrow(pages: Int): Int
+@JsFun("(memory, pages) => { try { return memory.grow(pages); } catch (e) { return -1; } }")
+private external fun jsMemoryGrow(
+    memory: WebAssembly.Memory,
+    pages: Int,
+): Int
 
 /** The @JsFun body is a single JS expression string that cannot be wrapped without breaking interop. */
-@Suppress("MaxLineLength")
-@JsFun("() => { if (typeof wasmExports !== 'undefined' && wasmExports.memory) { return wasmExports.memory.buffer.byteLength; } return 0; }")
-private external fun jsMemorySize(): Int
+@JsFun("(memory) => memory.buffer.byteLength")
+private external fun jsMemorySize(memory: WebAssembly.Memory): Int
 
 /**
  * Configuration for LinearBuffer memory allocation.
@@ -425,7 +436,7 @@ object LinearMemoryAllocator {
      * @return true if the engine granted them
      */
     private fun claimPages(pages: Int): Boolean {
-        val previousSizePages = jsMemoryGrow(pages)
+        val previousSizePages = jsMemoryGrow(wasmMemory, pages)
         if (previousSizePages < 0) return false
 
         val grantedStart = previousSizePages * PAGE_SIZE
@@ -507,12 +518,12 @@ object LinearMemoryAllocator {
      * to be its own function (see the note on [allocateOffset]).
      */
     private fun initializeMemory() {
-        val sizeBytes = jsMemorySize()
+        val sizeBytes = jsMemorySize(wasmMemory)
         val reserve = runtimeScratchReserveBytes
         // Grow far enough that [base, base + initial) exists, where base clears the reserve.
         val base = poolBaseFor(sizeBytes, reserve)
         val pagesToGrow = (base + initialPages * PAGE_SIZE - sizeBytes) / PAGE_SIZE
-        val previousSizePages = jsMemoryGrow(pagesToGrow)
+        val previousSizePages = jsMemoryGrow(wasmMemory, pagesToGrow)
         if (previousSizePages < 0) {
             throw OutOfMemoryError("Failed to grow WASM memory for buffer allocation")
         }

@@ -20,6 +20,8 @@ import com.ditchoom.buffer.BufferConstants.WORD_BYTE_MASK
 import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.wasm.unsafe.Pointer
 import kotlin.wasm.unsafe.UnsafeWasmMemoryApi
+import kotlin.wasm.unsafe.WebAssembly
+import kotlin.wasm.unsafe.wasmMemory
 
 /**
  * Decode bytes from WASM linear memory to a string using the specified encoding.
@@ -27,15 +29,15 @@ import kotlin.wasm.unsafe.UnsafeWasmMemoryApi
  */
 @JsFun(
     """
-(offset, length, encoding) => {
-    const memory = wasmExports.memory.buffer;
-    const bytes = new Uint8Array(memory, offset, length);
+(memory, offset, length, encoding) => {
+    const bytes = new Uint8Array(memory.buffer, offset, length);
     const decoder = new TextDecoder(encoding, { fatal: true });
     return decoder.decode(bytes);
 }
 """,
 )
 private external fun decodeString(
+    memory: WebAssembly.Memory,
     offset: Int,
     length: Int,
     encoding: JsString,
@@ -47,15 +49,16 @@ private external fun decodeString(
  */
 @JsFun(
     """
-(srcOffset, dstOffset, length) => {
-    const memory = wasmExports.memory.buffer;
-    const src = new Uint8Array(memory, srcOffset, length);
-    const dst = new Uint8Array(memory, dstOffset, length);
+(memory, srcOffset, dstOffset, length) => {
+    const bytes = memory.buffer;
+    const src = new Uint8Array(bytes, srcOffset, length);
+    const dst = new Uint8Array(bytes, dstOffset, length);
     dst.set(src);
 }
 """,
 )
 private external fun memcpy(
+    memory: WebAssembly.Memory,
     srcOffset: Int,
     dstOffset: Int,
     length: Int,
@@ -66,15 +69,15 @@ private external fun memcpy(
  */
 @JsFun(
     """
-(jsArray, dstOffset, srcOffset, length) => {
-    const memory = wasmExports.memory.buffer;
-    const dst = new Uint8Array(memory, dstOffset, length);
+(memory, jsArray, dstOffset, srcOffset, length) => {
+    const dst = new Uint8Array(memory.buffer, dstOffset, length);
     const src = new Uint8Array(jsArray.buffer, jsArray.byteOffset + srcOffset, length);
     dst.set(src);
 }
 """,
 )
 private external fun copyFromJsArray(
+    memory: WebAssembly.Memory,
     jsArray: JsAny,
     dstOffset: Int,
     srcOffset: Int,
@@ -86,15 +89,15 @@ private external fun copyFromJsArray(
  */
 @JsFun(
     """
-(jsArray, srcOffset, dstOffset, length) => {
-    const memory = wasmExports.memory.buffer;
-    const src = new Uint8Array(memory, srcOffset, length);
+(memory, jsArray, srcOffset, dstOffset, length) => {
+    const src = new Uint8Array(memory.buffer, srcOffset, length);
     const dst = new Uint8Array(jsArray.buffer, jsArray.byteOffset + dstOffset, length);
     dst.set(src);
 }
 """,
 )
 private external fun copyToJsArray(
+    memory: WebAssembly.Memory,
     jsArray: JsAny,
     srcOffset: Int,
     dstOffset: Int,
@@ -150,7 +153,7 @@ class LinearBuffer(
 
     /**
      * The offset in WASM linear memory for zero-copy JS interop.
-     * Use with `new DataView(wasmExports.memory.buffer, nativeAddress, nativeSize)`.
+     * Use with `new DataView(wasmMemory.buffer, nativeAddress, nativeSize)`.
      */
     override val nativeAddress: Long get(): Long {
         // Handing out the address of a released block is how stale views are born.
@@ -186,7 +189,7 @@ class LinearBuffer(
         length: Int,
     ): LinearBuffer {
         checkNotFreed()
-        copyFromJsArray(jsArray, baseOffset + positionValue, srcOffset, length)
+        copyFromJsArray(wasmMemory, jsArray, baseOffset + positionValue, srcOffset, length)
         positionValue += length
         return this
     }
@@ -205,7 +208,7 @@ class LinearBuffer(
         length: Int,
     ) {
         checkNotFreed()
-        copyToJsArray(jsArray, baseOffset + positionValue, dstOffset, length)
+        copyToJsArray(wasmMemory, jsArray, baseOffset + positionValue, dstOffset, length)
         positionValue += length
     }
 
@@ -575,6 +578,7 @@ class LinearBuffer(
             is LinearBuffer -> {
                 // Both are in linear memory - use native memcpy via Uint8Array.set()
                 memcpy(
+                    wasmMemory,
                     srcOffset = actual.baseOffset + actual.positionValue,
                     dstOffset = baseOffset + positionValue,
                     length = size,
@@ -610,7 +614,7 @@ class LinearBuffer(
                 Charset.UTF32BigEndian,
                 -> throw UnsupportedOperationException("UTF-32 charsets are not supported by TextDecoder")
             }
-        val result = decodeString(baseOffset + positionValue, length, encoding.toJsString()).toString()
+        val result = decodeString(wasmMemory, baseOffset + positionValue, length, encoding.toJsString()).toString()
         positionValue += length
         return result
     }

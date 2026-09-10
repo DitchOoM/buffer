@@ -1,9 +1,10 @@
 
 [versions]
-kotlin = "2.4.0"
+kotlin = "2.4.20"
 androidGradlePlugin = "9.2.1"
 ktlint = "14.2.0"
-# detekt 2.0.0-alpha.5 is built against Kotlin 2.4.0 (matches `kotlin` above).
+# detekt bundles its own Kotlin compiler (2.0.0-alpha.6 embeds 2.4.10), so it does not have to
+# match `kotlin` above.
 # Plugin id moved to `dev.detekt` in 2.0. Run non-blocking with a committed baseline.
 detekt = "2.0.0-alpha.6"
 # simdutf - SIMD-accelerated Unicode validation and transcoding (Linux only)
@@ -26,7 +27,10 @@ kotlinxSerialization = "1.11.0"
 kotlinxIo = "0.9.1"
 # Ktor 3.x — buffer-ktor ContentConverter, channel bridges, and WebSocket masking helpers.
 ktor = "3.5.2"
-kotlinxBenchmark = "0.4.17"
+# kotlinx-benchmark 0.4.17 and earlier reach for the `wasmExports` global in their wasmJs
+# runtime (jsPromiseIntegration), which Kotlin 2.4.20 turned into a throwing Proxy — every
+# wasmJs benchmark dies at startup. Fixed in 0.4.18; must stay >= that while `kotlin` is 2.4.20+.
+kotlinxBenchmark = "0.4.19"
 androidxBenchmark = "1.4.1"
 androidxTestRunner = "1.7.0"
 androidxTestRules = "1.7.0"
@@ -36,7 +40,8 @@ androidxTestJunit = "1.3.0"
 androidxBiometric = "1.1.0"
 kotlinWrappers = "2026.6.0"
 ksp = "2.3.9"
-# kctfork 0.13.0 targets Kotlin 2.4.0 (matches `kotlin` above).
+# kctfork runs the processor tests on its own embedded compiler (0.13.0 ships 2.4.0), which
+# buffer-codec-processor's dependency constraints pin explicitly — independent of `kotlin` above.
 kctfork = "0.13.0"
 kotlinpoet = "2.3.0"
 binaryCompatibilityValidator = "0.18.1"
