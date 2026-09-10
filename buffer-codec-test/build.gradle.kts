@@ -83,6 +83,11 @@ kotlin {
                     associateWith(this@linuxX64.compilations.getByName("main"))
                 }
             }
+            // Register linuxArm64 on local Linux dev too, matching every other module here.
+            // :buffer-flow's tests depend on this module, and it declares linuxArm64 locally — so
+            // without this, a local `./gradlew build` fails resolving :buffer-codec-test for
+            // :buffer-flow:compileTestKotlinLinuxArm64 while CI (where both declare it) passes.
+            linuxArm64()
         }
     }
 
