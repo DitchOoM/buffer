@@ -57,6 +57,9 @@ Benchmarks run on:
 
 #### WasmJS
 
+> Measured 2025-12-30 on the M2 host above, before the Kotlin 2.4.20 upgrade. Bulk heap
+> operations have since regressed — see [Kotlin 2.4.20: heap/direct divergence](#kotlin-2420-heapdirect-divergence).
+
 | Benchmark | ops/sec | Error |
 |-----------|---------|-------|
 | allocateHeap | 21,255,491 | ±979K |
@@ -68,6 +71,38 @@ Benchmarks run on:
 | largeBufferOperations | 1,587 | ±121 |
 | mixedOperations | 129,720 | ±2.2K |
 | sliceBuffer | 7,644,115 | ±517K |
+
+##### Kotlin 2.4.20: heap/direct divergence
+
+Kotlin 2.4.20 turns on Wasm array range checks by default ([KT-73452]). Measured as a
+same-machine A/B of 2.4.0 against 2.4.20 (`bulk` + `wasmFast` configurations), bulk operations
+over **heap** buffers regress while **`Pointer`-backed direct** buffers do not:
+
+| Benchmark (64 KB) | 2.4.20 vs 2.4.0 |
+|-------------------|-----------------|
+| `xorMaskCopy64kHeap` | 0.43x |
+| `xorMask64kHeap` | 0.53x |
+| `contentEquals64kHeap` | 0.72x |
+| `readWriteIntHeap` | 0.87x |
+| `xorMask64kDirect` | 1.03x |
+| `contentEquals64kDirect` | 1.24x |
+| `indexOfLong64kDirectAligned` | 1.87x |
+| `indexOfInt64kDirectAligned` | 2.07x |
+
+`xorMask64kHeap` (0.53x) against `xorMask64kDirect` (1.03x) is the controlled pair: same
+operation, same 64 KB, differing only in backing store, and neither crosses the JS boundary. On
+the measuring host that is masking throughput of ~4.0 GB/s falling to ~2.1 GB/s. The median
+across all 38 benchmarks is 0.97x, so most operations are unchanged.
+
+Read these as ratios only. They come from a different (and noisier) machine than the tables
+above, so the absolute figures are not comparable with them. The 2.4.20 side is two runs agreeing
+within ~1%; the 2.4.0 side is a single run. Attribution to range checks is inferred from the
+heap/direct split rather than proven — `readWriteIntDirect` (0.78x) and `fill64kDirect` (0.86x)
+also regress and several direct paths get materially faster, so more than one codegen change is
+in play. `-Xwasm-enable-array-range-checks=false` exists; whether it recovers the loss is
+untested.
+
+[KT-73452]: https://youtrack.jetbrains.com/issue/KT-73452
 
 #### macOS ARM64 (Native)
 
@@ -189,6 +224,11 @@ Takeaways:
 - **Fastest allocation** of any platform (21M+ ops/s)
 - Primitive operations are ~3x faster than JS (111K vs 36K ops/s)
 - Good choice for compute-heavy workloads
+- Since Kotlin 2.4.20, prefer Direct (`BufferFactory.Default`) for bulk byte work: heap-backed
+  `xorMask` and `contentEquals` roughly halved while the direct equivalents held or improved
+  (see [Kotlin 2.4.20: heap/direct divergence](#kotlin-2420-heapdirect-divergence)). This pulls
+  against reaching for `managed()` purely to sidestep linear-memory leaks in throughput-sensitive
+  paths — pair Direct with `use { }` instead, which addresses the leak without the slowdown.
 
 ### Apple/Native (iOS, macOS, etc.)
 - Zero-copy slicing via pointer arithmetic (17.6M ops/s)
