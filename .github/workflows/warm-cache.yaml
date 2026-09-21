@@ -78,7 +78,7 @@ jobs:
       # No `cache: gradle` — it would double-store ~/.gradle/caches against the 10 GB
       # per-repo budget and race the explicit step below. Same reasoning as build-apple.yaml.
       - name: Set up JDK 21
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: 'zulu'
           java-version: '21'
@@ -161,7 +161,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up JDK 21
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: 'zulu'
           java-version: '21'
@@ -170,7 +170,7 @@ jobs:
       # configuration time — so this is required even though nothing here builds an
       # Android variant deliberately.
       - name: Setup Android SDK
-        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
 
       # publishToMavenLocal builds :buffer's linuxArm64 publication, which cross-compiles
       # simdutf (C++) with the aarch64 toolchain. No qemu or arm64 runtime libs are needed:
