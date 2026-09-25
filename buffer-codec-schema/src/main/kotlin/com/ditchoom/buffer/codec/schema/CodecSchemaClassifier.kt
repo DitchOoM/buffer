@@ -208,9 +208,31 @@ object CodecSchemaClassifier {
             }
         }
         for (pos in cByPos.keys.sorted()) {
-            if (pos !in bByPos) {
-                drifts += safe(b.typeName, "field position $pos ('${cByPos.getValue(pos).name}') appended")
-            }
+            if (pos in bByPos) continue
+            val added = cByPos.getValue(pos)
+            // Appending a field is only safe if a peer built against the OLD shape can still be
+            // decoded — i.e. the new field tolerates being absent from the wire, which means it is
+            // gated on `remaining()`. Appending a REQUIRED field means every frame from an existing
+            // producer now runs off the end mid-decode. Classifying that as safe is what makes
+            // "just add a field with a Kotlin default" look supported when it is not: a Kotlin
+            // default is invisible to generated decode.
+            //
+            // A FLAG-gated conditional (`@When("someFlag")`) is deliberately NOT treated as safe.
+            // It is optional, but not absent-tolerant: an older producer that sets the flag expects
+            // the bytes to follow, so appending one breaks that peer exactly like a required field.
+            drifts +=
+                if (added.absentTolerant) {
+                    safe(b.typeName, "field position $pos ('${added.name}') appended as absent-tolerant")
+                } else {
+                    breaking(
+                        b.typeName,
+                        "field position $pos ('${added.name}') appended without absence tolerance — " +
+                            "peers built against the previous shape do not send it, so their frames " +
+                            "now fail mid-decode. A Kotlin default does NOT make a field optional on " +
+                            "decode. Gate it with @When(\"remaining >= n\") so the decoder tolerates " +
+                            "its absence.",
+                    )
+                }
         }
         return drifts
     }
