@@ -20,12 +20,19 @@ private fun ByteOrder.toJavaByteOrder(): java.nio.ByteOrder =
         ByteOrder.LITTLE_ENDIAN -> java.nio.ByteOrder.LITTLE_ENDIAN
     }
 
+// Default = plain direct native memory (DirectByteBuffer), same as the JVM<=20 default. This is
+// GC-managed native memory WITHOUT the FFM per-access `java.nio.Buffer.session()` scope check that
+// an Arena.ofAuto()-backed buffer pays. FfmAutoBuffer's only extra feature over DirectJvmBuffer would
+// be a deterministic free(), but its freeNativeMemory() is a no-op (auto arena) — so Default paid the
+// session() tax for zero benefit (top JVM CPU cost in the Autobahn cat-13 profile). Deterministic
+// free lives in BufferFactory.deterministic() (FfmBuffer). See allocateAutoFfmBuffer for the retained
+// GC-managed-FFM path (no longer the default; kept for explicit opt-in / the factory-options rework).
 internal val defaultBufferFactory: BufferFactory =
     object : BufferFactory {
         override fun allocate(
             size: Int,
             byteOrder: ByteOrder,
-        ): PlatformBuffer = allocateAutoFfmBuffer(size, byteOrder)
+        ): PlatformBuffer = DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrder.toJavaByteOrder()))
 
         override fun wrap(
             array: ByteArray,
@@ -51,7 +58,7 @@ internal val sharedBufferFactory: BufferFactory =
         override fun allocate(
             size: Int,
             byteOrder: ByteOrder,
-        ): PlatformBuffer = allocateAutoFfmBuffer(size, byteOrder)
+        ): PlatformBuffer = DirectJvmBuffer(ByteBuffer.allocateDirect(size).order(byteOrder.toJavaByteOrder()))
 
         override fun wrap(
             array: ByteArray,
