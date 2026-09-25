@@ -470,6 +470,39 @@ Key rules: `@DispatchValue` must return `Int`. `wire` values are validated at co
 
 For protocols that mix byte orders within a single message, use `@WireOrder(Endianness.Big)` or `@WireOrder(Endianness.Little)` on individual fields. This overrides the message-level `@ProtocolMessage(wireOrder = ...)`. It composes with `@WireBytes` when a custom-width field's byte order also differs from the message default.
 
+### Optional Trailing Fields (`@SinceVersion`) — Decoding Older Peers' Frames
+
+A Kotlin constructor default is **invisible** to the generated decoder: `decode` always passes every
+argument explicitly, so appending a field with `= default` does NOT let an older producer's frame
+decode — it throws partway through. Mark appended trailing fields `@SinceVersion(n)`:
+
+```kotlin
+@ProtocolMessage
+data class Register(
+    val id: Int,
+    @SinceVersion(2) val retries: Int = 3,           // v1 frames decode with retries == 3
+    @SinceVersion(3) val mode: Mode = Mode.Default,  // v1/v2 frames decode with Mode.Default
+)
+```
+
+The field must be trailing, non-nullable, have a Kotlin default, and be a scalar, a value class over
+a scalar, or an enum. **Decode-only**: the encoder always writes every field, so this widens what you
+can read, never what you send.
+
+**Boundedness is required.** The guard is `if (buffer.remaining() >= n)`, which is only meaningful
+when the remaining bytes belong to this message alone — i.e. it is top-level, behind
+`@LengthPrefixed`/`@LengthFrom`, or under a `@FramedBy` sealed parent. Nesting such a message as a
+bare field, or as a list element, is a **compile error**: `remaining()` would count the enclosing
+message's next fields and the guard would consume them, decoding a plausible wrong value instead of
+throwing. See `@SinceVersion`'s KDoc and `SUPPORT_MATRIX.md` §2.4.
+
+For a field that is **protocol-optional** — absent by design, both peers know, and the encoder must
+be able to omit it for byte-identical re-encode (MQTT v5 reason codes, RFC 6455 close bodies) — use
+`@When("remaining >= n")` with a nullable instead.
+
+Adding a `@SinceVersion` field is a SAFE schema change; appending a **required** field is BREAKING,
+and `checkCodecSchema` now says so.
+
 ### `peekFrameSize` — Generated Stream Framing
 
 Every codec automatically generates `peekFrameSize(stream: StreamProcessor, baseOffset: Int = 0): Int?` when the frame size is determinable from the wire format. This peeks at a stream to determine the total bytes needed for decode, without consuming data. Eliminates manual peek offset math in streaming loops:
