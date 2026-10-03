@@ -45,7 +45,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up JDK 21
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: "zulu"
           java-version: "21"
@@ -95,7 +95,7 @@ jobs:
       - name: Upload detekt SARIF to code scanning
         if: always()
         continue-on-error: true # never block on the upload itself
-        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           sarif_file: build/reports/detekt-merged.sarif
           category: detekt
