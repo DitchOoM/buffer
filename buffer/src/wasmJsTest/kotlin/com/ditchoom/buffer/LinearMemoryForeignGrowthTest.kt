@@ -6,14 +6,18 @@ import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.wasm.unsafe.WebAssembly
+import kotlin.wasm.unsafe.wasmMemory
 
 /**
  * Grows WASM linear memory directly, bypassing [LinearMemoryAllocator], so a subsequent pool growth
  * receives a grant that is **not** adjacent to the pool.
  */
-@Suppress("MaxLineLength")
-@JsFun("(pages) => { if (typeof wasmExports !== 'undefined' && wasmExports.memory) { return wasmExports.memory.grow(pages); } return -1; }")
-private external fun foreignMemoryGrow(pages: Int): Int
+@JsFun("(memory, pages) => memory.grow(pages)")
+private external fun foreignMemoryGrow(
+    memory: WebAssembly.Memory,
+    pages: Int,
+): Int
 
 /**
  * Covers [LinearMemoryAllocator]'s non-contiguous growth branch.
@@ -44,7 +48,7 @@ class LinearMemoryForeignGrowthTest {
         beforeGap.writeInt(SENTINEL)
 
         // Open a gap the allocator knows nothing about.
-        assertTrue(foreignMemoryGrow(FOREIGN_PAGES) >= 0, "test setup: could not grow linear memory")
+        assertTrue(foreignMemoryGrow(wasmMemory, FOREIGN_PAGES) >= 0, "test setup: could not grow linear memory")
 
         // Force the pool to grow; the grant now lands past the foreign pages.
         val poolBefore = stats().poolBytes

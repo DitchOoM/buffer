@@ -54,6 +54,22 @@ allprojects {
     }
 }
 
+// ---- ktlint x kotlinx-benchmark: declare the generated-source edge --------------------------
+// kotlinx-benchmark writes generated sources into build/benchmarks/<target>/sources, and the ktlint
+// task for that source set reads them. Gradle sees one task consuming another's output with no
+// declared edge and fails with an implicit-dependency validation error. It only fires when both
+// tasks land in the same graph (`./gradlew build`), which is why a bare `ktlintCheck` never
+// surfaced it. `mustRunAfter` rather than `dependsOn` so linting on its own does not force
+// benchmark code generation. Same class of fix as the KSP one in buffer-codec-test.
+allprojects {
+    plugins.withId("org.jlleitschuh.gradle.ktlint") {
+        val benchmarkGenerators = tasks.matching { it.name.endsWith("BenchmarkGenerate") }
+        tasks
+            .matching { it.name.startsWith("runKtlint") && it.name.contains("Benchmark") }
+            .configureEach { mustRunAfter(benchmarkGenerators) }
+    }
+}
+
 // Aggregate detekt run across every module — the entry point CI invokes.
 tasks.register("detektAll") {
     description = "Run detekt static analysis across all modules and Kotlin source sets (non-blocking)."
