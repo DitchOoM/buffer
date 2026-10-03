@@ -171,6 +171,10 @@ jobs:
       # Android variant deliberately.
       - name: Setup Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          # The action's default list also asks for the legacy `tools` package, which the SDK
+          # repository no longer carries: sdkmanager then exits 1 and fails the job.
+          packages: platform-tools
 
       # publishToMavenLocal builds :buffer's linuxArm64 publication, which cross-compiles
       # simdutf (C++) with the aarch64 toolchain. No qemu or arm64 runtime libs are needed:
