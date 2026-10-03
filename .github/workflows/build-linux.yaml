@@ -104,6 +104,10 @@ jobs:
       # more than the ~20s it costs on a leg that does not use it.
       - name: Setup Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          # The action's default list also asks for the legacy `tools` package, which the SDK
+          # repository no longer carries: sdkmanager then exits 1 and fails the job.
+          packages: platform-tools
 
       # Restore-only in the test legs: five concurrent jobs racing to save one key is the
       # `Unable to reserve cache ... another job may be creating this cache` warning. The
@@ -297,6 +301,10 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          # The action's default list also asks for the legacy `tools` package, which the SDK
+          # repository no longer carries: sdkmanager then exits 1 and fails the job.
+          packages: platform-tools
 
       # Publishing :buffer's linuxArm64 publication cross-compiles simdutf (C++) with the
       # aarch64 toolchain, so this job needs the cross-compiler even though it never runs
