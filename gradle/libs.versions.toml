@@ -17,7 +17,7 @@ atomicfu = "0.33.0"
 # `org.jetbrains.lincheck` as of 3.x (was `org.jetbrains.kotlinx`).
 lincheck = "3.7"
 dokka = "2.2.0"
-kover = "0.9.9"
+kover = "0.9.11"
 kotlinxCoroutines = "1.11.0"
 # kotlinx-serialization — buffer-crypto test-only: parsing vendored Wycheproof KAT vectors
 kotlinxSerialization = "1.11.0"
@@ -25,8 +25,8 @@ kotlinxSerialization = "1.11.0"
 # RawSource/RawSink. Ktor 3 also builds its ByteReadChannel/ByteWriteChannel on kotlinx-io.
 kotlinxIo = "0.9.1"
 # Ktor 3.x — buffer-ktor ContentConverter, channel bridges, and WebSocket masking helpers.
-ktor = "3.5.2"
-kotlinxBenchmark = "0.4.17"
+ktor = "3.6.0"
+kotlinxBenchmark = "0.5.0"
 androidxBenchmark = "1.4.1"
 androidxTestRunner = "1.7.0"
 androidxTestRules = "1.7.0"
@@ -38,13 +38,13 @@ kotlinWrappers = "2026.6.0"
 ksp = "2.3.9"
 # kctfork 0.13.0 targets Kotlin 2.4.0 (matches `kotlin` above).
 kctfork = "0.13.0"
-kotlinpoet = "2.3.0"
-binaryCompatibilityValidator = "0.18.1"
+kotlinpoet = "2.4.0"
+binaryCompatibilityValidator = "0.18.2"
 # androidx.collection — multiplatform Swiss-table maps used by the :buffer-1brc showcase only
 androidxCollection = "1.6.0"
 # okio — segment-based multiplatform IO; buffer-okio bridges PlatformBuffer to its Source/Sink.
-okio = "3.18.1"
-sqldelight = "2.3.2"
+okio = "3.18.2"
+sqldelight = "2.4.0"
 
 [libraries]
 okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
