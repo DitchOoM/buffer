@@ -93,11 +93,25 @@ internal object CodecSchemaDescriptor {
             typeName = shape.messageClassName.canonicalName,
             fields =
                 shape.fields.mapIndexed { position, field ->
+                    // `@SinceVersion` is wire-significant in exactly one way: it tells a differ
+                    // that a peer may omit this field, so appending it is safe where appending a
+                    // required field is breaking. The version rides in the descriptor so that
+                    // adding or removing the marker is itself a tracked change.
+                    val since =
+                        shape.optionalTrailing
+                            ?.fields
+                            ?.getOrNull(position - shape.optionalTrailing.firstIndex)
+                            ?.takeIf { position >= shape.optionalTrailing.firstIndex }
                     SchemaRecord.MessageRecord.Field(
                         position = position,
                         name = field.name,
-                        optional = field is FieldSpec.Conditional,
-                        descriptor = describeField(field),
+                        optional = field is FieldSpec.Conditional || since != null,
+                        descriptor =
+                            if (since != null) {
+                                "since=${since.version} ${describeField(field)}"
+                            } else {
+                                describeField(field)
+                            },
                     )
                 },
         )

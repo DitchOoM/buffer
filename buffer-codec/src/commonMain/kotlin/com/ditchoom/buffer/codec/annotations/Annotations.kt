@@ -460,13 +460,32 @@ annotation class WireOrder(
  * @When("flags.willFlag") val willTopic: String? = null
  * ```
  *
- * ### 2. `remaining <op> <int-literal>` *(reserved — not yet implemented)*
+ * ### 2. `remaining <op> <int-literal>`
  *
  * `"remaining <op> <int>"` where `<op> ∈ {>=, >, ==}` gates the slot on the bounded
  * decode buffer's `remaining()`. The identifier `remaining` is reserved/magic and
- * does not refer to a sibling field. Reserved for a future release; until then,
- * this grammar is documented but not parsed — using it today produces the
- * standard "sibling not found" diagnostic.
+ * does not refer to a sibling field.
+ *
+ * This is the **protocol-optional** shape: the field may legitimately be absent on the
+ * wire, both peers know it, and the encoder must be able to omit it (the slot is gated
+ * on `value.<field> != null`, so re-encoding a frame that arrived without it omits it
+ * again — byte-identity is preserved). MQTT v5's PUBACK/PUBREC/PUBREL/PUBCOMP/
+ * UNSUBACK/DISCONNECT/AUTH reason-code cascade and RFC 6455's close-frame body both
+ * use it.
+ *
+ * The `<int>` threshold is the field's **minimum wire width**, and the processor now
+ * verifies it: a threshold narrower than the field can read is a compile error, because
+ * the guard would pass on a frame too short to satisfy the read that follows.
+ *
+ * **Boundedness is required**, exactly as for [SinceVersion] — `remaining()` is only
+ * meaningful when the bytes left in the buffer belong to this message alone. Using this
+ * grammar in a message that is nested unbounded (a bare field, or a list element) is a
+ * compile error. See [SinceVersion]'s KDoc for why relaxing that rule yields silent
+ * corruption rather than a caught failure.
+ *
+ * For a field that is merely **newer** than some producers — absent only because the
+ * peer predates it — prefer [SinceVersion]: it derives the threshold, keeps the field
+ * non-nullable with a real default, and makes a partial cascade unrepresentable.
  *
  * ## Compound conditions: use a value-class getter
  *
@@ -510,8 +529,9 @@ annotation class WireOrder(
  * When the predicate is `true` and the field's value is `null`, encode throws
  * `EncodeException` with field-path attribution.
  *
- * @param predicate Grammar 1 (`"siblingField"` or `"siblingField.property"`) today;
- *   grammar 2 (`"remaining <op> <int>"`) reserved for a future release.
+ * @param predicate Grammar 1 (`"siblingField"` or `"siblingField.property"`) for a
+ *   flag-gated slot, or grammar 2 (`"remaining <op> <int>"`) for a protocol-optional
+ *   trailing slot. Both are parsed and generated today.
  */
 @Target(AnnotationTarget.VALUE_PARAMETER)
 @Retention(AnnotationRetention.BINARY)
@@ -913,4 +933,96 @@ annotation class EnumDefault
 @Retention(AnnotationRetention.BINARY)
 annotation class UseTextPolicy(
     val policy: kotlin.reflect.KClass<*>,
+)
+
+/**
+ * Marks a **trailing** field as absent-tolerant on decode: a frame produced before this field
+ * existed decodes successfully, and the field takes its Kotlin default.
+ *
+ * ```kotlin
+ * @ProtocolMessage
+ * data class Register(
+ *     val id: Int,
+ *     @SinceVersion(2) val retries: Int = 3,          // v1 frames decode with retries == 3
+ *     @SinceVersion(3) val mode: Mode = Mode.Default, // v1 and v2 frames decode with Mode.Default
+ * )
+ * ```
+ *
+ * ## Decode-only. The encoder always writes every field.
+ *
+ * Optionality is a **decoder-side tolerance**, not a wire-size optimization. A current producer
+ * always emits all fields, so `@SinceVersion` never shrinks what you send — it only widens what
+ * you can read. Do not expect an absent field to save bytes on encode; it cannot, because the
+ * encoder has no notion of "the version this peer expects". If you need the *encoder* to omit a
+ * slot, that is [When]'s `remaining` grammar (protocol-optional), not this annotation.
+ *
+ * ## Requires boundedness — DO NOT REMOVE THIS RULE
+ *
+ * The generated guard is `if (buffer.remaining() >= n)`. That test is only meaningful when the
+ * bytes remaining in the buffer belong to **this message and nothing else**. The processor
+ * therefore rejects any use where it cannot prove the message's extent is bounded.
+ *
+ * A message is bounded when it is length-framed — nested behind [LengthPrefixed] / [LengthFrom],
+ * or under a [FramedBy] sealed parent whose framing codec narrows the limit — or when it is
+ * decoded top-level and owns the rest of the buffer.
+ *
+ * It is **not** bounded when it appears as a bare nested field, or as the element type of a list.
+ * There, `remaining()` counts the *enclosing* message's next fields. An optional trailing field
+ * would consume them:
+ *
+ * ```kotlin
+ * // REJECTED at compile time — `inner` is not length-framed, so Inner's trailing
+ * // guard would read the first byte of `afterInner` and silently corrupt both fields.
+ * @ProtocolMessage
+ * data class Outer(val inner: Inner, val afterInner: Int)
+ * ```
+ *
+ * The same applies transitively to list elements: entry *k*'s optional field would swallow the
+ * head of entry *k+1*. Boundedness is a property of the **use site**, not of the declaration — a
+ * message can legitimately be bounded at one call site and unbounded at another, so the rule is
+ * enforced where the type is referenced, and the fix is to add [LengthPrefixed] to the field.
+ *
+ * This is the constraint most likely to look redundant to a future reader, because removing it
+ * produces no test failure on a well-formed frame — the decoder still returns a value. It returns
+ * a **wrong** value, built from the enclosing message's bytes. That is strictly worse than the
+ * throw it replaces: a truncated read is loud, and a misaligned one is not. Keep the rule.
+ *
+ * ## Fill order, and why a short frame is unambiguous
+ *
+ * Optional trailing fields fill strictly in declaration order, so a short frame means
+ * "fields *k*..*N* are absent" — never an arbitrary subset. That makes the decoder N+1 cases
+ * rather than 2^N, and it is why [version] must not decrease down the parameter list.
+ *
+ * ## Requirements, all enforced at compile time
+ *
+ * - The field must be **trailing** — every parameter after it must also carry `@SinceVersion`.
+ * - The field must declare a **Kotlin default**. Absence is expressed by omitting the argument
+ *   from the generated constructor call, so a field with no default has no value to fall back to.
+ * - The field must be **non-nullable**. `null` would model "absent" as a value the protocol does
+ *   not have; the default is the better answer, and it keeps the meaning of absence in one place
+ *   instead of at every read site. Use [When]'s `remaining` grammar when absence is genuinely
+ *   distinct information the encoder must be able to reproduce.
+ * - The field's type must have a well-defined **minimum wire width** — a scalar, a value class
+ *   over a scalar, or an enum. Variable-width trailing shapes (length-prefixed strings, lists,
+ *   nested messages) are rejected: use [When]'s `remaining` grammar, which tests after each read.
+ * - [version] must be **non-decreasing** across the trailing run.
+ *
+ * ## Schema drift
+ *
+ * The descriptor records the field as optional (`since=N`), so adding or removing `@SinceVersion`
+ * is a tracked schema change. Appending an optional field is classified safe; appending a
+ * required one is breaking, because peers built against the older shape will not send it.
+ *
+ * Note that the schema gate can see *that* a field has a default, but not *what* the default is —
+ * KSP does not expose default-value expressions. Changing `= 3` to `= 5` silently changes how
+ * pre-existing frames decode, and no tooling will flag it. Treat a default's value as part of the
+ * wire contract.
+ *
+ * @param version Monotonic marker for the revision that introduced the field. The processor uses
+ *   it only for ordering and for the schema descriptor; it is never written to the wire.
+ */
+@Target(AnnotationTarget.VALUE_PARAMETER)
+@Retention(AnnotationRetention.BINARY)
+annotation class SinceVersion(
+    val version: Int,
 )

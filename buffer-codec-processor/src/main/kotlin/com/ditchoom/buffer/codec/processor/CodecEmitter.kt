@@ -757,14 +757,30 @@ internal class CodecEmitter(
                 .build()
         }
         val ctorArgs = shape.fields.joinToString(", ") { "${it.name} = ${it.name}" }
+        // `@SinceVersion` run: fields from `firstIndex` on are read only if the bounded
+        // buffer still holds their bytes, and are OMITTED from the constructor call when
+        // absent so Kotlin's declared default applies. Sound only because the reference-site
+        // validator has proven this message's extent is bounded.
+        val optional = shape.optionalTrailing
         if (boundingIndex < 0) {
-            appendDecodeFields(body, shape.fields)
-            body.addStatement("return %T(%L)", messageType, ctorArgs)
+            if (optional == null) {
+                appendDecodeFields(body, shape.fields)
+                body.addStatement("return %T(%L)", messageType, ctorArgs)
+            } else {
+                appendDecodeFields(body, shape.fields.subList(0, optional.firstIndex))
+                body.add("return ")
+                appendOptionalTrailingDecode(body, shape, messageType, optional, depth = 0)
+            }
         } else {
             appendDecodeFields(body, shape.fields.subList(0, boundingIndex + 1))
             body.beginControlFlow("return try")
-            appendDecodeFields(body, shape.fields.subList(boundingIndex + 1, shape.fields.size))
-            body.addStatement("%T(%L)", messageType, ctorArgs)
+            if (optional == null) {
+                appendDecodeFields(body, shape.fields.subList(boundingIndex + 1, shape.fields.size))
+                body.addStatement("%T(%L)", messageType, ctorArgs)
+            } else {
+                appendDecodeFields(body, shape.fields.subList(boundingIndex + 1, optional.firstIndex))
+                appendOptionalTrailingDecode(body, shape, messageType, optional, depth = 0)
+            }
             body.nextControlFlow("finally")
             val boundingName = shape.fields[boundingIndex].name
             body.addStatement("buffer.setLimit(__%LOuterLimit)", boundingName)
@@ -779,6 +795,57 @@ internal class CodecEmitter(
             .addCode(body.build())
             .build()
     }
+
+    /**
+     * Emit the `@SinceVersion` tail as nested `if`/`else`, one level per optional field,
+     * with a constructor call at every leaf.
+     *
+     * ```kotlin
+     * if (buffer.remaining() < 4) {
+     *   Register(id = id)                          // v1 frame: retries + mode default
+     * } else {
+     *   val retries = buffer.readInt()
+     *   if (buffer.remaining() < 1) {
+     *     Register(id = id, retries = retries)     // v2 frame: mode defaults
+     *   } else { … }
+     * }
+     * ```
+     *
+     * Guards are **sequential, not cumulative**: reading field *k* moves the position that
+     * field *k+1* is tested against. A cumulative `when` over the total tail width would be
+     * wrong for any field whose encoded width can exceed its minimum, because it would
+     * commit to "both present" on a frame holding only a long first field.
+     *
+     * Absence is expressed by *omitting* the argument rather than passing null — that is the
+     * whole reason the fields can stay non-nullable, and it is why `@SinceVersion` requires a
+     * Kotlin default.
+     */
+    private fun appendOptionalTrailingDecode(
+        body: CodeBlock.Builder,
+        shape: CodecShape,
+        messageType: TypeName,
+        optional: OptionalTrailingRun,
+        depth: Int,
+    ) {
+        val fieldIndex = optional.firstIndex + depth
+        val entry = optional.fields[depth]
+        body.beginControlFlow("if (buffer.remaining() < %L)", entry.minWireBytes)
+        body.addStatement("%T(%L)", messageType, ctorArgsUpTo(shape, fieldIndex))
+        body.nextControlFlow("else")
+        appendDecodeField(body, shape.fields[fieldIndex])
+        if (depth + 1 < optional.fields.size) {
+            appendOptionalTrailingDecode(body, shape, messageType, optional, depth + 1)
+        } else {
+            body.addStatement("%T(%L)", messageType, ctorArgsUpTo(shape, fieldIndex + 1))
+        }
+        body.endControlFlow()
+    }
+
+    /** Named constructor arguments for the first [count] fields — the rest take their defaults. */
+    private fun ctorArgsUpTo(
+        shape: CodecShape,
+        count: Int,
+    ): String = shape.fields.take(count).joinToString(", ") { "${it.name} = ${it.name}" }
 
     private fun appendDecodeField(
         body: CodeBlock.Builder,
