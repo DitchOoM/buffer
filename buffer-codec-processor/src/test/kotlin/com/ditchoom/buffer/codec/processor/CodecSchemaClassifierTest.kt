@@ -95,7 +95,25 @@ class CodecSchemaClassifierTest {
     // ---- message fields ---------------------------------------------------
 
     @Test
-    fun `append message field is safe`() {
+    fun `append absent-tolerant message field is safe`() {
+        val drift =
+            soleDrift(
+                msgRec("p.M", field(0, "a", "scalar:Int wire=4B order=Big")),
+                msgRec(
+                    "p.M",
+                    field(0, "a", "scalar:Int wire=4B order=Big"),
+                    field(1, "b", "when(remaining>=1) scalar:UByte order=Big", optional = true),
+                ),
+            )
+        assertEquals(DriftSeverity.SAFE, drift.severity)
+    }
+
+    @Test
+    fun `append REQUIRED message field is breaking`() {
+        // The pattern this classifier previously blessed: appending a field with a Kotlin
+        // default, believing older producers still decode. They do not — the generated decoder
+        // reads every required field unconditionally, so an existing peer's frame runs off the
+        // end mid-decode. This gate is what was supposed to catch that, and instead endorsed it.
         val drift =
             soleDrift(
                 msgRec("p.M", field(0, "a", "scalar:Int wire=4B order=Big")),
@@ -105,7 +123,29 @@ class CodecSchemaClassifierTest {
                     field(1, "b", "scalar:UByte wire=1B order=Big"),
                 ),
             )
-        assertEquals(DriftSeverity.SAFE, drift.severity)
+        assertEquals(DriftSeverity.BREAKING, drift.severity)
+        assertTrue(drift.detail.contains("Kotlin default"), "must name the trap: ${drift.detail}")
+    }
+
+    @Test
+    fun `append FLAG-gated conditional field is breaking, not safe`() {
+        // A flag-gated `@When("someFlag")` field is optional but NOT absent-tolerant: an older
+        // producer that sets the pre-existing flag expects the bytes to follow, so appending one
+        // breaks that peer exactly like a required field. Conflating "optional" with
+        // "safe to append" would put this on the wrong side of the gate.
+        val drift =
+            soleDrift(
+                msgRec(
+                    "p.M",
+                    field(0, "flag", "scalar:Boolean wire=1B order=Big"),
+                ),
+                msgRec(
+                    "p.M",
+                    field(0, "flag", "scalar:Boolean wire=1B order=Big"),
+                    field(1, "extra", "when(sibling:flag) scalar:UByte order=Big", optional = true),
+                ),
+            )
+        assertEquals(DriftSeverity.BREAKING, drift.severity)
     }
 
     @Test

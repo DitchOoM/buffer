@@ -460,13 +460,66 @@ annotation class WireOrder(
  * @When("flags.willFlag") val willTopic: String? = null
  * ```
  *
- * ### 2. `remaining <op> <int-literal>` *(reserved — not yet implemented)*
+ * ### 2. `remaining <op> <int-literal>`
  *
  * `"remaining <op> <int>"` where `<op> ∈ {>=, >, ==}` gates the slot on the bounded
  * decode buffer's `remaining()`. The identifier `remaining` is reserved/magic and
- * does not refer to a sibling field. Reserved for a future release; until then,
- * this grammar is documented but not parsed — using it today produces the
- * standard "sibling not found" diagnostic.
+ * does not refer to a sibling field.
+ *
+ * This is the shape for a field that may legitimately be **absent from the wire** — both
+ * peers know it, and the encoder must be able to omit it. The slot is gated on
+ * `value.<field> != null`, so re-encoding a frame that arrived without it omits it again
+ * and byte-identity is preserved. MQTT v5's PUBACK/PUBREC/PUBREL/PUBCOMP/UNSUBACK/
+ * DISCONNECT/AUTH reason-code cascade and RFC 6455's close-frame body both use it.
+ *
+ * The `<int>` threshold is the field's **minimum wire width**, and the processor verifies
+ * it: a threshold narrower than the field can read is a compile error, because the guard
+ * would pass on a frame too short to satisfy the read that follows.
+ *
+ * ## Boundedness — required, and DO NOT REMOVE THIS RULE
+ *
+ * `remaining()` counts the bytes left in the **buffer**, not in this message. The predicate
+ * is therefore only meaningful when those bytes belong to this message alone. A message
+ * carrying this grammar may only be referenced from a slot whose extent is bounded: decoded
+ * top-level, behind [LengthPrefixed] / [LengthFrom], or under a [FramedBy] sealed parent
+ * whose framing codec narrows the limit.
+ *
+ * It is **not** bounded when it appears as a bare nested field, or as a list element. There,
+ * `remaining()` counts the *enclosing* message's next fields, and the guard consumes them:
+ *
+ * ```kotlin
+ * // REJECTED at compile time — `inner` is not length-framed, so Inner's trailing guard
+ * // would read the first byte of `afterInner` and silently corrupt both fields.
+ * @ProtocolMessage
+ * data class Outer(val inner: Inner, val afterInner: Int)
+ * ```
+ *
+ * List elements are rejected unconditionally: framing the list does not bound its elements
+ * from one another, so element *k*'s guard would swallow the head of element *k+1*.
+ *
+ * Boundedness is a property of the **use site**, not of the declaration — the same message is
+ * legitimately bounded behind a length prefix and unbounded as a bare field — so the rule is
+ * enforced where the type is referenced.
+ *
+ * This is the constraint most likely to look redundant to a future reader, because removing
+ * it produces no test failure on a well-formed frame: the decoder still returns a value. It
+ * returns a **wrong** value, assembled from the enclosing message's bytes. That is strictly
+ * worse than the throw it replaces — a truncated read is loud, and a misaligned one is not.
+ * Keep the rule.
+ *
+ * ## A trailing field is not self-delimiting
+ *
+ * A message whose tail is optional cannot be framed from a byte stream by this library:
+ * `peekFrameSize` reports `NoFraming`, because N available bytes are genuinely ambiguous
+ * between one long frame and two short ones. Such a message needs an outer framing layer —
+ * a datagram boundary, a length-prefixed envelope, or a [FramedBy] parent.
+ *
+ * ## Appending a field to a shipped message
+ *
+ * A Kotlin constructor default does **not** make a field optional on decode: generated
+ * `decode` passes every argument explicitly, so the default is unreachable and a frame from
+ * a producer that predates the field throws partway through the read. Gating the field with
+ * this grammar is what makes the older frame decodable.
  *
  * ## Compound conditions: use a value-class getter
  *
@@ -510,8 +563,9 @@ annotation class WireOrder(
  * When the predicate is `true` and the field's value is `null`, encode throws
  * `EncodeException` with field-path attribution.
  *
- * @param predicate Grammar 1 (`"siblingField"` or `"siblingField.property"`) today;
- *   grammar 2 (`"remaining <op> <int>"`) reserved for a future release.
+ * @param predicate Grammar 1 (`"siblingField"` or `"siblingField.property"`) for a
+ *   flag-gated slot, or grammar 2 (`"remaining <op> <int>"`) for an optional trailing
+ *   slot. Both are parsed and generated today.
  */
 @Target(AnnotationTarget.VALUE_PARAMETER)
 @Retention(AnnotationRetention.BINARY)

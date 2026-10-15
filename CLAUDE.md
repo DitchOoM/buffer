@@ -470,6 +470,36 @@ Key rules: `@DispatchValue` must return `Int`. `wire` values are validated at co
 
 For protocols that mix byte orders within a single message, use `@WireOrder(Endianness.Big)` or `@WireOrder(Endianness.Little)` on individual fields. This overrides the message-level `@ProtocolMessage(wireOrder = ...)`. It composes with `@WireBytes` when a custom-width field's byte order also differs from the message default.
 
+### Optional Trailing Fields — Decoding Older Peers' Frames
+
+A Kotlin constructor default is **invisible** to the generated decoder: `decode` always passes
+every argument explicitly, so appending a field with `= default` does NOT let an older producer's
+frame decode — it throws partway through. Gate the field on the buffer's remaining bytes instead:
+
+```kotlin
+@ProtocolMessage
+data class Ack(
+    val id: Int,
+    @When("remaining >= 4") val reason: Int? = null,   // absent on an older peer's frame
+)
+```
+
+The threshold is the field's **minimum wire width**, and the processor now verifies it — a
+threshold narrower than the field can read is a compile error.
+
+**Boundedness is required.** The guard is only meaningful when the remaining bytes belong to this
+message alone — i.e. it is top-level, behind `@LengthPrefixed`/`@LengthFrom`, or under a
+`@FramedBy` sealed parent. Nesting such a message as a bare field, or as a list element, is a
+**compile error**: `remaining()` would count the enclosing message's next fields and the guard
+would consume them, decoding a plausible wrong value instead of throwing. See `@When`'s KDoc and
+`SUPPORT_MATRIX.md` §2.4.
+
+**Not self-delimiting.** `peekFrameSize` reports `NoFraming` for such a message — N available
+bytes are ambiguous between one long frame and two short ones — so it needs an outer framing layer.
+
+Appending an absent-tolerant field is a SAFE schema change; appending a required one (or a
+flag-gated `@When("someFlag")` one) is BREAKING, and `checkCodecSchema` now says so.
+
 ### `peekFrameSize` — Generated Stream Framing
 
 Every codec automatically generates `peekFrameSize(stream: StreamProcessor, baseOffset: Int = 0): Int?` when the frame size is determinable from the wire format. This peeks at a stream to determine the total bytes needed for decode, without consuming data. Eliminates manual peek offset math in streaming loops:

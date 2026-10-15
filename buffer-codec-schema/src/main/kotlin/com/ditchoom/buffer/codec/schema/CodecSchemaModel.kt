@@ -63,7 +63,22 @@ sealed interface SchemaRecord {
             val name: String,
             val optional: Boolean,
             val descriptor: String,
-        )
+        ) {
+            /**
+             * True when a decoder tolerates this field being **absent from the wire** — i.e. it is
+             * gated on the buffer's `remaining()` (`@When("remaining <op> N")`), so a frame from a
+             * producer that predates the field still decodes.
+             *
+             * This is narrower than [optional]. A flag-gated conditional (`@When("someFlag")`) is
+             * also "optional", but is NOT absent-tolerant: an older producer that sets the flag
+             * expects the bytes to follow, so appending one still breaks that peer. The two must
+             * not be conflated when classifying an append.
+             *
+             * Derived from the descriptor rather than stored, so the rendered format is unchanged
+             * and no checked-in baseline needs regenerating.
+             */
+            val absentTolerant: Boolean get() = descriptor.startsWith(REMAINING_GATED_PREFIX)
+        }
 
         override fun render(): List<String> =
             listOf("message $typeName") +
@@ -103,3 +118,6 @@ fun renderSchemaRecords(records: List<SchemaRecord>): String =
     } else {
         records.joinToString(separator = "\n", postfix = "\n") { it.render().joinToString("\n") }
     }
+
+/** Descriptor prefix marking a slot gated on the decode buffer's `remaining()`. */
+private const val REMAINING_GATED_PREFIX = "when(remaining"
