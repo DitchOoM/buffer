@@ -252,14 +252,14 @@ jobs:
       # what consumers download.
       - name: Download published artifacts
         if: needs.publish.result == 'success'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: maven-local-merged
           path: /tmp/maven-repo
 
       - name: Generate SBOM (CycloneDX)
         if: needs.publish.result == 'success'
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           path: /tmp/maven-repo
           format: cyclonedx-json
