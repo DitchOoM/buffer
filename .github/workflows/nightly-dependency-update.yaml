@@ -18,6 +18,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  id-token: write # claude-code-action exchanges a GitHub OIDC token for its app token
 
 concurrency:
   group: nightly-dependency-update
