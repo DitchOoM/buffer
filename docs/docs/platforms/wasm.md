@@ -210,9 +210,13 @@ val jsOffset = buffer.linearMemoryOffset  // current read/write position offset
 ```
 
 ```javascript
-// JavaScript side: access same memory using the offset from Kotlin
-const wasmMemory = wasmExports.memory;
-const view = new DataView(wasmMemory.buffer, jsOffset, 1024);
+// JavaScript side: access same memory using the offset from Kotlin.
+// The compiled module exports its WebAssembly.Memory as `memory`. (Before Kotlin 2.4.20 this
+// was reached through the `wasmExports` global, which is now deprecated and no longer usable
+// for anything but `.memory`; from Kotlin, use `kotlin.wasm.unsafe.wasmMemory`.)
+import { memory } from './my-module.mjs';
+
+const view = new DataView(memory.buffer, jsOffset, 1024);
 const value = view.getInt32(0, false); // 42 - same bytes, zero copy!
 ```
 
@@ -325,8 +329,10 @@ val offset = nativeData.linearBuffer.nativeAddress
 ```
 
 ```javascript
-// JavaScript side - access same memory
-const view = new DataView(wasmExports.memory.buffer, offset, 1024);
+// JavaScript side - access same memory via the module's exported memory
+import { memory } from './my-module.mjs';
+
+const view = new DataView(memory.buffer, offset, 1024);
 const value = view.getInt32(0, false); // 42 - zero copy!
 ```
 

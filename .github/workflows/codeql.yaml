@@ -17,8 +17,8 @@ jobs:
   analyze:
     name: Analyze (java-kotlin)
     runs-on: ubuntu-latest
-    # ── TEMPORARY PARK: CodeQL's Kotlin extractor does not yet support Kotlin 2.4.0 ──
-    # The traced `compileKotlinJvm` below crashes inside CodeQL's instrumented build on 2.4.0
+    # ── TEMPORARY PARK: CodeQL's Kotlin extractor does not yet support the Kotlin 2.4 line ──
+    # The traced `compileKotlinJvm` below crashes inside CodeQL's instrumented build on 2.4.x
     # ("Daemon compilation failed") while the real JVM compile is green (build-linux, detekt,
     # Android all pass). Upstream tracking: https://github.com/github/codeql/issues/21938.
     # While parked, the failing steps are non-fatal so this required check stays green; scanning
@@ -27,7 +27,8 @@ jobs:
     # This is a scoped, source-analysis-only gap — supply-chain scanning (OSV / SBOM) and all
     # build/test/lint gates remain strict and unaffected.
     #
-    # RE-ENABLE (when CodeQL supports 2.4.0): set repo variable CODEQL_KOTLIN_240_SUPPORTED=true
+    # RE-ENABLE (when CodeQL supports 2.4.x): set repo variable CODEQL_KOTLIN_240_SUPPORTED=true
+    # (the variable name predates the 2.4.20 bump; it gates the whole 2.4 line, not just 2.4.0)
     # to restore strict failure, confirm a green run, then delete both the variable and this block.
     permissions:
       security-events: write # upload CodeQL results to code scanning
@@ -64,12 +65,12 @@ jobs:
           build-mode: manual
           queries: security-extended
       - name: Compile Kotlin (JVM) for extraction
-        # Parked for Kotlin 2.4.0 (see job banner). Non-fatal until CODEQL_KOTLIN_240_SUPPORTED=true.
+        # Parked for Kotlin 2.4.x (see job banner). Non-fatal until CODEQL_KOTLIN_240_SUPPORTED=true.
         continue-on-error: ${{ vars.CODEQL_KOTLIN_240_SUPPORTED != 'true' }}
         run: ./gradlew compileKotlinJvm --no-daemon --no-configuration-cache
 
       - name: Perform CodeQL analysis
-        # Parked for Kotlin 2.4.0 (see job banner). Non-fatal until CODEQL_KOTLIN_240_SUPPORTED=true.
+        # Parked for Kotlin 2.4.x (see job banner). Non-fatal until CODEQL_KOTLIN_240_SUPPORTED=true.
         continue-on-error: ${{ vars.CODEQL_KOTLIN_240_SUPPORTED != 'true' }}
         uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:

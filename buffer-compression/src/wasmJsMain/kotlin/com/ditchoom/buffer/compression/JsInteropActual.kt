@@ -10,6 +10,8 @@ import com.ditchoom.buffer.nativeMemoryAccess
 import kotlinx.coroutines.await
 import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.js.Promise
+import kotlin.wasm.unsafe.WebAssembly
+import kotlin.wasm.unsafe.wasmMemory
 
 // ============================================================================
 // Platform detection
@@ -44,9 +46,8 @@ internal actual fun emptyJsByteArray(): JsByteArray = JsByteArray(jsEmptyUint8Ar
 
 @JsFun(
     """
-(offset, length) => {
-    const memory = wasmExports.memory.buffer;
-    const src = new Uint8Array(memory, offset, length);
+(memory, offset, length) => {
+    const src = new Uint8Array(memory.buffer, offset, length);
     const copy = new Uint8Array(length);
     copy.set(src);
     return copy;
@@ -54,6 +55,7 @@ internal actual fun emptyJsByteArray(): JsByteArray = JsByteArray(jsEmptyUint8Ar
 """,
 )
 private external fun jsCopyFromWasmMemory(
+    memory: WebAssembly.Memory,
     offset: Int,
     length: Int,
 ): JsAny
@@ -67,7 +69,7 @@ internal actual fun ReadBuffer.toJsByteArray(): JsByteArray {
     if (native != null) {
         val offset = native.nativeAddress.toInt() + position()
         position(position() + remaining)
-        return JsByteArray(jsCopyFromWasmMemory(offset, remaining))
+        return JsByteArray(jsCopyFromWasmMemory(wasmMemory, offset, remaining))
     }
     // Managed backing: copy straight out of the backing array, one copy rather than the two a
     // readByteArray() round-trip costs. See [stageManaged] for why a copy is unavoidable at all.
@@ -83,12 +85,13 @@ internal actual fun ReadBuffer.toJsByteArray(): JsByteArray {
 
 @JsFun(
     """
-(offset, length) => {
-    return new Uint8Array(wasmExports.memory.buffer, offset, length);
+(memory, offset, length) => {
+    return new Uint8Array(memory.buffer, offset, length);
 }
 """,
 )
 private external fun jsViewWasmMemory(
+    memory: WebAssembly.Memory,
     offset: Int,
     length: Int,
 ): JsAny
@@ -103,7 +106,7 @@ internal actual fun ReadBuffer.toJsByteArrayView(): JsByteArray {
     if (native != null) {
         val offset = native.nativeAddress.toInt() + position()
         position(position() + remaining)
-        return JsByteArray(jsViewWasmMemory(offset, remaining))
+        return JsByteArray(jsViewWasmMemory(wasmMemory, offset, remaining))
     }
     // Non-native buffer: must copy (no linear memory to view)
     val managed = managedMemoryAccess
@@ -121,7 +124,7 @@ internal actual fun ReadBuffer.toJsByteArrayView(): JsByteArray {
  *
  * The copy is not avoidable, and specifically **cannot be replaced by pinning**. Kotlin/Wasm is
  * WasmGC: a `ByteArray` is a GC object living in the GC heap, which is a different address space
- * from linear memory and is not reachable through `wasmExports.memory.buffer`. There is no
+ * from linear memory and is not reachable through `wasmMemory.buffer`. There is no
  * `usePinned` equivalent to hand JS a stable address for it, the way Kotlin/Native can. So bytes
  * that start on the Kotlin heap have to be written into linear memory before JS can see them, and
  * the only question is how many times they get copied on the way. Going through
@@ -148,7 +151,7 @@ private fun stageManaged(
                 "BufferFactory.Default must yield native memory on wasmJs"
             }.nativeAddress.toInt()
         staging.writeBytes(bytes, offset, length)
-        return JsByteArray(jsCopyFromWasmMemory(address, length))
+        return JsByteArray(jsCopyFromWasmMemory(wasmMemory, address, length))
     } finally {
         // Linear memory is not garbage collected — the staging block has to go back explicitly.
         staging.freeNativeMemory()
@@ -201,14 +204,14 @@ internal actual fun combineJsByteArrays(
 
 @JsFun(
     """
-(jsArray, dstOffset) => {
-    const memory = wasmExports.memory.buffer;
-    const dst = new Uint8Array(memory, dstOffset, jsArray.length);
+(memory, jsArray, dstOffset) => {
+    const dst = new Uint8Array(memory.buffer, dstOffset, jsArray.length);
     dst.set(jsArray);
 }
 """,
 )
 private external fun jsCopyToWasmMemory(
+    memory: WebAssembly.Memory,
     jsArray: JsAny,
     dstOffset: Int,
 )
@@ -224,7 +227,7 @@ internal actual fun JsByteArray.toPlatformBuffer(bufferFactory: BufferFactory): 
     val buf = bufferFactory.allocate(length)
     val native = buf.nativeMemoryAccess
     if (native != null) {
-        jsCopyToWasmMemory(ref, native.nativeAddress.toInt())
+        jsCopyToWasmMemory(wasmMemory, ref, native.nativeAddress.toInt())
         buf.position(length)
         buf.resetForRead()
     } else {
@@ -238,7 +241,7 @@ internal actual fun JsByteArray.toPlatformBuffer(bufferFactory: BufferFactory): 
                 checkNotNull(staging.nativeMemoryAccess) {
                     "BufferFactory.Default must yield native memory on wasmJs"
                 }.nativeAddress.toInt()
-            jsCopyToWasmMemory(ref, address)
+            jsCopyToWasmMemory(wasmMemory, ref, address)
             staging.position(length)
             staging.resetForRead()
             buf.write(staging)
@@ -254,11 +257,21 @@ internal actual fun JsByteArray.toPlatformBuffer(bufferFactory: BufferFactory): 
 // Node.js sync zlib
 // ============================================================================
 
+// Node's zlib is reached through `process.getBuiltinModule(...)` rather than a bare `require(...)`.
+// As of Kotlin 2.4.20 the generated glue shadows the module-scope `require` with a stub that throws
+// unless the host has set `globalThis.require`, so a top-level `require` in a @JsFun body fails at
+// runtime (KT-86192). `getBuiltinModule` is the synchronous ESM-safe equivalent (Node 20.16+/22.3+);
+// the `require` fallback keeps older hosts and bundler/CommonJS contexts working.
+//
+// The module name stays split as 'zl' + 'ib' so webpack cannot statically resolve it and pull Node's
+// zlib into a browser bundle — these functions are only ever called behind a Node check.
+
 @JsFun(
     """
 (input, algorithm, level, windowBits, dictionary) => {
     const m = 'zl' + 'ib';
-    const zlib = require(m);
+    const p = globalThis.process;
+    const zlib = p.getBuiltinModule ? p.getBuiltinModule(m) : require(m);
     const options = { level: level };
     if (windowBits !== 0) options.windowBits = windowBits;
     if (dictionary != null) options.dictionary = dictionary;
@@ -294,7 +307,8 @@ internal actual fun nodeZlibSync(
     """
 (input, algorithm, level, windowBits) => {
     const m = 'zl' + 'ib';
-    const zlib = require(m);
+    const p = globalThis.process;
+    const zlib = p.getBuiltinModule ? p.getBuiltinModule(m) : require(m);
     const options = { level: level, finishFlush: zlib.constants.Z_SYNC_FLUSH };
     if (windowBits !== 0) options.windowBits = windowBits;
     switch (algorithm) {
@@ -324,7 +338,8 @@ internal actual fun nodeZlibSyncFlush(
     """
 (input, algorithm, dictionary) => {
     const m = 'zl' + 'ib';
-    const zlib = require(m);
+    const p = globalThis.process;
+    const zlib = p.getBuiltinModule ? p.getBuiltinModule(m) : require(m);
     switch (algorithm) {
         case 0: {
             const options = {};
@@ -416,7 +431,8 @@ internal actual class NodeTransformHandle(
     """
 (algorithm, level, windowBits, dictionary) => {
     const m = 'zl' + 'ib';
-    const zlib = require(m);
+    const p = globalThis.process;
+    const zlib = p.getBuiltinModule ? p.getBuiltinModule(m) : require(m);
     const options = { level: level };
     if (windowBits !== 0) options.windowBits = windowBits;
     if (dictionary != null) options.dictionary = dictionary;
@@ -450,7 +466,8 @@ internal actual fun createCompressStream(
     """
 (algorithm, windowBits, dictionary) => {
     const m = 'zl' + 'ib';
-    const zlib = require(m);
+    const p = globalThis.process;
+    const zlib = p.getBuiltinModule ? p.getBuiltinModule(m) : require(m);
     const options = {};
     if (algorithm === 2) options.finishFlush = zlib.constants.Z_SYNC_FLUSH;
     if (windowBits !== 0) options.windowBits = windowBits;
@@ -483,7 +500,8 @@ internal actual fun createDecompressStream(
     """
 (stream, inputs) => {
     const m = 'zl' + 'ib';
-    const zlib = require(m);
+    const p = globalThis.process;
+    const zlib = p.getBuiltinModule ? p.getBuiltinModule(m) : require(m);
     return new Promise((resolve, reject) => {
         const chunks = [];
         stream.on('readable', () => {
@@ -649,10 +667,26 @@ internal actual fun NodeTransformHandle.processSyncOneShot(
     flushFlag: Int,
 ): JsByteArray = JsByteArray(jsProcessSyncOneShot(ref, input.ref, flushFlag))
 
-@JsFun("() => require('zl' + 'ib').constants.Z_SYNC_FLUSH")
+@JsFun(
+    """
+() => {
+    const m = 'zl' + 'ib';
+    const p = globalThis.process;
+    return (p.getBuiltinModule ? p.getBuiltinModule(m) : require(m)).constants.Z_SYNC_FLUSH;
+}
+""",
+)
 private external fun jsZSyncFlush(): Int
 
-@JsFun("() => require('zl' + 'ib').constants.Z_FINISH")
+@JsFun(
+    """
+() => {
+    const m = 'zl' + 'ib';
+    const p = globalThis.process;
+    return (p.getBuiltinModule ? p.getBuiltinModule(m) : require(m)).constants.Z_FINISH;
+}
+""",
+)
 private external fun jsZFinish(): Int
 
 internal actual fun zlibSyncFlushFlag(): Int = jsZSyncFlush()
@@ -667,7 +701,8 @@ internal actual fun zlibFinishFlag(): Int = jsZFinish()
     """
 (inputs, algorithm, level, dictionary) => {
     const m = 'zl' + 'ib';
-    const zlib = require(m);
+    const p = globalThis.process;
+    const zlib = p.getBuiltinModule ? p.getBuiltinModule(m) : require(m);
     const options = { level: level };
     if (dictionary != null) options.dictionary = dictionary;
     let stream;
@@ -715,7 +750,8 @@ internal actual suspend fun nodeTransformCompressOneShot(
     """
 (inputs, algorithm, dictionary) => {
     const m = 'zl' + 'ib';
-    const zlib = require(m);
+    const p = globalThis.process;
+    const zlib = p.getBuiltinModule ? p.getBuiltinModule(m) : require(m);
     const options = {};
     if (algorithm === 2) options.finishFlush = zlib.constants.Z_SYNC_FLUSH;
     if (dictionary != null) options.dictionary = dictionary;

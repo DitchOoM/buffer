@@ -191,7 +191,7 @@ jobs:
           set -euo pipefail
           version="$INPUT_VERSION"
           if [ -z "$version" ]; then
-            version="$(./gradlew -q nextVersion ${{ inputs.gradle-args }})"
+            version="$(bash .github/scripts/next-version.sh ${{ inputs.gradle-args }})"
           fi
           echo "Building version $version"
           echo "ORG_GRADLE_PROJECT_version=$version" >> "$GITHUB_ENV"
@@ -249,7 +249,7 @@ jobs:
           set -euo pipefail
           version="$INPUT_VERSION"
           if [ -z "$version" ]; then
-            version="$(./gradlew -q nextVersion ${{ inputs.gradle-args }})"
+            version="$(bash .github/scripts/next-version.sh ${{ inputs.gradle-args }})"
           fi
           echo "Building version $version"
           echo "version=$version" >> "$GITHUB_OUTPUT"

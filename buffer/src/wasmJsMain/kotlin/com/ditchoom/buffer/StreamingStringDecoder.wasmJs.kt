@@ -2,12 +2,15 @@
 
 package com.ditchoom.buffer
 
+import kotlin.wasm.unsafe.WebAssembly
+import kotlin.wasm.unsafe.wasmMemory
+
 // WasmJS implementation using TextDecoder with stream mode via JS interop.
 //
 // Thread Safety: StreamingStringDecoder is NOT thread-safe. Use one instance per stream/thread.
 //
 // Uses the browser's native TextDecoder API with `stream: true` option.
-// - LinearBuffer: zero-copy decode via Uint8Array view on wasmExports.memory.buffer
+// - LinearBuffer: zero-copy decode via Uint8Array view on wasmMemory.buffer
 // - Other buffers: bulk copy to linear memory scratch space, then decode (single JS call)
 
 /** Create a streaming TextDecoder instance. Returns an opaque handle to the decoder. */
@@ -25,17 +28,18 @@ private external fun createDecoder(
 
 /**
  * Decode bytes from WASM linear memory using a streaming decoder.
- * Zero-copy: creates a Uint8Array view directly on wasmExports.memory.buffer.
+ * Zero-copy: creates a Uint8Array view directly on wasmMemory.buffer.
  */
 @JsFun(
     """
-(decoder, offset, length, stream) => {
-    const bytes = new Uint8Array(wasmExports.memory.buffer, offset, length);
+(memory, decoder, offset, length, stream) => {
+    const bytes = new Uint8Array(memory.buffer, offset, length);
     return decoder.decode(bytes, { stream: stream });
 }
 """,
 )
 private external fun decodeStreamLinear(
+    memory: WebAssembly.Memory,
     decoder: JsAny,
     offset: Int,
     length: Int,
@@ -120,6 +124,7 @@ private class WasmJsStreamingStringDecoder(
         val actual = buffer.unwrapFully()
         if (actual is LinearBuffer) {
             return decodeStreamLinear(
+                wasmMemory,
                 decoder,
                 actual.baseOffset + absoluteOffset,
                 length,
@@ -139,7 +144,7 @@ private class WasmJsStreamingStringDecoder(
                 scratch.toLong(),
                 length,
             )
-            return decodeStreamLinear(decoder, scratch, length, true.toJsBoolean()).toString()
+            return decodeStreamLinear(wasmMemory, decoder, scratch, length, true.toJsBoolean()).toString()
         }
 
         // Final fallback for unknown buffer types
@@ -149,7 +154,7 @@ private class WasmJsStreamingStringDecoder(
         buffer.position(savedPos)
         val scratch = ensureScratch()
         UnsafeMemory.copyMemoryFromArray(bytes, 0, scratch.toLong(), length)
-        return decodeStreamLinear(decoder, scratch, length, true.toJsBoolean()).toString()
+        return decodeStreamLinear(wasmMemory, decoder, scratch, length, true.toJsBoolean()).toString()
     }
 
     override fun finish(destination: Appendable): Int =

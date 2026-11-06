@@ -358,7 +358,7 @@ fun BufferFactory.Companion.wrapNativeAddress(
 // val buffer = BufferFactory.Default.allocate(1024)
 // val linearBuffer = buffer.unwrapFully() as LinearBuffer
 // val offset = linearBuffer.baseOffset + linearBuffer.position()
-// // Create JS DataView: new DataView(wasmExports.memory.buffer, offset, size)
+// // Create JS DataView: new DataView(wasmMemory.buffer, offset, size)
 // ```
 //
 // **Linux** - Get native buffer:

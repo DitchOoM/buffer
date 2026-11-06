@@ -48,7 +48,7 @@ internal actual val managedBufferFactory: BufferFactory =
 /**
  * WASM has no cross-process shared memory, so this falls back to Direct linear memory — same as the
  * JVM, Apple and Linux fallbacks. Bytes are visible to JavaScript in the same process (zero-copy via
- * `wasmExports.memory.buffer`), but not to another worker or process.
+ * `wasmMemory.buffer`), but not to another worker or process.
  */
 internal actual val sharedBufferFactory: BufferFactory =
     object : BufferFactory {

@@ -10,17 +10,19 @@ import com.ditchoom.buffer.BufferConstants.WORD_BYTE_3
 import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.wasm.unsafe.Pointer
 import kotlin.wasm.unsafe.UnsafeWasmMemoryApi
+import kotlin.wasm.unsafe.WebAssembly
+import kotlin.wasm.unsafe.wasmMemory
 
 @JsFun(
     """
-(offset, length, value) => {
-    const memory = wasmExports.memory.buffer;
-    const arr = new Uint8Array(memory, offset, length);
+(memory, offset, length, value) => {
+    const arr = new Uint8Array(memory.buffer, offset, length);
     arr.fill(value);
 }
 """,
 )
 private external fun memset(
+    memory: WebAssembly.Memory,
     offset: Int,
     length: Int,
     value: Int,
@@ -28,15 +30,16 @@ private external fun memset(
 
 @JsFun(
     """
-(srcOffset, dstOffset, length) => {
-    const memory = wasmExports.memory.buffer;
-    const src = new Uint8Array(memory, srcOffset, length);
-    const dst = new Uint8Array(memory, dstOffset, length);
+(memory, srcOffset, dstOffset, length) => {
+    const bytes = memory.buffer;
+    const src = new Uint8Array(bytes, srcOffset, length);
+    const dst = new Uint8Array(bytes, dstOffset, length);
     dst.set(src);
 }
 """,
 )
 private external fun memcpyJs(
+    memory: WebAssembly.Memory,
     srcOffset: Int,
     dstOffset: Int,
     length: Int,
@@ -88,7 +91,7 @@ actual object UnsafeMemory {
         dstAddress: Long,
         size: Long,
     ) {
-        memcpyJs(srcAddress.toInt(), dstAddress.toInt(), size.toInt())
+        memcpyJs(wasmMemory, srcAddress.toInt(), dstAddress.toInt(), size.toInt())
     }
 
     actual fun setMemory(
@@ -96,7 +99,7 @@ actual object UnsafeMemory {
         size: Long,
         value: Byte,
     ) {
-        memset(address.toInt(), size.toInt(), value.toInt())
+        memset(wasmMemory, address.toInt(), size.toInt(), value.toInt())
     }
 
     actual fun copyMemoryToArray(

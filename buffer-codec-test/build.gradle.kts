@@ -83,6 +83,11 @@ kotlin {
                     associateWith(this@linuxX64.compilations.getByName("main"))
                 }
             }
+            // Register linuxArm64 on local Linux dev too, matching every other module here.
+            // :buffer-flow's tests depend on this module, and it declares linuxArm64 locally — so
+            // without this, a local `./gradlew build` fails resolving :buffer-codec-test for
+            // :buffer-flow:compileTestKotlinLinuxArm64 while CI (where both declare it) passes.
+            linuxArm64()
         }
     }
 
@@ -166,6 +171,13 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask<*>>().con
         dependsOn("kspCommonMainKotlinMetadata")
     }
 }
+
+// The per-target KSP tasks (kspKotlinJvm, kspKotlinJs, ...) also read that commonMain srcDir. Since KSP 2.3.13 they are
+// no longer KotlinCompilationTasks, so the block above misses them and Gradle 9.9 fails the build on the implicit
+// dependency. Order them after the common metadata run explicitly.
+tasks
+    .matching { it.name.startsWith("kspKotlin") }
+    .configureEach { dependsOn("kspCommonMainKotlinMetadata") }
 
 ktlint {
     verbose.set(true)

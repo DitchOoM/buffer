@@ -65,9 +65,9 @@ jobs:
         id: version
         run: |
           set -euo pipefail
-          version="$(./gradlew -q nextVersion ${{ inputs.gradle-args }})"
+          version="$(bash .github/scripts/next-version.sh ${{ inputs.gradle-args }})"
           if [ -z "$version" ]; then
-            echo "::error::nextVersion produced an empty version"
+            echo "::error::nextVersion produced an empty version" # unreachable via next-version.sh, kept as the last guard
             exit 1
           fi
           echo "Version for this run: $version"

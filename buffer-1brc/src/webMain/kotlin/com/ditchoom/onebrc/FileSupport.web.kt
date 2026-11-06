@@ -18,16 +18,49 @@ internal actual fun onebrcWriteText(
 internal actual fun onebrcDeleteFile(path: String) = nodeRemoveFile(path)
 
 // Parameters below are consumed inside the js(...) bodies, which detekt cannot see (interop).
+//
+// Node builtins are reached through `process.getBuiltinModule(...)` rather than a bare `require(...)`:
+// as of Kotlin 2.4.20 the generated glue shadows the module-scope `require` with a stub that throws
+// unless the host has set `globalThis.require` (KT-86192). `getBuiltinModule` is the synchronous
+// ESM-safe equivalent (Node 20.16+/22.3+); the `require` fallback keeps older hosts working.
 @Suppress("UnusedParameter")
-internal fun nodeReadFileUtf8(path: String): String = js("require('fs').readFileSync(path, 'utf8')")
+internal fun nodeReadFileUtf8(path: String): String =
+    js(
+        """
+        (globalThis.process.getBuiltinModule
+            ? globalThis.process.getBuiltinModule('fs')
+            : require('fs')).readFileSync(path, 'utf8')
+        """,
+    )
 
 @Suppress("UnusedParameter")
 internal fun nodeWriteFileUtf8(
     path: String,
     data: String,
-): Unit = js("require('fs').writeFileSync(path, data)")
+): Unit =
+    js(
+        """
+        (globalThis.process.getBuiltinModule
+            ? globalThis.process.getBuiltinModule('fs')
+            : require('fs')).writeFileSync(path, data)
+        """,
+    )
 
 @Suppress("UnusedParameter")
-internal fun nodeRemoveFile(path: String): Unit = js("require('fs').rmSync(path, { force: true })")
+internal fun nodeRemoveFile(path: String): Unit =
+    js(
+        """
+        (globalThis.process.getBuiltinModule
+            ? globalThis.process.getBuiltinModule('fs')
+            : require('fs')).rmSync(path, { force: true })
+        """,
+    )
 
-private fun nodeTmpDir(): String = js("require('os').tmpdir()")
+private fun nodeTmpDir(): String =
+    js(
+        """
+        (globalThis.process.getBuiltinModule
+            ? globalThis.process.getBuiltinModule('os')
+            : require('os')).tmpdir()
+        """,
+    )
