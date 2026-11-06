@@ -172,6 +172,13 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask<*>>().con
     }
 }
 
+// The per-target KSP tasks (kspKotlinJvm, kspKotlinJs, ...) also read that commonMain srcDir. Since KSP 2.3.13 they are
+// no longer KotlinCompilationTasks, so the block above misses them and Gradle 9.9 fails the build on the implicit
+// dependency. Order them after the common metadata run explicitly.
+tasks
+    .matching { it.name.startsWith("kspKotlin") }
+    .configureEach { dependsOn("kspCommonMainKotlinMetadata") }
+
 ktlint {
     verbose.set(true)
     outputToConsole.set(true)
