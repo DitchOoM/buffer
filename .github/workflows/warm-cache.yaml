@@ -108,7 +108,7 @@ jobs:
       - name: Resolve version
         run: |
           set -euo pipefail
-          version="$(./gradlew -q nextVersion)"
+          version="$(bash .github/scripts/next-version.sh)"
           echo "Warming caches for version $version"
           echo "ORG_GRADLE_PROJECT_version=$version" >> "$GITHUB_ENV"
 
@@ -219,7 +219,7 @@ jobs:
       - name: Resolve version
         run: |
           set -euo pipefail
-          version="$(./gradlew -q nextVersion)"
+          version="$(bash .github/scripts/next-version.sh)"
           echo "Warming caches for version $version"
           echo "ORG_GRADLE_PROJECT_version=$version" >> "$GITHUB_ENV"
 
