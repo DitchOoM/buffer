@@ -28,6 +28,7 @@ buffer-kotlinx-io
 buffer-ktor
 buffer-okio
 buffer-sqldelight
+buffer-guard-drill
 "
 
 KEXE_SUFFIX="build/bin/linuxArm64/debugTest/test.kexe"
