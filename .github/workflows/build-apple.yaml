@@ -78,9 +78,9 @@ jobs:
           # reporting SKIPPED, because an x64 simulator cannot run on an arm64 runner.)
           #
           # Device ABIs have no hosted runner at all, so those are compile-and-link only —
-          # the same gate build-linux applies via linkDebugTestLinuxArm64 before its QEMU
-          # steps. The x64 simulator targets are likewise link-only here, matching what the
-          # old job effectively did once its *Test tasks skipped.
+          # the same link-before-run gate build-linux applies via linkDebugTestLinuxArm64
+          # before its native arm64 runs. The x64 simulator targets are likewise link-only
+          # here, matching what the old job effectively did once its *Test tasks skipped.
           #
           # The four *Test tasks are left UNQUALIFIED: they resolve across all ten modules
           # that register the target (verified), which is broader than the six-module link
@@ -89,8 +89,8 @@ jobs:
           #
           # The link tasks are MODULE-QUALIFIED, covering the six modules that have native
           # test binaries: :buffer, :buffer-codec, :buffer-codec-test, :buffer-compression,
-          # :buffer-flow, :buffer-crypto. That is build-linux's QEMU set PLUS :buffer-codec —
-          # which the QEMU set omits but which does have Apple test binaries for all 12
+          # :buffer-flow, :buffer-crypto. That is build-linux's old QEMU set PLUS :buffer-codec —
+          # which the QEMU set omitted but which does have Apple test binaries for all 12
           # targets, and which the old `publishToMavenLocal` graph compiled and linked as a
           # side effect. Dropping it here would have been a silent coverage regression; it
           # was caught by diffing the old job's task graph against the new one's, not by
