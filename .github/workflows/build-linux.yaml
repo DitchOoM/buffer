@@ -33,17 +33,18 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Four test legs, all concurrent with each other and with `publish`.
+  # Three Gradle-driven test legs, all concurrent with each other, with `linux-native`
+  # and with `publish`.
   #
-  # Only the `linux` leg installs the apt/QEMU/aarch64 toolchain and only the `js-wasm`
-  # leg needs a browser, so each leg's setup is gated on `matrix.name` rather than every
-  # leg paying for every other leg's prerequisites.
+  # Only the `js-wasm` leg needs a browser, so that setup is gated on `matrix.name`
+  # rather than every leg paying for it. The Linux-native leg is its own job below,
+  # because the arm64 job has to wait for it and only for it.
   test:
     name: "Test (${{ matrix.name }})"
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
-      # A JS failure should not hide a Linux-native failure: report every leg.
+      # A JS failure should not hide a JVM failure: report every leg.
       fail-fast: false
       matrix:
         include:
@@ -68,8 +69,6 @@ jobs:
           # truth for Android behavior.
           - name: android-ktlint
             tasks: "ktlintCheck testDebugUnitTest testBenchmarkUnitTest"
-          - name: linux
-            tasks: ""  # driven by explicit steps below (QEMU runs are not Gradle tasks)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -109,7 +108,7 @@ jobs:
           # repository no longer carries: sdkmanager then exits 1 and fails the job.
           packages: platform-tools
 
-      # Restore-only in the test legs: five concurrent jobs racing to save one key is the
+      # Restore-only in the test legs: several concurrent jobs racing to save one key is the
       # `Unable to reserve cache ... another job may be creating this cache` warning. The
       # `publish` job is the single saver — it produces the widest set of reusable outputs.
       - name: Restore Konan
@@ -127,91 +126,6 @@ jobs:
           restore-keys: |
             gradle-linux-
 
-      # ---- linux-leg-only native prerequisites -------------------------------------
-      # Restore-only, like the Gradle/Konan caches above: `publish` and warm-cache.yaml
-      # are the savers. Giving this leg its own save key would store a second copy of
-      # identical content under a different name.
-      - name: Restore simdutf x64
-        if: matrix.name == 'linux'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: buffer/build/simdutf/libs/linux-x64
-          key: simdutf-linux-x64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
-
-      - name: Restore simdutf ARM64
-        if: matrix.name == 'linux'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: buffer/build/simdutf/libs/linux-arm64
-          key: simdutf-linux-arm64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
-
-      # Two ARM64 runtime libs that the QEMU-emulated test binaries need inside the
-      # cross sysroot (`qemu-aarch64-static -L /usr/aarch64-linux-gnu`, below).
-      # gcc-aarch64-linux-gnu populates that sysroot with libc only, and Ubuntu
-      # ships no cross package for the rest — noble carries libc6{,-dbg,-dev}-arm64-cross
-      # and nothing else — so these two are taken straight from the pool. apt is not
-      # an alternative that avoids the network: arm64 lives solely on
-      # ports.ubuntu.com (archive.ubuntu.com has no binary-arm64 at all), so a
-      # multiarch `apt-get install zlib1g:arm64` would hit the same host, and pull
-      # the ~1.8 MB arm64 index every run to do it. These two files are ~144 KB.
-      #
-      # Cached because they are version-pinned: refetched only when this workflow
-      # changes, not once per run.
-      - name: Cache ARM64 runtime libraries
-        if: matrix.name == 'linux'
-        id: cache-arm64-libs
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: /tmp/arm64-libs
-          key: arm64-libs-${{ hashFiles('.github/workflows/build-linux.yaml') }}
-
-      # Bounded and retried because an unbounded stall here has already cost a full
-      # green build: in run 29865567822 this download hung for 35m47s against a
-      # 13-51s norm, and the job was killed at the 60-minute wall during post-job
-      # cache save — after every test had passed. ports.ubuntu.com stalls often
-      # enough from Azure-hosted runners that "fail fast and retry" has to be
-      # explicit; curl's default is to wait forever.
-      - name: Download ARM64 runtime libraries
-        if: matrix.name == 'linux' && steps.cache-arm64-libs.outputs.cache-hit != 'true'
-        timeout-minutes: 10
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/arm64-libs
-          cd /tmp/arm64-libs
-          for url in \
-            https://ports.ubuntu.com/pool/main/libx/libxcrypt/libcrypt1_4.4.36-4build1_arm64.deb \
-            https://ports.ubuntu.com/pool/main/z/zlib/zlib1g_1.3.dfsg-3.1ubuntu2_arm64.deb
-          do
-            curl -fsSLO --retry 5 --retry-all-errors --retry-delay 5 \
-              --connect-timeout 15 --max-time 120 "$url"
-          done
-
-      - name: Install ARM64 dependencies
-        if: matrix.name == 'linux'
-        timeout-minutes: 15
-        run: |
-          set -euo pipefail
-          # Acquire::Retries so a transient mirror failure retries instead of failing
-          # the job, same reasoning as the curl flags above.
-          sudo apt-get -o Acquire::Retries=5 update
-          # gcc/g++-aarch64-linux-gnu cross-compile :buffer's simdutf (C++) for arm64; qemu-user-static
-          # runs the arm64 test.kexe binaries. buffer-crypto no longer builds BoringSSL in-repo — its
-          # libcrypto.a comes prebuilt from the com.ditchoom.boringssl.provision bundle — so no BoringSSL
-          # toolchain is needed here; the aarch64 cross-compiler is retained solely for simdutf.
-          sudo apt-get -o Acquire::Retries=5 install -y \
-            qemu-user-static gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          # Unpack each .deb in its own directory. `ar x` drops a `data.tar.*` into
-          # the working directory, so a shared one lets a stale archive be reused
-          # silently if a future package version switches compression — the previous
-          # form hardcoded `tar xf data.tar.zst` for both.
-          for deb in /tmp/arm64-libs/*.deb; do
-            dir="$(mktemp -d)"
-            ( cd "$dir" && ar x "$deb" && tar xf data.tar.* )
-            sudo cp -r "$dir"/usr/lib/aarch64-linux-gnu/* /usr/aarch64-linux-gnu/lib/
-            rm -rf "$dir"
-          done
-
-      # ---- shared -------------------------------------------------------------------
       # Pin the version for every Gradle invocation in this job. Not cosmetic even on a
       # test leg: with no externally-supplied version each module's build script calls
       # getNextVersion(), which queries Maven Central AT CONFIGURATION TIME, once per
@@ -229,16 +143,95 @@ jobs:
           echo "ORG_GRADLE_PROJECT_version=$version" >> "$GITHUB_ENV"
 
       - name: Run ${{ matrix.name }} tests
-        if: matrix.name != 'linux'
         run: ./gradlew ${{ matrix.tasks }} ${{ inputs.gradle-args }}
 
-      # ---- linux-leg-only test steps -------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # Linux native: run the linuxX64 tests here, and link (but do not run) every module's
+  # linuxArm64 test binary for `linux-arm64` below.
+  #
+  # The job id changed from the old matrix leg but the display name did not, so the
+  # check still reads `build-linux / Test (linux)`. It is not a required check (only the
+  # `linux` gate at the bottom is), but keeping the name keeps run history comparable.
+  linux-native:
+    name: "Test (linux)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      # Needed at configuration time even here; see the same step in `test`.
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: platform-tools
+
+      - name: Restore Konan
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.konan
+          key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-linux-
+
+      - name: Restore Gradle build outputs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.gradle/caches
+          key: gradle-linux-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-linux-
+
+      # Restore-only, like the Gradle/Konan caches above: `publish` and warm-cache.yaml
+      # are the savers. Giving this job its own save key would store a second copy of
+      # identical content under a different name.
+      - name: Restore simdutf x64
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: buffer/build/simdutf/libs/linux-x64
+          key: simdutf-linux-x64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
+
+      - name: Restore simdutf ARM64
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: buffer/build/simdutf/libs/linux-arm64
+          key: simdutf-linux-arm64-${{ hashFiles('gradle/libs.versions.toml', 'buffer/src/nativeInterop/cinterop/simdutf_wrapper.cpp') }}
+
+      # gcc/g++-aarch64-linux-gnu cross-compile :buffer's simdutf (C++) for arm64. Nothing
+      # arm64 RUNS on this runner any more — the binaries run on real arm64 hardware in
+      # `linux-arm64` — so there is no qemu-user-static and no arm64 runtime libraries in
+      # the cross sysroot. buffer-crypto's arm64 libcrypto.a comes prebuilt from the
+      # com.ditchoom.boringssl.provision bundle, so no BoringSSL toolchain is needed either.
+      - name: Install ARM64 cross-compiler (for buffer simdutf arm64)
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          # Acquire::Retries so a transient mirror failure retries instead of failing the job.
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      # See the same step in `test`.
+      - name: Resolve version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="$INPUT_VERSION"
+          if [ -z "$version" ]; then
+            version="$(bash .github/scripts/next-version.sh ${{ inputs.gradle-args }})"
+          fi
+          echo "Building version $version"
+          echo "ORG_GRADLE_PROJECT_version=$version" >> "$GITHUB_ENV"
+
       # BoringSSL is provisioned by the com.ditchoom.boringssl.provision plugin (resolved from the
       # Plugin Portal / Maven Central at the pinned version): it downloads the checksum-pinned
       # linuxX64/linuxArm64 bundle from the boringssl-kmp GitHub Release and verifies it against its
       # baked-in SHA-256 before use — no in-repo BoringSSL build, no TOFU.
       - name: Run Linux x64 tests
-        if: matrix.name == 'linux'
         # :buffer-crypto:linuxX64Test runs the full common crypto suite (KAT + Wycheproof +
         # tamper/negative + capability) over the BoringSSL backend. BoringSSL's libcrypto.a is now
         # provisioned by the com.ditchoom.boringssl.provision plugin (download + sha256-verify), not
@@ -248,35 +241,54 @@ jobs:
           :buffer-codec:linuxX64Test :buffer-codec-test:linuxX64Test :buffer-crypto:linuxX64Test
           ${{ inputs.gradle-args }}
 
-      - name: Build ARM64 test binaries
-        if: matrix.name == 'linux'
-        # buffer-crypto's arm64 BoringSSL is the prebuilt linuxArm64 tarball from the provision bundle
-        # (no in-repo cross-build); :buffer's simdutf is still cross-built with the aarch64 toolchain
-        # installed above. The linkDebugTestLinuxArm64 output is then QEMU-run below.
-        run: >-
-          ./gradlew :buffer:linkDebugTestLinuxArm64 :buffer-compression:linkDebugTestLinuxArm64 :buffer-flow:linkDebugTestLinuxArm64
-          :buffer-codec-test:linkDebugTestLinuxArm64 :buffer-crypto:linkDebugTestLinuxArm64
-          ${{ inputs.gradle-args }}
+      # Kotlin/Native links linuxArm64 from an x64 host. Left UNQUALIFIED on purpose so it
+      # links every module that has linuxArm64 tests; the check below then fails if that set
+      # differs from the list in linux-arm64-tests.sh, so a new module cannot be linked here
+      # and silently never run.
+      - name: Link ARM64 test binaries
+        run: ./gradlew linkDebugTestLinuxArm64 ${{ inputs.gradle-args }}
 
-      - name: Run buffer ARM64 tests via QEMU
-        if: matrix.name == 'linux'
-        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer/build/bin/linuxArm64/debugTest/test.kexe
+      - name: Check ARM64 test binaries
+        run: bash .github/scripts/linux-arm64-tests.sh check .
 
-      - name: Run buffer-compression ARM64 tests via QEMU
-        if: matrix.name == 'linux'
-        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-compression/build/bin/linuxArm64/debugTest/test.kexe
+      # The tests read no files at run time (no fixtures or certs), and every library they
+      # load dynamically (libc, libm, libpthread, libcrypt, zlib) is already on the arm64
+      # runner image, so the binaries are all that has to travel.
+      - name: Upload ARM64 test binaries
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: linux-arm64-test-binaries
+          path: '*/build/bin/linuxArm64/debugTest/test.kexe'
+          if-no-files-found: error
+          retention-days: 1
 
-      - name: Run buffer-flow ARM64 tests via QEMU
-        if: matrix.name == 'linux'
-        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-flow/build/bin/linuxArm64/debugTest/test.kexe
+  # ---------------------------------------------------------------------------
+  # Runs the linuxArm64 test binaries on GitHub's hosted arm64 runner (real hardware,
+  # free for public repos). This replaced running them under qemu-user on the x64
+  # runner: qemu-user is a different CPU and kernel interface from real arm64 (socket's
+  # qemu runs, for example, got ENOSYS from io_uring_setup), and it was slower.
+  linux-arm64:
+    name: "Test (linux-arm64, native)"
+    needs: linux-native
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      # Only for .github/scripts/linux-arm64-tests.sh.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
 
-      - name: Run buffer-codec-test ARM64 tests via QEMU
-        if: matrix.name == 'linux'
-        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-codec-test/build/bin/linuxArm64/debugTest/test.kexe
+      - name: Download ARM64 test binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: linux-arm64-test-binaries
+          path: arm64-tests
 
-      - name: Run buffer-crypto ARM64 tests via QEMU
-        if: matrix.name == 'linux'
-        run: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./buffer-crypto/build/bin/linuxArm64/debugTest/test.kexe
+      # Fails if any listed module's binary is missing, if an unlisted one appears, if any
+      # binary exits non-zero, or if one exits 0 without its `[  PASSED  ] N tests.` line.
+      # Every binary runs even after one fails, so one failure does not hide another.
+      - name: Run ARM64 tests natively
+        run: bash .github/scripts/linux-arm64-tests.sh run arm64-tests
 
   # ---------------------------------------------------------------------------
   # The artifact producer, concurrent with the test legs.
@@ -387,16 +399,22 @@ jobs:
   # for why this is `if: always()` with explicit result checks rather than a bare `needs:`.
   linux:
     name: "Linux / JVM / JS / WASM / Android"
-    needs: [test, publish]
+    needs: [test, linux-native, linux-arm64, publish]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Assert every Linux job succeeded
         run: |
-          echo "test legs: ${{ needs.test.result }}"
-          echo "publish:   ${{ needs.publish.result }}"
+          echo "test legs:    ${{ needs.test.result }}"
+          echo "linux-native: ${{ needs.linux-native.result }}"
+          echo "linux-arm64:  ${{ needs.linux-arm64.result }}"
+          echo "publish:      ${{ needs.publish.result }}"
           # A matrix job's aggregate result is `success` only when every leg succeeded.
           [ "${{ needs.test.result }}" = "success" ] || { echo "::error::Linux test legs did not all pass"; exit 1; }
+          [ "${{ needs.linux-native.result }}" = "success" ] || { echo "::error::Linux x64 tests / arm64 link did not pass"; exit 1; }
+          # `skipped` here means linux-native failed first; that is already caught above, and
+          # is still not `success`, so it fails this gate too.
+          [ "${{ needs.linux-arm64.result }}" = "success" ] || { echo "::error::Linux arm64 native tests did not pass"; exit 1; }
           [ "${{ needs.publish.result }}" = "success" ] || { echo "::error::Linux publish did not pass"; exit 1; }
           echo "All Linux / JVM / JS / WASM / Android checks passed."

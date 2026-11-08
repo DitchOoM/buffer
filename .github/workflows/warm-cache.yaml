@@ -202,7 +202,7 @@ jobs:
             gradle-linux-
 
       # publishToMavenLocal below cross-builds simdutf for both Linux arches, so warm those
-      # too — same keys build-linux.yaml uses, where the `linux` test leg restores them
+      # too — same keys build-linux.yaml uses, where the `linux-native` job restores them
       # read-only. Without this they would only ever exist in a per-PR scope.
       - name: Cache simdutf x64
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -226,8 +226,8 @@ jobs:
       - name: Warm publication outputs
         run: ./gradlew publishToMavenLocal
 
-      # The test legs' compile outputs. No browser and no QEMU here: jsBrowserTest /
-      # wasmJsBrowserTest and the arm64 QEMU runs execute binaries rather than producing
+      # The test legs' compile outputs. No browser and no arm64 runs here: jsBrowserTest /
+      # wasmJsBrowserTest and the native arm64 test runs execute binaries rather than producing
       # cacheable Gradle outputs, so they are left to the real PR legs. continue-on-error
       # for the same reason as the macOS job — this gates nothing.
       - name: Warm test-compilation outputs
