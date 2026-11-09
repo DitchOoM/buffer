@@ -482,10 +482,17 @@ interface ReadBuffer : PositionBuffer {
         private const val LF: Byte = '\n'.code.toByte()
         val newLine = "\r\n".encodeToByteArray()
 
-        // Use managed (ByteArrayBuffer) so freeNativeMemory() is a no-op.
-        // BufferFactory.Default creates NativeBuffer on Linux, which would be
-        // permanently destroyed when any code calls freeIfNeeded() on this singleton.
-        val EMPTY_BUFFER: PlatformBuffer = BufferFactory.managed().allocate(0).also { it.resetForRead() }
+        /**
+         * The shared zero-length buffer.
+         *
+         * Read through [EmptyBufferHolder] rather than stored here, because this companion is
+         * initialized as part of [ReadBuffer]'s own static initialization. On the JVM every
+         * [ReadBuffer] implementation must initialize [ReadBuffer] before itself (the interface
+         * declares default methods), so a buffer constructed here would make [ReadBuffer] and its
+         * implementations wait on each other: two threads entering the hierarchy from opposite ends
+         * deadlock in class initialization.
+         */
+        val EMPTY_BUFFER: PlatformBuffer get() = EmptyBufferHolder.buffer
     }
 
     /**
@@ -1197,4 +1204,16 @@ fun bufferHashCode(self: ReadBuffer): Int {
         i++
     }
     return h
+}
+
+/**
+ * Holds [ReadBuffer.EMPTY_BUFFER] in its own class, so it is built on first use instead of during
+ * [ReadBuffer]'s static initialization.
+ *
+ * Managed (heap) memory, so freeNativeMemory() is a no-op: BufferFactory.Default creates a native
+ * buffer on Linux, which would be permanently destroyed when any code calls freeIfNeeded() on this
+ * singleton.
+ */
+private object EmptyBufferHolder {
+    val buffer: PlatformBuffer = BufferFactory.managed().allocate(0).also { it.resetForRead() }
 }
