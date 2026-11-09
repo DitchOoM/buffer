@@ -119,19 +119,22 @@ class ReadBufferClassInitTest {
         override fun loadClass(
             name: String,
             resolve: Boolean,
-        ): Class<*> {
-            if (!name.startsWith(BUFFER_PACKAGE)) return super.loadClass(name, resolve)
-            synchronized(getClassLoadingLock(name)) {
-                findLoadedClass(name)?.let { return it }
-                if (name == gatedClass && gated.getNow(null) === Thread.currentThread()) {
-                    atGate.complete(GateReached())
-                    opened.join()
-                }
-                val bytes =
-                    parent.getResourceAsStream(name.replace('.', '/') + ".class")?.use { it.readBytes() }
-                        ?: throw ClassNotFoundException(name)
-                return defineClass(name, bytes, 0, bytes.size)
+        ): Class<*> =
+            if (name.startsWith(BUFFER_PACKAGE)) {
+                synchronized(getClassLoadingLock(name)) { findLoadedClass(name) ?: defineFresh(name) }
+            } else {
+                super.loadClass(name, resolve)
             }
+
+        private fun defineFresh(name: String): Class<*> {
+            if (name == gatedClass && gated.getNow(null) === Thread.currentThread()) {
+                atGate.complete(GateReached())
+                opened.join()
+            }
+            val bytes =
+                parent.getResourceAsStream(name.replace('.', '/') + ".class")?.use { it.readBytes() }
+                    ?: throw ClassNotFoundException(name)
+            return defineClass(name, bytes, 0, bytes.size)
         }
 
         companion object {
@@ -182,7 +185,9 @@ class ReadBufferClassInitTest {
         while (true) {
             val dump = threadDump()
             if (until(dump)) return dump
-            if (start.elapsedNow() >= timeout) fail("timed out after $timeout waiting for $what; last thread dump:\n$dump")
+            if (start.elapsedNow() >= timeout) {
+                fail("timed out after $timeout waiting for $what; last thread dump:\n$dump")
+            }
             Thread.onSpinWait()
         }
     }
