@@ -254,8 +254,8 @@ kotlin {
             // every registered Apple target, and merely *naming* a CommonCrypto/Security function
             // whose signature is `size_t`-typed is rejected there with "The declaration is using
             // numbers with different bit widths in least two actual platforms". 112 such errors
-            // across 17 files — SecRandomCopyBytes, CCCrypt, the SecKey* surface, the
-            // commoncryptogcm cinterop. `.convert()` cannot help: the overloads themselves resolve
+            // across 17 files — SecRandomCopyBytes, CCCrypt, the SecKey* surface.
+            // `.convert()` cannot help: the overloads themselves resolve
             // per-target, so the reference is what offends, not the argument.
             //
             // Admitting arm64_32 therefore means splitting appleMain by pointer width the way
@@ -318,14 +318,10 @@ kotlin {
         )
     }
 
-    // Apple native targets: CommonCrypto GCM + CryptoKit shim. Guarded to Apple konan targets so it
+    // Apple native targets: CryptoKit shim. Guarded to Apple konan targets so it
     // never tries to bind CommonCrypto/Security headers on Linux.
     targets.withType<KotlinNativeTarget>().matching { it.konanTarget.family.isAppleFamily }.configureEach {
-        compilations.getByName("main").cinterops.create("commoncryptogcm") {
-            defFile(project.file("src/nativeInterop/cinterop/commoncryptogcm.def"))
-        }
-
-        // CryptoKit shim: ChaCha20-Poly1305, Ed25519, X25519, and ECDSA-sign-from-scalar live in
+        // CryptoKit shim: AES-GCM, ChaCha20-Poly1305, Ed25519, X25519, and ECDSA-sign-from-scalar live in
         // CryptoKit, which is Swift-only with no Objective-C/C interface — Kotlin/Native cinterop
         // cannot bind it directly the way it binds CommonCrypto/Security. We compile a tiny Swift
         // shim (src/nativeInterop/swift/CryptoKitShim.swift) that re-exposes those primitives through
@@ -622,4 +618,35 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest
     ).forEach { key ->
         System.getenv(key)?.let { environment(key, it) }
     }
+}
+
+// App Store Connect rejects a binary that references CommonCrypto GCM SPI ("The app references
+// non-public symbols: _CCCryptorGCMAddIV, _CCCryptorGCMDecrypt, ..."). AES-GCM goes through the
+// CryptoKit shim; this fails the build if such a symbol is linked into the macosArm64 test binary.
+if (HostManager.hostIsMac) {
+    val privateAppleSymbolPattern = "_CCCryptorGCM[A-Za-z]*"
+    val linkTestBinary = tasks.named<org.jetbrains.kotlin.gradle.tasks.KotlinNativeLink>("linkDebugTestMacosArm64")
+    val testBinary = linkTestBinary.flatMap { it.outputFile }
+    val verifyNoPrivateAppleSymbols =
+        tasks.register("verifyNoPrivateAppleSymbols") {
+            group = "verification"
+            description = "Fails if the macosArm64 test binary references private Apple symbols."
+            dependsOn(linkTestBinary)
+            inputs.file(testBinary)
+            doLast {
+                val binary = testBinary.get()
+                val nm = ProcessBuilder("nm", "-u", binary.absolutePath).redirectErrorStream(true).start()
+                val undefined = nm.inputStream.readBytes().decodeToString()
+                val exit = nm.waitFor()
+                if (exit != 0) throw GradleException("nm -u ${binary.absolutePath} exited $exit: $undefined")
+                val found = Regex(privateAppleSymbolPattern).findAll(undefined).map { it.value }.toSortedSet()
+                if (found.isNotEmpty()) {
+                    throw GradleException(
+                        "${binary.name} references ${found.size} private Apple symbol(s), which App Store Connect rejects: " +
+                            found.joinToString(", "),
+                    )
+                }
+            }
+        }
+    tasks.named("check").configure { dependsOn(verifyNoPrivateAppleSymbols) }
 }

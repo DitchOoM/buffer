@@ -1,7 +1,7 @@
 package com.ditchoom.buffer.crypto
 
 /**
- * Apple HPKE capability flags. AES-GCM is synchronously available via CommonCrypto, and the
+ * Apple HPKE capability flags. AES-GCM is synchronously available via CryptoKit, and the
  * platform is not the web. (X25519 suites are still gated out by [supportsSyncX25519] = `false`;
  * the ECDH-curve suites are supported.)
  */

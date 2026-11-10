@@ -25,6 +25,24 @@
 // bcks_la_unlock_with_credential returns it; see PromptOutcome.UserCancelled on the Kotlin side.
 #define BCKS_ERR_CANCELED (-6)
 
+// AES-GCM.
+int32_t bcks_aesgcm_seal(
+    const uint8_t *keyPtr, size_t keyLen,
+    const uint8_t *noncePtr, size_t nonceLen,
+    const uint8_t *aadPtr, size_t aadLen,
+    const uint8_t *ptPtr, size_t ptLen,
+    uint8_t *ctOut, size_t ctCap,
+    uint8_t *tagOut, size_t tagCap);
+
+int32_t bcks_aesgcm_open(
+    const uint8_t *keyPtr, size_t keyLen,
+    const uint8_t *noncePtr, size_t nonceLen,
+    const uint8_t *aadPtr, size_t aadLen,
+    const uint8_t *ctPtr, size_t ctLen,
+    const uint8_t *tagPtr, size_t tagLen,
+    uint8_t *ptOut, size_t ptCap,
+    size_t *ptLenOut);
+
 // ChaCha20-Poly1305.
 int32_t bcks_chachapoly_seal(
     const uint8_t *keyPtr, size_t keyLen,

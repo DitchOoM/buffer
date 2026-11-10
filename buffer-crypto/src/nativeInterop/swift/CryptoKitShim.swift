@@ -57,6 +57,62 @@ private func bytes(_ ptr: UnsafePointer<UInt8>?, _ len: Int) -> Data {
 }
 
 // =============================================================================
+// AES-GCM (AEAD) — CryptoKit AES.GCM
+// =============================================================================
+
+// Seal: writes ciphertext (== plaintext length) into ctOut and the 16-byte tag into tagOut.
+// keyLen must be 16, 24, or 32; any other length returns BCKS_ERR_INPUT.
+@_cdecl("bcks_aesgcm_seal")
+public func bcks_aesgcm_seal(
+    _ keyPtr: UnsafePointer<UInt8>?, _ keyLen: Int,
+    _ noncePtr: UnsafePointer<UInt8>?, _ nonceLen: Int,
+    _ aadPtr: UnsafePointer<UInt8>?, _ aadLen: Int,
+    _ ptPtr: UnsafePointer<UInt8>?, _ ptLen: Int,
+    _ ctOut: UnsafeMutablePointer<UInt8>?, _ ctCap: Int,
+    _ tagOut: UnsafeMutablePointer<UInt8>?, _ tagCap: Int
+) -> Int32 {
+    guard keyLen == 16 || keyLen == 24 || keyLen == 32 else { return BCKS_ERR_INPUT }
+    let key = SymmetricKey(data: bytes(keyPtr, keyLen))
+    guard let nonce = try? AES.GCM.Nonce(data: bytes(noncePtr, nonceLen)) else { return BCKS_ERR_INPUT }
+    let aad = bytes(aadPtr, aadLen)
+    let pt = bytes(ptPtr, ptLen)
+    guard let box = try? AES.GCM.seal(pt, using: key, nonce: nonce, authenticating: aad) else {
+        return BCKS_ERR_INTERNAL
+    }
+    if box.ciphertext.count > ctCap || box.tag.count > tagCap { return BCKS_ERR_BUFFER }
+    if let ctOut = ctOut, box.ciphertext.count > 0 { box.ciphertext.copyBytes(to: ctOut, count: box.ciphertext.count) }
+    if let tagOut = tagOut { box.tag.copyBytes(to: tagOut, count: box.tag.count) }
+    return BCKS_OK
+}
+
+// Open: authenticates and decrypts; writes plaintext (== ciphertext length) into ptOut.
+// Returns BCKS_ERR_AUTH on tag mismatch without touching ptOut.
+@_cdecl("bcks_aesgcm_open")
+public func bcks_aesgcm_open(
+    _ keyPtr: UnsafePointer<UInt8>?, _ keyLen: Int,
+    _ noncePtr: UnsafePointer<UInt8>?, _ nonceLen: Int,
+    _ aadPtr: UnsafePointer<UInt8>?, _ aadLen: Int,
+    _ ctPtr: UnsafePointer<UInt8>?, _ ctLen: Int,
+    _ tagPtr: UnsafePointer<UInt8>?, _ tagLen: Int,
+    _ ptOut: UnsafeMutablePointer<UInt8>?, _ ptCap: Int,
+    _ ptLenOut: UnsafeMutablePointer<Int>?
+) -> Int32 {
+    guard keyLen == 16 || keyLen == 24 || keyLen == 32 else { return BCKS_ERR_INPUT }
+    let key = SymmetricKey(data: bytes(keyPtr, keyLen))
+    guard let nonce = try? AES.GCM.Nonce(data: bytes(noncePtr, nonceLen)) else { return BCKS_ERR_INPUT }
+    let aad = bytes(aadPtr, aadLen)
+    guard let box = try? AES.GCM.SealedBox(
+        nonce: nonce,
+        ciphertext: bytes(ctPtr, ctLen),
+        tag: bytes(tagPtr, tagLen)
+    ) else { return BCKS_ERR_INPUT }
+    guard let pt = try? AES.GCM.open(box, using: key, authenticating: aad) else {
+        return BCKS_ERR_AUTH
+    }
+    return emit(pt, ptOut, ptCap, ptLenOut)
+}
+
+// =============================================================================
 // ChaCha20-Poly1305 (AEAD) — CryptoKit ChaChaPoly
 // =============================================================================
 
