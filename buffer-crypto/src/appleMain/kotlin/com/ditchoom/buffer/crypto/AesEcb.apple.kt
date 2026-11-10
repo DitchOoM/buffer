@@ -22,9 +22,9 @@ import platform.posix.size_tVar
 /*
  * Apple single-block AES (ECB) backed by CommonCrypto's public one-shot CCCrypt API.
  *
- * Unlike AES-GCM (whose streaming SPI entry points are absent from Kotlin/Native's binding and need
- * the `commoncryptogcm` cinterop), ECB is one of CommonCrypto's *public* modes and is exposed
- * directly by platform.CoreCrypto — so no extra cinterop is required. We call CCCrypt with
+ * Unlike AES-GCM (SPI in CommonCrypto, so it goes through CryptoKit), ECB is one of
+ * CommonCrypto's *public* modes and is exposed directly by platform.CoreCrypto — so no extra
+ * cinterop is required. We call CCCrypt with
  * kCCAlgorithmAES + kCCOptionECBMode and no padding option, over exactly one 16-byte block (the
  * common witness op validates the length/room first). ECB takes no IV, so it is passed as null.
  *

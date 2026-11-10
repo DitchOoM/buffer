@@ -5,6 +5,8 @@ package com.ditchoom.buffer.crypto
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_aesgcm_open
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_aesgcm_seal
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_chachapoly_open
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_chachapoly_seal
 import kotlinx.cinterop.ByteVar
@@ -85,6 +87,16 @@ internal fun constantTimeEqualsAt(
 }
 
 /**
+ * AES-GCM on Apple via CryptoKit (`AES.GCM.seal` / `.open`).
+ *
+ * AES-GCM routes through the CryptoKit Swift shim ([bcks_aesgcm_seal] / [bcks_aesgcm_open], from
+ * `CryptoKitShim.swift` via the `cryptokitshim` cinterop). CryptoKit is available on every Apple
+ * target this module builds for (macOS 10.15+, iOS 13+, tvOS 13+, watchOS 6+), so AES-GCM is
+ * always available — [APPLE_AES_GCM_AVAILABLE] is `true` unconditionally.
+ */
+internal const val APPLE_AES_GCM_AVAILABLE: Boolean = true
+
+/**
  * ChaCha20-Poly1305 on Apple via CryptoKit (`ChaChaPoly.seal` / `.open`).
  *
  * CommonCrypto exposes no Kotlin/Native-bindable ChaCha20-Poly1305 one-shot, so the algorithm
@@ -95,6 +107,116 @@ internal fun constantTimeEqualsAt(
  * runtime feature-detection is needed.
  */
 internal const val APPLE_CHACHA_POLY_AVAILABLE: Boolean = true
+
+internal fun appleAesGcmSeal(
+    key: AesGcmKey,
+    nonce: ReadBuffer,
+    aad: ReadBuffer?,
+    plaintext: ReadBuffer,
+    dest: WriteBuffer,
+) {
+    val ptLen = plaintext.remaining()
+    require(dest.remaining() >= ptLen + AEAD_TAG_BYTES) {
+        "dest needs ${ptLen + AEAD_TAG_BYTES} bytes remaining, has ${dest.remaining()}"
+    }
+    memScoped {
+        val tag = allocArray<ByteVar>(AEAD_TAG_BYTES)
+        var status = -1
+        key.requireInMemoryMaterial().withRemainingBytes { keyPtr, keyLen ->
+            nonce.withRemainingBytes { ivPtr, ivLen ->
+                withOptionalBytes(aad) { aadPtr, aadLen ->
+                    plaintext.withRemainingBytes2(ptLen) { ptPtr ->
+                        // Ciphertext (== plaintext length) goes straight into dest; tag to scratch.
+                        dest.withWritablePointer(ptLen) { ctPtr ->
+                            status =
+                                bcks_aesgcm_seal(
+                                    keyPtr.reinterpret(),
+                                    keyLen.convert(),
+                                    ivPtr.reinterpret(),
+                                    ivLen.convert(),
+                                    aadPtr.reinterpret(),
+                                    aadLen.convert(),
+                                    ptPtr.reinterpret(),
+                                    ptLen.convert(),
+                                    ctPtr.reinterpret(),
+                                    ptLen.convert(),
+                                    tag.reinterpret(),
+                                    AEAD_TAG_BYTES.convert(),
+                                )
+                        }
+                    }
+                }
+            }
+        }
+        check(status == BCKS_OK) { "AES-GCM seal failed (status=$status)" }
+        for (i in 0 until AEAD_TAG_BYTES) dest.writeByte(tag[i])
+    }
+}
+
+internal fun appleAesGcmOpen(
+    key: AesGcmKey,
+    nonce: ReadBuffer,
+    aad: ReadBuffer?,
+    ciphertextAndTag: ReadBuffer,
+    dest: WriteBuffer,
+) {
+    require(ciphertextAndTag.remaining() >= AEAD_TAG_BYTES) {
+        "ciphertext+tag must be at least $AEAD_TAG_BYTES bytes"
+    }
+    val ctLen = ciphertextAndTag.remaining() - AEAD_TAG_BYTES
+    require(dest.remaining() >= ctLen) { "dest needs $ctLen bytes remaining, has ${dest.remaining()}" }
+
+    // Pointer offsets, not slices: a slice of a PooledBuffer takes a reference the callee would
+    // have to hand back on every path including the VerificationFailed throw (#332).
+    val ctStart = ciphertextAndTag.position()
+    val tagStart = ctStart + ctLen
+
+    memScoped {
+        val destStart = dest.position()
+        var status = -1
+        val writtenVar = alloc<size_tVar>()
+        key.requireInMemoryMaterial().withRemainingBytes { keyPtr, keyLen ->
+            nonce.withRemainingBytes { ivPtr, ivLen ->
+                withOptionalBytes(aad) { aadPtr, aadLen ->
+                    ciphertextAndTag.withBytesAt(ctStart, ctLen) { ctPtr ->
+                        ciphertextAndTag.withBytesAt(tagStart, AEAD_TAG_BYTES) { tagPtr ->
+                            // CryptoKit authenticates first; on tag mismatch it returns BCKS_ERR_AUTH
+                            // and never writes plaintext into dest.
+                            dest.withWritablePointer(ctLen) { ptPtr ->
+                                status =
+                                    bcks_aesgcm_open(
+                                        keyPtr.reinterpret(),
+                                        keyLen.convert(),
+                                        ivPtr.reinterpret(),
+                                        ivLen.convert(),
+                                        aadPtr.reinterpret(),
+                                        aadLen.convert(),
+                                        ctPtr.reinterpret(),
+                                        ctLen.convert(),
+                                        tagPtr.reinterpret(),
+                                        AEAD_TAG_BYTES.convert(),
+                                        ptPtr.reinterpret(),
+                                        ctLen.convert(),
+                                        writtenVar.ptr,
+                                    )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        val written = writtenVar.value.toInt()
+        if (status != BCKS_OK || written != ctLen) {
+            // Scrub any bytes that may have been written and reject. CryptoKit does not release
+            // unverified plaintext, but we zero dest defensively to honor the no-leak contract.
+            val end = dest.position()
+            dest.position(destStart)
+            while (dest.position() < end) dest.writeByte(0)
+            dest.position(destStart)
+            throw VerificationFailed()
+        }
+    }
+}
 
 internal fun appleChaChaPolySeal(
     key: ChaChaPolyKey,
