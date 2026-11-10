@@ -15,10 +15,13 @@ package com.ditchoom.buffer.pool
  * - **Size-aware reuse:** bucketing by class lets acquire() pop a buffer that is
  *   guaranteed to fit instead of freeing and reallocating on a wrong-sized pop.
  *
- * Invariant: a buffer stored in bucket `k` has `capacity >= 1 shl k` (floor log2), and a
- * request routed to bucket `k` needs at most `1 shl k` bytes (ceil log2), so any buffer
- * found in bucket `k` or higher satisfies the request. The single exception is bucket 0,
- * which also holds zero-capacity buffers; acquire() keeps a defensive capacity check.
+ * Classes are totally ordered by size: bucket `k` holds buffers whose capacity is at least
+ * the size of class `k`. A request is routed to the smallest class that fits it and a buffer
+ * is filed under the largest class it fills, so any buffer found in the request's bucket or
+ * a higher one satisfies the request. A buffer the pool allocated has exactly its class's
+ * size, so it is filed under the class a request of the same size searches. The single
+ * exception is bucket 0, which also holds zero-capacity buffers; acquire() keeps a defensive
+ * capacity check.
  */
 internal object BufferSizeClass {
     /** Largest power-of-two size representable as a positive Int (2^30 = 1 GiB). */
@@ -35,24 +38,23 @@ internal object BufferSizeClass {
      */
     private const val LARGE_GRANULARITY: Int = 1 shl 20
 
-    /** One bucket per power-of-two exponent of a non-negative Int capacity. */
-    const val BUCKET_COUNT: Int = 32
+    /** Power-of-two classes `0..20` (1 byte to 1 MiB), then one class per MiB multiple up to 1 GiB. */
+    private const val POW2_CLASS_COUNT: Int = 21
+
+    /** Class index of the 1 MiB multiple `n` (`n >= 1`): `n = 1` is the last power-of-two class. */
+    private const val LARGE_CLASS_OFFSET: Int = POW2_CLASS_COUNT - 2
+
+    /** Number of size classes; a bucket index at or above this is searched by no request. */
+    const val BUCKET_COUNT: Int = LARGE_CLASS_OFFSET + MAX_POW2 / LARGE_GRANULARITY + 1
 
     /**
      * Rounds [size] up to its size class: the next power of two up to [LARGE_GRANULARITY],
      * the next [LARGE_GRANULARITY] multiple up to [MAX_POW2], or the exact size above
      * [MAX_POW2] (where rounding could overflow Int).
      *
-     * Requests above [MAX_POW2] map to bucket 31, which no capacity's floor log2 can
-     * reach — they always miss and allocate exactly, and are (deliberately) never
-     * served from the pool. Their released buffers land in bucket 30 and remain
-     * reusable for any request up to [MAX_POW2].
-     *
-     * Note that a non-power-of-two rounded size (e.g. 17 MiB) is stored under its floor
-     * log2 bucket, one below where an equal-sized request starts searching — so exact
-     * same-size churn above [LARGE_GRANULARITY] misses the pool and reallocates. That
-     * matches the pre-size-class pool's behavior for mismatched pops; commensurable
-     * block sizes make the free/realloc cycle fragmentation-safe.
+     * Requests above [MAX_POW2] have no class: they search no bucket, always allocate
+     * exactly, and are never served from the pool. Their released buffers are filed under
+     * the largest class and remain reusable for any request up to [MAX_POW2].
      */
     fun roundUp(size: Int): Int =
         when {
@@ -65,17 +67,18 @@ internal object BufferSizeClass {
 
     /** Index of the smallest bucket whose buffers are guaranteed to satisfy [size]. */
     fun bucketForRequest(size: Int): Int =
-        if (size <= 1) {
-            0
-        } else {
-            (Int.SIZE_BITS - (size - 1).countLeadingZeroBits()).coerceAtMost(BUCKET_COUNT - 1)
+        when {
+            size <= 1 -> 0
+            size > MAX_POW2 -> BUCKET_COUNT
+            size > LARGE_GRANULARITY -> LARGE_CLASS_OFFSET + (size + LARGE_GRANULARITY - 1) / LARGE_GRANULARITY
+            else -> Int.SIZE_BITS - (size - 1).countLeadingZeroBits()
         }
 
-    /** Index of the bucket a buffer of [capacity] is stored in (floor log2). */
+    /** Index of the bucket a buffer of [capacity] is stored in: the largest class it fills. */
     fun bucketForCapacity(capacity: Int): Int =
-        if (capacity <= 1) {
-            0
-        } else {
-            (Int.SIZE_BITS - 1) - capacity.countLeadingZeroBits()
+        when {
+            capacity <= 1 -> 0
+            capacity < LARGE_GRANULARITY -> (Int.SIZE_BITS - 1) - capacity.countLeadingZeroBits()
+            else -> (LARGE_CLASS_OFFSET + capacity / LARGE_GRANULARITY).coerceAtMost(BUCKET_COUNT - 1)
         }
 }
