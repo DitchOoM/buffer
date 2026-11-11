@@ -15,8 +15,8 @@ import kotlin.concurrent.atomics.ExperimentalAtomicApi
  * Uses Compare-And-Swap (CAS) operations for thread-safe access without locks.
  * Suitable for concurrent access from multiple threads/coroutines.
  *
- * Allocations are rounded up to size classes (power-of-two up to 1 MiB, 1 MiB
- * multiples above) and cached buffers are
+ * Allocations are rounded up to size classes (power-of-two up to 1 MiB, quarter
+ * steps of each power of two above) and cached buffers are
  * bucketed by class — one Treiber stack per class ([BufferSizeClass]) — so mixed-size
  * churn neither allocates unique odd sizes (which fragment freelist allocators,
  * catastrophically on Android/ART — see ANDROID_ART_ALLOCATOR.md) nor
@@ -198,7 +198,7 @@ internal class LockFreeBufferPool(
      * Pops a cached buffer guaranteed to hold [size] bytes, searching the request's own
      * size class first and falling back to larger classes. Returns null on miss.
      */
-    private fun popAtLeast(size: Int): PlatformBuffer? {
+    internal fun popAtLeast(size: Int): PlatformBuffer? {
         for (bucket in BufferSizeClass.bucketForRequest(size) until BufferSizeClass.BUCKET_COUNT) {
             val buffer = pop(heads[bucket])
             if (buffer != null) return buffer

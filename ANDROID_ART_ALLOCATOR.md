@@ -4,7 +4,7 @@
 
 The fix is **merged and released**:
 
-- **#255** — size-class buckets (`BufferSizeClass` power-of-two rounding + per-class buckets
+- **#255** — size-class buckets (`BufferSizeClass` rounding + per-class buckets
   in `LockFreeBufferPool` / `SingleThreadedBufferPool`) that stop the Android ART
   fragmentation OOM (commonMain, factory-agnostic), plus native-memory lifecycle hardening
   (`String.toReadBuffer` defaults to `managed()`; `ReadBuffer.indexOf(String)` frees its
@@ -133,10 +133,10 @@ target footprint 443534656, growth limit 603979776; failed due to malloc_space f
 ## Implications for the fix (pool fix landed 2026-07-02; factory routing rejected)
 
 - **Pool (commonMain, factory-agnostic) — LANDED, the fix:** `BufferSizeClass`
-  power-of-two rounding + per-class buckets in `LockFreeBufferPool` /
+  size-class rounding (powers of two to 1 MiB, quarter steps above) + per-class buckets in `LockFreeBufferPool` /
   `SingleThreadedBufferPool` stops *both* churn streams (exact odd-size large buffers
   → LOS front; 8 KiB acquire/release → non-moving front) on every platform. Live
-  block sizes are bounded to <= 31 size classes, so neither freelist can fragment.
+  block sizes are bounded to <= 61 size classes, so neither freelist can fragment.
   `NonMovableOomRegressionTest.case1` (pool-shaped churn) pins this red→green.
 - **Factory (androidMain) — IMPLEMENTED, THEN REJECTED:** routing
   `BufferFactory.Default` allocations >= 12 KiB to an owning native-malloc buffer
