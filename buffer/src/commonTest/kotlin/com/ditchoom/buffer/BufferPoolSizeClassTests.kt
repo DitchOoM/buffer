@@ -13,7 +13,7 @@ class BufferPoolSizeClassTests {
         const val MIB = 1024 * 1024
         const val GIB = 1 shl 30
 
-        /** Around every class edge: power-of-two classes, the 1 MiB switch, and 1 MiB multiples. */
+        /** Around every class edge: power-of-two classes, the 1 MiB switch, and quarter steps above it. */
         val REQUEST_SIZES =
             intArrayOf(
                 1,
@@ -82,5 +82,43 @@ class BufferPoolSizeClassTests {
             )
         }
         assertTrue(BufferSizeClass.bucketForCapacity(Int.MAX_VALUE) < BufferSizeClass.BUCKET_COUNT)
+    }
+
+    private fun sweepSizes(): List<Int> {
+        val sizes = ArrayList<Int>()
+        for (n in 0..4096) sizes += n
+        for (exponent in 10..30) {
+            val base = 1 shl exponent
+            for (numerator in 4..8) {
+                val edge = base + (base / 4) * (numerator - 4)
+                for (delta in -1..1) if (edge + delta in 0..GIB) sizes += edge + delta
+            }
+        }
+        sizes += listOf(GIB - 1, GIB, 100 * MIB + 100_000, 600 * MIB)
+        return sizes
+    }
+
+    @Test
+    fun classCapacityCoversTheRequestAndIsAFixedPoint() {
+        for (size in sweepSizes()) {
+            val capacity = BufferSizeClass.roundUp(size)
+            assertTrue(capacity >= size, "class of $size is $capacity")
+            assertEquals(capacity, BufferSizeClass.roundUp(capacity), "capacity $capacity of $size must be a fixed point")
+            assertEquals(
+                BufferSizeClass.bucketForRequest(capacity),
+                BufferSizeClass.bucketForCapacity(capacity),
+                "capacity $capacity must be filed where it is searched",
+            )
+            if (size > MIB) assertTrue(capacity.toLong() * 4 <= size.toLong() * 5, "waste of $size -> $capacity exceeds 25%")
+        }
+    }
+
+    @Test
+    fun largeClassesAreQuarterStepsOfEachPowerOfTwo() {
+        assertEquals(MIB + MIB / 4, BufferSizeClass.roundUp(MIB + 1))
+        assertEquals(2 * MIB + MIB / 2, BufferSizeClass.roundUp(2_500_000))
+        assertEquals(20 * MIB, BufferSizeClass.roundUp(16 * MIB + 29))
+        assertEquals(GIB, BufferSizeClass.roundUp(GIB - 1))
+        assertEquals(61, BufferSizeClass.BUCKET_COUNT)
     }
 }

@@ -138,27 +138,29 @@ class BufferPoolFragmentationTests {
         }
 
     /**
-     * Above 1 MiB, rounding switches to 1 MiB multiples: power-of-two rounding would
-     * double large-message allocations (16 MiB + 29 → 32 MiB), enough to OOM
-     * heap-constrained Android under Autobahn's 16 MB echo cases (9.1.6). 1 MiB
-     * multiples cap the waste while keeping block sizes commensurable.
+     * Above 1 MiB, classes are quarter steps of each power of two (1.25x, 1.5x, 1.75x, 2x):
+     * a large acquire is never more than 25% larger than requested, and never a full
+     * power-of-two doubling (a 16 MiB + 29 request must not allocate 32 MiB).
      */
     @Test
-    fun largeAcquireRoundsToMebibyteMultipleNotPowerOfTwo() {
+    fun largeAcquireIsAtMostAQuarterLargerAndNeverDoubled() {
         val mib = 1024 * KIB
-        withPool(maxPoolSize = 4, defaultBufferSize = 1 * KIB) { pool ->
-            val buffer = pool.acquire(16 * mib + 29)
-            assertEquals(
-                17 * mib,
-                buffer.capacity,
-                "a large odd-sized acquire must round to the next 1 MiB multiple, " +
-                    "not the next power of two",
-            )
-            pool.release(buffer)
+        val sizes = listOf(mib + 1, 2 * mib - 1, 2 * mib + 1, 2_500_000, 3 * mib, 5 * mib + 7, 16 * mib + 29, 100 * mib + 3)
+        for (size in sizes) {
+            withPool(maxPoolSize = 4, defaultBufferSize = 1 * KIB) { pool ->
+                val buffer = pool.acquire(size)
+                val capacity = buffer.capacity
+                assertTrue(capacity >= size, "capacity $capacity < requested $size")
+                assertTrue(
+                    capacity.toLong() * 4 <= size.toLong() * 5,
+                    "capacity $capacity is more than 25% above requested $size (a power-of-two doubling would be 100%)",
+                )
+                pool.release(buffer)
+            }
         }
         withPool(maxPoolSize = 4, defaultBufferSize = 1 * KIB) { pool ->
             val exact = pool.acquire(4 * mib)
-            assertEquals(4 * mib, exact.capacity, "1 MiB-multiple requests must not be rounded")
+            assertEquals(4 * mib, exact.capacity, "a power-of-two request must not be rounded")
             pool.release(exact)
         }
     }

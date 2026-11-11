@@ -11,8 +11,8 @@ import com.ditchoom.buffer.ReadWriteBuffer
  * NOT thread-safe. Use when pool is confined to a single coroutine/thread.
  * For multi-threaded access, use [LockFreeBufferPool] instead.
  *
- * Allocations are rounded up to size classes (power-of-two up to 1 MiB, 1 MiB
- * multiples above) and cached buffers are
+ * Allocations are rounded up to size classes (power-of-two up to 1 MiB, quarter
+ * steps of each power of two above) and cached buffers are
  * bucketed by class ([BufferSizeClass]), so mixed-size churn neither allocates unique
  * odd sizes (which fragment freelist allocators, catastrophically on Android/ART — see
  * ANDROID_ART_ALLOCATOR.md) nor frees-and-reallocates on wrong-sized pops.
@@ -133,7 +133,7 @@ internal class SingleThreadedBufferPool(
      * Removes and returns a cached buffer guaranteed to hold [size] bytes, searching the
      * request's own size class first and falling back to larger classes, or null.
      */
-    private fun popAtLeast(size: Int): PlatformBuffer? {
+    internal fun popAtLeast(size: Int): PlatformBuffer? {
         for (bucket in BufferSizeClass.bucketForRequest(size) until BufferSizeClass.BUCKET_COUNT) {
             val buffer = buckets[bucket].removeLastOrNull()
             if (buffer != null) {
