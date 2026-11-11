@@ -548,6 +548,16 @@ benchmark {
             iterationTimeUnit = "ms"
             include("PoolChurn")
         }
+        register("poolsizeclass") {
+            warmups = 5
+            iterations = 10
+            iterationTime = 1
+            iterationTimeUnit = "s"
+            include("PoolMissScan")
+            include("PoolSizeClassBenchmark.missEmptyPool$")
+            include("PoolSizeClassBenchmark.missOtherClasses")
+            advanced("jvmForks", 2)
+        }
         register("subset") {
             warmups = 2
             iterations = 3
