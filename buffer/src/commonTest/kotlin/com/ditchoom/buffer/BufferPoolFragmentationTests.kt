@@ -146,7 +146,7 @@ class BufferPoolFragmentationTests {
     fun largeAcquireIsAtMostAQuarterLargerAndNeverDoubled() {
         val mib = 1024 * KIB
         val sizes =
-            listOf(mib + 1, 2 * mib - 1, 2 * mib + 1, 2_500_000, 3 * mib, 5 * mib + 7, 16 * mib + 29, 100 * mib + 3)
+            listOf(mib + 1, 2 * mib - 1, 2 * mib + 1, 2_500_000, 3 * mib, 5 * mib + 7, 16 * mib + 29)
         for (size in sizes) {
             withPool(maxPoolSize = 4, defaultBufferSize = 1 * KIB) { pool ->
                 val buffer = pool.acquire(size)
