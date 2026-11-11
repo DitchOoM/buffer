@@ -40,7 +40,9 @@ class BufferPoolSizeClassTests {
     }
 
     @Test
-    fun releasedBufferIsReusedForTheSameRequestSizeSingleThreaded() = releasedBufferIsReused(ThreadingMode.SingleThreaded)
+    fun releasedBufferIsReusedForTheSameRequestSizeSingleThreaded() {
+        releasedBufferIsReused(ThreadingMode.SingleThreaded)
+    }
 
     @Test
     fun releasedBufferIsReusedForTheSameRequestSizeMultiThreaded() = releasedBufferIsReused(ThreadingMode.MultiThreaded)
@@ -103,13 +105,19 @@ class BufferPoolSizeClassTests {
         for (size in sweepSizes()) {
             val capacity = BufferSizeClass.roundUp(size)
             assertTrue(capacity >= size, "class of $size is $capacity")
-            assertEquals(capacity, BufferSizeClass.roundUp(capacity), "capacity $capacity of $size must be a fixed point")
+            assertEquals(
+                capacity,
+                BufferSizeClass.roundUp(capacity),
+                "capacity $capacity of $size must be a fixed point",
+            )
             assertEquals(
                 BufferSizeClass.bucketForRequest(capacity),
                 BufferSizeClass.bucketForCapacity(capacity),
                 "capacity $capacity must be filed where it is searched",
             )
-            if (size > MIB) assertTrue(capacity.toLong() * 4 <= size.toLong() * 5, "waste of $size -> $capacity exceeds 25%")
+            if (size > MIB) {
+                assertTrue(capacity.toLong() * 4 <= size.toLong() * 5, "waste of $size -> $capacity exceeds 25%")
+            }
         }
     }
 

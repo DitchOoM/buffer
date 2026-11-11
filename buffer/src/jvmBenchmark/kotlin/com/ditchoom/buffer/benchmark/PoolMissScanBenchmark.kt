@@ -42,7 +42,8 @@ open class PoolMissScanBenchmark {
 
     @Setup
     fun setup() {
-        singleThreaded = SingleThreadedBufferPool(maxPoolSize = 4, defaultBufferSize = 1, factory = BufferFactory.Default)
+        singleThreaded =
+            SingleThreadedBufferPool(maxPoolSize = 4, defaultBufferSize = 1, factory = BufferFactory.Default)
         lockFree = LockFreeBufferPool(maxPoolSize = 4, defaultBufferSize = 1, factory = BufferFactory.Default)
         if (contents == "otherClasses") {
             val smaller = size / 16
