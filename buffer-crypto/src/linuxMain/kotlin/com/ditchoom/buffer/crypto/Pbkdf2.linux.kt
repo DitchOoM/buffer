@@ -12,7 +12,9 @@ import kotlinx.cinterop.convert
 import kotlinx.cinterop.reinterpret
 
 /** Linux PBKDF2 backed by BoringSSL `PKCS5_PBKDF2_HMAC`, writing straight into [WriteBuffer] memory. */
-actual fun CryptoCapabilities.pbkdf2(prf: Pbkdf2Prf): Pbkdf2Support = Pbkdf2Support.Blocking(BlockingPbkdf2Ops(prf, ::pbkdf2BoringSsl))
+actual fun CryptoCapabilities.pbkdf2(prf: Pbkdf2Prf): Pbkdf2Support = Pbkdf2Support.Blocking(boringSslOps(prf))
+
+private fun boringSslOps(prf: Pbkdf2Prf) = BlockingPbkdf2Ops(prf, ::pbkdf2BoringSsl)
 
 private const val SHA256_BITS = 256
 private const val SHA512_BITS = 512

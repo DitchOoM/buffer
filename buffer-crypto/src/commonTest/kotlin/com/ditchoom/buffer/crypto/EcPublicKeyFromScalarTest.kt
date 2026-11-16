@@ -107,7 +107,10 @@ class EcPublicKeyFromScalarTest {
     @Test
     fun rejectsWrongWidthAndX25519() =
         runTest {
-            val short = assertFailsWith<EcEncodingException> { ecPublicKeyFromScalar(KeyAgreementCurve.P256, hexBuffer("01")) }
+            val short =
+                assertFailsWith<EcEncodingException> {
+                    ecPublicKeyFromScalar(KeyAgreementCurve.P256, hexBuffer("01"))
+                }
             assertEquals(EcEncodingError.WrongKeyLength, short.error)
             val long =
                 assertFailsWith<EcEncodingException> {

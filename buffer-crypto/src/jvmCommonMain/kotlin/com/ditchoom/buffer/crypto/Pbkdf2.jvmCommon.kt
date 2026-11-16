@@ -16,7 +16,9 @@ import javax.crypto.SecretKey
  * keyed `Mac` is reused across every iteration, so the cost per iteration is the HMAC's.
  */
 
-actual fun CryptoCapabilities.pbkdf2(prf: Pbkdf2Prf): Pbkdf2Support = Pbkdf2Support.Blocking(BlockingPbkdf2Ops(prf, ::pbkdf2Jca))
+actual fun CryptoCapabilities.pbkdf2(prf: Pbkdf2Prf): Pbkdf2Support = Pbkdf2Support.Blocking(jcaOps(prf))
+
+private fun jcaOps(prf: Pbkdf2Prf) = BlockingPbkdf2Ops(prf, ::pbkdf2Jca)
 
 private fun jcaMacName(prf: Pbkdf2Prf): String =
     when (prf) {
@@ -48,10 +50,9 @@ private fun pbkdf2Jca(
     try {
         val blocks = (length + hLen - 1) / hLen
         for (i in 1..blocks) {
-            blockIndex[0] = (i ushr 24).toByte()
-            blockIndex[1] = (i ushr 16).toByte()
-            blockIndex[2] = (i ushr 8).toByte()
-            blockIndex[3] = i.toByte()
+            for (b in 0 until Int.SIZE_BYTES) {
+                blockIndex[b] = (i ushr ((Int.SIZE_BYTES - 1 - b) * Byte.SIZE_BITS)).toByte()
+            }
             mac.updateRemaining(salt)
             mac.update(blockIndex)
             mac.doFinal(u, 0)

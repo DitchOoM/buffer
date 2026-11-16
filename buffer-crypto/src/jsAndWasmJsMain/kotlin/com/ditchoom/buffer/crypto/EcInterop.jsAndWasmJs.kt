@@ -37,7 +37,10 @@ internal actual suspend fun ecPublicPointFromValidScalar(
     curve: KeyAgreementCurve,
     scalar: ReadBuffer,
     factory: BufferFactory,
-): ReadBuffer = hexToReadBuffer(webCryptoPublicPointFromPkcs8(curve.curveName, scalarToPkcs8Hex(curve, scalar)), factory)
+): ReadBuffer {
+    val pkcs8Hex = scalarToPkcs8Hex(curve, scalar)
+    return hexToReadBuffer(webCryptoPublicPointFromPkcs8(curve.curveName, pkcs8Hex), factory)
+}
 
 /**
  * Per-target WebCrypto glue: imports [pkcs8Hex] as an ECDH private key on [curveName], exports it as a

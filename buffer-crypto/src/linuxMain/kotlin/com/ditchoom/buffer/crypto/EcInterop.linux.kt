@@ -88,7 +88,9 @@ internal actual suspend fun ecPublicPointFromValidScalar(
                     outLen.ptr,
                 )
         }
-        check(status == BCL_OK && outLen.value.toInt() == outCap) { "EC_POINT_mul failed for a validated scalar (status=$status)" }
+        check(status == BCL_OK && outLen.value.toInt() == outCap) {
+            "EC_POINT_mul failed for a validated scalar (status=$status)"
+        }
         val dest = factory.allocate(outCap)
         for (i in 0 until outCap) dest.writeByte(outBuf[i])
         dest.resetForRead()

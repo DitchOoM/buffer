@@ -97,7 +97,9 @@ internal actual suspend fun ecPublicPointFromValidScalar(
                     outLen.ptr,
                 )
         }
-        check(status == BCKS_OK && outLen.value.toInt() == outCap) { "CryptoKit rejected a validated scalar (status=$status)" }
+        check(status == BCKS_OK && outLen.value.toInt() == outCap) {
+            "CryptoKit rejected a validated scalar (status=$status)"
+        }
         val dest = factory.allocate(outCap)
         for (i in 0 until outCap) dest.writeByte(outBuf[i])
         dest.resetForRead()

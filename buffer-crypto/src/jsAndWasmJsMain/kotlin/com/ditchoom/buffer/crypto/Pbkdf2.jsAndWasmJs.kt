@@ -10,7 +10,9 @@ import com.ditchoom.buffer.toHexString
  * limitation documented for the AEAD bridge: those copies cannot be wiped.
  */
 
-actual fun CryptoCapabilities.pbkdf2(prf: Pbkdf2Prf): Pbkdf2Support = Pbkdf2Support.AsyncOnly(AsyncPbkdf2Ops(prf, ::pbkdf2WebCrypto))
+actual fun CryptoCapabilities.pbkdf2(prf: Pbkdf2Prf): Pbkdf2Support = Pbkdf2Support.AsyncOnly(webCryptoOps(prf))
+
+private fun webCryptoOps(prf: Pbkdf2Prf) = AsyncPbkdf2Ops(prf, ::pbkdf2WebCrypto)
 
 private suspend fun pbkdf2WebCrypto(
     prf: Pbkdf2Prf,

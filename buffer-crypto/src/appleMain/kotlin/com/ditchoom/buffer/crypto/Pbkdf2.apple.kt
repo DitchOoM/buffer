@@ -15,7 +15,9 @@ import platform.CoreCrypto.kCCPRFHmacAlgSHA512
 import platform.CoreCrypto.kCCSuccess
 
 /** Apple PBKDF2 backed by CommonCrypto `CCKeyDerivationPBKDF`, writing straight into [WriteBuffer] memory. */
-actual fun CryptoCapabilities.pbkdf2(prf: Pbkdf2Prf): Pbkdf2Support = Pbkdf2Support.Blocking(BlockingPbkdf2Ops(prf, ::pbkdf2CommonCrypto))
+actual fun CryptoCapabilities.pbkdf2(prf: Pbkdf2Prf): Pbkdf2Support = Pbkdf2Support.Blocking(commonCryptoOps(prf))
+
+private fun commonCryptoOps(prf: Pbkdf2Prf) = BlockingPbkdf2Ops(prf, ::pbkdf2CommonCrypto)
 
 private fun pbkdf2CommonCrypto(
     prf: Pbkdf2Prf,

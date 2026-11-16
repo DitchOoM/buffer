@@ -228,7 +228,14 @@ class Pbkdf2Test {
         for (v in vectors + emptyInputVectors) {
             when (val support = CryptoCapabilities.pbkdf2(v.prf)) {
                 is Pbkdf2Support.Blocking -> {
-                    val out = support.ops.deriveBlocking(v.password(), v.salt(), v.iterations, v.length, BufferFactory.Default)
+                    val out =
+                        support.ops.deriveBlocking(
+                            v.password(),
+                            v.salt(),
+                            v.iterations,
+                            v.length,
+                            BufferFactory.Default,
+                        )
                     assertEquals(v.expected, out.toHex(), "${v.prf} c=${v.iterations} dkLen=${v.length}")
                 }
                 is Pbkdf2Support.AsyncOnly -> return
