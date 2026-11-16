@@ -115,6 +115,20 @@ static inline void bcl_hmac_final(HMAC_CTX *c, uint8_t *out) {
 }
 
 /* ===========================================================================
+ * PBKDF2 (RFC 8018) over HMAC-SHA-256 / HMAC-SHA-512. `md_bits` selects the digest.
+ * Returns BCL_OK, or BCL_ERR on an unknown digest or a BoringSSL failure.
+ * =========================================================================== */
+
+static inline int bcl_pbkdf2_hmac(int md_bits, const uint8_t *password, size_t password_len,
+                                  const uint8_t *salt, size_t salt_len, uint32_t iterations,
+                                  uint8_t *out, size_t out_len) {
+    const EVP_MD *md = md_bits == 256 ? EVP_sha256() : md_bits == 512 ? EVP_sha512() : NULL;
+    if (!md) return BCL_ERR;
+    return PKCS5_PBKDF2_HMAC((const char *)password, password_len, salt, salt_len, iterations,
+                             md, out_len, out) == 1 ? BCL_OK : BCL_ERR;
+}
+
+/* ===========================================================================
  * AEAD: AES-128/256-GCM and ChaCha20-Poly1305 (one-shot, RFC 5116 layout).
  * Tag is the trailing 16 bytes of the sealed output (EVP_AEAD seal appends it).
  * =========================================================================== */
@@ -391,6 +405,42 @@ static inline int bcl_ec_decompress(
     }
 done:
     if (pt) EC_POINT_free(pt);
+    if (bnctx) BN_CTX_free(bnctx);
+    if (group) EC_GROUP_free(group);
+    return rc;
+}
+
+/* Computes the uncompressed public point (0x04 || X || Y) = scalar * G. EC_POINT_mul's generator
+ * path is constant-time in BoringSSL. The caller has already range-checked the scalar. */
+static inline int bcl_ec_public_from_scalar(
+    int curve_code,
+    const uint8_t *scalar, size_t scalar_len,
+    uint8_t *out_point, size_t out_cap, size_t *out_len) {
+    int rc = BCL_ERR;
+    int nid = bcl_ec_nid(curve_code);
+    if (nid == 0) return BCL_ERR;
+    EC_GROUP *group = EC_GROUP_new_by_curve_name(nid);
+    BIGNUM *d = NULL;
+    EC_POINT *pub = NULL;
+    BN_CTX *bnctx = NULL;
+    if (!group) return BCL_ERR;
+    bnctx = BN_CTX_new();
+    if (!bnctx) goto done;
+    d = BN_bin2bn(scalar, (int)scalar_len, NULL);
+    if (!d) goto done;
+    pub = EC_POINT_new(group);
+    if (!pub) goto done;
+    if (!EC_POINT_mul(group, pub, d, NULL, NULL, bnctx)) goto done;
+    if (EC_POINT_is_at_infinity(group, pub)) goto done;
+    {
+        size_t n = EC_POINT_point2oct(group, pub, POINT_CONVERSION_UNCOMPRESSED, out_point, out_cap, bnctx);
+        if (n == 0) goto done;
+        *out_len = n;
+        rc = BCL_OK;
+    }
+done:
+    if (pub) EC_POINT_free(pub);
+    if (d) BN_clear_free(d);
     if (bnctx) BN_CTX_free(bnctx);
     if (group) EC_GROUP_free(group);
     return rc;

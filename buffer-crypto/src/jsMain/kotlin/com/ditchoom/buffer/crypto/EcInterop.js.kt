@@ -2,6 +2,8 @@ package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer
+import kotlinx.coroutines.await
+import kotlin.js.Promise
 
 /*
  * JS EC point decompression. WebCrypto offers no decompression (`importKey('raw')` requires the
@@ -48,3 +50,27 @@ private fun jsDecompressHex(
         })()
         """,
     ) as String
+
+internal actual suspend fun webCryptoPublicPointFromPkcs8(
+    curveName: String,
+    pkcs8Hex: String,
+): String = jsPublicPointFromPkcs8(curveName, pkcs8Hex).await()
+
+// Promise chains (not async/await): the Kotlin/JS `js(...)` intrinsic rejects async statements.
+@Suppress("UnusedParameter") // referenced inside the js(...) template
+private fun jsPublicPointFromPkcs8(
+    curveName: String,
+    pkcs8Hex: String,
+): Promise<String> =
+    js(
+        """
+        (function () {
+            const subtle = (globalThis.crypto).subtle;
+            const h2b = (h) => { const a = new Uint8Array(h.length / 2); for (let i = 0; i < a.length; i++) a[i] = parseInt(h.substr(i*2,2),16); return a; };
+            const b64uToHex = (s) => { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) { s += '='; } const bin = atob(s); let h = ''; for (let i = 0; i < bin.length; i++) { h += bin.charCodeAt(i).toString(16).padStart(2, '0'); } return h; };
+            return subtle.importKey('pkcs8', h2b(pkcs8Hex), { name: 'ECDH', namedCurve: curveName }, true, ['deriveBits'])
+                .then((key) => subtle.exportKey('jwk', key))
+                .then((jwk) => '04' + b64uToHex(jwk.x) + b64uToHex(jwk.y));
+        })()
+        """,
+    )

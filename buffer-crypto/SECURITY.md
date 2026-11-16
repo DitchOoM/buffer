@@ -76,6 +76,9 @@ Run the full suite:
 
 - Hashes: `Sha256Test`, `Sha384Sha512Test`, `HmacSha256Test`, `HmacSha384Sha512Test`,
   `HkdfTest`, `HkdfSha384Sha512Test`, `Sha512FamilyWycheproofTest`
+- Password-based KDF: `Pbkdf2Test` (RFC 7914 §11 PBKDF2-HMAC-SHA256 incl. c = 80 000, RFC 6070
+  inputs over HMAC-SHA256/-SHA512, c = 210 000, multi-block partial output, non-UTF-8 and
+  over-block-size passwords, backing matrix, parameter validation)
 - AEAD: `AeadTest`, `AeadWycheproofTest`, `AeadTamperTest`
 - Single-block AES (ECB): `AesEcbTest` (FIPS-197 Appendix C.1/C.3 + NIST SP 800-38A F.1
   single-block KAT, encrypt/decrypt round-trip, key/block-length validation, capability contract)
@@ -90,6 +93,9 @@ Run the full suite:
   gated-closure machinery, via a fake secure element), `KeyProviderResolverTest` (total
   per-algorithm routing + `requireTier`), `WebCryptoProtectedKeyProviderTest` (the js/wasmJs
   WebCrypto non-exportable provider end-to-end: ECDSA, AES-GCM, ECDH, HPKE `openBase`)
+- EC public key from a private scalar: `EcPublicKeyFromScalarTest` (RFC 6979 A.2.5–A.2.7 key pairs,
+  `d = 1` and `d = n − 1` for both Y parities, `0` / `n` / all-ones range rejection, width and
+  curve rejection, scalar backing matrix)
 - Foundation: `ConstantTimeTest`, `CryptoRandomTest`, `SecureBufferTest`,
   `WycheproofRunnerSelfTest`
 - Vendored Wycheproof vector sets (curated, in `WycheproofVectors*.kt`): AES-GCM,
@@ -172,13 +178,24 @@ material its own key schedule requires — the TLS 1.2/DTLS 1.2 `premaster_secre
 | Raw secret lingering in memory | **(d)** returned in a wiped `SecureBuffer` the caller owns and MUST free (`use {}` / `freeNativeMemory()`); never logged |
 | Wrong-curve key confusion | **(a)** the ops are curve-bound; a private key off the ops' curve is rejected with `IllegalArgumentException` |
 
-### KDF / MAC (HKDF, HMAC-SHA-2)
+### KDF / MAC (HKDF, PBKDF2, HMAC-SHA-2)
 | Vector | Defense |
 |---|---|
 | Skipping extract (IKM as PRK) | **(a)** + **(d)** extract-then-expand enforced |
 | `L > 255·HashLen` / `L = 0` edge | **(a)** + **(b)** length cap |
 | Non-constant-time tag compare in glue | **(b)** `constantTimeEquals`; **(e)** native verify |
 | Hash-length confusion (256/384/512) | **(d)** typed |
+| PBKDF2 `c = 0` / `dkLen = 0` / oversized `dkLen` | **(b)** `IllegalArgumentException` in common code before dispatch + negative test |
+| PBKDF2 password re-encoded (lossy `char[]` → UTF-8) | **(d)** password is a byte buffer; the JVM path keys the JCA `Mac` directly rather than `PBEKeySpec` + **(a)** non-UTF-8 vector |
+| Low PBKDF2 iteration count | **(e)** caller's choice; the KDoc points at the work factor and the suite pins c = 210 000 |
+
+### EC public key from a private scalar (`ecPublicKeyFromScalar`)
+| Vector | Defense |
+|---|---|
+| Scalar `0` or `≥ n` accepted as a key | **(b)** typed `EcEncodingException(ScalarOutOfRange)` in common code before dispatch; the range compare visits every byte + negative test |
+| Secret-dependent timing in `d·G` | **(c)/(e)** no scalar arithmetic in this library: BoringSSL `EC_POINT_mul` (Linux), CryptoKit (Apple), WebCrypto PKCS#8 import (web), and on JVM/Android the provider's ECDH against the generator plus an ECDSA sign/verify to pick Y's sign — only public coordinates touch `BigInteger` |
+| Scalar copies left in memory | **(e)** the JVM copy is wiped after `ECPrivateKeySpec`; the provider key object, the CryptoKit `Data`, and the web hex String are not wipeable (same limitation as the KA bridges) |
+| Wrong point for the scalar | **(a)** RFC 6979 key-pair KATs on every target, including both Y parities |
 
 ### HPKE / DHKEM (RFC 9180): Base/PSK/Auth/AuthPSK over X25519, P-256/384/521; AES-128/256-GCM, ChaCha20-Poly1305
 | Vector | Defense |
@@ -216,6 +233,8 @@ These are tested error paths, not assumptions — the capability flag drives a `
 | Primitive | JVM | Android (minSdk 28) | Apple | JS / WASM |
 |---|---|---|---|---|
 | SHA-256/384/512, HMAC, HKDF | ✓ | ✓ | ✓ | ✓ (pure-Kotlin core) |
+| EC public key from scalar (P-256/384/521) | ✓ (ECDH vs G + ECDSA parity) | ✓ (ECDH vs G + ECDSA parity) | ✓ (CryptoKit) | ✓ (WebCrypto PKCS#8 → JWK, async) |
+| PBKDF2-HMAC-SHA256/512 | ✓ (JCA `Mac` loop) | ✓ (JCA `Mac` loop) | ✓ (`CCKeyDerivationPBKDF`) | ✓ (WebCrypto `deriveBits`, async) |
 | AES-GCM 128/256 | ✓ | ✓ | ✓ | ✓ (WebCrypto, async) |
 | ChaCha20-Poly1305 | ✓ (JDK 11+) | ✓ | ⚠ pending (see §5) | ✗ throws — not in WebCrypto |
 | AES-ECB (single block, raw — unauthenticated) | ✓ | ✓ | ✓ | ✗ throws — no ECB in WebCrypto |

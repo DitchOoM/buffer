@@ -165,7 +165,7 @@ private fun beInt(
 }
 
 /** EC domain parameters for [curve], obtained without generating a key pair. */
-private fun ecParams(curve: KeyAgreementCurve): ECParameterSpec {
+internal fun ecParams(curve: KeyAgreementCurve): ECParameterSpec {
     val ap = AlgorithmParameters.getInstance("EC")
     ap.init(ECGenParameterSpec(jcaCurveName(curve)))
     return ap.getParameterSpec(ECParameterSpec::class.java)

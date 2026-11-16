@@ -302,6 +302,39 @@ public func bcks_ecdh_x963_from_scalar(
 }
 
 // =============================================================================
+// EC public point from a bare scalar — CryptoKit P256/P384/P521.Signing
+// =============================================================================
+//
+// Emits the uncompressed public point (04 ‖ X ‖ Y) for a raw big-endian private scalar. CryptoKit
+// derives the point internally, so only the public point crosses back to Kotlin.
+
+private func ecPublicFromScalar(_ curve: Int32, _ scalar: Data) -> Data? {
+    switch curve {
+    case 256:
+        return (try? P256.Signing.PrivateKey(rawRepresentation: scalar))?.publicKey.x963Representation
+    case 384:
+        return (try? P384.Signing.PrivateKey(rawRepresentation: scalar))?.publicKey.x963Representation
+    case 521:
+        return (try? P521.Signing.PrivateKey(rawRepresentation: scalar))?.publicKey.x963Representation
+    default:
+        return nil
+    }
+}
+
+@_cdecl("bcks_ec_public_from_scalar")
+public func bcks_ec_public_from_scalar(
+    _ curve: Int32,
+    _ scalarPtr: UnsafePointer<UInt8>?, _ scalarLen: Int,
+    _ out: UnsafeMutablePointer<UInt8>?, _ outCap: Int,
+    _ outLenOut: UnsafeMutablePointer<Int>?
+) -> Int32 {
+    guard let point = ecPublicFromScalar(curve, bytes(scalarPtr, scalarLen)) else {
+        return BCKS_ERR_INPUT
+    }
+    return emit(point, out, outCap, outLenOut)
+}
+
+// =============================================================================
 // EC point decompression — CryptoKit P256/P384/P521.KeyAgreement
 // =============================================================================
 //
