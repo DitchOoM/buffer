@@ -8,6 +8,7 @@ import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
@@ -37,9 +38,9 @@ public object LePacketCodec : Codec<LePacket> {
 
   override fun sizeHint(`value`: LePacket, context: EncodeContext): Int = 2 + value.payload.length
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 2) return FramePeek.needsMoreData
     val headerRawB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
     val headerRawB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val headerRaw = (headerRawB0 or (headerRawB1 shl 8)).toUInt().toUShort()
@@ -49,8 +50,10 @@ public object LePacketCodec : Codec<LePacket> {
     if (payloadBytes < 0 || payloadBytes > Int.MAX_VALUE - __offset) {
       throw DecodeException(fieldPath = "LePacket.payload", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + payloadBytes.toLong()}""")
     }
-    if (stream.available() - baseOffset < __offset + payloadBytes) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + payloadBytes) return FramePeek.declaredIncomplete(__offset + payloadBytes)
     __offset += payloadBytes
-    return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData
+    return FramePeek.forDeclaredSize(__offset, stream.available() - baseOffset)
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

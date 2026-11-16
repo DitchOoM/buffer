@@ -6,6 +6,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -55,21 +56,23 @@ public object EthernetFrameByEtherTypeCodec : Codec<EthernetFrameByEtherType> {
     is EthernetFrameByEtherType.Ipv6 -> EthernetFrameByEtherTypeIpv6Codec.sizeHint(value, context)
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 2) return PeekResult.NeedsMoreData
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+    if (stream.available() - baseOffset < 2) return FramePeek.needsMoreData
     val __discRawB0 = stream.peekByte(baseOffset + 0).toInt() and 0xFF
     val __discRawB1 = stream.peekByte(baseOffset + 0 + 1).toInt() and 0xFF
     val __discRaw = ((__discRawB0 shl 8) or __discRawB1).toUInt().toUShort()
     val __discriminator = EtherType(__discRaw)
     val __dispatchValue = __discriminator.type.toInt()
     return when (__dispatchValue) {
-      2_048 -> EthernetFrameByEtherTypeIpv4Codec.peekFrameSize(stream, baseOffset)
-      2_054 -> EthernetFrameByEtherTypeArpCodec.peekFrameSize(stream, baseOffset)
-      33_024 -> EthernetFrameByEtherTypeVlanTagCodec.peekFrameSize(stream, baseOffset)
-      34_525 -> EthernetFrameByEtherTypeIpv6Codec.peekFrameSize(stream, baseOffset)
+      2_048 -> EthernetFrameByEtherTypeIpv4Codec.peekFrame(stream, baseOffset)
+      2_054 -> EthernetFrameByEtherTypeArpCodec.peekFrame(stream, baseOffset)
+      33_024 -> EthernetFrameByEtherTypeVlanTagCodec.peekFrame(stream, baseOffset)
+      34_525 -> EthernetFrameByEtherTypeIpv6Codec.peekFrame(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "EthernetFrameByEtherType.discriminator", bufferPosition = baseOffset, expected = "one of {2048, 2054, 33024, 34525}", actual = """${__dispatchValue}""")
       }
     }
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

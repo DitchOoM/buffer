@@ -8,6 +8,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -71,9 +72,9 @@ public object AsciiGreetingCodec : Codec<AsciiGreeting> {
 
   override fun sizeHint(`value`: AsciiGreeting, context: EncodeContext): Int = 2
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 2) return FramePeek.needsMoreData
     val commandPrefixB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
     val commandPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val commandPrefix = ((commandPrefixB0 shl 8) or commandPrefixB1).toUInt()
@@ -81,6 +82,8 @@ public object AsciiGreetingCodec : Codec<AsciiGreeting> {
       throw DecodeException(fieldPath = "AsciiGreeting.command", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + commandPrefix.toInt()}""")
     }
     __offset += 2 + commandPrefix.toInt()
-    return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData
+    return FramePeek.forDeclaredSize(__offset, stream.available() - baseOffset)
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

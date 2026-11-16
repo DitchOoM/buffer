@@ -10,6 +10,7 @@ import com.ditchoom.buffer.codec.Decoder
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameDetector
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
@@ -65,7 +66,9 @@ public class MqttPublishV3Codec<P : Payload>(
 
   override fun sizeHint(`value`: MqttPublishV3<P>, context: EncodeContext): Int = 5 + value.topic.length
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = Companion.peekFrameSize(stream, baseOffset)
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek = Companion.peekFrame(stream, baseOffset)
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 
   public class Partial<P : Payload> internal constructor(
     public val `header`: MqttFixedHeader,
@@ -81,7 +84,9 @@ public class MqttPublishV3Codec<P : Payload>(
   }
 
   public companion object : FrameDetector {
-    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
+    override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek = FramePeek.noFraming
+
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 
     public fun <P : Payload> partial(buffer: ReadBuffer, context: DecodeContext): Partial<P> {
       val header = MqttFixedHeader(buffer.readUByte())

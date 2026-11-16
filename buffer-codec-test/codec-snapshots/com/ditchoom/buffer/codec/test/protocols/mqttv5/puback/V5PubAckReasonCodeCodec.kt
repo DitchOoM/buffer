@@ -6,6 +6,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -79,25 +80,27 @@ public object V5PubAckReasonCodeCodec : Codec<V5PubAckReasonCode> {
     is V5PubAckReasonCode.PayloadFormatInvalid -> V5PubAckReasonCodePayloadFormatInvalidCodec.sizeHint(value, context)
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+    if (stream.available() - baseOffset < 1) return FramePeek.needsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()
     val __discriminator = V5PubAckReasonCodeRaw(__discRaw)
     val __dispatchValue = __discriminator.id
     return when (__dispatchValue) {
-      0 -> V5PubAckReasonCodeSuccessCodec.peekFrameSize(stream, baseOffset)
-      16 -> V5PubAckReasonCodeNoMatchingSubscribersCodec.peekFrameSize(stream, baseOffset)
-      128 -> V5PubAckReasonCodeUnspecifiedErrorCodec.peekFrameSize(stream, baseOffset)
-      131 -> V5PubAckReasonCodeImplementationSpecificErrorCodec.peekFrameSize(stream, baseOffset)
-      135 -> V5PubAckReasonCodeNotAuthorizedCodec.peekFrameSize(stream, baseOffset)
-      144 -> V5PubAckReasonCodeTopicNameInvalidCodec.peekFrameSize(stream, baseOffset)
-      145 -> V5PubAckReasonCodePacketIdentifierInUseCodec.peekFrameSize(stream, baseOffset)
-      146 -> V5PubAckReasonCodePacketIdentifierNotFoundCodec.peekFrameSize(stream, baseOffset)
-      151 -> V5PubAckReasonCodeQuotaExceededCodec.peekFrameSize(stream, baseOffset)
-      153 -> V5PubAckReasonCodePayloadFormatInvalidCodec.peekFrameSize(stream, baseOffset)
+      0 -> V5PubAckReasonCodeSuccessCodec.peekFrame(stream, baseOffset)
+      16 -> V5PubAckReasonCodeNoMatchingSubscribersCodec.peekFrame(stream, baseOffset)
+      128 -> V5PubAckReasonCodeUnspecifiedErrorCodec.peekFrame(stream, baseOffset)
+      131 -> V5PubAckReasonCodeImplementationSpecificErrorCodec.peekFrame(stream, baseOffset)
+      135 -> V5PubAckReasonCodeNotAuthorizedCodec.peekFrame(stream, baseOffset)
+      144 -> V5PubAckReasonCodeTopicNameInvalidCodec.peekFrame(stream, baseOffset)
+      145 -> V5PubAckReasonCodePacketIdentifierInUseCodec.peekFrame(stream, baseOffset)
+      146 -> V5PubAckReasonCodePacketIdentifierNotFoundCodec.peekFrame(stream, baseOffset)
+      151 -> V5PubAckReasonCodeQuotaExceededCodec.peekFrame(stream, baseOffset)
+      153 -> V5PubAckReasonCodePayloadFormatInvalidCodec.peekFrame(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "V5PubAckReasonCode.discriminator", bufferPosition = baseOffset, expected = "one of {0, 16, 128, 131, 135, 144, 145, 146, 151, 153}", actual = """${__dispatchValue}""")
       }
     }
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

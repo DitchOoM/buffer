@@ -29,7 +29,7 @@ class CompanionPeekPlacementTest {
             assertFailsWith<IllegalStateException> {
                 genericCodecBuilder()
                     .addCodecCompanion(
-                        peek = peekFun("return payloadCodec.peekFrameSize(stream, baseOffset)"),
+                        peek = peekFun("return payloadCodec.peekFrame(stream, baseOffset)"),
                     )
             }
         val message = failure.message.orEmpty()
@@ -61,7 +61,7 @@ class CompanionPeekPlacementTest {
         val failure =
             assertFailsWith<IllegalStateException> {
                 builder.addCodecCompanion(
-                    peek = peekFun("return publishCodec.peekFrameSize(stream, baseOffset)"),
+                    peek = peekFun("return publishCodec.peekFrame(stream, baseOffset)"),
                     partial = partialFun(),
                 )
             }
@@ -76,15 +76,15 @@ class CompanionPeekPlacementTest {
                     peek =
                         peekFun(
                             """
-                            |val __headerFrame = VarIntCodec.peekFrameSize(stream, baseOffset)
-                            |val __total = __headerFrame.bytes + 2
+                            |val __headerFrame = VarIntCodec.peekFrame(stream, baseOffset)
+                            |val __total = __headerFrame.size + 2
                             |return PeekResult.Complete(__total)
                             """.trimMargin(),
                         ),
                 )
         val companion = builder.build().typeSpecs.single()
         assertTrue(companion.isCompanion)
-        assertEquals(listOf("peekFrameSize"), companion.funSpecs.map { it.name })
+        assertEquals(listOf("peekFrame", "peekFrameSize"), companion.funSpecs.map { it.name })
     }
 
     /**
@@ -100,7 +100,7 @@ class CompanionPeekPlacementTest {
                 .addCodecCompanion(peek = peekFun("return PeekResult.NoFraming"))
         val companion = builder.build().typeSpecs.single()
         assertTrue(companion.isCompanion)
-        assertEquals(listOf("peekFrameSize"), companion.funSpecs.map { it.name })
+        assertEquals(listOf("peekFrame", "peekFrameSize"), companion.funSpecs.map { it.name })
     }
 
     /**
@@ -181,7 +181,7 @@ class CompanionPeekPlacementTest {
                 )
         val companion = builder.build().typeSpecs.single()
         assertEquals(
-            listOf("decodeAggregating", "peekFrameSize"),
+            listOf("decodeAggregating", "peekFrame", "peekFrameSize"),
             companion.funSpecs.map { it.name }.sorted(),
         )
         assertEquals(1, companion.superinterfaces.size, "the companion is a FrameDetector value")
@@ -195,7 +195,7 @@ class CompanionPeekPlacementTest {
     fun `the member forwarder qualifies its call with Companion`() {
         val forwarder = memberPeekFun(peekFun("return PeekResult.Complete(4)"))
         assertTrue(
-            "Companion.peekFrameSize(stream, baseOffset)" in forwarder.body.toString(),
+            "Companion.peekFrame(stream, baseOffset)" in forwarder.body.toString(),
             forwarder.body.toString(),
         )
     }
@@ -215,11 +215,11 @@ class CompanionPeekPlacementTest {
 
     private fun peekFun(body: String): FunSpec =
         FunSpec
-            .builder("peekFrameSize")
+            .builder("peekFrame")
             .addModifiers(KModifier.OVERRIDE)
             .addParameter("stream", STREAM_PROCESSOR_CN)
             .addParameter("baseOffset", INT)
-            .returns(PEEK_RESULT_CN)
+            .returns(FRAME_PEEK_CN)
             .addStatement("%L", body)
             .build()
 

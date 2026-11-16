@@ -8,6 +8,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.Decoder
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameDetector
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
@@ -52,7 +53,9 @@ public class CommandFrameCodec<P : Payload>(
 
   override fun sizeHint(`value`: CommandFrame<P>, context: EncodeContext): Int = 6
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = Companion.peekFrameSize(stream, baseOffset)
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek = Companion.peekFrame(stream, baseOffset)
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 
   public class Partial<P : Payload> internal constructor(
     public val counter: UShort,
@@ -77,7 +80,9 @@ public class CommandFrameCodec<P : Payload>(
   }
 
   public companion object : FrameDetector {
-    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
+    override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek = FramePeek.noFraming
+
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 
     public fun <P : Payload> partial(buffer: ReadBuffer, context: DecodeContext): Partial<P> {
       val __batch3Raw = buffer.readInt()

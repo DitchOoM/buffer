@@ -5,6 +5,7 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec
@@ -37,12 +38,14 @@ public object DispatchVarintUnionMixedCodec : Codec<DispatchVarintUnion.Mixed> {
 
   override fun sizeHint(`value`: DispatchVarintUnion.Mixed, context: EncodeContext): Int = 1
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    val __vFrame = QuicVarintCodec.peekFrameSize(stream, baseOffset + 0)
-    if (__vFrame !is PeekResult.Complete) {
-      return __vFrame
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+    val __vFrame = QuicVarintCodec.peekFrame(stream, baseOffset + 0)
+    if (!__vFrame.isComplete) {
+      return __vFrame.withoutDeclaredSize()
     }
-    val __total = 0 + __vFrame.bytes + 1
-    return if (stream.available() - baseOffset >= __total) PeekResult.Complete(__total) else PeekResult.NeedsMoreData
+    val __total = 0 + __vFrame.size + 1
+    return FramePeek.forDeclaredSize(__total, stream.available() - baseOffset)
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

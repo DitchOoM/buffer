@@ -7,6 +7,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameDetector
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
@@ -73,29 +74,31 @@ public object Http3FcFrameSettingsCodec : FrameDetector {
     }
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    val __headerFrame = Http3FcFrameTypeCodec.peekFrameSize(stream, baseOffset)
-    if (__headerFrame !is PeekResult.Complete) {
-      return __headerFrame
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+    val __headerFrame = Http3FcFrameTypeCodec.peekFrame(stream, baseOffset)
+    if (!__headerFrame.isComplete) {
+      return __headerFrame.withoutDeclaredSize()
     }
-    val __headerWireWidth = __headerFrame.bytes
-    if (stream.available() - baseOffset < __headerWireWidth + 1) return PeekResult.NeedsMoreData
-    val __framingPeek = stream.peekBuffer(baseOffset + __headerWireWidth, Http3FcLengthCodec.maxWireSize) ?: return PeekResult.NeedsMoreData
+    val __headerWireWidth = __headerFrame.size
+    if (stream.available() - baseOffset < __headerWireWidth + 1) return FramePeek.needsMoreData
+    val __framingPeek = stream.peekBuffer(baseOffset + __headerWireWidth, Http3FcLengthCodec.maxWireSize) ?: return FramePeek.needsMoreData
     try {
       val __framingPeekStart = __framingPeek.position()
       val __framingLength = try {
         Http3FcLengthCodec.decode(__framingPeek, DecodeContext.Empty)
       } catch (__e: Throwable) {
         when (__e::class.simpleName) {
-          "BufferUnderflowException", "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException" -> return PeekResult.NeedsMoreData
+          "BufferUnderflowException", "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException" -> return FramePeek.needsMoreData
           else -> throw __e
         }
       }
       val __framingPrefixWidth = __framingPeek.position() - __framingPeekStart
       val __total = __headerWireWidth + __framingPrefixWidth + __framingLength.toInt()
-      return if (stream.available() - baseOffset >= __total) PeekResult.Complete(__total) else PeekResult.NeedsMoreData
+      return FramePeek.forDeclaredSize(__total, stream.available() - baseOffset)
     } finally {
       (__framingPeek as? PlatformBuffer)?.freeNativeMemory()
     }
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

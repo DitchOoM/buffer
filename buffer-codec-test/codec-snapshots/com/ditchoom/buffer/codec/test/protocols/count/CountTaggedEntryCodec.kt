@@ -8,6 +8,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
@@ -52,9 +53,9 @@ public object CountTaggedEntryCodec : Codec<CountTaggedEntry> {
 
   override fun sizeHint(`value`: CountTaggedEntry, context: EncodeContext): Int = 2 + value.tag.value.length
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 2) return FramePeek.needsMoreData
     val tagPrefixB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
     val tagPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val tagPrefix = ((tagPrefixB0 shl 8) or tagPrefixB1).toUInt()
@@ -62,6 +63,8 @@ public object CountTaggedEntryCodec : Codec<CountTaggedEntry> {
       throw DecodeException(fieldPath = "CountTaggedEntry.tag", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + tagPrefix.toInt()}""")
     }
     __offset += 2 + tagPrefix.toInt()
-    return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData
+    return FramePeek.forDeclaredSize(__offset, stream.available() - baseOffset)
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

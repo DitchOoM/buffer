@@ -6,6 +6,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -58,31 +59,18 @@ public object CommandPayloadCodec : Codec<CommandPayload> {
     is CommandPayload.ResetDevice -> CommandPayloadResetDeviceCodec.sizeHint(value, context)
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+    if (stream.available() - baseOffset < 1) return FramePeek.needsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF
     return when (discriminator) {
-      0x22 -> {
-        when (val inner = CommandPayloadSetRgbStateCodec.peekFrameSize(stream, baseOffset + 1)) {
-          is PeekResult.Complete -> PeekResult.Complete(1 + inner.bytes)
-          else -> inner
-        }
-      }
-      0x23 -> {
-        when (val inner = CommandPayloadGetRgbStateCodec.peekFrameSize(stream, baseOffset + 1)) {
-          is PeekResult.Complete -> PeekResult.Complete(1 + inner.bytes)
-          else -> inner
-        }
-      }
-      0x24 -> {
-        when (val inner = CommandPayloadResetDeviceCodec.peekFrameSize(stream, baseOffset + 1)) {
-          is PeekResult.Complete -> PeekResult.Complete(1 + inner.bytes)
-          else -> inner
-        }
-      }
+      0x22 -> CommandPayloadSetRgbStateCodec.peekFrame(stream, baseOffset + 1).withPrefix(1)
+      0x23 -> CommandPayloadGetRgbStateCodec.peekFrame(stream, baseOffset + 1).withPrefix(1)
+      0x24 -> CommandPayloadResetDeviceCodec.peekFrame(stream, baseOffset + 1).withPrefix(1)
       else -> {
         throw DecodeException(fieldPath = "CommandPayload.discriminator", bufferPosition = baseOffset, expected = "one of {0x22, 0x23, 0x24}", actual = """0x${discriminator.toString(16).padStart(2, '0').uppercase()}""")
       }
     }
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

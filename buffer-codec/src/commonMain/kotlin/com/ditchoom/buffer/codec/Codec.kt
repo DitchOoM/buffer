@@ -131,6 +131,22 @@ interface FrameDetector {
         stream: StreamProcessor,
         baseOffset: Int = 0,
     ): PeekResult = PeekResult.NoFraming
+
+    /**
+     * Allocation-free form of [peekFrameSize]: the same question, answered with a
+     * [FramePeek] value class that is returned directly and so never boxes.
+     * Prefer calling this on a hot path; streaming helpers such as `readFrame` do.
+     *
+     * The default delegates to [peekFrameSize], so every existing codec keeps
+     * working unchanged (that path still allocates for a complete frame). Override
+     * it to answer without boxing, and report [FramePeek.declaredIncomplete] when
+     * the frame size is known but its bytes have not all arrived. Generated codecs
+     * override it. If you override both, keep them in agreement.
+     */
+    fun peekFrame(
+        stream: StreamProcessor,
+        baseOffset: Int = 0,
+    ): FramePeek = FramePeek.from(peekFrameSize(stream, baseOffset))
 }
 
 /**

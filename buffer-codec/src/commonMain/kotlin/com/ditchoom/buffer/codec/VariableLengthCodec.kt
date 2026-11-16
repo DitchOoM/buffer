@@ -74,4 +74,13 @@ interface VariableLengthCodec<T> : Codec<T> {
             is VarLenPeek.Decoded -> PeekResult.Complete(peeked.byteCount)
             VarLenPeek.NeedsMoreData -> PeekResult.NeedsMoreData
         }
+
+    override fun peekFrame(
+        stream: StreamProcessor,
+        baseOffset: Int,
+    ): FramePeek =
+        when (val peeked = peekValue(stream, baseOffset)) {
+            is VarLenPeek.Decoded -> FramePeek.complete(peeked.byteCount)
+            VarLenPeek.NeedsMoreData -> FramePeek.needsMoreData
+        }
 }

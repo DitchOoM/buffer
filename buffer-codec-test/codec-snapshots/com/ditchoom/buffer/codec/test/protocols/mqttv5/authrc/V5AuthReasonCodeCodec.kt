@@ -6,6 +6,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -51,18 +52,20 @@ public object V5AuthReasonCodeCodec : Codec<V5AuthReasonCode> {
     is V5AuthReasonCode.ReAuthenticate -> V5AuthReasonCodeReAuthenticateCodec.sizeHint(value, context)
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+    if (stream.available() - baseOffset < 1) return FramePeek.needsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()
     val __discriminator = V5AuthReasonCodeRaw(__discRaw)
     val __dispatchValue = __discriminator.id
     return when (__dispatchValue) {
-      0 -> V5AuthReasonCodeSuccessCodec.peekFrameSize(stream, baseOffset)
-      24 -> V5AuthReasonCodeContinueAuthenticationCodec.peekFrameSize(stream, baseOffset)
-      25 -> V5AuthReasonCodeReAuthenticateCodec.peekFrameSize(stream, baseOffset)
+      0 -> V5AuthReasonCodeSuccessCodec.peekFrame(stream, baseOffset)
+      24 -> V5AuthReasonCodeContinueAuthenticationCodec.peekFrame(stream, baseOffset)
+      25 -> V5AuthReasonCodeReAuthenticateCodec.peekFrame(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "V5AuthReasonCode.discriminator", bufferPosition = baseOffset, expected = "one of {0, 24, 25}", actual = """${__dispatchValue}""")
       }
     }
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

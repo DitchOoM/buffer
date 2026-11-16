@@ -8,6 +8,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
@@ -55,7 +56,9 @@ public object RemoteCommandCodec : Codec<RemoteCommand> {
 
   override fun sizeHint(`value`: RemoteCommand, context: EncodeContext): Int = 2 + value.id.length
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek = FramePeek.noFraming
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 
   public fun partial(buffer: ReadBuffer, context: DecodeContext): Partial {
     val idPrefixB0 = buffer.readUByte().toUInt()

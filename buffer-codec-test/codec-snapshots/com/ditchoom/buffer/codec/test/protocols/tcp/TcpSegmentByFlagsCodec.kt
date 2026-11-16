@@ -6,6 +6,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -59,20 +60,22 @@ public object TcpSegmentByFlagsCodec : Codec<TcpSegmentByFlags> {
     is TcpSegmentByFlags.SynAck -> TcpSegmentByFlagsSynAckCodec.sizeHint(value, context)
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+    if (stream.available() - baseOffset < 1) return FramePeek.needsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()
     val __discriminator = TcpFlagsByte(__discRaw)
     val __dispatchValue = __discriminator.flags.toInt()
     return when (__dispatchValue) {
-      2 -> TcpSegmentByFlagsSynCodec.peekFrameSize(stream, baseOffset)
-      4 -> TcpSegmentByFlagsRstCodec.peekFrameSize(stream, baseOffset)
-      16 -> TcpSegmentByFlagsAckCodec.peekFrameSize(stream, baseOffset)
-      17 -> TcpSegmentByFlagsFinAckCodec.peekFrameSize(stream, baseOffset)
-      18 -> TcpSegmentByFlagsSynAckCodec.peekFrameSize(stream, baseOffset)
+      2 -> TcpSegmentByFlagsSynCodec.peekFrame(stream, baseOffset)
+      4 -> TcpSegmentByFlagsRstCodec.peekFrame(stream, baseOffset)
+      16 -> TcpSegmentByFlagsAckCodec.peekFrame(stream, baseOffset)
+      17 -> TcpSegmentByFlagsFinAckCodec.peekFrame(stream, baseOffset)
+      18 -> TcpSegmentByFlagsSynAckCodec.peekFrame(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "TcpSegmentByFlags.discriminator", bufferPosition = baseOffset, expected = "one of {2, 4, 16, 17, 18}", actual = """${__dispatchValue}""")
       }
     }
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

@@ -23,14 +23,14 @@ public const val DEFAULT_MAX_FRAME_BYTES: Int = 4 * 1024 * 1024
  *
  * Set it to the largest frame the protocol can legitimately produce.
  *
- * **Scope of the guarantee**: this bounds the frame [readFrame] will
- * slice and decode — it does not bound how much a streaming loop
- * accumulates while waiting. A codec's `peekFrameSize` reports
- * [PeekResult.NeedsMoreData] until the whole frame has arrived, which
- * cannot carry the size the codec already computed, so a peer that
- * declares a large frame and never sends it is not rejected here. See
- * issue #308: closing that gap needs `PeekResult` to express a
- * known-but-unsatisfied size, which is a breaking change.
+ * **Scope of the guarantee**: a frame whose size the codec reports,
+ * whether complete ([FramePeek.complete]) or still arriving
+ * ([FramePeek.declaredIncomplete]), is checked against the ceiling before
+ * anything is sliced, so a peer that declares a large frame and never
+ * sends it is rejected as soon as the declaration is buffered (issue #308).
+ * A codec that only implements the older `peekFrameSize` cannot express a
+ * known-but-unsatisfied size, so for it the check still happens only once
+ * the whole frame has arrived. Generated codecs report the size.
  *
  * ```kotlin
  * val ctx = DecodeContext.Empty.with(MaxFrameBytesKey, 64 * 1024)

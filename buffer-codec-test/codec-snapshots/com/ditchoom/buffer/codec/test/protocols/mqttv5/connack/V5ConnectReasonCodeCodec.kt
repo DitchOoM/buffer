@@ -6,6 +6,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -127,37 +128,39 @@ public object V5ConnectReasonCodeCodec : Codec<V5ConnectReasonCode> {
     is V5ConnectReasonCode.ConnectionRateExceeded -> V5ConnectReasonCodeConnectionRateExceededCodec.sizeHint(value, context)
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+    if (stream.available() - baseOffset < 1) return FramePeek.needsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()
     val __discriminator = V5ConnectReasonCodeRaw(__discRaw)
     val __dispatchValue = __discriminator.id
     return when (__dispatchValue) {
-      0 -> V5ConnectReasonCodeSuccessCodec.peekFrameSize(stream, baseOffset)
-      128 -> V5ConnectReasonCodeUnspecifiedErrorCodec.peekFrameSize(stream, baseOffset)
-      129 -> V5ConnectReasonCodeMalformedPacketCodec.peekFrameSize(stream, baseOffset)
-      130 -> V5ConnectReasonCodeProtocolErrorCodec.peekFrameSize(stream, baseOffset)
-      131 -> V5ConnectReasonCodeImplementationSpecificErrorCodec.peekFrameSize(stream, baseOffset)
-      132 -> V5ConnectReasonCodeUnsupportedProtocolVersionCodec.peekFrameSize(stream, baseOffset)
-      133 -> V5ConnectReasonCodeClientIdentifierNotValidCodec.peekFrameSize(stream, baseOffset)
-      134 -> V5ConnectReasonCodeBadUserNameOrPasswordCodec.peekFrameSize(stream, baseOffset)
-      135 -> V5ConnectReasonCodeNotAuthorizedCodec.peekFrameSize(stream, baseOffset)
-      136 -> V5ConnectReasonCodeServerUnavailableCodec.peekFrameSize(stream, baseOffset)
-      137 -> V5ConnectReasonCodeServerBusyCodec.peekFrameSize(stream, baseOffset)
-      138 -> V5ConnectReasonCodeBannedCodec.peekFrameSize(stream, baseOffset)
-      140 -> V5ConnectReasonCodeBadAuthenticationMethodCodec.peekFrameSize(stream, baseOffset)
-      144 -> V5ConnectReasonCodeTopicNameInvalidCodec.peekFrameSize(stream, baseOffset)
-      149 -> V5ConnectReasonCodePacketTooLargeCodec.peekFrameSize(stream, baseOffset)
-      151 -> V5ConnectReasonCodeQuotaExceededCodec.peekFrameSize(stream, baseOffset)
-      153 -> V5ConnectReasonCodePayloadFormatInvalidCodec.peekFrameSize(stream, baseOffset)
-      154 -> V5ConnectReasonCodeRetainNotSupportedCodec.peekFrameSize(stream, baseOffset)
-      155 -> V5ConnectReasonCodeQoSNotSupportedCodec.peekFrameSize(stream, baseOffset)
-      156 -> V5ConnectReasonCodeUseAnotherServerCodec.peekFrameSize(stream, baseOffset)
-      157 -> V5ConnectReasonCodeServerMovedCodec.peekFrameSize(stream, baseOffset)
-      159 -> V5ConnectReasonCodeConnectionRateExceededCodec.peekFrameSize(stream, baseOffset)
+      0 -> V5ConnectReasonCodeSuccessCodec.peekFrame(stream, baseOffset)
+      128 -> V5ConnectReasonCodeUnspecifiedErrorCodec.peekFrame(stream, baseOffset)
+      129 -> V5ConnectReasonCodeMalformedPacketCodec.peekFrame(stream, baseOffset)
+      130 -> V5ConnectReasonCodeProtocolErrorCodec.peekFrame(stream, baseOffset)
+      131 -> V5ConnectReasonCodeImplementationSpecificErrorCodec.peekFrame(stream, baseOffset)
+      132 -> V5ConnectReasonCodeUnsupportedProtocolVersionCodec.peekFrame(stream, baseOffset)
+      133 -> V5ConnectReasonCodeClientIdentifierNotValidCodec.peekFrame(stream, baseOffset)
+      134 -> V5ConnectReasonCodeBadUserNameOrPasswordCodec.peekFrame(stream, baseOffset)
+      135 -> V5ConnectReasonCodeNotAuthorizedCodec.peekFrame(stream, baseOffset)
+      136 -> V5ConnectReasonCodeServerUnavailableCodec.peekFrame(stream, baseOffset)
+      137 -> V5ConnectReasonCodeServerBusyCodec.peekFrame(stream, baseOffset)
+      138 -> V5ConnectReasonCodeBannedCodec.peekFrame(stream, baseOffset)
+      140 -> V5ConnectReasonCodeBadAuthenticationMethodCodec.peekFrame(stream, baseOffset)
+      144 -> V5ConnectReasonCodeTopicNameInvalidCodec.peekFrame(stream, baseOffset)
+      149 -> V5ConnectReasonCodePacketTooLargeCodec.peekFrame(stream, baseOffset)
+      151 -> V5ConnectReasonCodeQuotaExceededCodec.peekFrame(stream, baseOffset)
+      153 -> V5ConnectReasonCodePayloadFormatInvalidCodec.peekFrame(stream, baseOffset)
+      154 -> V5ConnectReasonCodeRetainNotSupportedCodec.peekFrame(stream, baseOffset)
+      155 -> V5ConnectReasonCodeQoSNotSupportedCodec.peekFrame(stream, baseOffset)
+      156 -> V5ConnectReasonCodeUseAnotherServerCodec.peekFrame(stream, baseOffset)
+      157 -> V5ConnectReasonCodeServerMovedCodec.peekFrame(stream, baseOffset)
+      159 -> V5ConnectReasonCodeConnectionRateExceededCodec.peekFrame(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "V5ConnectReasonCode.discriminator", bufferPosition = baseOffset, expected = "one of {0, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 140, 144, 149, 151, 153, 154, 155, 156, 157, 159}", actual = """${__dispatchValue}""")
       }
     }
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

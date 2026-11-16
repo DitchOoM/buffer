@@ -7,6 +7,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -81,14 +82,16 @@ public object LpByteWrappedTailCodec : Codec<LpByteWrappedTail> {
 
   override fun sizeHint(`value`: LpByteWrappedTail, context: EncodeContext): Int = 1 + WrappedLabelCodec.sizeHint(value.body, context)
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 1) return FramePeek.needsMoreData
     val bodyPrefix = (stream.peekByte(baseOffset + __offset).toInt() and 0xFF).toUInt()
     if (bodyPrefix > (Int.MAX_VALUE - __offset - 1).toUInt()) {
       throw DecodeException(fieldPath = "LpByteWrappedTail.body", bufferPosition = baseOffset + __offset, expected = "__offset + 1 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 1 + bodyPrefix.toInt()}""")
     }
     __offset += 1 + bodyPrefix.toInt()
-    return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData
+    return FramePeek.forDeclaredSize(__offset, stream.available() - baseOffset)
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

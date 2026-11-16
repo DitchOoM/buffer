@@ -6,6 +6,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -55,19 +56,21 @@ public object MqttV3SubAckReturnCodeCodec : Codec<MqttV3SubAckReturnCode> {
     is MqttV3SubAckReturnCode.Failure -> MqttV3SubAckReturnCodeFailureCodec.sizeHint(value, context)
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+    if (stream.available() - baseOffset < 1) return FramePeek.needsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()
     val __discriminator = MqttV3SubAckReturnCodeRaw(__discRaw)
     val __dispatchValue = __discriminator.id
     return when (__dispatchValue) {
-      0 -> MqttV3SubAckReturnCodeSuccessMaximumQoS0Codec.peekFrameSize(stream, baseOffset)
-      1 -> MqttV3SubAckReturnCodeSuccessMaximumQoS1Codec.peekFrameSize(stream, baseOffset)
-      2 -> MqttV3SubAckReturnCodeSuccessMaximumQoS2Codec.peekFrameSize(stream, baseOffset)
-      128 -> MqttV3SubAckReturnCodeFailureCodec.peekFrameSize(stream, baseOffset)
+      0 -> MqttV3SubAckReturnCodeSuccessMaximumQoS0Codec.peekFrame(stream, baseOffset)
+      1 -> MqttV3SubAckReturnCodeSuccessMaximumQoS1Codec.peekFrame(stream, baseOffset)
+      2 -> MqttV3SubAckReturnCodeSuccessMaximumQoS2Codec.peekFrame(stream, baseOffset)
+      128 -> MqttV3SubAckReturnCodeFailureCodec.peekFrame(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "MqttV3SubAckReturnCode.discriminator", bufferPosition = baseOffset, expected = "one of {0, 1, 2, 128}", actual = """${__dispatchValue}""")
       }
     }
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }
