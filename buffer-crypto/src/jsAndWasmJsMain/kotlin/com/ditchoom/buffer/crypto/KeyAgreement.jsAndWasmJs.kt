@@ -75,7 +75,7 @@ private fun ecCurveOidHex(curve: KeyAgreementCurve): String =
     }
 
 /** Wraps the raw private [scalar] for [curve] in the PKCS#8 DER WebCrypto's `importKey('pkcs8')` accepts. */
-private fun scalarToPkcs8Hex(
+internal fun scalarToPkcs8Hex(
     curve: KeyAgreementCurve,
     scalar: ReadBuffer,
 ): String {

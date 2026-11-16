@@ -69,6 +69,9 @@ enum class EcEncodingError {
      * residue mod `p` — so it is not a valid point. (A genuine on-curve check, not a parse error.)
      */
     PointNotOnCurve,
+
+    /** A private scalar was zero or not below the curve order `n`, so it is not a valid private key. */
+    ScalarOutOfRange,
 }
 
 /**
@@ -791,4 +794,90 @@ expect fun ecPublicKeyDecompress(
     curve: KeyAgreementCurve,
     compressedPoint: ReadBuffer,
     factory: BufferFactory = BufferFactory.Default,
+): ReadBuffer
+
+// =============================================================================
+// EC public key from a private scalar (per-platform native scalar multiplication)
+// =============================================================================
+
+/** Big-endian hex of the group order `n` for a NIST prime [curve], at the curve's scalar width. */
+internal fun ecOrderHex(curve: KeyAgreementCurve): String =
+    when (curve) {
+        KeyAgreementCurve.P256 ->
+            "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551"
+        KeyAgreementCurve.P384 ->
+            "ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf" +
+                "581a0db248b0a77aecec196accc52973"
+        KeyAgreementCurve.P521 ->
+            "01ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" +
+                "fffa51868783bf2f966b7fcc0148f709a5d03bb5c9b8899c47aebb6fb71e91386409"
+        KeyAgreementCurve.X25519 -> fail(EcEncodingError.UnsupportedCurve)
+    }
+
+private const val HEX_RADIX = 16
+private const val SIGN_SHIFT = 31
+
+/**
+ * Rejects a scalar that is not exactly the curve's width ([WrongKeyLength]) or not in `[1, n)`
+ * ([ScalarOutOfRange]). The range check touches every byte regardless of where the scalar first
+ * differs from `n`, so its timing does not depend on the secret beyond the valid/invalid outcome.
+ */
+internal fun requireEcScalar(
+    curve: KeyAgreementCurve,
+    scalar: ReadBuffer,
+) {
+    requireEcCurve(curve)
+    val width = fieldBytes(curve)
+    if (scalar.remaining() != width) fail(EcEncodingError.WrongKeyLength)
+    val order = ecOrderHex(curve)
+    val base = scalar.position()
+    var any = 0
+    var less = 0
+    var greater = 0
+    for (i in 0 until width) {
+        val d = scalar.get(base + i).toInt() and BYTE_MASK
+        val n = order.substring(2 * i, 2 * i + 2).toInt(HEX_RADIX)
+        val undecided = (less or greater) xor 1
+        less = less or (((d - n) ushr SIGN_SHIFT) and undecided)
+        greater = greater or (((n - d) ushr SIGN_SHIFT) and undecided)
+        any = any or d
+    }
+    val zero = ((any - 1) ushr SIGN_SHIFT) and 1
+    if ((less and (zero xor 1)) == 0) fail(EcEncodingError.ScalarOutOfRange)
+}
+
+/**
+ * Computes the public point `Q = d·G` for the private [scalar] `d` (big-endian, exactly the curve's
+ * width: 32 / 48 / 66 bytes) on a NIST prime [curve], returned as the uncompressed SEC1 point
+ * (`0x04 ‖ X ‖ Y`) allocated from [factory], read-ready. This is the [VerifyKey] /
+ * [KeyAgreementPublicKey] encoding, so a key pair can be rebuilt from a stored or derived scalar
+ * alone, e.g. `SigningKey.ecdsaP256(scalar, VerifyKey.ecdsaP256(ecPublicKeyFromScalar(P256, scalar)))`.
+ *
+ * The multiplication is the platform's: BoringSSL `EC_POINT_mul` (Linux), CryptoKit
+ * `P###.Signing.PrivateKey(rawRepresentation:).publicKey` (Apple), WebCrypto (import the scalar as
+ * PKCS#8 and read `x`/`y` back from its JWK export), and on JVM/Android a JCA ECDH of the scalar
+ * against the generator for `X`, with `Y`'s sign chosen by a JCA ECDSA sign/verify round. No
+ * secret-dependent arithmetic is done in this library; constant-time behaviour is the native stack's
+ * (see SECURITY.md).
+ *
+ * `suspend` because WebCrypto is Promise-based; the native platforms complete without suspending.
+ * Throws [EcEncodingException] with [UnsupportedCurve] for X25519, [WrongKeyLength] for a scalar of
+ * the wrong width, and [ScalarOutOfRange] for `d = 0` or `d ≥ n`. [scalar] is read non-destructively.
+ */
+suspend fun ecPublicKeyFromScalar(
+    curve: KeyAgreementCurve,
+    scalar: ReadBuffer,
+    factory: BufferFactory = BufferFactory.Default,
+): ReadBuffer {
+    requireEcScalar(curve, scalar)
+    val point = ecPublicPointFromValidScalar(curve, scalar, factory)
+    check(point.remaining() == 1 + 2 * fieldBytes(curve)) { "native stack returned a malformed point" }
+    return point
+}
+
+/** Platform `d·G` for a scalar already accepted by [requireEcScalar]; returns `0x04 ‖ X ‖ Y`, read-ready. */
+internal expect suspend fun ecPublicPointFromValidScalar(
+    curve: KeyAgreementCurve,
+    scalar: ReadBuffer,
+    factory: BufferFactory,
 ): ReadBuffer

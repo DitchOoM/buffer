@@ -7,6 +7,7 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_INPUT
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_ec_decompress
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_ec_public_from_scalar
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.alloc
@@ -16,6 +17,7 @@ import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.reinterpret
+import kotlinx.cinterop.value
 import platform.posix.size_tVar
 
 /*
@@ -35,7 +37,7 @@ private fun curveBits(curve: KeyAgreementCurve): Int =
         KeyAgreementCurve.P256 -> P256_BITS
         KeyAgreementCurve.P384 -> P384_BITS
         KeyAgreementCurve.P521 -> P521_BITS
-        KeyAgreementCurve.X25519 -> error("X25519 has no compressed point form") // requireCompressedPoint rejected it
+        KeyAgreementCurve.X25519 -> error("X25519 has no SEC1 point form") // the common validators rejected it
     }
 
 actual fun ecPublicKeyDecompress(
@@ -67,6 +69,35 @@ actual fun ecPublicKeyDecompress(
                 "EC point decompression requires macOS 13 / iOS 16 / watchOS 9 / tvOS 16 or newer",
             )
         }
+        val dest = factory.allocate(outCap)
+        for (i in 0 until outCap) dest.writeByte(outBuf[i])
+        dest.resetForRead()
+        dest
+    }
+}
+
+internal actual suspend fun ecPublicPointFromValidScalar(
+    curve: KeyAgreementCurve,
+    scalar: ReadBuffer,
+    factory: BufferFactory,
+): ReadBuffer {
+    val outCap = 1 + 2 * fieldBytes(curve)
+    return memScoped {
+        val outBuf = allocArray<ByteVar>(outCap)
+        val outLen = alloc<size_tVar>()
+        var status = BCKS_ERR_INPUT
+        scalar.withRemainingBytes { ptr, len ->
+            status =
+                bcks_ec_public_from_scalar(
+                    curveBits(curve),
+                    ptr.reinterpret(),
+                    len.convert(),
+                    outBuf.reinterpret(),
+                    outCap.convert(),
+                    outLen.ptr,
+                )
+        }
+        check(status == BCKS_OK && outLen.value.toInt() == outCap) { "CryptoKit rejected a validated scalar (status=$status)" }
         val dest = factory.allocate(outCap)
         for (i in 0 until outCap) dest.writeByte(outBuf[i])
         dest.resetForRead()

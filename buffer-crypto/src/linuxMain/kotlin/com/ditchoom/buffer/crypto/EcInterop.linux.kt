@@ -6,6 +6,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.crypto.cinterop.boringssl.BCL_OK
 import com.ditchoom.buffer.crypto.cinterop.boringssl.bcl_ec_decompress
+import com.ditchoom.buffer.crypto.cinterop.boringssl.bcl_ec_public_from_scalar
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.alloc
@@ -33,7 +34,7 @@ private fun nistCurveCode(curve: KeyAgreementCurve): Int =
         KeyAgreementCurve.P256 -> P256_CURVE_CODE
         KeyAgreementCurve.P384 -> P384_CURVE_CODE
         KeyAgreementCurve.P521 -> P521_CURVE_CODE
-        KeyAgreementCurve.X25519 -> error("X25519 has no compressed point form") // requireCompressedPoint rejected it
+        KeyAgreementCurve.X25519 -> error("X25519 has no SEC1 point form") // the common validators rejected it
     }
 
 actual fun ecPublicKeyDecompress(
@@ -59,6 +60,35 @@ actual fun ecPublicKeyDecompress(
                 )
         }
         if (status != BCL_OK || outLen.value.toInt() != outCap) failPointNotOnCurve()
+        val dest = factory.allocate(outCap)
+        for (i in 0 until outCap) dest.writeByte(outBuf[i])
+        dest.resetForRead()
+        dest
+    }
+}
+
+internal actual suspend fun ecPublicPointFromValidScalar(
+    curve: KeyAgreementCurve,
+    scalar: ReadBuffer,
+    factory: BufferFactory,
+): ReadBuffer {
+    val outCap = 1 + 2 * fieldBytes(curve)
+    return memScoped {
+        val outBuf = allocArray<ByteVar>(outCap)
+        val outLen = alloc<size_tVar>()
+        var status = -1
+        scalar.withRemainingBytes { ptr, len ->
+            status =
+                bcl_ec_public_from_scalar(
+                    nistCurveCode(curve),
+                    ptr.reinterpret(),
+                    len.convert(),
+                    outBuf.reinterpret(),
+                    outCap.convert(),
+                    outLen.ptr,
+                )
+        }
+        check(status == BCL_OK && outLen.value.toInt() == outCap) { "EC_POINT_mul failed for a validated scalar (status=$status)" }
         val dest = factory.allocate(outCap)
         for (i in 0 until outCap) dest.writeByte(outBuf[i])
         dest.resetForRead()

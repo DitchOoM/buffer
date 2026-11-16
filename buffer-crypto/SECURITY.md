@@ -93,6 +93,9 @@ Run the full suite:
   gated-closure machinery, via a fake secure element), `KeyProviderResolverTest` (total
   per-algorithm routing + `requireTier`), `WebCryptoProtectedKeyProviderTest` (the js/wasmJs
   WebCrypto non-exportable provider end-to-end: ECDSA, AES-GCM, ECDH, HPKE `openBase`)
+- EC public key from a private scalar: `EcPublicKeyFromScalarTest` (RFC 6979 A.2.5–A.2.7 key pairs,
+  `d = 1` and `d = n − 1` for both Y parities, `0` / `n` / all-ones range rejection, width and
+  curve rejection, scalar backing matrix)
 - Foundation: `ConstantTimeTest`, `CryptoRandomTest`, `SecureBufferTest`,
   `WycheproofRunnerSelfTest`
 - Vendored Wycheproof vector sets (curated, in `WycheproofVectors*.kt`): AES-GCM,
@@ -186,6 +189,14 @@ material its own key schedule requires — the TLS 1.2/DTLS 1.2 `premaster_secre
 | PBKDF2 password re-encoded (lossy `char[]` → UTF-8) | **(d)** password is a byte buffer; the JVM path keys the JCA `Mac` directly rather than `PBEKeySpec` + **(a)** non-UTF-8 vector |
 | Low PBKDF2 iteration count | **(e)** caller's choice; the KDoc points at the work factor and the suite pins c = 210 000 |
 
+### EC public key from a private scalar (`ecPublicKeyFromScalar`)
+| Vector | Defense |
+|---|---|
+| Scalar `0` or `≥ n` accepted as a key | **(b)** typed `EcEncodingException(ScalarOutOfRange)` in common code before dispatch; the range compare visits every byte + negative test |
+| Secret-dependent timing in `d·G` | **(c)/(e)** no scalar arithmetic in this library: BoringSSL `EC_POINT_mul` (Linux), CryptoKit (Apple), WebCrypto PKCS#8 import (web), and on JVM/Android the provider's ECDH against the generator plus an ECDSA sign/verify to pick Y's sign — only public coordinates touch `BigInteger` |
+| Scalar copies left in memory | **(e)** the JVM copy is wiped after `ECPrivateKeySpec`; the provider key object, the CryptoKit `Data`, and the web hex String are not wipeable (same limitation as the KA bridges) |
+| Wrong point for the scalar | **(a)** RFC 6979 key-pair KATs on every target, including both Y parities |
+
 ### HPKE / DHKEM (RFC 9180): Base/PSK/Auth/AuthPSK over X25519, P-256/384/521; AES-128/256-GCM, ChaCha20-Poly1305
 | Vector | Defense |
 |---|---|
@@ -222,6 +233,7 @@ These are tested error paths, not assumptions — the capability flag drives a `
 | Primitive | JVM | Android (minSdk 28) | Apple | JS / WASM |
 |---|---|---|---|---|
 | SHA-256/384/512, HMAC, HKDF | ✓ | ✓ | ✓ | ✓ (pure-Kotlin core) |
+| EC public key from scalar (P-256/384/521) | ✓ (ECDH vs G + ECDSA parity) | ✓ (ECDH vs G + ECDSA parity) | ✓ (CryptoKit) | ✓ (WebCrypto PKCS#8 → JWK, async) |
 | PBKDF2-HMAC-SHA256/512 | ✓ (JCA `Mac` loop) | ✓ (JCA `Mac` loop) | ✓ (`CCKeyDerivationPBKDF`) | ✓ (WebCrypto `deriveBits`, async) |
 | AES-GCM 128/256 | ✓ | ✓ | ✓ | ✓ (WebCrypto, async) |
 | ChaCha20-Poly1305 | ✓ (JDK 11+) | ✓ | ⚠ pending (see §5) | ✗ throws — not in WebCrypto |

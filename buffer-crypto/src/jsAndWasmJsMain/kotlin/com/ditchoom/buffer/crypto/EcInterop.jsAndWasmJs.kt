@@ -25,3 +25,25 @@ internal fun hexToReadBuffer(
     hex: String,
     factory: BufferFactory,
 ): ReadBuffer = factory.fromHexString(hex)
+
+/*
+ * Public point from a private scalar: WebCrypto has no "d·G" call, but it computes the public point
+ * when importing a PKCS#8 key that omits it, and an exported private JWK carries `x` and `y`. So the
+ * scalar is imported (extractable, as the JWK export requires) and only `x`/`y` are read back. The
+ * scalar crosses the boundary as a hex String, with the zeroization limitation documented for the
+ * key-agreement bridge.
+ */
+internal actual suspend fun ecPublicPointFromValidScalar(
+    curve: KeyAgreementCurve,
+    scalar: ReadBuffer,
+    factory: BufferFactory,
+): ReadBuffer = hexToReadBuffer(webCryptoPublicPointFromPkcs8(curve.curveName, scalarToPkcs8Hex(curve, scalar)), factory)
+
+/**
+ * Per-target WebCrypto glue: imports [pkcs8Hex] as an ECDH private key on [curveName], exports it as a
+ * JWK, and returns `04 ‖ x ‖ y` as lowercase hex.
+ */
+internal expect suspend fun webCryptoPublicPointFromPkcs8(
+    curveName: String,
+    pkcs8Hex: String,
+): String
