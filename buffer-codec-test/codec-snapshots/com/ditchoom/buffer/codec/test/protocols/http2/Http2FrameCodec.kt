@@ -6,6 +6,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
@@ -67,8 +68,8 @@ public class Http2FrameCodec<P : Payload>(
     }
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 4) return PeekResult.NeedsMoreData
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+    if (stream.available() - baseOffset < 4) return FramePeek.needsMoreData
     val __discRawB0 = stream.peekByte(baseOffset + 0).toInt() and 0xFF
     val __discRawB1 = stream.peekByte(baseOffset + 0 + 1).toInt() and 0xFF
     val __discRawB2 = stream.peekByte(baseOffset + 0 + 2).toInt() and 0xFF
@@ -77,15 +78,17 @@ public class Http2FrameCodec<P : Payload>(
     val __discriminator = Http2LengthAndType(__discRaw)
     val __dispatchValue = __discriminator.type
     return when (__dispatchValue) {
-      0 -> dataCodec.peekFrameSize(stream, baseOffset)
-      4 -> Http2FrameSettingsCodec.peekFrameSize(stream, baseOffset)
-      6 -> Http2FramePingCodec.peekFrameSize(stream, baseOffset)
-      8 -> Http2FrameWindowUpdateCodec.peekFrameSize(stream, baseOffset)
+      0 -> dataCodec.peekFrame(stream, baseOffset)
+      4 -> Http2FrameSettingsCodec.peekFrame(stream, baseOffset)
+      6 -> Http2FramePingCodec.peekFrame(stream, baseOffset)
+      8 -> Http2FrameWindowUpdateCodec.peekFrame(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "Http2Frame.discriminator", bufferPosition = baseOffset, expected = "one of {0, 4, 6, 8}", actual = """${__dispatchValue}""")
       }
     }
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 
   public companion object {
     public fun <P : Payload> decodeAggregating(

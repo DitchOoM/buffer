@@ -6,6 +6,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
@@ -73,11 +74,11 @@ public object GrpcLengthPrefixedMessageCodec : Codec<GrpcLengthPrefixedMessage> 
 
   override fun sizeHint(`value`: GrpcLengthPrefixedMessage, context: EncodeContext): Int = 5
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 1) return FramePeek.needsMoreData
     __offset += 1
-    if (stream.available() - baseOffset < __offset + 4) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 4) return FramePeek.needsMoreData
     val messagePrefixB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
     val messagePrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val messagePrefixB2 = stream.peekByte(baseOffset + __offset + 2).toInt() and 0xFF
@@ -87,6 +88,8 @@ public object GrpcLengthPrefixedMessageCodec : Codec<GrpcLengthPrefixedMessage> 
       throw DecodeException(fieldPath = "GrpcLengthPrefixedMessage.message", bufferPosition = baseOffset + __offset, expected = "__offset + 4 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 4 + messagePrefix.toInt()}""")
     }
     __offset += 4 + messagePrefix.toInt()
-    return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData
+    return FramePeek.forDeclaredSize(__offset, stream.available() - baseOffset)
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

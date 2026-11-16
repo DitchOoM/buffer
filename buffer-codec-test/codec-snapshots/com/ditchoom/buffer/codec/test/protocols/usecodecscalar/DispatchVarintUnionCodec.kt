@@ -6,6 +6,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -80,37 +81,19 @@ public object DispatchVarintUnionCodec : Codec<DispatchVarintUnion> {
     is DispatchVarintUnion.Plain -> DispatchVarintUnionPlainCodec.sizeHint(value, context)
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+    if (stream.available() - baseOffset < 1) return FramePeek.needsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF
     return when (discriminator) {
-      0x01 -> {
-        when (val inner = DispatchVarintUnionSingleCodec.peekFrameSize(stream, baseOffset + 1)) {
-          is PeekResult.Complete -> PeekResult.Complete(1 + inner.bytes)
-          else -> inner
-        }
-      }
-      0x02 -> {
-        when (val inner = DispatchVarintUnionMixedCodec.peekFrameSize(stream, baseOffset + 1)) {
-          is PeekResult.Complete -> PeekResult.Complete(1 + inner.bytes)
-          else -> inner
-        }
-      }
-      0x03 -> {
-        when (val inner = DispatchVarintUnionMarkerCodec.peekFrameSize(stream, baseOffset + 1)) {
-          is PeekResult.Complete -> PeekResult.Complete(1 + inner.bytes)
-          else -> inner
-        }
-      }
-      0x04 -> {
-        when (val inner = DispatchVarintUnionPlainCodec.peekFrameSize(stream, baseOffset + 1)) {
-          is PeekResult.Complete -> PeekResult.Complete(1 + inner.bytes)
-          else -> inner
-        }
-      }
+      0x01 -> DispatchVarintUnionSingleCodec.peekFrame(stream, baseOffset + 1).withPrefix(1)
+      0x02 -> DispatchVarintUnionMixedCodec.peekFrame(stream, baseOffset + 1).withPrefix(1)
+      0x03 -> DispatchVarintUnionMarkerCodec.peekFrame(stream, baseOffset + 1).withPrefix(1)
+      0x04 -> DispatchVarintUnionPlainCodec.peekFrame(stream, baseOffset + 1).withPrefix(1)
       else -> {
         throw DecodeException(fieldPath = "DispatchVarintUnion.discriminator", bufferPosition = baseOffset, expected = "one of {0x01, 0x02, 0x03, 0x04}", actual = """0x${discriminator.toString(16).padStart(2, '0').uppercase()}""")
       }
     }
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

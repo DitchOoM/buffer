@@ -92,4 +92,9 @@ object AsciiStringCodec : Codec<String> {
         stream: StreamProcessor,
         baseOffset: Int,
     ): PeekResult = PeekResult.NoFraming
+
+    override fun peekFrame(
+        stream: StreamProcessor,
+        baseOffset: Int,
+    ): FramePeek = FramePeek.noFraming
 }

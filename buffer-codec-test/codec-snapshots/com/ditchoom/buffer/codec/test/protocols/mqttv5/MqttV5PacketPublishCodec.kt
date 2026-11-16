@@ -11,6 +11,7 @@ import com.ditchoom.buffer.codec.Decoder
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameDetector
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
@@ -102,7 +103,9 @@ public class MqttV5PacketPublishCodec<P : Payload>(
     payloadCodec.encode(buffer, value.payload, context)
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = Companion.peekFrameSize(stream, baseOffset)
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek = Companion.peekFrame(stream, baseOffset)
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 
   public class Partial<P : Payload> internal constructor(
     public val `header`: MqttFixedHeader,
@@ -122,26 +125,28 @@ public class MqttV5PacketPublishCodec<P : Payload>(
   }
 
   public companion object : FrameDetector {
-    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-      if (stream.available() - baseOffset < 2) return PeekResult.NeedsMoreData
-      val __framingPeek = stream.peekBuffer(baseOffset + 1, 5) ?: return PeekResult.NeedsMoreData
+    override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+      if (stream.available() - baseOffset < 2) return FramePeek.needsMoreData
+      val __framingPeek = stream.peekBuffer(baseOffset + 1, 5) ?: return FramePeek.needsMoreData
       try {
         val __framingPeekStart = __framingPeek.position()
         val __framingLength = try {
           MqttRemainingLengthCodec.decode(__framingPeek, DecodeContext.Empty)
         } catch (__e: Throwable) {
           when (__e::class.simpleName) {
-            "BufferUnderflowException", "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException" -> return PeekResult.NeedsMoreData
+            "BufferUnderflowException", "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException" -> return FramePeek.needsMoreData
             else -> throw __e
           }
         }
         val __framingPrefixWidth = __framingPeek.position() - __framingPeekStart
         val __total = 1 + __framingPrefixWidth + __framingLength.toInt()
-        return if (stream.available() - baseOffset >= __total) PeekResult.Complete(__total) else PeekResult.NeedsMoreData
+        return FramePeek.forDeclaredSize(__total, stream.available() - baseOffset)
       } finally {
         (__framingPeek as? PlatformBuffer)?.freeNativeMemory()
       }
     }
+
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 
     public fun <P : Payload> partial(buffer: ReadBuffer, context: DecodeContext): Partial<P> {
       val header = MqttFixedHeader(buffer.readUByte())

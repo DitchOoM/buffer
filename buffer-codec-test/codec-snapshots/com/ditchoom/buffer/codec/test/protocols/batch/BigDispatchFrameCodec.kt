@@ -6,6 +6,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -51,25 +52,17 @@ public object BigDispatchFrameCodec : Codec<BigDispatchFrame> {
     is BigDispatchFrame.TypeB -> BigDispatchFrameTypeBCodec.sizeHint(value, context)
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+    if (stream.available() - baseOffset < 1) return FramePeek.needsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF
     return when (discriminator) {
-      0x01 -> {
-        when (val inner = BigDispatchFrameTypeACodec.peekFrameSize(stream, baseOffset + 1)) {
-          is PeekResult.Complete -> PeekResult.Complete(1 + inner.bytes)
-          else -> inner
-        }
-      }
-      0x02 -> {
-        when (val inner = BigDispatchFrameTypeBCodec.peekFrameSize(stream, baseOffset + 1)) {
-          is PeekResult.Complete -> PeekResult.Complete(1 + inner.bytes)
-          else -> inner
-        }
-      }
+      0x01 -> BigDispatchFrameTypeACodec.peekFrame(stream, baseOffset + 1).withPrefix(1)
+      0x02 -> BigDispatchFrameTypeBCodec.peekFrame(stream, baseOffset + 1).withPrefix(1)
       else -> {
         throw DecodeException(fieldPath = "BigDispatchFrame.discriminator", bufferPosition = baseOffset, expected = "one of {0x01, 0x02}", actual = """0x${discriminator.toString(16).padStart(2, '0').uppercase()}""")
       }
     }
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

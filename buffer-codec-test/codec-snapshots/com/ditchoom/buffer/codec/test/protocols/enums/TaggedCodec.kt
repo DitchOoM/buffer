@@ -6,6 +6,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.UnsignedVarIntCodec
 import com.ditchoom.buffer.codec.WireSize
@@ -36,12 +37,14 @@ public object TaggedCodec : Codec<Tagged> {
 
   override fun sizeHint(`value`: Tagged, context: EncodeContext): Int = 2
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    val __levelFrame = UnsignedVarIntCodec.peekFrameSize(stream, baseOffset + 0)
-    if (__levelFrame !is PeekResult.Complete) {
-      return __levelFrame
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+    val __levelFrame = UnsignedVarIntCodec.peekFrame(stream, baseOffset + 0)
+    if (!__levelFrame.isComplete) {
+      return __levelFrame.withoutDeclaredSize()
     }
-    val __total = 0 + __levelFrame.bytes + 1
-    return if (stream.available() - baseOffset >= __total) PeekResult.Complete(__total) else PeekResult.NeedsMoreData
+    val __total = 0 + __levelFrame.size + 1
+    return FramePeek.forDeclaredSize(__total, stream.available() - baseOffset)
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

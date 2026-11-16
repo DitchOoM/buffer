@@ -7,6 +7,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -60,11 +61,11 @@ public object TlsHandshakeCodec : Codec<TlsHandshake> {
 
   override fun sizeHint(`value`: TlsHandshake, context: EncodeContext): Int = 4
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 1) return FramePeek.needsMoreData
     __offset += 1
-    if (stream.available() - baseOffset < __offset + 3) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 3) return FramePeek.needsMoreData
     val lengthB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
     val lengthB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val lengthB2 = stream.peekByte(baseOffset + __offset + 2).toInt() and 0xFF
@@ -77,8 +78,10 @@ public object TlsHandshakeCodec : Codec<TlsHandshake> {
     if (bodyBytes < 0 || bodyBytes > Int.MAX_VALUE - __offset) {
       throw DecodeException(fieldPath = "TlsHandshake.body", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + bodyBytes.toLong()}""")
     }
-    if (stream.available() - baseOffset < __offset + bodyBytes) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + bodyBytes) return FramePeek.declaredIncomplete(__offset + bodyBytes)
     __offset += bodyBytes
-    return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData
+    return FramePeek.forDeclaredSize(__offset, stream.available() - baseOffset)
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

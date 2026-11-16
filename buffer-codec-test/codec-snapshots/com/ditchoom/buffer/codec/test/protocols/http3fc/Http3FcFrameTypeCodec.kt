@@ -5,6 +5,7 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec
@@ -35,12 +36,14 @@ public object Http3FcFrameTypeCodec : Codec<Http3FcFrameType> {
 
   override fun sizeHint(`value`: Http3FcFrameType, context: EncodeContext): Int = 0
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    val __rawFrame = QuicVarintCodec.peekFrameSize(stream, baseOffset + 0)
-    if (__rawFrame !is PeekResult.Complete) {
-      return __rawFrame
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+    val __rawFrame = QuicVarintCodec.peekFrame(stream, baseOffset + 0)
+    if (!__rawFrame.isComplete) {
+      return __rawFrame.withoutDeclaredSize()
     }
-    val __total = 0 + __rawFrame.bytes + 0
-    return if (stream.available() - baseOffset >= __total) PeekResult.Complete(__total) else PeekResult.NeedsMoreData
+    val __total = 0 + __rawFrame.size + 0
+    return FramePeek.forDeclaredSize(__total, stream.available() - baseOffset)
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

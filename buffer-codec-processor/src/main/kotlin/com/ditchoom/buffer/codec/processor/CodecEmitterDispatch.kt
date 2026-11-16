@@ -523,43 +523,34 @@ internal fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
     // and return, bypassing discriminator routing.
     shape.customPeek?.let { customPeek ->
         return FunSpec
-            .builder("peekFrameSize")
+            .builder("peekFrame")
             .addModifiers(KModifier.OVERRIDE)
             .addParameter("stream", STREAM_PROCESSOR_CN)
             .addParameter("baseOffset", INT)
-            .returns(PEEK_RESULT_CN)
-            .addStatement("return %T.peekFrameSize(stream, baseOffset)", customPeek)
+            .returns(FRAME_PEEK_CN)
+            .addStatement("return %T.peekFrame(stream, baseOffset)", customPeek)
             .build()
     }
 
     when (val disc = shape.discriminator) {
         Discriminator.FixedByte -> {
             body.addStatement(
-                "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
+                "if (stream.available() - baseOffset < %L) return %T.needsMoreData",
                 disc.wireWidth.requireFixed("dispatch peek"),
-                PEEK_RESULT_CN,
+                FRAME_PEEK_CN,
             )
             body.addStatement(
                 "val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF",
             )
             body.beginControlFlow("return when (discriminator)")
             for (variant in shape.variants) {
-                body.beginControlFlow(
-                    "%L ->",
+                // The variant's body excludes the discriminator byte, so its answer
+                // is shifted by that one byte; incomplete states pass through.
+                body.addStatement(
+                    "%L -> %L.peekFrame(stream, baseOffset + 1).withPrefix(1)",
                     variant.dispatchLabel(shape.discriminator.labelFormat),
-                )
-                body.beginControlFlow(
-                    "when (val inner = %L.peekFrameSize(stream, baseOffset + 1))",
                     variant.codecReceiver(),
                 )
-                body.addStatement(
-                    "is %T.Complete -> %T.Complete(1 + inner.bytes)",
-                    PEEK_RESULT_CN,
-                    PEEK_RESULT_CN,
-                )
-                body.addStatement("else -> inner")
-                body.endControlFlow()
-                body.endControlFlow()
             }
             body.beginControlFlow("else ->")
             body.addStatement(
@@ -574,9 +565,9 @@ internal fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
         }
         is Discriminator.ValueClass -> {
             body.addStatement(
-                "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
+                "if (stream.available() - baseOffset < %L) return %T.needsMoreData",
                 disc.wireWidth.requireFixed("dispatch peek"),
-                PEEK_RESULT_CN,
+                FRAME_PEEK_CN,
             )
             // Peek the discriminator's inner-scalar bytes at baseOffset and
             // reconstruct the value class — the same path the value-class
@@ -604,7 +595,7 @@ internal fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
                 // Variant.peek counts the discriminator bytes in its own
                 // header field, so we delegate at baseOffset, not + 1.
                 body.addStatement(
-                    "%L -> %L.peekFrameSize(stream, baseOffset)",
+                    "%L -> %L.peekFrame(stream, baseOffset)",
                     variant.dispatchLabel(shape.discriminator.labelFormat),
                     variant.codecReceiver(),
                 )
@@ -627,19 +618,19 @@ internal fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
             // VariableLengthCodec). If the prefix is too short to frame the
             // discriminator, propagate NeedsMoreData / NoFraming unchanged.
             body.addStatement(
-                "val __discFrame = %T.peekFrameSize(stream, baseOffset)",
+                "val __discFrame = %T.peekFrame(stream, baseOffset)",
                 disc.codecClassName,
             )
-            body.beginControlFlow("if (__discFrame !is %T.Complete)", PEEK_RESULT_CN)
-            body.addStatement("return __discFrame")
+            body.beginControlFlow("if (!__discFrame.isComplete)")
+            body.addStatement("return __discFrame.withoutDeclaredSize()")
             body.endControlFlow()
             // Decode the discriminator from a non-consuming view of exactly
             // its measured width to recover the dispatch value, then PURE-
             // DELEGATE to the variant at baseOffset (the variant re-reads the
             // self-delimiting discriminator as its first field, so no `1 +`).
             body.addStatement(
-                "val __discView = stream.peekBuffer(baseOffset, __discFrame.bytes) ?: return %T.NeedsMoreData",
-                PEEK_RESULT_CN,
+                "val __discView = stream.peekBuffer(baseOffset, __discFrame.size) ?: return %T.needsMoreData",
+                FRAME_PEEK_CN,
             )
             body.beginControlFlow("val __dispatchValue = try")
             body.addStatement(
@@ -663,7 +654,7 @@ internal fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
             body.beginControlFlow("return when (__dispatchValue)")
             for (variant in shape.variants) {
                 body.addStatement(
-                    "%L -> %L.peekFrameSize(stream, baseOffset)",
+                    "%L -> %L.peekFrame(stream, baseOffset)",
                     variant.dispatchLabel(shape.discriminator.labelFormat),
                     variant.codecReceiver(),
                 )
@@ -682,11 +673,11 @@ internal fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
     }
 
     return FunSpec
-        .builder("peekFrameSize")
+        .builder("peekFrame")
         .addModifiers(KModifier.OVERRIDE)
         .addParameter("stream", STREAM_PROCESSOR_CN)
         .addParameter("baseOffset", INT)
-        .returns(PEEK_RESULT_CN)
+        .returns(FRAME_PEEK_CN)
         .addCode(body.build())
         .build()
 }
@@ -742,12 +733,12 @@ internal fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
                 builder.addFunction(buildDispatchDecodeFun(shape))
                 if (framed) {
                     builder.addFunction(buildFramedByDispatchOnEncodeFun(shape, parentTypeRef))
-                    builder.addFunction(buildFramedByDispatchOnPeekFun(shape))
+                    builder.addFunctions(withLegacyPeekFrameSize(buildFramedByDispatchOnPeekFun(shape)))
                 } else {
                     builder.addFunction(buildDispatchEncodeFun(shape))
                     builder.addFunction(buildDispatchWireSizeFun(shape))
                     builder.addFunction(buildDispatchSizeHintFun(shape))
-                    builder.addFunction(buildDispatchPeekFun(shape))
+                    builder.addFunctions(withLegacyPeekFrameSize(buildDispatchPeekFun(shape)))
                 }
                 builder.build()
             }
@@ -806,6 +797,7 @@ internal fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
                     // generic codec's and hoists the same way (#348).
                     val peek = buildFramedByDispatchOnPeekFun(shape)
                     builder.addFunction(memberPeekFun(peek))
+                    builder.addFunction(legacyPeekFrameSizeFun(peek))
                     builder.addCodecCompanion(peek = peek, aggregator = aggregator)
                 } else {
                     builder.addFunction(buildDispatchEncodeFun(shape))
@@ -816,7 +808,7 @@ internal fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
                     // constructor-injected instance field. Member-only, and no
                     // `peek` passed below — `requireCodecIndependentPeek` would
                     // reject this body on sight.
-                    builder.addFunction(buildDispatchPeekFun(shape))
+                    builder.addFunctions(withLegacyPeekFrameSize(buildDispatchPeekFun(shape)))
                     builder.addCodecCompanion(aggregator = aggregator)
                 }
                 builder.build()
@@ -904,11 +896,11 @@ internal fun buildFramedByDispatchOnPeekFun(shape: DispatchShape): FunSpec {
             ?: error("buildFramedByDispatchOnPeekFun called on shape without @FramedBy")
     val builder =
         FunSpec
-            .builder("peekFrameSize")
+            .builder("peekFrame")
             .addModifiers(KModifier.OVERRIDE)
             .addParameter("stream", STREAM_PROCESSOR_CN)
             .addParameter("baseOffset", INT)
-            .returns(PEEK_RESULT_CN)
+            .returns(FRAME_PEEK_CN)
     val body = CodeBlock.builder()
     val headerWidthExpr: String
     if (shape.discriminator is Discriminator.Varint) {
@@ -919,37 +911,37 @@ internal fun buildFramedByDispatchOnPeekFun(shape: DispatchShape): FunSpec {
         // measured offset with the framing codec's worst-case budget.
         val disc = shape.discriminator as Discriminator.Varint
         body.addStatement(
-            "val __headerFrame = %T.peekFrameSize(stream, baseOffset)",
+            "val __headerFrame = %T.peekFrame(stream, baseOffset)",
             disc.codecClassName,
         )
-        body.beginControlFlow("if (__headerFrame !is %T.Complete)", PEEK_RESULT_CN)
-        body.addStatement("return __headerFrame")
+        body.beginControlFlow("if (!__headerFrame.isComplete)")
+        body.addStatement("return __headerFrame.withoutDeclaredSize()")
         body.endControlFlow()
-        body.addStatement("val __headerWireWidth = __headerFrame.bytes")
+        body.addStatement("val __headerWireWidth = __headerFrame.size")
         body.addStatement(
-            "if (stream.available() - baseOffset < __headerWireWidth + 1) return %T.NeedsMoreData",
-            PEEK_RESULT_CN,
+            "if (stream.available() - baseOffset < __headerWireWidth + 1) return %T.needsMoreData",
+            FRAME_PEEK_CN,
         )
         body.addStatement(
             "val __framingPeek = stream.peekBuffer(baseOffset + __headerWireWidth, %T.maxWireSize) " +
-                "?: return %T.NeedsMoreData",
+                "?: return %T.needsMoreData",
             framedBy.codecClassName,
-            PEEK_RESULT_CN,
+            FRAME_PEEK_CN,
         )
         headerWidthExpr = "__headerWireWidth"
     } else {
         val headerWireWidth = shape.discriminator.wireWidth.requireFixed("dispatchOnDiscriminator")
         body.addStatement(
-            "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
+            "if (stream.available() - baseOffset < %L) return %T.needsMoreData",
             headerWireWidth + 1,
-            PEEK_RESULT_CN,
+            FRAME_PEEK_CN,
         )
         val peekBudget = 5
         body.addStatement(
-            "val __framingPeek = stream.peekBuffer(baseOffset + %L, %L) ?: return %T.NeedsMoreData",
+            "val __framingPeek = stream.peekBuffer(baseOffset + %L, %L) ?: return %T.needsMoreData",
             headerWireWidth,
             peekBudget,
-            PEEK_RESULT_CN,
+            FRAME_PEEK_CN,
         )
         headerWidthExpr = headerWireWidth.toString()
     }
@@ -964,11 +956,11 @@ internal fun buildFramedByDispatchOnPeekFun(shape: DispatchShape): FunSpec {
     body.nextControlFlow("catch (__e: %T)", ClassName("kotlin", "Throwable"))
     body.beginControlFlow("when (__e::class.simpleName)")
     body.addStatement(
-        "%S, %S, %S -> return %T.NeedsMoreData",
+        "%S, %S, %S -> return %T.needsMoreData",
         "BufferUnderflowException",
         "IndexOutOfBoundsException",
         "ArrayIndexOutOfBoundsException",
-        PEEK_RESULT_CN,
+        FRAME_PEEK_CN,
     )
     body.addStatement("else -> throw __e")
     body.endControlFlow()
@@ -981,9 +973,8 @@ internal fun buildFramedByDispatchOnPeekFun(shape: DispatchShape): FunSpec {
         headerWidthExpr,
     )
     body.addStatement(
-        "return if (stream.available() - baseOffset >= __total) %T.Complete(__total) else %T.NeedsMoreData",
-        PEEK_RESULT_CN,
-        PEEK_RESULT_CN,
+        "return %T.forDeclaredSize(__total, stream.available() - baseOffset)",
+        FRAME_PEEK_CN,
     )
     body.nextControlFlow("finally")
     body.addStatement(

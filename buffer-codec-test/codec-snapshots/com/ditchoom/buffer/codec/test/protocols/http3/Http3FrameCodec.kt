@@ -7,6 +7,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -56,12 +57,12 @@ public object Http3FrameCodec : Codec<Http3Frame> {
     is Http3Frame.Extension -> Http3FrameExtensionCodec.sizeHint(value, context)
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    val __discFrame = Http3FrameTypeCodec.peekFrameSize(stream, baseOffset)
-    if (__discFrame !is PeekResult.Complete) {
-      return __discFrame
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+    val __discFrame = Http3FrameTypeCodec.peekFrame(stream, baseOffset)
+    if (!__discFrame.isComplete) {
+      return __discFrame.withoutDeclaredSize()
     }
-    val __discView = stream.peekBuffer(baseOffset, __discFrame.bytes) ?: return PeekResult.NeedsMoreData
+    val __discView = stream.peekBuffer(baseOffset, __discFrame.size) ?: return FramePeek.needsMoreData
     val __dispatchValue = try {
       val __discriminator = Http3FrameTypeCodec.decode(__discView, DecodeContext.Empty)
       __discriminator.type
@@ -69,13 +70,15 @@ public object Http3FrameCodec : Codec<Http3Frame> {
       (__discView as? PlatformBuffer)?.freeNativeMemory()
     }
     return when (__dispatchValue) {
-      0 -> Http3FrameDataCodec.peekFrameSize(stream, baseOffset)
-      1 -> Http3FrameHeadersCodec.peekFrameSize(stream, baseOffset)
-      4 -> Http3FrameSettingsCodec.peekFrameSize(stream, baseOffset)
-      64 -> Http3FrameExtensionCodec.peekFrameSize(stream, baseOffset)
+      0 -> Http3FrameDataCodec.peekFrame(stream, baseOffset)
+      1 -> Http3FrameHeadersCodec.peekFrame(stream, baseOffset)
+      4 -> Http3FrameSettingsCodec.peekFrame(stream, baseOffset)
+      64 -> Http3FrameExtensionCodec.peekFrame(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "Http3Frame.discriminator", bufferPosition = baseOffset, expected = "one of {0, 1, 4, 64}", actual = """${__dispatchValue}""")
       }
     }
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

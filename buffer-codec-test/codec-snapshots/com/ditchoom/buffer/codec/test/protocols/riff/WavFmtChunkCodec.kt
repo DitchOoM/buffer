@@ -8,6 +8,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -91,11 +92,11 @@ public object WavFmtChunkCodec : Codec<WavFmtChunk> {
 
   override fun sizeHint(`value`: WavFmtChunk, context: EncodeContext): Int = 8 + WavFmtBodyCodec.sizeHint(value.body, context)
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 4) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 4) return FramePeek.needsMoreData
     __offset += 4
-    if (stream.available() - baseOffset < __offset + 4) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 4) return FramePeek.needsMoreData
     val bodyPrefixB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
     val bodyPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val bodyPrefixB2 = stream.peekByte(baseOffset + __offset + 2).toInt() and 0xFF
@@ -105,6 +106,8 @@ public object WavFmtChunkCodec : Codec<WavFmtChunk> {
       throw DecodeException(fieldPath = "WavFmtChunk.body", bufferPosition = baseOffset + __offset, expected = "__offset + 4 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 4 + bodyPrefix.toInt()}""")
     }
     __offset += 4 + bodyPrefix.toInt()
-    return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData
+    return FramePeek.forDeclaredSize(__offset, stream.available() - baseOffset)
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

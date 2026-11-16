@@ -82,7 +82,7 @@ private fun grownCapacityOrRethrow(
  * still incomplete). A `null` return is the streaming loop's signal to pull more transport bytes,
  * [StreamProcessor.append] them, and retry.
  *
- * Uses this codec's generated [FrameDetector.peekFrameSize] to size the frame without consuming
+ * Uses this codec's [FrameDetector.peekFrame] (allocation-free for generated codecs) to size the frame without consuming
  * bytes, then decodes exactly that many via [StreamProcessor.readBufferScoped] so the sliced frame
  * is released back to the pool after [Decoder.decode] returns.
  *
@@ -103,23 +103,35 @@ public fun <T> Codec<T>.readFrame(
     stream: StreamProcessor,
     context: DecodeContext = DecodeContext.Empty,
 ): T? =
-    when (val peek = peekFrameSize(stream)) {
-        is PeekResult.Complete -> {
-            val maxFrameBytes = context[MaxFrameBytesKey] ?: DEFAULT_MAX_FRAME_BYTES
-            if (peek.bytes !in 1..maxFrameBytes) {
-                throw FrameTooLargeException(declaredBytes = peek.bytes, maxBytes = maxFrameBytes)
+    peekFrame(stream).let { peek ->
+        when (peek.kind) {
+            FramePeekKind.Complete -> {
+                val size = peek.size
+                checkFrameSize(size, context)
+                if (stream.available() < size) null else stream.readBufferScoped(size) { decode(this, context) }
             }
-            if (stream.available() < peek.bytes) {
+            // The codec already knows how large the frame will be; reject an oversized or
+            // malformed declaration now instead of buffering toward it (issue #308).
+            FramePeekKind.DeclaredIncomplete -> {
+                checkFrameSize(peek.size, context)
                 null
-            } else {
-                stream.readBufferScoped(peek.bytes) { decode(this, context) }
             }
+            FramePeekKind.NeedsMoreData -> null
+            FramePeekKind.NoFraming ->
+                throw IllegalStateException(
+                    "Codec ${this::class.simpleName} does not support frame detection " +
+                        "(peekFrameSize returned NoFraming); its wire format has no determinable frame " +
+                        "size. Streaming requires a self-delimiting format (e.g. a length prefix).",
+                )
         }
-        PeekResult.NeedsMoreData -> null
-        PeekResult.NoFraming ->
-            throw IllegalStateException(
-                "Codec ${this::class.simpleName} does not support frame detection " +
-                    "(peekFrameSize returned NoFraming); its wire format has no determinable frame " +
-                    "size. Streaming requires a self-delimiting format (e.g. a length prefix).",
-            )
     }
+
+private fun checkFrameSize(
+    declaredBytes: Int,
+    context: DecodeContext,
+) {
+    val maxFrameBytes = context[MaxFrameBytesKey] ?: DEFAULT_MAX_FRAME_BYTES
+    if (declaredBytes !in 1..maxFrameBytes) {
+        throw FrameTooLargeException(declaredBytes = declaredBytes, maxBytes = maxFrameBytes)
+    }
+}

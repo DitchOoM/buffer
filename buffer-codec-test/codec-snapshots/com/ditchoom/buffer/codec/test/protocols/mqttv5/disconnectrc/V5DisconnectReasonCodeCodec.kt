@@ -6,6 +6,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -151,43 +152,45 @@ public object V5DisconnectReasonCodeCodec : Codec<V5DisconnectReasonCode> {
     is V5DisconnectReasonCode.WildcardSubscriptionsNotSupported -> V5DisconnectReasonCodeWildcardSubscriptionsNotSupportedCodec.sizeHint(value, context)
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+    if (stream.available() - baseOffset < 1) return FramePeek.needsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()
     val __discriminator = V5DisconnectReasonCodeRaw(__discRaw)
     val __dispatchValue = __discriminator.id
     return when (__dispatchValue) {
-      0 -> V5DisconnectReasonCodeNormalDisconnectionCodec.peekFrameSize(stream, baseOffset)
-      4 -> V5DisconnectReasonCodeDisconnectWithWillMessageCodec.peekFrameSize(stream, baseOffset)
-      128 -> V5DisconnectReasonCodeUnspecifiedErrorCodec.peekFrameSize(stream, baseOffset)
-      129 -> V5DisconnectReasonCodeMalformedPacketCodec.peekFrameSize(stream, baseOffset)
-      130 -> V5DisconnectReasonCodeProtocolErrorCodec.peekFrameSize(stream, baseOffset)
-      131 -> V5DisconnectReasonCodeImplementationSpecificErrorCodec.peekFrameSize(stream, baseOffset)
-      135 -> V5DisconnectReasonCodeNotAuthorizedCodec.peekFrameSize(stream, baseOffset)
-      137 -> V5DisconnectReasonCodeServerBusyCodec.peekFrameSize(stream, baseOffset)
-      139 -> V5DisconnectReasonCodeServerShuttingDownCodec.peekFrameSize(stream, baseOffset)
-      141 -> V5DisconnectReasonCodeKeepAliveTimeoutCodec.peekFrameSize(stream, baseOffset)
-      142 -> V5DisconnectReasonCodeSessionTakenOverCodec.peekFrameSize(stream, baseOffset)
-      143 -> V5DisconnectReasonCodeTopicFilterInvalidCodec.peekFrameSize(stream, baseOffset)
-      144 -> V5DisconnectReasonCodeTopicNameInvalidCodec.peekFrameSize(stream, baseOffset)
-      147 -> V5DisconnectReasonCodeReceiveMaximumExceededCodec.peekFrameSize(stream, baseOffset)
-      148 -> V5DisconnectReasonCodeTopicAliasInvalidCodec.peekFrameSize(stream, baseOffset)
-      149 -> V5DisconnectReasonCodePacketTooLargeCodec.peekFrameSize(stream, baseOffset)
-      151 -> V5DisconnectReasonCodeQuotaExceededCodec.peekFrameSize(stream, baseOffset)
-      152 -> V5DisconnectReasonCodeAdministrativeActionCodec.peekFrameSize(stream, baseOffset)
-      153 -> V5DisconnectReasonCodePayloadFormatInvalidCodec.peekFrameSize(stream, baseOffset)
-      154 -> V5DisconnectReasonCodeRetainNotSupportedCodec.peekFrameSize(stream, baseOffset)
-      155 -> V5DisconnectReasonCodeQoSNotSupportedCodec.peekFrameSize(stream, baseOffset)
-      156 -> V5DisconnectReasonCodeUseAnotherServerCodec.peekFrameSize(stream, baseOffset)
-      157 -> V5DisconnectReasonCodeServerMovedCodec.peekFrameSize(stream, baseOffset)
-      158 -> V5DisconnectReasonCodeSharedSubscriptionsNotSupportedCodec.peekFrameSize(stream, baseOffset)
-      159 -> V5DisconnectReasonCodeConnectionRateExceededCodec.peekFrameSize(stream, baseOffset)
-      160 -> V5DisconnectReasonCodeMaximumConnectTimeCodec.peekFrameSize(stream, baseOffset)
-      161 -> V5DisconnectReasonCodeSubscriptionIdentifiersNotSupportedCodec.peekFrameSize(stream, baseOffset)
-      162 -> V5DisconnectReasonCodeWildcardSubscriptionsNotSupportedCodec.peekFrameSize(stream, baseOffset)
+      0 -> V5DisconnectReasonCodeNormalDisconnectionCodec.peekFrame(stream, baseOffset)
+      4 -> V5DisconnectReasonCodeDisconnectWithWillMessageCodec.peekFrame(stream, baseOffset)
+      128 -> V5DisconnectReasonCodeUnspecifiedErrorCodec.peekFrame(stream, baseOffset)
+      129 -> V5DisconnectReasonCodeMalformedPacketCodec.peekFrame(stream, baseOffset)
+      130 -> V5DisconnectReasonCodeProtocolErrorCodec.peekFrame(stream, baseOffset)
+      131 -> V5DisconnectReasonCodeImplementationSpecificErrorCodec.peekFrame(stream, baseOffset)
+      135 -> V5DisconnectReasonCodeNotAuthorizedCodec.peekFrame(stream, baseOffset)
+      137 -> V5DisconnectReasonCodeServerBusyCodec.peekFrame(stream, baseOffset)
+      139 -> V5DisconnectReasonCodeServerShuttingDownCodec.peekFrame(stream, baseOffset)
+      141 -> V5DisconnectReasonCodeKeepAliveTimeoutCodec.peekFrame(stream, baseOffset)
+      142 -> V5DisconnectReasonCodeSessionTakenOverCodec.peekFrame(stream, baseOffset)
+      143 -> V5DisconnectReasonCodeTopicFilterInvalidCodec.peekFrame(stream, baseOffset)
+      144 -> V5DisconnectReasonCodeTopicNameInvalidCodec.peekFrame(stream, baseOffset)
+      147 -> V5DisconnectReasonCodeReceiveMaximumExceededCodec.peekFrame(stream, baseOffset)
+      148 -> V5DisconnectReasonCodeTopicAliasInvalidCodec.peekFrame(stream, baseOffset)
+      149 -> V5DisconnectReasonCodePacketTooLargeCodec.peekFrame(stream, baseOffset)
+      151 -> V5DisconnectReasonCodeQuotaExceededCodec.peekFrame(stream, baseOffset)
+      152 -> V5DisconnectReasonCodeAdministrativeActionCodec.peekFrame(stream, baseOffset)
+      153 -> V5DisconnectReasonCodePayloadFormatInvalidCodec.peekFrame(stream, baseOffset)
+      154 -> V5DisconnectReasonCodeRetainNotSupportedCodec.peekFrame(stream, baseOffset)
+      155 -> V5DisconnectReasonCodeQoSNotSupportedCodec.peekFrame(stream, baseOffset)
+      156 -> V5DisconnectReasonCodeUseAnotherServerCodec.peekFrame(stream, baseOffset)
+      157 -> V5DisconnectReasonCodeServerMovedCodec.peekFrame(stream, baseOffset)
+      158 -> V5DisconnectReasonCodeSharedSubscriptionsNotSupportedCodec.peekFrame(stream, baseOffset)
+      159 -> V5DisconnectReasonCodeConnectionRateExceededCodec.peekFrame(stream, baseOffset)
+      160 -> V5DisconnectReasonCodeMaximumConnectTimeCodec.peekFrame(stream, baseOffset)
+      161 -> V5DisconnectReasonCodeSubscriptionIdentifiersNotSupportedCodec.peekFrame(stream, baseOffset)
+      162 -> V5DisconnectReasonCodeWildcardSubscriptionsNotSupportedCodec.peekFrame(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "V5DisconnectReasonCode.discriminator", bufferPosition = baseOffset, expected = "one of {0, 4, 128, 129, 130, 131, 135, 137, 139, 141, 142, 143, 144, 147, 148, 149, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162}", actual = """${__dispatchValue}""")
       }
     }
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

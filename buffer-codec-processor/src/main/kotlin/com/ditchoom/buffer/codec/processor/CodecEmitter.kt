@@ -244,7 +244,7 @@ internal class CodecEmitter(
                 .addSuperinterface(FRAME_DETECTOR_CN)
                 .addFunction(buildFramedByDecodeFun(shape, framedBy))
                 .addFunction(buildFramedByEncodeFun(shape, framedBy))
-                .addFunction(buildFramedByPeekFrameFun(shape, framedBy))
+                .addFunctions(withLegacyPeekFrameSize(buildFramedByPeekFrameFun(shape, framedBy)))
                 .build()
         return FileSpec
             .builder(shape.packageName, shape.codecSimpleName)
@@ -392,11 +392,11 @@ internal class CodecEmitter(
         val variableAfter = afterField as? FieldSpec.UseCodecScalar
         val builder =
             FunSpec
-                .builder("peekFrameSize")
+                .builder("peekFrame")
                 .addModifiers(KModifier.OVERRIDE)
                 .addParameter("stream", STREAM_PROCESSOR_CN)
                 .addParameter("baseOffset", INT)
-                .returns(PEEK_RESULT_CN)
+                .returns(FRAME_PEEK_CN)
         val body = CodeBlock.builder()
         if (variableAfter != null) {
             // Variable-width header (varint discriminator): measure the
@@ -405,22 +405,22 @@ internal class CodecEmitter(
             // the framing codec's declared worst case rather than the
             // fixed-path literal (a QUIC varint length is 1..8 bytes).
             body.addStatement(
-                "val __headerFrame = %T.peekFrameSize(stream, baseOffset)",
+                "val __headerFrame = %T.peekFrame(stream, baseOffset)",
                 variableAfter.codecType,
             )
-            body.beginControlFlow("if (__headerFrame !is %T.Complete)", PEEK_RESULT_CN)
-            body.addStatement("return __headerFrame")
+            body.beginControlFlow("if (!__headerFrame.isComplete)")
+            body.addStatement("return __headerFrame.withoutDeclaredSize()")
             body.endControlFlow()
-            body.addStatement("val __headerWireWidth = __headerFrame.bytes")
+            body.addStatement("val __headerWireWidth = __headerFrame.size")
             body.addStatement(
-                "if (stream.available() - baseOffset < __headerWireWidth + 1) return %T.NeedsMoreData",
-                PEEK_RESULT_CN,
+                "if (stream.available() - baseOffset < __headerWireWidth + 1) return %T.needsMoreData",
+                FRAME_PEEK_CN,
             )
             body.addStatement(
                 "val __framingPeek = stream.peekBuffer(baseOffset + __headerWireWidth, %T.maxWireSize) " +
-                    "?: return %T.NeedsMoreData",
+                    "?: return %T.needsMoreData",
                 framedBy.codecClassName,
-                PEEK_RESULT_CN,
+                FRAME_PEEK_CN,
             )
             return buildFramedByPeekFrameTail(builder, body, framedBy, headerWidthExpr = "__headerWireWidth")
         }
@@ -431,19 +431,19 @@ internal class CodecEmitter(
         // attempting the codec read. Wider VBI continuations are caught
         // by the codec's underflow → NeedsMoreData fallback below.
         body.addStatement(
-            "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
+            "if (stream.available() - baseOffset < %L) return %T.needsMoreData",
             headerWireWidth + 1,
-            PEEK_RESULT_CN,
+            FRAME_PEEK_CN,
         )
         // peekBuffer needs a budget large enough for the prefix codec's
         // worst case. MqttRemainingLengthCodec is 1..4 bytes; allow 5 to
         // mirror the emit's UInt VBI peek budget.
         val peekBudget = 5
         body.addStatement(
-            "val __framingPeek = stream.peekBuffer(baseOffset + %L, %L) ?: return %T.NeedsMoreData",
+            "val __framingPeek = stream.peekBuffer(baseOffset + %L, %L) ?: return %T.needsMoreData",
             headerWireWidth,
             peekBudget,
-            PEEK_RESULT_CN,
+            FRAME_PEEK_CN,
         )
         return buildFramedByPeekFrameTail(builder, body, framedBy, headerWidthExpr = headerWireWidth.toString())
     }
@@ -473,11 +473,11 @@ internal class CodecEmitter(
         body.nextControlFlow("catch (__e: %T)", ClassName("kotlin", "Throwable"))
         body.beginControlFlow("when (__e::class.simpleName)")
         body.addStatement(
-            "%S, %S, %S -> return %T.NeedsMoreData",
+            "%S, %S, %S -> return %T.needsMoreData",
             "BufferUnderflowException",
             "IndexOutOfBoundsException",
             "ArrayIndexOutOfBoundsException",
-            PEEK_RESULT_CN,
+            FRAME_PEEK_CN,
         )
         body.addStatement("else -> throw __e")
         body.endControlFlow()
@@ -490,9 +490,8 @@ internal class CodecEmitter(
             headerWidthExpr,
         )
         body.addStatement(
-            "return if (stream.available() - baseOffset >= __total) %T.Complete(__total) else %T.NeedsMoreData",
-            PEEK_RESULT_CN,
-            PEEK_RESULT_CN,
+            "return %T.forDeclaredSize(__total, stream.available() - baseOffset)",
+            FRAME_PEEK_CN,
         )
         body.nextControlFlow("finally")
         body.addStatement(
@@ -593,7 +592,7 @@ internal class CodecEmitter(
                     // An `object` codec is already its own static receiver, so
                     // the body stays on it — no companion needed. This is the
                     // placement a class-shaped codec's companion mirrors.
-                    .addFunction(buildPeekFrame(shape))
+                    .addFunctions(withLegacyPeekFrameSize(buildPeekFrame(shape)))
                     .also { builder ->
                         // Every codec carrying a typed payload field
                         // gets a `Partial` nested class plus a `partial(buffer,
@@ -649,6 +648,7 @@ internal class CodecEmitter(
             .addFunction(buildWireSizeFun(shape, parameterizedMessage))
             .addFunction(buildSizeHintFun(shape, parameterizedMessage))
             .addFunction(memberPeekFun(peek))
+            .addFunction(legacyPeekFrameSizeFun(peek))
             .also { builder ->
                 // For the (class) shape, `Partial` is a
                 // nested class (independent type parameter <P : Payload>) and
@@ -705,6 +705,7 @@ internal class CodecEmitter(
             .addFunction(buildFramedByDecodeFun(shape, framedBy, parameterizedMessage))
             .addFunction(buildFramedByEncodeFun(shape, framedBy, parameterizedMessage))
             .addFunction(memberPeekFun(peek))
+            .addFunction(legacyPeekFrameSizeFun(peek))
             .also { builder ->
                 // Same placement rule as the unframed generic codec, through the
                 // same helper: framing derives from the length prefix, never
@@ -2015,6 +2016,7 @@ internal fun TypeSpec.Builder.addCodecCompanion(
         // same-named function on it.
         companion.addSuperinterface(FRAME_DETECTOR_CN)
         companion.addFunction(peek)
+        companion.addFunction(legacyPeekFrameSizeFun(peek))
     }
     partial?.let { companion.addFunction(it) }
     return addType(companion.build())
@@ -2048,6 +2050,24 @@ internal fun memberPeekFun(peek: FunSpec): FunSpec =
             peek,
             peek.parameters.joinToString(", ") { it.name },
         ).build()
+
+/**
+ * The older `peekFrameSize` answered from the allocation-free `peekFrame`, so
+ * generated codecs keep satisfying [PeekResult] callers. [peek] is the
+ * `peekFrame` spec; the body lives there once and this forwards to it.
+ */
+internal fun legacyPeekFrameSizeFun(peek: FunSpec): FunSpec =
+    FunSpec
+        .builder("peekFrameSize")
+        .addModifiers(KModifier.OVERRIDE)
+        .addParameter("stream", STREAM_PROCESSOR_CN)
+        .addParameter("baseOffset", INT)
+        .returns(PEEK_RESULT_CN)
+        .addStatement("return %N(stream, baseOffset).toPeekResult()", peek)
+        .build()
+
+/** [peek] followed by its [legacyPeekFrameSizeFun], for placements that add both as members. */
+internal fun withLegacyPeekFrameSize(peek: FunSpec): List<FunSpec> = listOf(peek, legacyPeekFrameSizeFun(peek))
 
 /** Index of the (single) `DeferredPayload` field, or -1. */
 private fun CodecShape.payloadFieldIndex(): Int = fields.indexOfFirst { it is FieldSpec.DeferredPayload }

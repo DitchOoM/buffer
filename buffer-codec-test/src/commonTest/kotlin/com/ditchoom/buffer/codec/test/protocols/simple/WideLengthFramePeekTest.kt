@@ -7,6 +7,7 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeekKind
 import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.MaxFrameBytesKey
 import com.ditchoom.buffer.codec.PeekResult
@@ -76,16 +77,29 @@ class WideLengthFramePeekTest {
     }
 
     @Test
-    fun readFrameDoesNotYetBoundPreArrivalAccumulation() {
-        // Known gap, tracked in issue #308. The peek walk computes 8 MiB and then
-        // discards it — `NeedsMoreData` cannot say "known, but unsatisfied" — so
-        // `readFrame` never sees a `Complete` to check the ceiling against and
-        // returns null. A caller looping on that null keeps appending transport
-        // bytes for a frame the peer never intends to send. Closing this needs
-        // `PeekResult.Incomplete(requiredBytes)`, a v7 change.
+    fun readFrameRejectsAnOversizedDeclarationBeforeTheFrameArrives() {
+        // Issue #308. The peek walk computes 8 MiB + header and reports it as
+        // `DeclaredIncomplete`, so `readFrame` checks the ceiling now instead of
+        // returning null while a caller keeps appending bytes the peer never
+        // intends to send.
         val stream = streamOf(frameBytes(8u * 1024u * 1024u))
         try {
-            assertNull(WideLengthFrameCodec.readFrame(stream))
+            val thrown = assertFailsWith<FrameTooLargeException> { WideLengthFrameCodec.readFrame(stream) }
+            assertEquals(8 * 1024 * 1024 + 5, thrown.declaredBytes)
+        } finally {
+            stream.release()
+        }
+    }
+
+    @Test
+    fun peekFrameReportsTheDeclaredSizeOfAnIncompleteFrame() {
+        val stream = streamOf(frameBytes(64u))
+        try {
+            val peek = WideLengthFrameCodec.peekFrame(stream)
+            assertEquals(FramePeekKind.DeclaredIncomplete, peek.kind)
+            assertEquals(5 + 64, peek.size)
+            // The older API still reports the only incomplete state it has.
+            assertEquals(PeekResult.NeedsMoreData, WideLengthFrameCodec.peekFrameSize(stream))
         } finally {
             stream.release()
         }

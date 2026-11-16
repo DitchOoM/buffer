@@ -7,6 +7,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
@@ -53,32 +54,34 @@ public object Http3FrameHeadersCodec : Codec<Http3Frame.Headers> {
 
   override fun sizeHint(`value`: Http3Frame.Headers, context: EncodeContext): Int = 0
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
     var __priorBytes = 0
-    val __frameTypeFrame = Http3FrameTypeCodec.peekFrameSize(stream, baseOffset + __priorBytes)
-    if (__frameTypeFrame !is PeekResult.Complete) {
-      return __frameTypeFrame
+    val __frameTypeFrame = Http3FrameTypeCodec.peekFrame(stream, baseOffset + __priorBytes)
+    if (!__frameTypeFrame.isComplete) {
+      return __frameTypeFrame.withoutDeclaredSize()
     }
-    __priorBytes += __frameTypeFrame.bytes
-    if (stream.available() - baseOffset < __priorBytes + 1) return PeekResult.NeedsMoreData
-    val __lengthPeekView = stream.peekBuffer(baseOffset + __priorBytes, 10) ?: return PeekResult.NeedsMoreData
+    __priorBytes += __frameTypeFrame.size
+    if (stream.available() - baseOffset < __priorBytes + 1) return FramePeek.needsMoreData
+    val __lengthPeekView = stream.peekBuffer(baseOffset + __priorBytes, 10) ?: return FramePeek.needsMoreData
     try {
       val __lengthPriorPos = __lengthPeekView.position()
       val length = try {
         Http3LengthCodec.decode(__lengthPeekView, DecodeContext.Empty)
       } catch (__e: Throwable) {
         when (__e::class.simpleName) {
-          "BufferUnderflowException", "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException" -> return PeekResult.NeedsMoreData
+          "BufferUnderflowException", "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException" -> return FramePeek.needsMoreData
           else -> throw __e
         }
       }
       val __lengthWidth = __lengthPeekView.position() - __lengthPriorPos
       val __total = __priorBytes + __lengthWidth + length.toInt()
-      return if (stream.available() - baseOffset >= __total) PeekResult.Complete(__total) else PeekResult.NeedsMoreData
+      return FramePeek.forDeclaredSize(__total, stream.available() - baseOffset)
     } finally {
       (__lengthPeekView as? PlatformBuffer)?.freeNativeMemory()
     }
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 
   public fun partial(buffer: ReadBuffer, context: DecodeContext): Partial {
     val frameType = Http3FrameTypeCodec.decode(buffer, context)

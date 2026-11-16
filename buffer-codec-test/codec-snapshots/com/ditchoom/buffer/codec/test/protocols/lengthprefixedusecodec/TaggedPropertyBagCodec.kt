@@ -9,6 +9,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.LengthPrefixedListEncoder
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
@@ -87,24 +88,26 @@ public object TaggedPropertyBagCodec : Codec<TaggedPropertyBag> {
 
   override fun sizeHint(`value`: TaggedPropertyBag, context: EncodeContext): Int = 1
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 2) return PeekResult.NeedsMoreData
-    val __propertiesPeekView = stream.peekBuffer(baseOffset + 1, 5) ?: return PeekResult.NeedsMoreData
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+    if (stream.available() - baseOffset < 2) return FramePeek.needsMoreData
+    val __propertiesPeekView = stream.peekBuffer(baseOffset + 1, 5) ?: return FramePeek.needsMoreData
     try {
       val __propertiesPriorPos = __propertiesPeekView.position()
       val __propertiesLength = try {
         MqttRemainingLengthCodec.decode(__propertiesPeekView, DecodeContext.Empty)
       } catch (__e: Throwable) {
         when (__e::class.simpleName) {
-          "BufferUnderflowException", "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException" -> return PeekResult.NeedsMoreData
+          "BufferUnderflowException", "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException" -> return FramePeek.needsMoreData
           else -> throw __e
         }
       }
       val __propertiesWidth = __propertiesPeekView.position() - __propertiesPriorPos
       val __total = 1 + __propertiesWidth + __propertiesLength.toInt()
-      return if (stream.available() - baseOffset >= __total) PeekResult.Complete(__total) else PeekResult.NeedsMoreData
+      return FramePeek.forDeclaredSize(__total, stream.available() - baseOffset)
     } finally {
       (__propertiesPeekView as? PlatformBuffer)?.freeNativeMemory()
     }
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

@@ -7,6 +7,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -59,9 +60,9 @@ public object Http2FrameSettingsCodec : Codec<Http2Frame.Settings> {
 
   override fun sizeHint(`value`: Http2Frame.Settings, context: EncodeContext): Int = 9
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 4) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 4) return FramePeek.needsMoreData
     val headerRawB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
     val headerRawB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val headerRawB2 = stream.peekByte(baseOffset + __offset + 2).toInt() and 0xFF
@@ -69,16 +70,18 @@ public object Http2FrameSettingsCodec : Codec<Http2Frame.Settings> {
     val headerRaw = ((headerRawB0 shl 24) or (headerRawB1 shl 16) or (headerRawB2 shl 8) or headerRawB3).toUInt()
     val header = Http2LengthAndType(headerRaw)
     __offset += 4
-    if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 1) return FramePeek.needsMoreData
     __offset += 1
-    if (stream.available() - baseOffset < __offset + 4) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 4) return FramePeek.needsMoreData
     __offset += 4
     val entriesBytes = header.length
     if (entriesBytes < 0 || entriesBytes > Int.MAX_VALUE - __offset) {
       throw DecodeException(fieldPath = "Settings.entries", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + entriesBytes.toLong()}""")
     }
-    if (stream.available() - baseOffset < __offset + entriesBytes) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + entriesBytes) return FramePeek.declaredIncomplete(__offset + entriesBytes)
     __offset += entriesBytes
-    return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData
+    return FramePeek.forDeclaredSize(__offset, stream.available() - baseOffset)
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

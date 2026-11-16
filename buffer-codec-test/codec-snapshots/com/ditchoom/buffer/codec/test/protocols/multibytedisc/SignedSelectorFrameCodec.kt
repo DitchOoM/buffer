@@ -6,6 +6,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -47,8 +48,8 @@ public object SignedSelectorFrameCodec : Codec<SignedSelectorFrame> {
     is SignedSelectorFrame.Nine -> SignedSelectorFrameNineCodec.sizeHint(value, context)
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 8) return PeekResult.NeedsMoreData
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+    if (stream.available() - baseOffset < 8) return FramePeek.needsMoreData
     val __discRawB0 = stream.peekByte(baseOffset + 0).toLong() and 0xFFL
     val __discRawB1 = stream.peekByte(baseOffset + 0 + 1).toLong() and 0xFFL
     val __discRawB2 = stream.peekByte(baseOffset + 0 + 2).toLong() and 0xFFL
@@ -61,11 +62,13 @@ public object SignedSelectorFrameCodec : Codec<SignedSelectorFrame> {
     val __discriminator = SignedSelector(__discRaw)
     val __dispatchValue = __discriminator.kind
     return when (__dispatchValue) {
-      2 -> SignedSelectorFrameTwoCodec.peekFrameSize(stream, baseOffset)
-      9 -> SignedSelectorFrameNineCodec.peekFrameSize(stream, baseOffset)
+      2 -> SignedSelectorFrameTwoCodec.peekFrame(stream, baseOffset)
+      9 -> SignedSelectorFrameNineCodec.peekFrame(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "SignedSelectorFrame.discriminator", bufferPosition = baseOffset, expected = "one of {2, 9}", actual = """${__dispatchValue}""")
       }
     }
   }
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 }

@@ -9,6 +9,7 @@ import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.Decoder
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameDetector
+import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
@@ -77,7 +78,9 @@ public class DeferredDispatchFrameCommandCodec<P : Payload>(
 
   override fun sizeHint(`value`: DeferredDispatchFrame.Command<P>, context: EncodeContext): Int = 6
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = Companion.peekFrameSize(stream, baseOffset)
+  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek = Companion.peekFrame(stream, baseOffset)
+
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 
   public class Partial<P : Payload> internal constructor(
     public val counter: UShort,
@@ -110,11 +113,11 @@ public class DeferredDispatchFrameCommandCodec<P : Payload>(
   }
 
   public companion object : FrameDetector {
-    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+    override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
       var __offset = 0
-      if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData
+      if (stream.available() - baseOffset < __offset + 2) return FramePeek.needsMoreData
       __offset += 2
-      if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData
+      if (stream.available() - baseOffset < __offset + 2) return FramePeek.needsMoreData
       val payloadLengthB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
       val payloadLengthB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
       val payloadLength = ((payloadLengthB0 shl 8) or payloadLengthB1).toUInt().toUShort()
@@ -123,12 +126,14 @@ public class DeferredDispatchFrameCommandCodec<P : Payload>(
       if (payloadBytes < 0 || payloadBytes > Int.MAX_VALUE - __offset) {
         throw DecodeException(fieldPath = "Command.payload", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + payloadBytes.toLong()}""")
       }
-      if (stream.available() - baseOffset < __offset + payloadBytes) return PeekResult.NeedsMoreData
+      if (stream.available() - baseOffset < __offset + payloadBytes) return FramePeek.needsMoreData
       __offset += payloadBytes
-      if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData
+      if (stream.available() - baseOffset < __offset + 2) return FramePeek.needsMoreData
       __offset += 2
-      return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData
+      return FramePeek.forDeclaredSize(__offset, stream.available() - baseOffset)
     }
+
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
 
     public fun <P : Payload> partial(buffer: ReadBuffer, context: DecodeContext): Partial<P> {
       val __batch2 = buffer.readInt()
