@@ -1474,6 +1474,61 @@ public final class com/ditchoom/buffer/crypto/OptionalAead$Unavailable : com/dit
 	public fun toString ()Ljava/lang/String;
 }
 
+public abstract interface class com/ditchoom/buffer/crypto/Pbkdf2AsyncOps {
+	public abstract fun derive (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;IILcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun deriveInto (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;IILcom/ditchoom/buffer/WriteBuffer;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getPrf ()Lcom/ditchoom/buffer/crypto/Pbkdf2Prf;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/Pbkdf2BlockingOps : com/ditchoom/buffer/crypto/Pbkdf2AsyncOps {
+	public abstract fun deriveBlocking (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;IILcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/ReadBuffer;
+	public abstract fun deriveIntoBlocking (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;IILcom/ditchoom/buffer/WriteBuffer;)V
+}
+
+public final class com/ditchoom/buffer/crypto/Pbkdf2Kt {
+	public static final field PBKDF2_MAX_OUTPUT_BYTES I
+}
+
+public final class com/ditchoom/buffer/crypto/Pbkdf2Prf : java/lang/Enum {
+	public static final field HmacSha256 Lcom/ditchoom/buffer/crypto/Pbkdf2Prf;
+	public static final field HmacSha512 Lcom/ditchoom/buffer/crypto/Pbkdf2Prf;
+	public final fun getBlockBytes ()I
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/ditchoom/buffer/crypto/Pbkdf2Prf;
+	public static fun values ()[Lcom/ditchoom/buffer/crypto/Pbkdf2Prf;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/Pbkdf2Support {
+	public abstract fun getOps ()Lcom/ditchoom/buffer/crypto/Pbkdf2AsyncOps;
+}
+
+public final class com/ditchoom/buffer/crypto/Pbkdf2Support$AsyncOnly : com/ditchoom/buffer/crypto/Pbkdf2Support {
+	public fun <init> (Lcom/ditchoom/buffer/crypto/Pbkdf2AsyncOps;)V
+	public final fun component1 ()Lcom/ditchoom/buffer/crypto/Pbkdf2AsyncOps;
+	public final fun copy (Lcom/ditchoom/buffer/crypto/Pbkdf2AsyncOps;)Lcom/ditchoom/buffer/crypto/Pbkdf2Support$AsyncOnly;
+	public static synthetic fun copy$default (Lcom/ditchoom/buffer/crypto/Pbkdf2Support$AsyncOnly;Lcom/ditchoom/buffer/crypto/Pbkdf2AsyncOps;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/Pbkdf2Support$AsyncOnly;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getOps ()Lcom/ditchoom/buffer/crypto/Pbkdf2AsyncOps;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/Pbkdf2Support$Blocking : com/ditchoom/buffer/crypto/Pbkdf2Support {
+	public fun <init> (Lcom/ditchoom/buffer/crypto/Pbkdf2BlockingOps;)V
+	public final fun component1 ()Lcom/ditchoom/buffer/crypto/Pbkdf2BlockingOps;
+	public final fun copy (Lcom/ditchoom/buffer/crypto/Pbkdf2BlockingOps;)Lcom/ditchoom/buffer/crypto/Pbkdf2Support$Blocking;
+	public static synthetic fun copy$default (Lcom/ditchoom/buffer/crypto/Pbkdf2Support$Blocking;Lcom/ditchoom/buffer/crypto/Pbkdf2BlockingOps;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/Pbkdf2Support$Blocking;
+	public fun equals (Ljava/lang/Object;)Z
+	public synthetic fun getOps ()Lcom/ditchoom/buffer/crypto/Pbkdf2AsyncOps;
+	public fun getOps ()Lcom/ditchoom/buffer/crypto/Pbkdf2BlockingOps;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/Pbkdf2_jvmCommonKt {
+	public static final fun pbkdf2 (Lcom/ditchoom/buffer/crypto/CryptoCapabilities;Lcom/ditchoom/buffer/crypto/Pbkdf2Prf;)Lcom/ditchoom/buffer/crypto/Pbkdf2Support;
+}
+
 public abstract interface class com/ditchoom/buffer/crypto/PerUseAgreementCapable : com/ditchoom/buffer/crypto/UserAuthenticatedKeyProvider {
 	public abstract fun generateKeyAgreement (Lcom/ditchoom/buffer/crypto/KeyAgreementCurve;Lcom/ditchoom/buffer/crypto/UserAuthenticationPolicy$PerUse;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }

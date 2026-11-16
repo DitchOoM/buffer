@@ -115,6 +115,20 @@ static inline void bcl_hmac_final(HMAC_CTX *c, uint8_t *out) {
 }
 
 /* ===========================================================================
+ * PBKDF2 (RFC 8018) over HMAC-SHA-256 / HMAC-SHA-512. `md_bits` selects the digest.
+ * Returns BCL_OK, or BCL_ERR on an unknown digest or a BoringSSL failure.
+ * =========================================================================== */
+
+static inline int bcl_pbkdf2_hmac(int md_bits, const uint8_t *password, size_t password_len,
+                                  const uint8_t *salt, size_t salt_len, uint32_t iterations,
+                                  uint8_t *out, size_t out_len) {
+    const EVP_MD *md = md_bits == 256 ? EVP_sha256() : md_bits == 512 ? EVP_sha512() : NULL;
+    if (!md) return BCL_ERR;
+    return PKCS5_PBKDF2_HMAC((const char *)password, password_len, salt, salt_len, iterations,
+                             md, out_len, out) == 1 ? BCL_OK : BCL_ERR;
+}
+
+/* ===========================================================================
  * AEAD: AES-128/256-GCM and ChaCha20-Poly1305 (one-shot, RFC 5116 layout).
  * Tag is the trailing 16 bytes of the sealed output (EVP_AEAD seal appends it).
  * =========================================================================== */
