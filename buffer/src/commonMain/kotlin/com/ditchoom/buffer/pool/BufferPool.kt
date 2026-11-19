@@ -105,6 +105,17 @@ sealed interface BufferPool : BufferFactory {
     fun clear()
 
     /**
+     * Frees pooled buffers, largest first, until at most [targetBytes] remain pooled, and
+     * returns the number of bytes freed. Buffers currently acquired are untouched.
+     *
+     * The pool never trims itself; call this when the caller knows demand has dropped
+     * (a connection closed, a burst ended). `trim(0)` is equivalent to [clear].
+     *
+     * @throws IllegalArgumentException if [targetBytes] is negative
+     */
+    fun trim(targetBytes: Long): Long
+
+    /**
      * Whether this pool is safe for concurrent access from multiple threads/coroutines.
      *
      * A pool that is shared across coroutines — e.g. one passed to a socket/websocket, where a buffer
@@ -120,6 +131,8 @@ sealed interface BufferPool : BufferFactory {
          *
          * @param threadingMode Single-threaded (faster) or multi-threaded (thread-safe)
          * @param maxPoolSize Maximum buffers to keep in pool
+         * @param maxPooledBytes Maximum total capacity in bytes to keep in pool; a released buffer
+         *   that would exceed either this or [maxPoolSize] is freed instead of pooled
          * @param defaultBufferSize Default size for acquired buffers
          * @param factory Buffer factory for allocating new buffers
          */
@@ -128,6 +141,7 @@ sealed interface BufferPool : BufferFactory {
             maxPoolSize: Int = 64,
             defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
             factory: BufferFactory = BufferFactory.Default,
+            maxPooledBytes: Long = DEFAULT_MAX_POOLED_BYTES,
         ): BufferPool =
             // Never nest a pool inside a pool. `BufferPool : BufferFactory`, so a pool can be passed
             // as `factory`; wrapping it would produce PooledBuffer(inner = PooledBuffer(pool = inner),
@@ -138,15 +152,17 @@ sealed interface BufferPool : BufferFactory {
             (factory as? BufferPool)
                 ?: when (threadingMode) {
                     ThreadingMode.SingleThreaded ->
-                        SingleThreadedBufferPool(maxPoolSize, defaultBufferSize, factory)
+                        SingleThreadedBufferPool(maxPoolSize, maxPooledBytes, defaultBufferSize, factory)
                     ThreadingMode.MultiThreaded ->
-                        LockFreeBufferPool(maxPoolSize, defaultBufferSize, factory)
+                        LockFreeBufferPool(maxPoolSize, maxPooledBytes, defaultBufferSize, factory)
                 }
 
         /**
          * Creates a buffer pool with default single-threaded mode.
          *
          * @param maxPoolSize Maximum buffers to keep in pool
+         * @param maxPooledBytes Maximum total capacity in bytes to keep in pool; a released buffer
+         *   that would exceed either this or [maxPoolSize] is freed instead of pooled
          * @param defaultBufferSize Default size for acquired buffers
          * @param factory Buffer factory for allocating new buffers
          */
@@ -154,9 +170,26 @@ sealed interface BufferPool : BufferFactory {
             maxPoolSize: Int = 64,
             defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
             factory: BufferFactory = BufferFactory.Default,
+            maxPooledBytes: Long = DEFAULT_MAX_POOLED_BYTES,
         ): BufferPool =
             // See the threading-mode overload above: never nest a pool inside a pool.
-            (factory as? BufferPool) ?: SingleThreadedBufferPool(maxPoolSize, defaultBufferSize, factory)
+            (factory as? BufferPool)
+                ?: SingleThreadedBufferPool(maxPoolSize, maxPooledBytes, defaultBufferSize, factory)
+
+        @Deprecated("Kept so code compiled against an earlier version still links.", level = DeprecationLevel.HIDDEN)
+        operator fun invoke(
+            threadingMode: ThreadingMode = ThreadingMode.SingleThreaded,
+            maxPoolSize: Int = 64,
+            defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
+            factory: BufferFactory = BufferFactory.Default,
+        ): BufferPool = invoke(threadingMode, maxPoolSize, defaultBufferSize, factory, DEFAULT_MAX_POOLED_BYTES)
+
+        @Deprecated("Kept so code compiled against an earlier version still links.", level = DeprecationLevel.HIDDEN)
+        operator fun invoke(
+            maxPoolSize: Int = 64,
+            defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
+            factory: BufferFactory = BufferFactory.Default,
+        ): BufferPool = invoke(maxPoolSize, defaultBufferSize, factory, DEFAULT_MAX_POOLED_BYTES)
     }
 }
 
@@ -185,6 +218,7 @@ enum class ThreadingMode {
  * @property poolMisses Number of times a new buffer had to be allocated
  * @property currentPoolSize Number of buffers currently in the pool
  * @property peakPoolSize Maximum number of buffers ever held in the pool
+ * @property currentPooledBytes Total capacity in bytes of the buffers currently in the pool
  */
 data class PoolStats(
     val totalAllocations: Long,
@@ -192,11 +226,38 @@ data class PoolStats(
     val poolMisses: Long,
     val currentPoolSize: Int,
     val peakPoolSize: Int,
+    val currentPooledBytes: Long = 0L,
 ) {
+    @Deprecated("Kept so code compiled against an earlier version still links.", level = DeprecationLevel.HIDDEN)
+    constructor(
+        totalAllocations: Long,
+        poolHits: Long,
+        poolMisses: Long,
+        currentPoolSize: Int,
+        peakPoolSize: Int,
+    ) : this(totalAllocations, poolHits, poolMisses, currentPoolSize, peakPoolSize, 0L)
+
+    @Deprecated("Kept so code compiled against an earlier version still links.", level = DeprecationLevel.HIDDEN)
+    fun copy(
+        totalAllocations: Long = this.totalAllocations,
+        poolHits: Long = this.poolHits,
+        poolMisses: Long = this.poolMisses,
+        currentPoolSize: Int = this.currentPoolSize,
+        peakPoolSize: Int = this.peakPoolSize,
+    ): PoolStats = copy(totalAllocations, poolHits, poolMisses, currentPoolSize, peakPoolSize, currentPooledBytes)
+
     /** Percentage of acquire() calls satisfied from the pool (0.0 to 1.0). */
     val hitRate: Double
         get() = if (totalAllocations > 0) poolHits.toDouble() / totalAllocations else 0.0
 }
+
+/**
+ * Default cap on the total capacity a pool retains (16 MiB).
+ *
+ * Four times what the default 64 buffers of the default 64 KiB hold, so the default working
+ * set is never trimmed, while a handful of multi-megabyte buffers cannot be held forever.
+ */
+const val DEFAULT_MAX_POOLED_BYTES: Long = 16L * 1024 * 1024
 
 /**
  * Default buffer size for file I/O operations (64 KB).
@@ -218,7 +279,16 @@ fun createBufferPool(
     maxPoolSize: Int = 64,
     defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
     factory: BufferFactory = BufferFactory.Default,
-): BufferPool = BufferPool(threadingMode, maxPoolSize, defaultBufferSize, factory)
+    maxPooledBytes: Long = DEFAULT_MAX_POOLED_BYTES,
+): BufferPool = BufferPool(threadingMode, maxPoolSize, defaultBufferSize, factory, maxPooledBytes)
+
+@Deprecated("Kept so code compiled against an earlier version still links.", level = DeprecationLevel.HIDDEN)
+fun createBufferPool(
+    threadingMode: ThreadingMode = ThreadingMode.SingleThreaded,
+    maxPoolSize: Int = 64,
+    defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
+    factory: BufferFactory = BufferFactory.Default,
+): BufferPool = createBufferPool(threadingMode, maxPoolSize, defaultBufferSize, factory, DEFAULT_MAX_POOLED_BYTES)
 
 /**
  * Acquires a buffer, executes the block, and automatically releases the buffer.
@@ -261,12 +331,22 @@ inline fun <T> withPool(
     maxPoolSize: Int = 64,
     defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
     factory: BufferFactory = BufferFactory.Default,
+    maxPooledBytes: Long = DEFAULT_MAX_POOLED_BYTES,
     block: (BufferPool) -> T,
 ): T {
-    val pool = BufferPool(threadingMode, maxPoolSize, defaultBufferSize, factory)
+    val pool = BufferPool(threadingMode, maxPoolSize, defaultBufferSize, factory, maxPooledBytes)
     try {
         return block(pool)
     } finally {
         pool.clear()
     }
 }
+
+@Deprecated("Kept so code compiled against an earlier version still links.", level = DeprecationLevel.HIDDEN)
+inline fun <T> withPool(
+    threadingMode: ThreadingMode = ThreadingMode.SingleThreaded,
+    maxPoolSize: Int = 64,
+    defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
+    factory: BufferFactory = BufferFactory.Default,
+    block: (BufferPool) -> T,
+): T = withPool(threadingMode, maxPoolSize, defaultBufferSize, factory, DEFAULT_MAX_POOLED_BYTES, block)

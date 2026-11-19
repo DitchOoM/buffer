@@ -19,6 +19,7 @@ import com.ditchoom.buffer.ReadWriteBuffer
  */
 internal class SingleThreadedBufferPool(
     private val maxPoolSize: Int,
+    private val maxPooledBytes: Long,
     private val defaultBufferSize: Int,
     private val factory: BufferFactory,
 ) : BufferPool {
@@ -28,6 +29,9 @@ internal class SingleThreadedBufferPool(
     // log2, so every buffer in bucket k has capacity >= 1 shl k.
     private val buckets = Array(BufferSizeClass.BUCKET_COUNT) { ArrayDeque<PlatformBuffer>() }
     private var pooledCount = 0
+    private var pooledBytes = 0L
+
+    private var declaredOrder: DeclaredOrder = DeclaredOrder.Undeclared
 
     private var totalAllocations = 0L
     private var poolHits = 0L
@@ -61,6 +65,7 @@ internal class SingleThreadedBufferPool(
             if (buffer != null && buffer.capacity >= size) {
                 poolHits++
                 buffer.resetForWrite()
+                declaredOrder.pin(buffer)
                 buffer
             } else {
                 poolMisses++
@@ -68,7 +73,9 @@ internal class SingleThreadedBufferPool(
                 // buffer's native memory before allocating fresh, otherwise it leaks
                 // (Arena.ofShared never closes, FfmAutoBuffer waits on GC).
                 buffer?.freeNativeMemory()
-                allocateOrReclaim { factory.allocate(BufferSizeClass.roundUp(size)) }
+                allocateOrReclaim { factory.allocate(BufferSizeClass.roundUp(size)) }.also {
+                    if (declaredOrder is DeclaredOrder.Undeclared) declaredOrder = DeclaredOrder.Declared(it.byteOrder)
+                }
             }
         return PooledBuffer(raw, this)
     }
@@ -97,9 +104,13 @@ internal class SingleThreadedBufferPool(
                 else -> return
             }
 
-        if (pooledCount < maxPoolSize) {
+        // A buffer in another order (e.g. from allocate(size, otherOrder)) can never be handed out
+        // as-is, so it is not worth keeping.
+        val capacity = raw.capacity.toLong()
+        if (declaredOrder.accepts(raw) && pooledCount < maxPoolSize && pooledBytes + capacity <= maxPooledBytes) {
             buckets[BufferSizeClass.bucketForCapacity(raw.capacity)].addLast(raw)
             pooledCount++
+            pooledBytes += capacity
             if (pooledCount > peakPoolSize) {
                 peakPoolSize = pooledCount
             }
@@ -115,6 +126,7 @@ internal class SingleThreadedBufferPool(
             poolMisses = poolMisses,
             currentPoolSize = pooledCount,
             peakPoolSize = peakPoolSize,
+            currentPooledBytes = pooledBytes,
         )
 
     override fun clear() {
@@ -124,9 +136,28 @@ internal class SingleThreadedBufferPool(
         // nor a cached per-bucket loop is safe. This pattern matches LockFreeBufferPool.
         while (true) {
             val deque = buckets.firstOrNull { it.isNotEmpty() } ?: break
+            val buffer = deque.removeFirst()
             pooledCount--
-            deque.removeFirst().freeNativeMemory()
+            pooledBytes -= buffer.capacity
+            buffer.freeNativeMemory()
         }
+    }
+
+    override fun trim(targetBytes: Long): Long {
+        require(targetBytes >= 0) { "targetBytes must not be negative: $targetBytes" }
+        var freed = 0L
+        // Largest class first: frees the most memory per buffer, and the small buffers that
+        // serve most requests stay warm. Restarts the scan each iteration for the same
+        // re-entrancy reason as clear().
+        while (pooledBytes > targetBytes) {
+            val deque = buckets.lastOrNull { it.isNotEmpty() } ?: break
+            val buffer = deque.removeLast()
+            pooledCount--
+            pooledBytes -= buffer.capacity
+            freed += buffer.capacity
+            buffer.freeNativeMemory()
+        }
+        return freed
     }
 
     /**
@@ -138,6 +169,7 @@ internal class SingleThreadedBufferPool(
             val buffer = buckets[bucket].removeLastOrNull()
             if (buffer != null) {
                 pooledCount--
+                pooledBytes -= buffer.capacity
                 return buffer
             }
         }
