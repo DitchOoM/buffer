@@ -174,6 +174,21 @@ sealed interface BufferPool : BufferFactory {
         ): BufferPool =
             // See the threading-mode overload above: never nest a pool inside a pool.
             (factory as? BufferPool) ?: SingleThreadedBufferPool(maxPoolSize, maxPooledBytes, defaultBufferSize, factory)
+
+        @Deprecated("Kept so code compiled against an earlier version still links.", level = DeprecationLevel.HIDDEN)
+        operator fun invoke(
+            threadingMode: ThreadingMode = ThreadingMode.SingleThreaded,
+            maxPoolSize: Int = 64,
+            defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
+            factory: BufferFactory = BufferFactory.Default,
+        ): BufferPool = invoke(threadingMode, maxPoolSize, defaultBufferSize, factory, DEFAULT_MAX_POOLED_BYTES)
+
+        @Deprecated("Kept so code compiled against an earlier version still links.", level = DeprecationLevel.HIDDEN)
+        operator fun invoke(
+            maxPoolSize: Int = 64,
+            defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
+            factory: BufferFactory = BufferFactory.Default,
+        ): BufferPool = invoke(maxPoolSize, defaultBufferSize, factory, DEFAULT_MAX_POOLED_BYTES)
     }
 }
 
@@ -212,6 +227,24 @@ data class PoolStats(
     val peakPoolSize: Int,
     val currentPooledBytes: Long = 0L,
 ) {
+    @Deprecated("Kept so code compiled against an earlier version still links.", level = DeprecationLevel.HIDDEN)
+    constructor(
+        totalAllocations: Long,
+        poolHits: Long,
+        poolMisses: Long,
+        currentPoolSize: Int,
+        peakPoolSize: Int,
+    ) : this(totalAllocations, poolHits, poolMisses, currentPoolSize, peakPoolSize, 0L)
+
+    @Deprecated("Kept so code compiled against an earlier version still links.", level = DeprecationLevel.HIDDEN)
+    fun copy(
+        totalAllocations: Long = this.totalAllocations,
+        poolHits: Long = this.poolHits,
+        poolMisses: Long = this.poolMisses,
+        currentPoolSize: Int = this.currentPoolSize,
+        peakPoolSize: Int = this.peakPoolSize,
+    ): PoolStats = copy(totalAllocations, poolHits, poolMisses, currentPoolSize, peakPoolSize, currentPooledBytes)
+
     /** Percentage of acquire() calls satisfied from the pool (0.0 to 1.0). */
     val hitRate: Double
         get() = if (totalAllocations > 0) poolHits.toDouble() / totalAllocations else 0.0
@@ -247,6 +280,14 @@ fun createBufferPool(
     factory: BufferFactory = BufferFactory.Default,
     maxPooledBytes: Long = DEFAULT_MAX_POOLED_BYTES,
 ): BufferPool = BufferPool(threadingMode, maxPoolSize, defaultBufferSize, factory, maxPooledBytes)
+
+@Deprecated("Kept so code compiled against an earlier version still links.", level = DeprecationLevel.HIDDEN)
+fun createBufferPool(
+    threadingMode: ThreadingMode = ThreadingMode.SingleThreaded,
+    maxPoolSize: Int = 64,
+    defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
+    factory: BufferFactory = BufferFactory.Default,
+): BufferPool = createBufferPool(threadingMode, maxPoolSize, defaultBufferSize, factory, DEFAULT_MAX_POOLED_BYTES)
 
 /**
  * Acquires a buffer, executes the block, and automatically releases the buffer.
@@ -299,3 +340,12 @@ inline fun <T> withPool(
         pool.clear()
     }
 }
+
+@Deprecated("Kept so code compiled against an earlier version still links.", level = DeprecationLevel.HIDDEN)
+inline fun <T> withPool(
+    threadingMode: ThreadingMode = ThreadingMode.SingleThreaded,
+    maxPoolSize: Int = 64,
+    defaultBufferSize: Int = DEFAULT_FILE_BUFFER_SIZE,
+    factory: BufferFactory = BufferFactory.Default,
+    block: (BufferPool) -> T,
+): T = withPool(threadingMode, maxPoolSize, defaultBufferSize, factory, DEFAULT_MAX_POOLED_BYTES, block)
