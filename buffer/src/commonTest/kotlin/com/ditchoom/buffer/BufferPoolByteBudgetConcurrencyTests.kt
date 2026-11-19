@@ -81,6 +81,7 @@ class BufferPoolByteBudgetConcurrencyTests {
                     // The count cap has ample room, so the only limit is the budget: exactly that many are kept.
                     assertEquals(budgetBuffers, pool.stats().currentPoolSize)
                     assertEquals(budgetBuffers.toLong() * bufferSize, pool.stats().currentPooledBytes)
+                    pool.clear()
                 }
             }
         }
