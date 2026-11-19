@@ -307,6 +307,12 @@ kotlin {
         androidUnitTest {
             dependsOn(jvmCommonTest)
         }
+        // :buffer's Android unit tests are disabled (testBenchmarkUnitTest), so the instrumented lane is
+        // the only place jvmCommonTest actually runs on Android. Everything in it is device-safe
+        // (the OOM-resilience tests use a factory that throws a simulated OOM, nothing real).
+        androidInstrumentedTest {
+            dependsOn(jvmCommonTest)
+        }
 
         commonTest.dependencies {
             implementation(kotlin("test"))

@@ -154,11 +154,13 @@ class BufferPoolByteBudgetTests {
             List(64) { pool.acquire() }.forEach { pool.release(it) }
             assertEquals(64, pool.stats().currentPoolSize, "$mode")
 
-            // Large buffers are cut off by the byte budget long before the count cap.
+            // Large buffers are cut off by the byte budget long before the count cap. Six 4 MiB
+            // buffers (24 MiB) already exceed the 16 MiB budget, and stay small enough for Wasm's
+            // linear memory, which cannot hold dozens of multi-megabyte buffers at once.
             pool.clear()
-            List(64) { pool.acquire(4 * 1024 * 1024) }.forEach { pool.release(it) }
+            List(6) { pool.acquire(4 * 1024 * 1024) }.forEach { pool.release(it) }
+            assertTrue(pool.stats().currentPoolSize < 6, "$mode")
             assertTrue(pool.stats().currentPooledBytes <= DEFAULT_MAX_POOLED_BYTES, "$mode")
-            assertTrue(pool.stats().currentPoolSize < 64, "$mode")
             pool.clear()
         }
     }

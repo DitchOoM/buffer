@@ -173,7 +173,8 @@ sealed interface BufferPool : BufferFactory {
             maxPooledBytes: Long = DEFAULT_MAX_POOLED_BYTES,
         ): BufferPool =
             // See the threading-mode overload above: never nest a pool inside a pool.
-            (factory as? BufferPool) ?: SingleThreadedBufferPool(maxPoolSize, maxPooledBytes, defaultBufferSize, factory)
+            (factory as? BufferPool)
+                ?: SingleThreadedBufferPool(maxPoolSize, maxPooledBytes, defaultBufferSize, factory)
 
         @Deprecated("Kept so code compiled against an earlier version still links.", level = DeprecationLevel.HIDDEN)
         operator fun invoke(

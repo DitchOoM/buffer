@@ -19,11 +19,16 @@ class BufferPoolJvmByteOrderTest {
 
             val next = pool.acquire(64) as PlatformBuffer
             assertEquals(1L, pool.stats().poolHits, "$mode")
-            next.writeInt(0x01020304)
+            next.writeInt(ONE_TWO_THREE_FOUR)
             next.resetForRead()
-            assertEquals(listOf<Byte>(1, 2, 3, 4), List(4) { next.readByte() }, "$mode")
+            assertEquals(BIG_ENDIAN_BYTES, List(BIG_ENDIAN_BYTES.size) { next.readByte() }, "$mode")
             next.freeNativeMemory()
             pool.clear()
         }
+    }
+
+    private companion object {
+        const val ONE_TWO_THREE_FOUR = 0x01020304
+        val BIG_ENDIAN_BYTES: List<Byte> = listOf(0x01, 0x02, 0x03, 0x04)
     }
 }
