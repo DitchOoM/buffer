@@ -38,6 +38,7 @@ import kotlin.concurrent.atomics.ExperimentalAtomicApi
 @OptIn(ExperimentalAtomicApi::class)
 internal class LockFreeBufferPool(
     private val maxPoolSize: Int,
+    private val maxPooledBytes: Long,
     private val defaultBufferSize: Int,
     private val factory: BufferFactory,
 ) : BufferPool {
@@ -55,6 +56,11 @@ internal class LockFreeBufferPool(
 
     // Atomic size counter across all buckets, to avoid traversing the lists
     private val poolSize = AtomicInt(0)
+
+    // Atomic total capacity of the pooled buffers, reserved alongside poolSize
+    private val pooledBytes = AtomicLong(0L)
+
+    private val declaredOrder = AtomicReference<DeclaredOrder>(DeclaredOrder.Undeclared)
 
     // Atomic statistics
     private val totalAllocations = AtomicLong(0L)
@@ -90,6 +96,7 @@ internal class LockFreeBufferPool(
             if (buffer != null && buffer.capacity >= size) {
                 poolHits.update { it + 1 }
                 buffer.resetForWrite()
+                declaredOrder.load().pin(buffer)
                 buffer
             } else {
                 poolMisses.update { it + 1 }
@@ -97,7 +104,10 @@ internal class LockFreeBufferPool(
                 // buffer's native memory before allocating fresh, otherwise it leaks
                 // (Arena.ofShared never closes, FfmAutoBuffer waits on GC).
                 buffer?.freeNativeMemory()
-                allocateOrReclaim { factory.allocate(BufferSizeClass.roundUp(size)) }
+                allocateOrReclaim { factory.allocate(BufferSizeClass.roundUp(size)) }.also {
+                    // The first allocation fixes the order; later ones find it already declared.
+                    declaredOrder.compareAndSet(DeclaredOrder.Undeclared, DeclaredOrder.Declared(it.byteOrder))
+                }
             }
         return PooledBuffer(raw, this)
     }
@@ -126,16 +136,10 @@ internal class LockFreeBufferPool(
                 else -> return
             }
 
-        // Only push if under max size (check first to avoid unnecessary work)
-        if (poolSize.load() < maxPoolSize) {
-            if (push(raw)) {
-                // Update peak if needed
-                val currentSize = poolSize.load()
-                updatePeak(currentSize)
-            } else {
-                // CAS push failed because pool became full - free the buffer
-                raw.freeNativeMemory()
-            }
+        // A buffer in another order (e.g. from allocate(size, otherOrder)) can never be handed out
+        // as-is, so it is not worth keeping.
+        if (declaredOrder.load().accepts(raw) && push(raw)) {
+            updatePeak(poolSize.load())
         } else {
             raw.freeNativeMemory()
         }
@@ -148,6 +152,7 @@ internal class LockFreeBufferPool(
             poolMisses = poolMisses.load(),
             currentPoolSize = poolSize.load(),
             peakPoolSize = peakPoolSize.load(),
+            currentPooledBytes = pooledBytes.load(),
         )
 
     override fun clear() {
@@ -160,12 +165,26 @@ internal class LockFreeBufferPool(
         }
     }
 
+    override fun trim(targetBytes: Long): Long {
+        require(targetBytes >= 0) { "targetBytes must not be negative: $targetBytes" }
+        var freed = 0L
+        // Largest class first: frees the most memory per buffer, and the small buffers that
+        // serve most requests stay warm. Restarts the scan each iteration for the same
+        // re-entrancy reason as clear().
+        while (pooledBytes.load() > targetBytes) {
+            val buffer = popLargest() ?: break
+            freed += buffer.capacity
+            buffer.freeNativeMemory()
+        }
+        return freed
+    }
+
     /**
      * Lock-free push onto the Treiber stack for the buffer's size class.
-     * Returns true if pushed, false if pool is full.
+     * Returns true if pushed, false if either the count or the byte budget is exhausted.
      */
     private fun push(buffer: PlatformBuffer): Boolean {
-        // Reserve a slot with a bounded CAS-increment BEFORE touching the bucket head.
+        // Reserve a slot and its bytes with bounded CAS-increments BEFORE touching the bucket head.
         // With one head per size class, pushes to different buckets never contend on
         // the head CAS, so a plain check-then-push would never re-run its stale size
         // check and could admit up to (concurrent releasers - 1) buffers past
@@ -178,6 +197,18 @@ internal class LockFreeBufferPool(
                 return false
             }
             if (poolSize.compareAndSet(currentSize, currentSize + 1)) break
+        }
+        // The byte budget is reserved the same way. If it is exhausted the slot is given back;
+        // a concurrent releaser may meanwhile see the count as full and free its buffer, which
+        // errs on the side of retaining less, never more, than either cap.
+        val capacity = buffer.capacity.toLong()
+        while (true) {
+            val currentBytes = pooledBytes.load()
+            if (currentBytes + capacity > maxPooledBytes) {
+                poolSize.update { it - 1 }
+                return false
+            }
+            if (pooledBytes.compareAndSet(currentBytes, currentBytes + capacity)) break
         }
 
         // Slot reserved — the Treiber push always succeeds eventually.
@@ -215,6 +246,15 @@ internal class LockFreeBufferPool(
         return null
     }
 
+    /** Pops from any non-empty bucket, largest class first. Used by [trim]. */
+    private fun popLargest(): PlatformBuffer? {
+        for (bucket in heads.indices.reversed()) {
+            val buffer = pop(heads[bucket])
+            if (buffer != null) return buffer
+        }
+        return null
+    }
+
     /**
      * Lock-free pop from one size class's Treiber stack.
      * Returns the buffer or null if that stack is empty.
@@ -227,6 +267,7 @@ internal class LockFreeBufferPool(
             // CAS: if head hasn't changed, update it
             if (head.compareAndSet(oldHead, newHead)) {
                 poolSize.update { it - 1 }
+                pooledBytes.update { it - oldHead.buffer.capacity }
                 return oldHead.buffer
             }
             // CAS failed, retry

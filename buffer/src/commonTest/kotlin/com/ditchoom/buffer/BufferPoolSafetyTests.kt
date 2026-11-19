@@ -134,7 +134,7 @@ class BufferPoolSafetyTests {
     fun directlyNestedPoolRoutesReleaseToOwnerInsteadOfThrowing() {
         val inner = BufferPool(defaultBufferSize = 64)
         // Force the nested structure the invoke-guard would otherwise collapse.
-        val outer = LockFreeBufferPool(maxPoolSize = 64, defaultBufferSize = 64, factory = inner)
+        val outer = LockFreeBufferPool(maxPoolSize = 64, maxPooledBytes = 1L shl 20, defaultBufferSize = 64, factory = inner)
 
         val buffer = outer.acquire(8) as PlatformBuffer
         buffer.writeInt(42)
