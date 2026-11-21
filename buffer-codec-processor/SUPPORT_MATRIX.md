@@ -146,7 +146,7 @@ contract):
 | `@Count val: List<@ProtocolMessage>` (varint element count, non-terminal) | `CountPrefixedProtocolMessageList` |
 | `@When(sibling: Boolean) val: T?` — scalar / value-class scalar / string / `@ProtocolMessage` / `@UseCodec` inner | `Conditional` + `ConditionalInner.*` |
 | `@When("sibling.property → Boolean)` dotted form | `ConditionRef.ValueClassProperty`; MQTT `MqttFixedHeader.qosGreaterThanZero` |
-| `@When("remaining <op> INT")` grammar-2 | `ConditionRef.RemainingCmp` |
+| `@When("remaining <op> INT")` grammar-2 — optional trailing slot | `ConditionRef.RemainingCmp`. Encoder may omit the slot (`value.field != null`), so byte-identity survives a re-encode. Threshold is checked against the field's minimum wire width. **Requires boundedness** (see §2.4). |
 | `@UseCodec(Codec<T>) val: T` (bare scalar, natural width) | `UseCodecScalar`; MQTT remaining-length codec |
 | `@UseCodec(VariableLengthCodec<T>) val: T` → message wireSize is runtime-Exact | `UseCodecScalar.isVariableLength`; `varintfield/VarintLengthFrame`, `http3/Http3FrameType` |
 | `@WireBytes(N)` on scalar fields (1–8 bytes, N ≤ natural width) | `Scalar` with narrowed `wireBytes` |
@@ -167,6 +167,8 @@ Diagnostics live in `ProtocolMessageProcessor.kt` (`validate*`) and `CodecAnalyz
 | `@RemainingBytes` primitive array | "Primitive array element types … : Payload with a hand-written Codec<T>" — `validateRemainingBytesElementType` |
 | `@LengthFrom` bad bound type / sibling declared at-or-after / non-numeric sibling / dotted-property not value class / property not Int | `validateLengthFrom` (message family begins "@LengthFrom(…") |
 | `@When` on a non-nullable type / non-Boolean source / source declared at-or-after / dotted-property not value class or not Boolean / malformed grammar-2 | `validateWhen` |
+| `@When("remaining <op> N")` where `N` is below the field's minimum wire width | `validateWhen` — the guard would pass on a frame the read then fails on |
+| **A message carrying `@When("remaining …")` referenced as a BARE nested field, or as a list element** | `validateOptionalTrailingBoundedness` — see §2.4 |
 | `@UseCodec` composed with `@LengthFrom` on a non-`Payload`, non-`ViewCodec` bound type | "@LengthFrom @UseCodec … requires the bound field's type to extend `Payload`" — `validateUseCodec` |
 | `@UseCodec` target not a Kotlin `object` / not implementing `Codec<T>` | `validateUseCodec` |
 | `Payload` field without `@UseCodec` / `@RemainingBytes @UseCodec` on a non-`Payload` type | "Payload field requires @UseCodec" — `validateUseCodec` |
@@ -191,6 +193,35 @@ Diagnostics live in `ProtocolMessageProcessor.kt` (`validate*`) and `CodecAnalyz
 | Bare nested sealed-interface field with `@PacketType` variants | `CommandPayloadProtocol`, `DeviceState` |
 | Batch-encode coalescing of adjacent same-order scalars, respecting per-field `@WireOrder` and value-class `@ProtocolMessage(wireOrder)` | `wireorderMismatch/BigWirePacket`, `MixedOrderFlush`, `MixedOrderValueClass`; `BatchCoalescingCodegenTest` |
 | Value-class field + dotted `@LengthFrom("header.length")` | `simple/LeHeader` / `LePacket` (LeHeader wireOrder=Little) |
+| Optional-trailing message nested behind `@LengthPrefixed` / `@LengthFrom` (terminal position) | `OptionalTrailingBoundednessTest` |
+
+#### The boundedness rule (`@When("remaining <op> N")`)
+
+A message that decodes trailing fields by testing `buffer.remaining()` may only be referenced from
+a slot whose extent is **bounded**. `remaining()` counts bytes left in the *buffer*, not in the
+message, so an unbounded nested use makes the guard read the *enclosing* message's next fields.
+
+| Use site | Bounded? | Outcome |
+|----------|----------|---------|
+| Decoded top-level, buffer holds exactly one message | Yes | Supported |
+| Behind `@LengthPrefixed` / `@LengthFrom` (narrows `limit()`) | Yes | Supported |
+| Variant of a `@FramedBy` sealed parent (framing codec narrows `limit()`) | Yes | Supported |
+| **Bare nested field** (`val inner: Inner` with siblings after it) | No | **Rejected** |
+| **List element** (`@Count` / `@RemainingBytes List<Inner>`) | No | **Rejected** — framing the list does not bound elements from one another |
+
+The rejection is a hard error rather than a warning. Relaxing it produces no test failure on a
+well-formed frame: the decoder still returns a value, assembled partly from the enclosing message's
+bytes. A truncated read is loud; a misaligned one is not. Enforced at the **reference site**
+(`validateOptionalTrailingBoundedness`), because boundedness is a property of the use site — the
+same message is legitimately bounded behind a length prefix and unbounded as a bare field.
+
+**Cross-module caveat.** `@When` is `BINARY`-retained, so a downstream module nesting the type does
+get the diagnostic. `@FramedBy` is deliberately `SOURCE`-retained, so the framed-parent carve-out is
+only visible inside its own compilation; cross-module the check stays conservative and rejects.
+
+**Not self-delimiting.** A message whose tail is optional cannot be framed from a byte stream:
+`peekFrameSize` reports `NoFraming`, because N available bytes are ambiguous between one long frame
+and two short ones. Such a message needs an outer framing layer.
 
 #### Rejected (with diagnostic)
 
