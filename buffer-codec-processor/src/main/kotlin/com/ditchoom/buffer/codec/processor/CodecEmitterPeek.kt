@@ -435,10 +435,11 @@ internal fun appendPeekUseCodecScalar(
     val widthVar = "__${field.name}Width"
     body.addStatement("val %L = %L.position() - %L", widthVar, peekViewVar, priorPosVar)
     body.addStatement(
-        "val __total = %L + %L + %L.toInt()",
+        "val __total = %M(%L + %L, %L)",
+        DECLARED_FRAME_BYTES_MN,
         priorBytes,
         widthVar,
-        field.name,
+        declaredLengthArg(field.name, field.fieldType),
     )
     body.addStatement(
         "return if (stream.available() - baseOffset >= __total) %T.Complete(__total) else %T.NeedsMoreData",
@@ -547,7 +548,12 @@ internal fun appendPeekBoundingDynamicPrior(
     body.endControlFlow()
     val widthVar = "__${field.name}Width"
     body.addStatement("val %L = %L.position() - %L", widthVar, peekViewVar, priorPosVar)
-    body.addStatement("val __total = __priorBytes + %L + %L.toInt()", widthVar, field.name)
+    body.addStatement(
+        "val __total = %M(__priorBytes + %L, %L)",
+        DECLARED_FRAME_BYTES_MN,
+        widthVar,
+        declaredLengthArg(field.name, field.fieldType),
+    )
     body.addStatement(
         "return if (stream.available() - baseOffset >= __total) %T.Complete(__total) else %T.NeedsMoreData",
         PEEK_RESULT_CN,
@@ -723,7 +729,8 @@ internal fun appendPeekLengthPrefixedUseCodecList(
     val widthVar = "__${field.name}Width"
     body.addStatement("val %L = %L.position() - %L", widthVar, peekViewVar, priorPosVar)
     body.addStatement(
-        "val __total = %L + %L + %L.toInt()",
+        "val __total = %M(%L + %L, %L.toLong())",
+        DECLARED_FRAME_BYTES_MN,
         priorBytes,
         widthVar,
         lengthVar,

@@ -977,7 +977,8 @@ internal fun buildFramedByDispatchOnPeekFun(shape: DispatchShape): FunSpec {
         "val __framingPrefixWidth = __framingPeek.position() - __framingPeekStart",
     )
     body.addStatement(
-        "val __total = %L + __framingPrefixWidth + __framingLength.toInt()",
+        "val __total = %M(%L + __framingPrefixWidth, __framingLength.toLong())",
+        DECLARED_FRAME_BYTES_MN,
         headerWidthExpr,
     )
     body.addStatement(

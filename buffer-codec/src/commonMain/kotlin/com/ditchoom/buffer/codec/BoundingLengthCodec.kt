@@ -33,7 +33,10 @@ interface BoundingLengthCodec<T : Any> : Codec<T> {
      * Narrows [buffer]'s limit so that the bounded region ends after
      * [decodedValue] bytes from the current position. Called after
      * [decode][Decoder.decode] returns. Implementations typically call
-     * `buffer.setLimit(buffer.position() + decodedValue.toInt())`.
+     * `buffer.setLimit(buffer.position() + declaredFrameBytes(0, decodedValue.toLong()))`:
+     * a bare `decodedValue.toInt()` wraps a declaration past [Int] range
+     * into a small bound. Generated callers reject such a value before
+     * calling this.
      */
     fun applyBound(
         buffer: ReadBuffer,

@@ -45,20 +45,74 @@ public object MaxFrameBytesKey : DecodeKey<Int>
 /**
  * A frame's declared size is unusable: either larger than the ceiling in
  * effect ([MaxFrameBytesKey], defaulting to [DEFAULT_MAX_FRAME_BYTES]),
- * or not a positive byte count at all.
+ * larger than an [Int] byte count can express, or not a positive byte
+ * count at all.
  *
- * Thrown by [readFrame] before any buffer is sliced, so an oversized or
+ * Thrown by [readFrame] before any buffer is sliced, and by generated
+ * peeks and decodes through [declaredFrameBytes] before a wire-supplied
+ * length is added, sliced or allocated with, so an oversized or
  * malformed declaration costs nothing beyond the bytes already buffered.
  * Callers branch on the type — a hostile or desynchronized peer is not
  * the same condition as a decode failure inside a well-formed frame, and
  * typically warrants dropping the connection rather than resyncing.
+ *
+ * [declaredBytes] is what the wire said, saturated at [Long.MAX_VALUE].
  */
 public class FrameTooLargeException(
-    public val declaredBytes: Int,
+    public val declaredBytes: Long,
     public val maxBytes: Int,
 ) : DecodeException(
         fieldPath = "<frame>",
         bufferPosition = 0,
-        expected = "frame size in 1..$maxBytes (raise via MaxFrameBytesKey)",
+        expected =
+            if (maxBytes == Int.MAX_VALUE) {
+                "frame size in 0..$maxBytes"
+            } else {
+                "frame size in 1..$maxBytes (raise via MaxFrameBytesKey)"
+            },
         actual = declaredBytes.toString(),
+    ) {
+    public constructor(declaredBytes: Int, maxBytes: Int) : this(declaredBytes.toLong(), maxBytes)
+}
+
+/**
+ * [headerBytes] followed by a body a peer declared as [declaredBodyBytes]
+ * bytes, as an [Int] frame size.
+ *
+ * Generated codecs pass every [BoundingLengthCodec] value through this
+ * before adding, slicing or allocating with it, so a declaration past
+ * [Int] range is rejected instead of wrapping into a small, plausible
+ * size. Hand-written [BoundingLengthCodec.applyBound] implementations can
+ * use it the same way, with `headerBytes = 0`.
+ *
+ * @throws FrameTooLargeException when [declaredBodyBytes] is negative or
+ *   the total exceeds [Int.MAX_VALUE].
+ */
+public fun declaredFrameBytes(
+    headerBytes: Int,
+    declaredBodyBytes: Long,
+): Int {
+    val total =
+        if (headerBytes > 0 && declaredBodyBytes > Long.MAX_VALUE - headerBytes) {
+            Long.MAX_VALUE
+        } else {
+            declaredBodyBytes + headerBytes
+        }
+    if (declaredBodyBytes < 0 || total !in 0L..Int.MAX_VALUE.toLong()) {
+        throw FrameTooLargeException(
+            declaredBytes = if (declaredBodyBytes < 0) declaredBodyBytes else total,
+            maxBytes = Int.MAX_VALUE,
+        )
+    }
+    return total.toInt()
+}
+
+/** [declaredFrameBytes] for an unsigned 64-bit declaration (a QUIC varint, for one). */
+public fun declaredFrameBytes(
+    headerBytes: Int,
+    declaredBodyBytes: ULong,
+): Int =
+    declaredFrameBytes(
+        headerBytes,
+        if (declaredBodyBytes > Long.MAX_VALUE.toULong()) Long.MAX_VALUE else declaredBodyBytes.toLong(),
     )

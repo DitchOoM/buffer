@@ -11,6 +11,7 @@ import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
@@ -32,7 +33,7 @@ public object Http3FcFrameCodec : FrameDetector {
         buffer.position(discriminatorPosition)
         val __fcOpcode = Http3FcFrameTypeCodec.decode(buffer, context).raw
         val __fcLength = Http3FcLengthCodec.decode(buffer, context)
-        if (__fcLength.toInt() > buffer.remaining()) {
+        if (declaredFrameBytes(0, __fcLength.toLong()) > buffer.remaining()) {
           throw DecodeException(
                 fieldPath = "Unknown.@ForwardCompatible",
                 bufferPosition = buffer.position(),
@@ -100,7 +101,7 @@ public object Http3FcFrameCodec : FrameDetector {
         }
       }
       val __framingPrefixWidth = __framingPeek.position() - __framingPeekStart
-      val __total = __headerWireWidth + __framingPrefixWidth + __framingLength.toInt()
+      val __total = declaredFrameBytes(__headerWireWidth + __framingPrefixWidth, __framingLength.toLong())
       return if (stream.available() - baseOffset >= __total) PeekResult.Complete(__total) else PeekResult.NeedsMoreData
     } finally {
       (__framingPeek as? PlatformBuffer)?.freeNativeMemory()

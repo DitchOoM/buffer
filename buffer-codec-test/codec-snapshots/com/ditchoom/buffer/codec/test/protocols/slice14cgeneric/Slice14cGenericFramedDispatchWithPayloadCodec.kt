@@ -15,6 +15,7 @@ import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
+import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
 import com.ditchoom.buffer.codec.test.protocols.slice14c.Slice14cTinyHeader
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -29,7 +30,7 @@ public class Slice14cGenericFramedDispatchWithPayloadCodec<P : Payload>(
     val header = Slice14cTinyHeader(buffer.readUByte())
     val __framingOuterLimit = buffer.limit()
     val __framingLength = MqttRemainingLengthCodec.decode(buffer, context)
-    if (__framingLength.toInt() > buffer.remaining()) {
+    if (declaredFrameBytes(0, __framingLength.toLong()) > buffer.remaining()) {
       throw DecodeException(
             fieldPath = "WithPayload.@FramedBy",
             bufferPosition = buffer.position(),
@@ -126,7 +127,7 @@ public class Slice14cGenericFramedDispatchWithPayloadCodec<P : Payload>(
           }
         }
         val __framingPrefixWidth = __framingPeek.position() - __framingPeekStart
-        val __total = 1 + __framingPrefixWidth + __framingLength.toInt()
+        val __total = declaredFrameBytes(1 + __framingPrefixWidth, __framingLength.toLong())
         return if (stream.available() - baseOffset >= __total) PeekResult.Complete(__total) else PeekResult.NeedsMoreData
       } finally {
         (__framingPeek as? PlatformBuffer)?.freeNativeMemory()
@@ -137,7 +138,7 @@ public class Slice14cGenericFramedDispatchWithPayloadCodec<P : Payload>(
       val header = Slice14cTinyHeader(buffer.readUByte())
       val __framingOuterLimit = buffer.limit()
       val __framingLength = MqttRemainingLengthCodec.decode(buffer, context)
-      if (__framingLength.toInt() > buffer.remaining()) {
+      if (declaredFrameBytes(0, __framingLength.toLong()) > buffer.remaining()) {
         throw DecodeException(
               fieldPath = "WithPayload.@FramedBy",
               bufferPosition = buffer.position(),

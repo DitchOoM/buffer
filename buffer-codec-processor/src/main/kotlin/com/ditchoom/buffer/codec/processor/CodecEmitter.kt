@@ -486,7 +486,8 @@ internal class CodecEmitter(
             "val __framingPrefixWidth = __framingPeek.position() - __framingPeekStart",
         )
         body.addStatement(
-            "val __total = %L + __framingPrefixWidth + __framingLength.toInt()",
+            "val __total = %M(%L + __framingPrefixWidth, __framingLength.toLong())",
+            DECLARED_FRAME_BYTES_MN,
             headerWidthExpr,
         )
         body.addStatement(
@@ -2076,8 +2077,12 @@ private fun CodecShape.partialCapturesPayloadRegion(): Boolean {
 }
 
 /**
- * Emits the framed-body truncation guard between the framing codec's `decode`
- * and the body decode: the declared body must be fully buffered. Without it a
+ * Emits the declared-body guard between a bounding length codec's `decode`
+ * and the body decode (`@FramedBy`, a bounding `@UseCodec` scalar, a
+ * `@LengthPrefixed @UseCodec` list): the declared body must fit in `Int`
+ * (`declaredFrameBytes` throws `FrameTooLargeException` instead of wrapping)
+ * and must be fully buffered. [lengthArg] is the `Long`/`ULong` argument for
+ * the length local's type. Without the buffered check a
  * truncated frame fails with platform-dependent buffer errors — or worse, on
  * platforms whose buffers clamp limits past capacity (JS), reads silently
  * fabricate zero bytes for the missing region (and the @ForwardCompatible
@@ -2089,8 +2094,9 @@ internal fun appendFramedBodyTruncationGuard(
     body: CodeBlock.Builder,
     lengthLocal: String,
     fieldPath: String,
+    lengthArg: String = "$lengthLocal.toLong()",
 ) {
-    body.beginControlFlow("if (%L.toInt() > buffer.remaining())", lengthLocal)
+    body.beginControlFlow("if (%M(0, %L) > buffer.remaining())", DECLARED_FRAME_BYTES_MN, lengthArg)
     body.addStatement(
         "throw %T(\n  fieldPath = %S,\n  bufferPosition = buffer.position(),\n" +
             "  expected = \"a fully-buffered \" + %L + \"-byte framed body\",\n" +

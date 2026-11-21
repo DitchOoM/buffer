@@ -1916,6 +1916,13 @@ internal fun appendDecodeUseCodecScalar(
     }
     body.addStatement("val %L = %T.decode(buffer, context)", field.name, field.codecType)
     if (field.isBounding) {
+        // The declared body must be representable and buffered before user code narrows with it.
+        appendFramedBodyTruncationGuard(
+            body,
+            field.name,
+            "${field.ownerSimpleName}.${field.name}",
+            declaredLengthArg(field.name, field.fieldType),
+        )
         body.addStatement("%T.applyBound(buffer, %L)", field.codecType, field.name)
         appendApplyBoundWidenGuard(
             body,
@@ -2115,6 +2122,8 @@ internal fun appendDecodeLengthPrefixedListBody(
     val lengthVar = "__${namespacePrefix}Length"
     body.addStatement("val %L = buffer.limit()", outerLimitVar)
     body.addStatement("val %L = %T.decode(buffer, context)", lengthVar, spec.codecType)
+    // The declared body must be representable and buffered before user code narrows with it.
+    appendFramedBodyTruncationGuard(body, lengthVar, fieldPath)
     body.addStatement("%T.applyBound(buffer, %L)", spec.codecType, lengthVar)
     appendApplyBoundWidenGuard(body, outerLimitVar, fieldPath)
     body.addStatement("val %L = mutableListOf<%T>()", listLocalName, spec.elementClassName)
