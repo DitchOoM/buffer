@@ -156,3 +156,26 @@ internal fun naturalScalarWriteStatement(
         ScalarKind.Float -> "buffer.writeFloat($accessor)"
         ScalarKind.Double -> "buffer.writeDouble($accessor)"
     }
+
+/**
+ * The fewest bytes a successful decode of this field can consume, or `null` when the
+ * shape has no lower bound useful for gating an optional trailing slot.
+ *
+ * Used by two callers that must agree: the `@SinceVersion` decoder derives each guard's
+ * threshold from it, and the `@When("remaining <op> N")` validator checks the author's
+ * hand-written threshold against it. A threshold below this value admits frames too
+ * short for the read that follows, turning absent-field tolerance back into a throw.
+ *
+ * `null` means "reject as an optional trailing slot": length-prefixed strings, lists,
+ * nested messages and `@UseCodec` bodies can all be gated soundly only by testing
+ * `remaining()` *after* each preceding read, which is `@When`'s per-field `if` shape
+ * rather than this one.
+ */
+internal fun FieldSpec.minimumWireBytesOrNull(): Int? =
+    when (this) {
+        is FieldSpec.FixedSize -> wireBytes
+        // The ordinal rides as an unsigned LEB128 varint: 1 byte for ordinals 0..127,
+        // more beyond. One byte is the floor, and a truncated varint throws on read.
+        is FieldSpec.EnumScalar -> 1
+        else -> null
+    }

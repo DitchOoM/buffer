@@ -208,9 +208,25 @@ object CodecSchemaClassifier {
             }
         }
         for (pos in cByPos.keys.sorted()) {
-            if (pos !in bByPos) {
-                drifts += safe(b.typeName, "field position $pos ('${cByPos.getValue(pos).name}') appended")
-            }
+            if (pos in bByPos) continue
+            val added = cByPos.getValue(pos)
+            // Appending a field is only safe if a peer built against the OLD shape can still be
+            // decoded — i.e. the new field is absent-tolerant (`@SinceVersion`, or a `@When`
+            // predicate). Appending a REQUIRED field means every frame from an existing producer
+            // now runs off the end of the buffer mid-decode. Classifying that as safe is what
+            // makes "just add a field with a Kotlin default" look supported when it is not.
+            drifts +=
+                if (added.optional) {
+                    safe(b.typeName, "field position $pos ('${added.name}') appended as optional")
+                } else {
+                    breaking(
+                        b.typeName,
+                        "field position $pos ('${added.name}') appended as REQUIRED — peers built " +
+                            "against the previous shape do not send it, so their frames now fail " +
+                            "mid-decode. Mark it @SinceVersion with a Kotlin default to make the " +
+                            "decoder tolerate its absence.",
+                    )
+                }
         }
         return drifts
     }

@@ -362,6 +362,39 @@ internal data class CodecShape(
      * (e.g. RFC 6455 WebSocket's escape-coded length + folded mask).
      */
     val customPeek: ClassName? = null,
+    /**
+     * The `@SinceVersion` trailing run, or null when the message has none. When
+     * non-null, [OptionalTrailingRun.firstIndex] is the index into [fields] of the
+     * first optional field; every field from there to the end is optional and fills
+     * in declaration order.
+     */
+    val optionalTrailing: OptionalTrailingRun? = null,
+)
+
+/**
+ * The `@SinceVersion` trailing run of a [CodecShape].
+ *
+ * Decode emits one nested `if` per entry, each testing the bounded buffer's
+ * `remaining()` against that field's own [OptionalTrailingField.minWireBytes] and
+ * constructing at the leaf with the arguments gathered so far — so a field that is
+ * absent is *omitted* from the constructor call and takes its Kotlin default. The
+ * guards are sequential rather than cumulative because reading field *k* advances the
+ * position that field *k+1* is tested against.
+ *
+ * Soundness depends on the message being length-framed or top-level; the reference-site
+ * validator rejects unbounded nesting before this shape is ever built. See
+ * `@SinceVersion`'s KDoc.
+ */
+internal data class OptionalTrailingRun(
+    val firstIndex: Int,
+    val fields: List<OptionalTrailingField>,
+)
+
+/** One `@SinceVersion` field: its declared version and the minimum bytes its read consumes. */
+internal data class OptionalTrailingField(
+    val name: String,
+    val version: Int,
+    val minWireBytes: Int,
 )
 
 /**
