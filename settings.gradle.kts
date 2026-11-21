@@ -33,6 +33,7 @@ plugins {
 develocity {
     buildScan {
         uploadInBackground.set(System.getenv("CI") != null)
+        publishing.onlyIf { System.getenv("CI") != null }
         termsOfUseUrl.set("https://gradle.com/help/legal-terms-of-use")
         termsOfUseAgree.set("yes")
     }
