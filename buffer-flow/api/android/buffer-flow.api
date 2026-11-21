@@ -80,9 +80,64 @@ public final class com/ditchoom/buffer/flow/BytesWritten {
 	public final synthetic fun unbox-impl ()I
 }
 
+public final class com/ditchoom/buffer/flow/CloseCause$Aborted : com/ditchoom/buffer/flow/CloseCause {
+	public static final field INSTANCE Lcom/ditchoom/buffer/flow/CloseCause$Aborted;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/flow/CloseCause$Failed : com/ditchoom/buffer/flow/CloseCause {
+	public fun <init> (Ljava/lang/Throwable;)V
+	public final fun component1 ()Ljava/lang/Throwable;
+	public final fun copy (Ljava/lang/Throwable;)Lcom/ditchoom/buffer/flow/CloseCause$Failed;
+	public static synthetic fun copy$default (Lcom/ditchoom/buffer/flow/CloseCause$Failed;Ljava/lang/Throwable;ILjava/lang/Object;)Lcom/ditchoom/buffer/flow/CloseCause$Failed;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCause ()Ljava/lang/Throwable;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/flow/CloseCause$Graceful : com/ditchoom/buffer/flow/CloseCause {
+	public static final field INSTANCE Lcom/ditchoom/buffer/flow/CloseCause$Graceful;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public abstract interface class com/ditchoom/buffer/flow/Connection : com/ditchoom/buffer/flow/Receiver, com/ditchoom/buffer/flow/Sender {
+	public fun abort (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public abstract fun close (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public abstract fun getId ()J
+}
+
+public final class com/ditchoom/buffer/flow/Connection$DefaultImpls {
+	public static fun abort (Lcom/ditchoom/buffer/flow/Connection;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class com/ditchoom/buffer/flow/ConnectionPhase$Closed : com/ditchoom/buffer/flow/ConnectionPhase {
+	public fun <init> (Lcom/ditchoom/buffer/flow/CloseCause;)V
+	public final fun component1 ()Lcom/ditchoom/buffer/flow/CloseCause;
+	public final fun copy (Lcom/ditchoom/buffer/flow/CloseCause;)Lcom/ditchoom/buffer/flow/ConnectionPhase$Closed;
+	public static synthetic fun copy$default (Lcom/ditchoom/buffer/flow/ConnectionPhase$Closed;Lcom/ditchoom/buffer/flow/CloseCause;ILjava/lang/Object;)Lcom/ditchoom/buffer/flow/ConnectionPhase$Closed;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCause ()Lcom/ditchoom/buffer/flow/CloseCause;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/flow/ConnectionPhase$Draining : com/ditchoom/buffer/flow/ConnectionPhase {
+	public static final field INSTANCE Lcom/ditchoom/buffer/flow/ConnectionPhase$Draining;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/flow/ConnectionPhase$Open : com/ditchoom/buffer/flow/ConnectionPhase {
+	public static final field INSTANCE Lcom/ditchoom/buffer/flow/ConnectionPhase$Open;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public abstract interface annotation class com/ditchoom/buffer/flow/ExperimentalDatagramApi : java/lang/annotation/Annotation {
@@ -175,6 +230,16 @@ public abstract interface class com/ditchoom/buffer/flow/Receiver {
 
 public abstract interface class com/ditchoom/buffer/flow/Resettable {
 	public abstract fun reset (JLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public abstract interface class com/ditchoom/buffer/flow/SendMode {
+}
+
+public final class com/ditchoom/buffer/flow/SendMode$AwaitWritten : com/ditchoom/buffer/flow/SendMode {
+	public static final field INSTANCE Lcom/ditchoom/buffer/flow/SendMode$AwaitWritten;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public abstract interface class com/ditchoom/buffer/flow/Sender {

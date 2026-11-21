@@ -68,6 +68,13 @@ internal class TrackedSlice(
         get() = if (shared) sharedReleased.load() != 0 else plainReleased
 
     /**
+     * The pool this slice's storage ultimately returns to. Internal so [SharedBytes.adopt] can
+     * reject a pool whose freelist is not safe to touch from the thread that drops the last
+     * shared reference — [inner] is the raw slice and carries no pool identity of its own.
+     */
+    internal val parentPool: BufferPool get() = parent.pool
+
+    /**
      * Fails fast if this slice has been released back to the pool. Mirrors
      * [PooledBuffer]'s `checkNotFreed` use-after-free contract (same exception
      * type and intent). Internal so [ReadBuffer.unwrapFully] can gate wrapper

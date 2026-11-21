@@ -174,5 +174,11 @@ public fun <T> ConnectedDatagramChannel.typed(
         override fun receive(): Flow<T> = receiver.receive()
 
         override suspend fun close() = channel.close()
+
+        // Explicit even though it matches the inherited default: a datagram channel holds no
+        // outbound queue, so there is nothing for abort to drop that close would have drained.
+        // Stated rather than inherited so the next change here has to decide deliberately —
+        // any decorator overriding close() overrides abort().
+        override suspend fun abort() = channel.close()
     }
 }

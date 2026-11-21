@@ -147,4 +147,16 @@ private class CodecConnection<T>(
     override suspend fun close() {
         stream.close()
     }
+
+    /**
+     * This view owns no writer and therefore has no queue to drop — its only send-side state is
+     * whatever the caller's own coroutine is doing inside [send]. What abort can still add over
+     * [close] is the byte layer's RST when the stream has one: a [close] on a stream whose peer
+     * stopped reading may park in the sink's own write policy, and [Resettable.reset] is the way
+     * out. Falls back to [close] for streams that cannot reset.
+     */
+    override suspend fun abort() {
+        val stream = stream
+        if (stream is Resettable) stream.reset(0L) else stream.close()
+    }
 }
