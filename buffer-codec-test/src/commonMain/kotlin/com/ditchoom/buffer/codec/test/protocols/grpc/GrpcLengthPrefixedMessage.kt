@@ -27,7 +27,7 @@ import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
  * prefix carrying the message's wire size, and the opaque message as a consumer-
  * decoded [BinaryData] payload (the protobuf body is interpreted by a
  * message-specific codec a layer up, not by the envelope). The generated
- * `peekFrameSize` therefore frames the whole envelope —
+ * `frameSize` therefore frames the whole envelope —
  * `Complete(1 + 4 + Message-Length)` — so a streaming reader can size each gRPC
  * message without consuming bytes. The length is owned by the framework, so the
  * `compressedFlag` + prefix shape round-trips byte-exactly against the spec.

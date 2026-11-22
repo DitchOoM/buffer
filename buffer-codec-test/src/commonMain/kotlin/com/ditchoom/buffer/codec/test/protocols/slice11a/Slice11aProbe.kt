@@ -5,7 +5,7 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
@@ -25,7 +25,7 @@ import com.ditchoom.buffer.codec.annotations.When
  * exercises [ProbeRemainingBytesList]'s `elementIsBackPatch=true`
  * path — without the guard added to `buildWireSizeFun` /
  * `classifyVariantWireSize`, encoding the list would CCE on the
- * runtime `as WireSize.Exact` cast for [Tag2]'s wireSize.
+ * runtime `as WireByteCount.exact` cast for [Tag2]'s wireSize.
  */
 @ProtocolMessage
 sealed interface ProbeSealed {
@@ -66,10 +66,10 @@ object ProbeSealedDelegateCodec : Codec<ProbeSealed> {
         ProbeSealedCodec.encode(buffer, value, context)
     }
 
-    override fun wireSize(
+    override fun wireBytes(
         value: ProbeSealed,
         context: EncodeContext,
-    ): WireSize = ProbeSealedCodec.wireSize(value, context)
+    ): WireByteCount = ProbeSealedCodec.wireBytes(value, context)
 }
 
 /**

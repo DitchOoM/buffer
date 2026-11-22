@@ -6,8 +6,9 @@ import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -21,7 +22,7 @@ import kotlin.test.assertNull
  * as the bound (inner) shape: round-trip across both predicate
  * values, encoder zero-byte skip when predicate false (entire slot
  * including the length prefix), decoder nullness round-trip,
- * `WireSize.BackPatch` per, and
+ * `WireByteCount.BackPatch` per, and
  * `peekFrameSize` walking from `NeedsMoreData` to `Complete` via
  * drip-feeding the flags byte and the conditional length-prefixed
  * body.
@@ -94,15 +95,15 @@ class WithFlagPayloadCodecTest {
     fun wireSizeIsBackPatch() {
         // Any @When field collapses message wireSize to BackPatch.
         assertEquals(
-            WireSize.BackPatch,
-            WithFlagPayloadCodec.wireSize(
+            WireByteCount.BackPatch,
+            WithFlagPayloadCodec.wireBytes(
                 WithFlagPayload(flags = SmallFlags.WANT, payload = "hi"),
                 EncodeContext.Empty,
             ),
         )
         assertEquals(
-            WireSize.BackPatch,
-            WithFlagPayloadCodec.wireSize(WithFlagPayload(flags = SmallFlags.NONE), EncodeContext.Empty),
+            WireByteCount.BackPatch,
+            WithFlagPayloadCodec.wireBytes(WithFlagPayload(flags = SmallFlags.NONE), EncodeContext.Empty),
         )
     }
 
@@ -111,7 +112,7 @@ class WithFlagPayloadCodecTest {
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, WithFlagPayloadCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, WithFlagPayloadCodec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -127,7 +128,7 @@ class WithFlagPayloadCodecTest {
             one.writeByte(0)
             one.resetForRead()
             stream.append(one)
-            assertEquals(PeekResult.Complete(1), WithFlagPayloadCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(1), WithFlagPayloadCodec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -144,7 +145,7 @@ class WithFlagPayloadCodecTest {
 
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, WithFlagPayloadCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, WithFlagPayloadCodec.peekOutcome(stream))
 
             for (i in 0 until totalBytes - 1) {
                 val one = BufferFactory.Default.allocate(1)
@@ -152,8 +153,8 @@ class WithFlagPayloadCodecTest {
                 one.resetForRead()
                 stream.append(one)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    WithFlagPayloadCodec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    WithFlagPayloadCodec.peekOutcome(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -161,7 +162,7 @@ class WithFlagPayloadCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), WithFlagPayloadCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), WithFlagPayloadCodec.peekOutcome(stream))
 
             val decoded =
                 stream.readBufferScoped(totalBytes) {

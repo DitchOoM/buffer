@@ -7,7 +7,8 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -119,8 +120,8 @@ class MqttUnsubAckCodecTest {
                 one.resetForRead()
                 stream.append(one)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    MqttPacketUnsubAckCodec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    MqttPacketUnsubAckCodec.peekOutcome(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -128,7 +129,7 @@ class MqttUnsubAckCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), MqttPacketUnsubAckCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), MqttPacketUnsubAckCodec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()

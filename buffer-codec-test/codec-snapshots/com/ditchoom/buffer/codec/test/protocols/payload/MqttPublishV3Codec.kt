@@ -12,17 +12,12 @@ import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.Payload
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireByteCount
-import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
 import com.ditchoom.buffer.stream.StreamProcessor
-import kotlin.Deprecated
 import kotlin.Int
-import kotlin.ReplaceWith
 import kotlin.String
-import kotlin.Suppress
 
 public class MqttPublishV3Codec<P : Payload>(
   private val payloadCodec: Codec<P>,
@@ -68,23 +63,9 @@ public class MqttPublishV3Codec<P : Payload>(
 
   override fun wireBytes(`value`: MqttPublishV3<P>, context: EncodeContext): WireByteCount = WireByteCount.BackPatch
 
-  @Deprecated(
-    message = "Call wireBytes.",
-    replaceWith = ReplaceWith("wireBytes(value, context)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun wireSize(`value`: MqttPublishV3<P>, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
-
   override fun sizeHint(`value`: MqttPublishV3<P>, context: EncodeContext): Int = 5 + value.topic.length
 
   override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = Companion.frameSize(stream, baseOffset)
-
-  @Deprecated(
-    message = "Call frameSize.",
-    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 
   public class Partial<P : Payload> internal constructor(
     public val `header`: MqttFixedHeader,
@@ -101,13 +82,6 @@ public class MqttPublishV3Codec<P : Payload>(
 
   public companion object : FrameDetector {
     override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = FrameSize.Unframed
-
-    @Deprecated(
-      message = "Call frameSize.",
-      replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
-    )
-    @Suppress("DEPRECATION")
-    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 
     public fun <P : Payload> partial(buffer: ReadBuffer, context: DecodeContext): Partial<P> {
       val header = MqttFixedHeader(buffer.readUByte())

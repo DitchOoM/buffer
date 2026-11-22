@@ -18,11 +18,11 @@ import com.ditchoom.buffer.codec.test.protocols.usecodecscalar.Le32LengthCodec
  * shape and applies the resulting bound to `buffer.limit()`; elements
  * are read element-by-element via [PropertyEntryCodec] inside the
  * bounded region. Encode pre-measures body bytes via the element
- * codec's `wireSize` (cast to `Exact`), writes the prefix via the user
+ * codec's `wireBytes` (cast to `Exact`), writes the prefix via the user
  * codec, then iterates and encodes elements.
  *
  * Each property entry is `[id (1 byte) | value (4 BE bytes)]` = 5 bytes
- * — an element wire size that exercises `wireSize` Exact composition
+ * — an element wire size that exercises `wireBytes` Exact composition
  * via the `as Exact` runtime cast.
  */
 @ProtocolMessage
@@ -65,11 +65,11 @@ data class TaggedPropertyBag(
 
 /**
  * Regression vector — a data class element whose
- * `wireSize` returns `BackPatch` (due to the `@LengthPrefixed val:
+ * `wireBytes` returns `BackPatch` (due to the `@LengthPrefixed val:
  * String` field, per row-15 doctrine). Before the element was
  * routed through the pre-measure encode path (because the analyzer's
  * `elementIsSealed` flag was driven solely by `Modifier.SEALED`), and
- * the `(ElementCodec.wireSize(it, context) as WireSize.Exact).bytes`
+ * the `(ElementCodec.wireSize(it, context) as WireByteCount.exact).bytes`
  * cast would `ClassCastException` at runtime. After the
  * analyze-time predicate `detectElementBackPatch` walks the element's
  * primary-constructor params and routes any element with `@When` /

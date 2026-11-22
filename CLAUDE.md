@@ -472,7 +472,7 @@ For protocols that mix byte orders within a single message, use `@WireOrder(Endi
 
 ### `frameSize` — Generated Stream Framing
 
-Every codec generates `frameSize(stream: StreamProcessor, baseOffset: Int = 0): FrameSize`, a value class (no allocation) that is the frame's declared total size in bytes, `NeedsMoreData`, or `Unframed`. A declared size is reported as soon as the length field arrives, before the frame does. `readFrame` does the loop and rejects a declaration over `MaxFrameBytesKey` immediately:
+Every codec generates `frameSize(stream: StreamProcessor, baseOffset: Int = 0): FrameSize`, a value class (no allocation on the JVM) that is the frame's declared size (framing header bytes + body bytes), `NeedsMoreData`, or `Unframed`. A declared size is reported as soon as the length field arrives, before the frame does. `readFrame` does the loop and rejects a declaration over `MaxFrameBytesKey` immediately:
 
 ```kotlin
 while (true) {
@@ -481,7 +481,7 @@ while (true) {
 }
 ```
 
-The sender side is `wireBytes(value, context): WireBytes` (exact bytes or `BackPatch`). The older `peekFrameSize` / `PeekResult` and `wireSize` / `WireSize` are deprecated; generated codecs still override them as forwarders.
+The sender side is `wireBytes(value, context): WireByteCount` (exact bytes or `BackPatch`). A hand-written `BoundingLengthCodec` also implements `peekLength` (the length field read with `peekByte`) and `encodedWidth`; a `VariableLengthCodec` implements `frameSize` as a width-only scan.
 
 Handles `@LengthPrefixed`, `@LengthFrom`, `@WhenTrue` (including value class property conditions), `@WireBytes`, sealed dispatch, `@DispatchOn` (value class and data class discriminators), nested messages, and multiple variable-length fields.
 

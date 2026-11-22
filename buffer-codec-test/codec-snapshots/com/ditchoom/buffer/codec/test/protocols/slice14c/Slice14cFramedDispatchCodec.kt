@@ -1,21 +1,15 @@
 package com.ditchoom.buffer.codec.test.protocols.slice14c
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.FrameSize
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
 import com.ditchoom.buffer.stream.StreamProcessor
-import kotlin.Deprecated
 import kotlin.Int
-import kotlin.ReplaceWith
-import kotlin.Suppress
-import kotlin.Throwable
 
 public object Slice14cFramedDispatchCodec : FrameDetector {
   public fun decode(buffer: ReadBuffer, context: DecodeContext): Slice14cFramedDispatch {
@@ -41,30 +35,5 @@ public object Slice14cFramedDispatchCodec : FrameDetector {
     is Slice14cFramedDispatch.B -> Slice14cFramedDispatchBCodec.encode(value, context, factory)
   }
 
-  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
-    if (stream.available() - baseOffset < 2) return FrameSize.NeedsMoreData
-    val __framingPeek = stream.peekBuffer(baseOffset + 1, 5) ?: return FrameSize.NeedsMoreData
-    try {
-      val __framingPeekStart = __framingPeek.position()
-      val __framingLength = try {
-        MqttRemainingLengthCodec.decode(__framingPeek, DecodeContext.Empty)
-      } catch (__e: Throwable) {
-        when (__e::class.simpleName) {
-          "BufferUnderflowException", "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException" -> return FrameSize.NeedsMoreData
-          else -> throw __e
-        }
-      }
-      val __framingPrefixWidth = __framingPeek.position() - __framingPeekStart
-      return FrameSize.declared(1 + __framingPrefixWidth, __framingLength.toLong())
-    } finally {
-      (__framingPeek as? PlatformBuffer)?.freeNativeMemory()
-    }
-  }
-
-  @Deprecated(
-    message = "Call frameSize.",
-    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = MqttRemainingLengthCodec.peekLength(stream, baseOffset + 1).fold(declared = { __lengthWidth, __bodyBytes -> FrameSize.declared(1 + __lengthWidth, __bodyBytes) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
 }

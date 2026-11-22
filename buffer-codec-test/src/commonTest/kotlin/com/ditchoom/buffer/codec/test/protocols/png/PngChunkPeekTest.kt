@@ -6,8 +6,9 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.ownedBytesFrom
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -52,8 +53,8 @@ class PngChunkPeekTest {
             for (i in 0 until total) {
                 appendByte(stream, source.readByte())
                 assertEquals(
-                    PeekResult.NoFraming,
-                    PngChunkCodec.peekFrameSize(stream),
+                    PeekOutcome.NoFraming,
+                    PngChunkCodec.peekOutcome(stream),
                     "after ${i + 1}/$total bytes",
                 )
             }

@@ -5,7 +5,7 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -145,6 +145,6 @@ class MqttPublishV3GenericCodecTest {
         // Same conservative-BackPatch contract as — the
         // user codec might be Exact or BackPatch; we don't optimize
         // the runtime cast in.
-        assertEquals(WireSize.BackPatch, codec.wireSize(msg, EncodeContext.Empty))
+        assertEquals(WireByteCount.BackPatch, codec.wireBytes(msg, EncodeContext.Empty))
     }
 }

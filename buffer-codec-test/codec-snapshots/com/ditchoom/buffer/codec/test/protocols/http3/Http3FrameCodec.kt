@@ -8,14 +8,9 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
-import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
-import kotlin.Deprecated
 import kotlin.Int
-import kotlin.ReplaceWith
-import kotlin.Suppress
 
 public object Http3FrameCodec : Codec<Http3Frame> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): Http3Frame {
@@ -54,13 +49,6 @@ public object Http3FrameCodec : Codec<Http3Frame> {
     is Http3Frame.Extension -> Http3FrameExtensionCodec.wireBytes(value, context)
   }
 
-  @Deprecated(
-    message = "Call wireBytes.",
-    replaceWith = ReplaceWith("wireBytes(value, context)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun wireSize(`value`: Http3Frame, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
-
   override fun sizeHint(`value`: Http3Frame, context: EncodeContext): Int = when (value) {
     is Http3Frame.Data -> Http3FrameDataCodec.sizeHint(value, context)
     is Http3Frame.Headers -> Http3FrameHeadersCodec.sizeHint(value, context)
@@ -69,7 +57,7 @@ public object Http3FrameCodec : Codec<Http3Frame> {
   }
 
   override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
-    val __discWidth = Http3FrameTypeCodec.frameSize(stream, baseOffset + 0).fold(declared = { it }, needsMoreData = { return FrameSize.NeedsMoreData }, unframed = { return FrameSize.Unframed })
+    val __discWidth = Http3FrameTypeCodec.frameSize(stream, baseOffset + 0).fold(declared = { __h, __b -> __h + __b }, needsMoreData = { return FrameSize.NeedsMoreData }, unframed = { return FrameSize.Unframed })
     if (__discWidth > stream.available() - baseOffset - 0) return FrameSize.NeedsMoreData
     val __discView = stream.peekBuffer(baseOffset, __discWidth.toInt()) ?: return FrameSize.NeedsMoreData
     val __dispatchValue = try {
@@ -88,11 +76,4 @@ public object Http3FrameCodec : Codec<Http3Frame> {
       }
     }
   }
-
-  @Deprecated(
-    message = "Call frameSize.",
-    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

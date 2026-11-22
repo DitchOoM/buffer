@@ -2,7 +2,6 @@ package com.ditchoom.buffer.codec.test.protocols.lengthprefixedusecodec
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
@@ -11,17 +10,11 @@ import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.LengthPrefixedListEncoder
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
-import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
 import com.ditchoom.buffer.stream.StreamProcessor
-import kotlin.Deprecated
 import kotlin.Int
-import kotlin.ReplaceWith
-import kotlin.Suppress
-import kotlin.Throwable
 
 public object StringTaggedPropertyBagCodec : Codec<StringTaggedPropertyBag> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): StringTaggedPropertyBag {
@@ -67,39 +60,7 @@ public object StringTaggedPropertyBagCodec : Codec<StringTaggedPropertyBag> {
 
   override fun wireBytes(`value`: StringTaggedPropertyBag, context: EncodeContext): WireByteCount = WireByteCount.BackPatch
 
-  @Deprecated(
-    message = "Call wireBytes.",
-    replaceWith = ReplaceWith("wireBytes(value, context)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun wireSize(`value`: StringTaggedPropertyBag, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
-
   override fun sizeHint(`value`: StringTaggedPropertyBag, context: EncodeContext): Int = 0
 
-  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
-    if (stream.available() - baseOffset < 1) return FrameSize.NeedsMoreData
-    val __propertiesPeekView = stream.peekBuffer(baseOffset + 0, 5) ?: return FrameSize.NeedsMoreData
-    try {
-      val __propertiesPriorPos = __propertiesPeekView.position()
-      val __propertiesLength = try {
-        MqttRemainingLengthCodec.decode(__propertiesPeekView, DecodeContext.Empty)
-      } catch (__e: Throwable) {
-        when (__e::class.simpleName) {
-          "BufferUnderflowException", "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException" -> return FrameSize.NeedsMoreData
-          else -> throw __e
-        }
-      }
-      val __propertiesWidth = __propertiesPeekView.position() - __propertiesPriorPos
-      return FrameSize.declared(0 + __propertiesWidth, __propertiesLength.toLong())
-    } finally {
-      (__propertiesPeekView as? PlatformBuffer)?.freeNativeMemory()
-    }
-  }
-
-  @Deprecated(
-    message = "Call frameSize.",
-    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = MqttRemainingLengthCodec.peekLength(stream, baseOffset + 0).fold(declared = { __lengthWidth, __bodyBytes -> FrameSize.declared(0 + __lengthWidth, __bodyBytes) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
 }

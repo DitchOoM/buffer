@@ -6,7 +6,8 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -38,11 +39,11 @@ class EthernetFrameByEtherTypePeekTest {
             val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
             try {
                 appendByte(stream, source.readByte())
-                assertEquals(PeekResult.NeedsMoreData, EthernetFrameByEtherTypeCodec.peekFrameSize(stream), "1/2 bytes")
+                assertEquals(PeekOutcome.NeedsMoreData, EthernetFrameByEtherTypeCodec.peekOutcome(stream), "1/2 bytes")
                 appendByte(stream, source.readByte())
                 assertEquals(
-                    PeekResult.Complete(2),
-                    EthernetFrameByEtherTypeCodec.peekFrameSize(stream),
+                    PeekOutcome.Complete(2),
+                    EthernetFrameByEtherTypeCodec.peekOutcome(stream),
                     "fully buffered",
                 )
 

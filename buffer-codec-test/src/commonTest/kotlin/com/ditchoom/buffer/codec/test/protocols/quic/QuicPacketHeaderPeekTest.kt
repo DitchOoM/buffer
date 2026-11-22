@@ -6,7 +6,8 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -33,9 +34,9 @@ class QuicPacketHeaderPeekTest {
             assertEquals(1, source.remaining(), "first-byte dispatch slice is 1 byte")
             val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
             try {
-                assertEquals(PeekResult.NeedsMoreData, QuicPacketHeaderCodec.peekFrameSize(stream), "no bytes")
+                assertEquals(PeekOutcome.NeedsMoreData, QuicPacketHeaderCodec.peekOutcome(stream), "no bytes")
                 appendByte(stream, source.readByte())
-                assertEquals(PeekResult.Complete(1), QuicPacketHeaderCodec.peekFrameSize(stream), "fully buffered")
+                assertEquals(PeekOutcome.Complete(1), QuicPacketHeaderCodec.peekOutcome(stream), "fully buffered")
 
                 val decodeBuffer = BufferFactory.Default.allocate(8, ByteOrder.BIG_ENDIAN)
                 QuicPacketHeaderCodec.encode(decodeBuffer, frame, EncodeContext.Empty)

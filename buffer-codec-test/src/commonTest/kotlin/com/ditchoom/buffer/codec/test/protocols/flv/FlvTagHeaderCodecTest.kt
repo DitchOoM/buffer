@@ -5,8 +5,9 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -85,7 +86,7 @@ class FlvTagHeaderCodecTest {
 
     @Test
     fun wireSizeIsAlwaysExact11() {
-        assertEquals(WireSize.Exact(frameSize), FlvTagHeaderCodec.wireSize(sampleHeader, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(frameSize.toLong()), FlvTagHeaderCodec.wireBytes(sampleHeader, EncodeContext.Empty))
     }
 
     @Test
@@ -93,15 +94,15 @@ class FlvTagHeaderCodecTest {
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, FlvTagHeaderCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, FlvTagHeaderCodec.peekOutcome(stream))
             for (i in 0 until frameSize - 1) {
                 val one = BufferFactory.Default.allocate(1)
                 one.writeByte(sampleWire[i])
                 one.resetForRead()
                 stream.append(one)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    FlvTagHeaderCodec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    FlvTagHeaderCodec.peekOutcome(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -109,7 +110,7 @@ class FlvTagHeaderCodecTest {
             last.writeByte(sampleWire[frameSize - 1])
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(frameSize), FlvTagHeaderCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(frameSize), FlvTagHeaderCodec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()

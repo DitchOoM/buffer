@@ -16,7 +16,7 @@ import com.ditchoom.buffer.pool.PoolReleasable
  *   2. Positions the growable past the slack region and invokes [writeBody]
  *      to write the body fields into the buffer.
  *   3. Computes `bodyBytes = position - maxSlack` and asks [framingCodec] for
- *      the actual prefix width via `wireBytes(bodyBytes, context)`.
+ *      the actual prefix width via `encodedWidth(bodyBytes)`.
  *   4. Right-flushes the prefix (and optional header) into the slack region
  *      so the wire bytes lie contiguously: `[header?][prefix][body]`.
  *   5. Returns a [ReadBuffer] slice spanning exactly those wire bytes.
@@ -51,13 +51,9 @@ public object FramedEncoder {
             writeBody(growable)
             val bodyBytes = growable.position() - maxSlack
             val actualPrefixWidth =
-                framingCodec.wireBytes(bodyBytes.toUInt(), context).fold(
-                    exact = { width ->
-                        if (width > framingCodec.maxWireSize) throw FramingSizeException(framingCodec)
-                        width.toInt()
-                    },
-                    backPatch = { throw FramingSizeException(framingCodec) },
-                )
+                framingCodec.encodedWidth(bodyBytes.toLong()).also { width ->
+                    if (width !in 0..framingCodec.maxWireSize) throw FramingSizeException(framingCodec)
+                }
             val sliceStart = maxSlack - actualPrefixWidth - headerWireWidth
             val buffer: PlatformBuffer = growable.innerBuffer()
             buffer.position(sliceStart)
@@ -101,5 +97,5 @@ public class FramingSizeException(
     public val encoder: Encoder<*>,
 ) : EncodeException(
         fieldPath = "@FramedBy",
-        reason = "${encoder::class.simpleName}.wireBytes is not an exact size within the framing slack",
+        reason = "${encoder::class.simpleName} does not report an exact size within the framing slack",
     )

@@ -6,10 +6,10 @@ import com.ditchoom.buffer.codec.BufferFactoryKey
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.OwnedBytesHandle
 import com.ditchoom.buffer.codec.Payload
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.asReadBuffer
 import com.ditchoom.buffer.codec.byteSize
 import com.ditchoom.buffer.codec.handleEquals
@@ -57,8 +57,8 @@ value class BinaryData(
  * factory comes from [BufferFactoryKey] on the [DecodeContext], or falls
  * back to [testFixtureFactory].
  *
- * `peekFrameSize` returns `NoFraming` — framing is owned by the outer
- * message's codec which walks the prefix in its own `peekFrameSize`.
+ * `frameSize` returns `NoFraming` — framing is owned by the outer
+ * message's codec which walks the prefix in its own `frameSize`.
  */
 object BinaryDataCodec : Codec<BinaryData> {
     override fun decode(
@@ -80,15 +80,15 @@ object BinaryDataCodec : Codec<BinaryData> {
         buffer.write(value.data.asReadBuffer())
     }
 
-    override fun wireSize(
+    override fun wireBytes(
         value: BinaryData,
         context: EncodeContext,
-    ): WireSize = WireSize.Exact(value.data.byteSize())
+    ): WireByteCount = WireByteCount.exact((value.data.byteSize()).toLong())
 
-    override fun peekFrameSize(
+    override fun frameSize(
         stream: StreamProcessor,
         baseOffset: Int,
-    ): PeekResult = PeekResult.NoFraming
+    ): FrameSize = FrameSize.Unframed
 }
 
 /**

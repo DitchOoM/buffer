@@ -6,7 +6,8 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.mqttv5.authrc.V5AuthReasonCode
 import com.ditchoom.buffer.codec.test.protocols.mqttv5.disconnectrc.V5DisconnectReasonCode
 import com.ditchoom.buffer.codec.test.protocols.mqttv5.puback.V5PubAckReasonCode
@@ -211,7 +212,7 @@ class MqttV5CascadingAcksCodecTest {
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
             stream.append(buf)
-            assertEquals(PeekResult.Complete(totalBytes), jpegDispatcher().peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), jpegDispatcher().peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -321,7 +322,7 @@ class MqttV5CascadingAcksCodecTest {
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, jpegDispatcher().peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, jpegDispatcher().peekOutcome(stream))
             // Drip-feed each byte; only the final byte makes the bounded RL
             // peek complete.
             for (i in 0 until totalBytes - 1) {
@@ -330,8 +331,8 @@ class MqttV5CascadingAcksCodecTest {
                 one.resetForRead()
                 stream.append(one)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    jpegDispatcher().peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    jpegDispatcher().peekOutcome(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -339,7 +340,7 @@ class MqttV5CascadingAcksCodecTest {
             last.writeByte(buf.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), jpegDispatcher().peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), jpegDispatcher().peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()

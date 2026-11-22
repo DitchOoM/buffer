@@ -85,7 +85,7 @@ class ProtocolMessagePayloadValidatorTest {
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
                 import com.ditchoom.buffer.codec.Payload
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.RemainingBytes
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -98,8 +98,8 @@ class ProtocolMessagePayloadValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: OpaqueBlob, context: EncodeContext) {
                         buffer.writeBytes(value.bytes)
                     }
-                    override fun wireSize(value: OpaqueBlob, context: EncodeContext): WireSize =
-                        WireSize.Exact(value.bytes.size)
+                    override fun wireBytes(value: OpaqueBlob, context: EncodeContext): WireByteCount =
+                        WireByteCount.exact(value.bytes.size.toLong())
                 }
 
                 @ProtocolMessage
@@ -229,7 +229,7 @@ class ProtocolMessagePayloadValidatorTest {
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
                 import com.ditchoom.buffer.codec.Payload
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -243,8 +243,8 @@ class ProtocolMessagePayloadValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: Blob, context: EncodeContext) {
                         buffer.writeBytes(value.bytes)
                     }
-                    override fun wireSize(value: Blob, context: EncodeContext): WireSize =
-                        WireSize.Exact(value.bytes.size)
+                    override fun wireBytes(value: Blob, context: EncodeContext): WireByteCount =
+                        WireByteCount.exact(value.bytes.size.toLong())
                 }
 
                 @ProtocolMessage
@@ -339,7 +339,7 @@ class ProtocolMessagePayloadValidatorTest {
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
                 import com.ditchoom.buffer.codec.Payload
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -352,7 +352,7 @@ class ProtocolMessagePayloadValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: Dimensions, context: EncodeContext) {
                         buffer.writeUShort(value.width); buffer.writeUShort(value.height)
                     }
-                    override fun wireSize(value: Dimensions, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun wireBytes(value: Dimensions, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
                 }
 
                 @ProtocolMessage
@@ -382,7 +382,7 @@ class ProtocolMessagePayloadValidatorTest {
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
                 import com.ditchoom.buffer.codec.Payload
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -395,8 +395,8 @@ class ProtocolMessagePayloadValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: TextPayload, context: EncodeContext) {
                         buffer.writeString(value.text)
                     }
-                    override fun wireSize(value: TextPayload, context: EncodeContext): WireSize =
-                        WireSize.Exact(value.text.length)
+                    override fun wireBytes(value: TextPayload, context: EncodeContext): WireByteCount =
+                        WireByteCount.exact(value.text.length.toLong())
                 }
 
                 @ProtocolMessage
@@ -427,7 +427,7 @@ class ProtocolMessagePayloadValidatorTest {
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
                 import com.ditchoom.buffer.codec.Payload
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -440,7 +440,7 @@ class ProtocolMessagePayloadValidatorTest {
                 object EventCodec : Codec<Event> {
                     override fun decode(buffer: ReadBuffer, context: DecodeContext): Event = Event.Tick(0u)
                     override fun encode(buffer: WriteBuffer, value: Event, context: EncodeContext) {}
-                    override fun wireSize(value: Event, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun wireBytes(value: Event, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
                 }
 
                 @ProtocolMessage

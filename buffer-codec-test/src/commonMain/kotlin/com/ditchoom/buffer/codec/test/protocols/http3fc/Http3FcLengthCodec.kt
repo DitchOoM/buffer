@@ -6,8 +6,10 @@ import com.ditchoom.buffer.codec.BoundingLengthCodec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec
+import com.ditchoom.buffer.stream.StreamProcessor
 
 /**
  * The HTTP/3 frame **Length** field (RFC 9114 §7.1) as the `@FramedBy`
@@ -51,10 +53,34 @@ object Http3FcLengthCodec : BoundingLengthCodec<UInt> {
         context: EncodeContext,
     ) = QuicVarintCodec.encode(buffer, value.toULong(), context)
 
-    override fun wireSize(
+    override fun wireBytes(
         value: UInt,
         context: EncodeContext,
-    ): WireSize = WireSize.Exact(QuicVarintCodec.encodedLength(value.toULong()))
+    ): WireByteCount = WireByteCount.exact((QuicVarintCodec.encodedLength(value.toULong())).toLong())
+
+    override fun peekLength(
+        stream: StreamProcessor,
+        baseOffset: Int,
+    ): FrameSize {
+        val length = QuicVarintCodec.peekAsLength(stream, baseOffset)
+        length.fold(
+            declared = { _, body ->
+                if (body > UInt.MAX_VALUE.toLong()) {
+                    throw DecodeException(
+                        fieldPath = "Http3FcFrame.length",
+                        bufferPosition = baseOffset,
+                        expected = "frame length <= ${UInt.MAX_VALUE}",
+                        actual = body.toString(),
+                    )
+                }
+            },
+            needsMoreData = {},
+            unframed = {},
+        )
+        return length
+    }
+
+    override fun encodedWidth(bodyBytes: Long): Int = QuicVarintCodec.encodedLength(bodyBytes.toULong())
 
     override fun applyBound(
         buffer: ReadBuffer,

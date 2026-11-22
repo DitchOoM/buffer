@@ -9,15 +9,10 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FrameTooLargeException
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireByteCount
-import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
-import kotlin.Deprecated
 import kotlin.Int
-import kotlin.ReplaceWith
-import kotlin.Suppress
 
 public object LengthFromValueClassIdCodec : Codec<LengthFromValueClassId> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): LengthFromValueClassId {
@@ -48,14 +43,7 @@ public object LengthFromValueClassIdCodec : Codec<LengthFromValueClassId> {
     buffer.writeText(value.payload.value, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
   }
 
-  override fun wireBytes(`value`: LengthFromValueClassId, context: EncodeContext): WireByteCount = WireByteCount.exact(2L + value.len.toInt())
-
-  @Deprecated(
-    message = "Call wireBytes.",
-    replaceWith = ReplaceWith("wireBytes(value, context)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun wireSize(`value`: LengthFromValueClassId, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
+  override fun wireBytes(`value`: LengthFromValueClassId, context: EncodeContext): WireByteCount = WireByteCount.exact(2L + value.len.toLong())
 
   override fun sizeHint(`value`: LengthFromValueClassId, context: EncodeContext): Int = 2 + value.payload.value.length
 
@@ -71,13 +59,6 @@ public object LengthFromValueClassIdCodec : Codec<LengthFromValueClassId> {
       throw FrameTooLargeException(declaredBytes = if (payloadBytes < 0) payloadBytes.toLong() else __offset.toLong() + payloadBytes, maxBytes = Int.MAX_VALUE)
     }
     __offset += payloadBytes
-    return FrameSize.declared(__offset.toLong())
+    return FrameSize.declared(0, __offset.toLong())
   }
-
-  @Deprecated(
-    message = "Call frameSize.",
-    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

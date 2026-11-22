@@ -26,7 +26,7 @@ import kotlin.jvm.JvmInline
  *    real RFC 9114 §7.1 Length, modeled as [Http3LengthCodec] (a
  *    `BoundingLengthCodec`). It narrows `buffer.limit()` to the payload extent so
  *    the trailing `@RemainingBytes payload` reads exactly `length` bytes — and
- *    the generated `peekFrameSize` sizes the whole frame as
+ *    the generated `frameSize` sizes the whole frame as
  *    `typeWidth + lengthWidth + length`.
  *
  * The length sits immediately before the payload (no field folds between them),

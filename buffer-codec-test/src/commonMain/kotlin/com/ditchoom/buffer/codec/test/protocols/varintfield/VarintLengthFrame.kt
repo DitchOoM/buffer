@@ -10,7 +10,7 @@ import com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec
  * followed by a fixed-size suffix.
  *
  * Proves the generic, encoding-agnostic plumbing: decode/encode delegate to the
- * codec (already worked), and `peekFrameSize` now frames the message as
+ * codec (already worked), and `frameSize` now frames the message as
  * `width(value) + 1` — the self-delimiting width read from the leading bytes
  * plus the trailing `tag` byte — instead of collapsing to `NoFraming`. No QUIC
  * knowledge is in the processor; the encoding is entirely in the consumer codec.

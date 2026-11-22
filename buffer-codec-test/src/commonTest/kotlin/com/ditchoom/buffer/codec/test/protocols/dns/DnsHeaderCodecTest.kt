@@ -5,8 +5,9 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -66,7 +67,7 @@ class DnsHeaderCodecTest {
 
     @Test
     fun wireSizeIsAlwaysExact12() {
-        assertEquals(WireSize.Exact(12), DnsHeaderCodec.wireSize(sampleHeader, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(12), DnsHeaderCodec.wireBytes(sampleHeader, EncodeContext.Empty))
         // Vary every field; size stays 12 regardless of values.
         val maxed =
             DnsHeader(
@@ -77,7 +78,7 @@ class DnsHeaderCodecTest {
                 nsCount = UShort.MAX_VALUE,
                 arCount = UShort.MAX_VALUE,
             )
-        assertEquals(WireSize.Exact(12), DnsHeaderCodec.wireSize(maxed, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(12), DnsHeaderCodec.wireBytes(maxed, EncodeContext.Empty))
     }
 
     @Test
@@ -85,15 +86,15 @@ class DnsHeaderCodecTest {
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, DnsHeaderCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, DnsHeaderCodec.peekOutcome(stream))
             for (i in 0 until 11) {
                 val one = BufferFactory.Default.allocate(1)
                 one.writeByte(sampleWire[i])
                 one.resetForRead()
                 stream.append(one)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    DnsHeaderCodec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    DnsHeaderCodec.peekOutcome(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -101,7 +102,7 @@ class DnsHeaderCodecTest {
             last.writeByte(sampleWire[11])
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(12), DnsHeaderCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(12), DnsHeaderCodec.peekOutcome(stream))
 
             val decoded =
                 stream.readBufferScoped(12) {
@@ -126,9 +127,9 @@ class DnsHeaderCodecTest {
             twoHeaders.resetForRead()
             stream.append(twoHeaders)
 
-            assertEquals(PeekResult.Complete(12), DnsHeaderCodec.peekFrameSize(stream, baseOffset = 0))
-            assertEquals(PeekResult.Complete(12), DnsHeaderCodec.peekFrameSize(stream, baseOffset = 12))
-            assertEquals(PeekResult.NeedsMoreData, DnsHeaderCodec.peekFrameSize(stream, baseOffset = 13))
+            assertEquals(PeekOutcome.Complete(12), DnsHeaderCodec.peekOutcome(stream, baseOffset = 0))
+            assertEquals(PeekOutcome.Complete(12), DnsHeaderCodec.peekOutcome(stream, baseOffset = 12))
+            assertEquals(PeekOutcome.NeedsMoreData, DnsHeaderCodec.peekOutcome(stream, baseOffset = 13))
         } finally {
             stream.release()
             pool.clear()

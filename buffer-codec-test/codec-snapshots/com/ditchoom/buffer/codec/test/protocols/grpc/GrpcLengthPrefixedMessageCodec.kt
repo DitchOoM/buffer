@@ -8,15 +8,10 @@ import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FrameTooLargeException
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
-import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import com.ditchoom.buffer.stream.StreamProcessor
-import kotlin.Deprecated
 import kotlin.Int
-import kotlin.ReplaceWith
-import kotlin.Suppress
 
 public object GrpcLengthPrefixedMessageCodec : Codec<GrpcLengthPrefixedMessage> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): GrpcLengthPrefixedMessage {
@@ -75,13 +70,6 @@ public object GrpcLengthPrefixedMessageCodec : Codec<GrpcLengthPrefixedMessage> 
     return WireByteCount.exact(1L + __messageSize)
   }
 
-  @Deprecated(
-    message = "Call wireBytes.",
-    replaceWith = ReplaceWith("wireBytes(value, context)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun wireSize(`value`: GrpcLengthPrefixedMessage, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
-
   override fun sizeHint(`value`: GrpcLengthPrefixedMessage, context: EncodeContext): Int = 5
 
   override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
@@ -98,13 +86,6 @@ public object GrpcLengthPrefixedMessageCodec : Codec<GrpcLengthPrefixedMessage> 
       throw FrameTooLargeException(declaredBytes = __offset.toLong() + 4 + messagePrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 4 + messagePrefix.toInt()
-    return FrameSize.declared(__offset.toLong())
+    return FrameSize.declared(0, __offset.toLong())
   }
-
-  @Deprecated(
-    message = "Call frameSize.",
-    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

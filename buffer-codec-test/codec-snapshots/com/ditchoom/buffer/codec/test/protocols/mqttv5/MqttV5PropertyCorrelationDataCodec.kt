@@ -9,15 +9,10 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FrameTooLargeException
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
-import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import com.ditchoom.buffer.stream.StreamProcessor
-import kotlin.Deprecated
 import kotlin.Int
-import kotlin.ReplaceWith
-import kotlin.Suppress
 
 public object MqttV5PropertyCorrelationDataCodec : Codec<MqttV5Property.CorrelationData> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): MqttV5Property.CorrelationData {
@@ -75,13 +70,6 @@ public object MqttV5PropertyCorrelationDataCodec : Codec<MqttV5Property.Correlat
     return WireByteCount.exact(1L + __dataSize)
   }
 
-  @Deprecated(
-    message = "Call wireBytes.",
-    replaceWith = ReplaceWith("wireBytes(value, context)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun wireSize(`value`: MqttV5Property.CorrelationData, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
-
   override fun sizeHint(`value`: MqttV5Property.CorrelationData, context: EncodeContext): Int = 3
 
   override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
@@ -96,13 +84,6 @@ public object MqttV5PropertyCorrelationDataCodec : Codec<MqttV5Property.Correlat
       throw FrameTooLargeException(declaredBytes = __offset.toLong() + 2 + dataPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 2 + dataPrefix.toInt()
-    return FrameSize.declared(__offset.toLong())
+    return FrameSize.declared(0, __offset.toLong())
   }
-
-  @Deprecated(
-    message = "Call frameSize.",
-    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

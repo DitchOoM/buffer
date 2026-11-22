@@ -6,8 +6,8 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.utf8Length
@@ -383,7 +383,7 @@ private fun dupMsg(
  * `@When @UseCodec val: T?` shape passes the same self-framing codec
  * call through.
  *
- * `peekFrameSize` returns `NoFraming` because the v5 dispatcher's outer
+ * `frameSize` returns `NoFraming` because the v5 dispatcher's outer
  * `MqttRemainingLengthCodec` already drives upstream peek (the bounding
  * UseCodecScalar walker on every `MqttV5Packet*Codec`). The bag's own
  * VBI prefix is irrelevant for packet-level framing.
@@ -599,15 +599,15 @@ object V5PropertyBagCodec : Codec<V5PropertyBag> {
         }
     }
 
-    override fun wireSize(
+    override fun wireBytes(
         value: V5PropertyBag,
         context: EncodeContext,
-    ): WireSize = WireSize.BackPatch
+    ): WireByteCount = WireByteCount.BackPatch
 
-    override fun peekFrameSize(
+    override fun frameSize(
         stream: StreamProcessor,
         baseOffset: Int,
-    ): PeekResult = PeekResult.NoFraming
+    ): FrameSize = FrameSize.Unframed
 
     private fun duplicate(
         position: Int,

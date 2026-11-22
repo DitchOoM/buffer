@@ -5,11 +5,10 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
 
 /**
  * Round-trip + wire-byte + wireSize coverage
@@ -101,8 +100,8 @@ class Slice11aProbeCodecTest {
         // element. ProbeSealed.Tag2 is BackPatch (carries
         // @LengthPrefixed val: String), so the collapse fires.
         val msg = ProbeRemainingBytesList(xs = listOf(ProbeSealed.Tag1(n = 0x00u)))
-        val ws = ProbeRemainingBytesListCodec.wireSize(msg, EncodeContext.Empty)
-        assertIs<WireSize.BackPatch>(ws, "expected BackPatch from sealed-element widening")
+        val ws = ProbeRemainingBytesListCodec.wireBytes(msg, EncodeContext.Empty)
+        assertEquals(WireByteCount.BackPatch, ws, "expected BackPatch from sealed-element widening")
     }
 
     @Test
@@ -110,8 +109,8 @@ class Slice11aProbeCodecTest {
         // Any Conditional field collapses message wireSize to BackPatch
         // (row 19) regardless of the inner shape — sanity check.
         val msg = ProbeConditional(present = true, seal = ProbeSealed.Tag1(n = 0x00u))
-        val ws = ProbeConditionalCodec.wireSize(msg, EncodeContext.Empty)
-        assertIs<WireSize.BackPatch>(ws)
+        val ws = ProbeConditionalCodec.wireBytes(msg, EncodeContext.Empty)
+        assertEquals(WireByteCount.BackPatch, ws)
     }
 
     private fun encode(value: ProbeConditional) =

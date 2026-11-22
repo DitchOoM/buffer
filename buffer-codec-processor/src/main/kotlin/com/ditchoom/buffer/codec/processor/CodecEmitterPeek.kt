@@ -165,11 +165,11 @@ internal fun buildPeekFrame(shape: CodecShape): FunSpec {
             if (priorAreFixed) {
                 // All-fixed priors: the static-offset walker (byte-identical
                 // to every pre-existing bounding fixture).
-                appendPeekUseCodecScalar(builder, shape, boundingField, budget)
+                appendPeekUseCodecScalar(builder, shape, boundingField)
             } else {
                 // A self-framing variable-width prior is present (varint
                 // discriminator): measure prior offsets at runtime.
-                appendPeekBoundingDynamicPrior(builder, shape, boundingField, budget)
+                appendPeekBoundingDynamicPrior(builder, shape, boundingField)
             }
             return builder.build()
         }
@@ -229,7 +229,7 @@ internal fun buildPeekFrame(shape: CodecShape): FunSpec {
             builder.addStatement("return %T.Unframed", FRAME_SIZE_CN)
             return builder.build()
         }
-        appendPeekLengthPrefixedUseCodecList(builder, shape, lpUcField, peekBudget = 5)
+        appendPeekLengthPrefixedUseCodecList(builder, shape, lpUcField)
         return builder.build()
     }
     // `@RemainingBytes List<@ProtocolMessage T>` and
@@ -343,7 +343,7 @@ internal fun buildPeekFrame(shape: CodecShape): FunSpec {
             (shape.singletonDispatchDiscriminator?.wireWidth ?: WireWidth.Zero)
                 .requireFixed("singletonDiscriminator")
         val total = shape.fields.sumOfFixedWireBytes().requireFixed("sumOfFixedWireBytes") + discriminatorBytes
-        builder.addStatement("return %T.declared(%LL)", FRAME_SIZE_CN, total)
+        builder.addStatement("return %T.declared(0, %LL)", FRAME_SIZE_CN, total)
         return builder.build()
     }
     appendSequentialPeek(builder, shape)
@@ -351,31 +351,15 @@ internal fun buildPeekFrame(shape: CodecShape): FunSpec {
 }
 
 /**
- * Emit peek for a shape carrying a bounding
- * `@UseCodec val: <scalar>` field. Materializes a non-consuming view
- * via `stream.peekBuffer(baseOffset + priorBytes, peekBudget)`, runs
- * `<codec>.decode` against the view, and computes total =
- * priorBytes + observed-codec-width + decodedValue.toInt(). The
- * user codec does the var-int read against the peek view, so the
- * peek path stays in lockstep with the decode path by construction.
- *
- * `IndexOutOfBoundsException` from the codec (the documented
- * underflow signal on `ReadBuffer`) collapses to
- * `PeekResult.NeedsMoreData`. Other exceptions (e.g. the codec's
- * own `DecodeException` for malformed wire) propagate — the stream
- * genuinely has bad data and the caller should observe the
- * exception, not loop on `NeedsMoreData`.
- *
- * The peek view is released via `freeNativeMemory()` in a `finally`
- * so the slow-path pool buffer is returned even when peek aborts.
- * The fast-path slice's `freeNativeMemory()` is a no-op for non-
- * pooled chunks.
+ * Peek for a shape whose bounding `@UseCodec` length follows only fixed-width fields:
+ * the length codec's [peekLength][com.ditchoom.buffer.codec.BoundingLengthCodec.peekLength]
+ * reads the field at the fixed prior offset, and the frame is that prefix plus the
+ * declared body.
  */
 internal fun appendPeekUseCodecScalar(
     builder: FunSpec.Builder,
     shape: CodecShape,
     field: FieldSpec.UseCodecScalar,
-    peekBudget: Int,
 ) {
     val priorBytes =
         shape.fields
@@ -383,95 +367,21 @@ internal fun appendPeekUseCodecScalar(
             .filterIsInstance<FieldSpec.FixedSize>()
             .sumOf { it.wireBytes }
     val body = CodeBlock.builder()
-    body.addStatement(
-        "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
-        priorBytes + 1,
-        FRAME_SIZE_CN,
-    )
-    val peekViewVar = "__${field.name}PeekView"
-    body.addStatement(
-        "val %L = stream.peekBuffer(baseOffset + %L, %L) ?: return %T.NeedsMoreData",
-        peekViewVar,
-        priorBytes,
-        peekBudget,
-        FRAME_SIZE_CN,
-    )
-    body.beginControlFlow("try")
-    val priorPosVar = "__${field.name}PriorPos"
-    body.addStatement("val %L = %L.position()", priorPosVar, peekViewVar)
-    body.beginControlFlow("val %L = try", field.name)
-    body.addStatement(
-        "%T.decode(%L, %T.Empty)",
-        field.codecType,
-        peekViewVar,
-        DECODE_CONTEXT_CN,
-    )
-    // Catch the underflow exception cross-platform via simpleName
-    // whitelist: JVM `java.nio.BufferUnderflowException` (extends
-    // RuntimeException, NOT IndexOutOfBoundsException), JS/WASM/
-    // Native `IndexOutOfBoundsException` / `ArrayIndexOutOfBoundsException`.
-    // Any other exception (e.g. the codec's own DecodeException for
-    // malformed wire) propagates — the stream genuinely has bad
-    // data and the caller should observe it, not loop on
-    // NeedsMoreData.
-    body.nextControlFlow("catch (__e: %T)", ClassName("kotlin", "Throwable"))
-    body.beginControlFlow("when (__e::class.simpleName)")
-    body.addStatement(
-        "%S, %S, %S -> return %T.NeedsMoreData",
-        "BufferUnderflowException",
-        "IndexOutOfBoundsException",
-        "ArrayIndexOutOfBoundsException",
-        FRAME_SIZE_CN,
-    )
-    body.addStatement("else -> throw __e")
-    body.endControlFlow()
-    body.endControlFlow()
-    val widthVar = "__${field.name}Width"
-    body.addStatement("val %L = %L.position() - %L", widthVar, peekViewVar, priorPosVar)
-    body.addStatement(
-        "return %T.declared(%L + %L, %L)",
-        FRAME_SIZE_CN,
-        priorBytes,
-        widthVar,
-        declaredLengthArg(field.name, field.fieldType),
-    )
-    body.nextControlFlow("finally")
-    body.addStatement(
-        "(%L as? %T)?.freeNativeMemory()",
-        peekViewVar,
-        PLATFORM_BUFFER_CN,
-    )
-    body.endControlFlow()
+    appendPeekLengthReturn(body, field.codecType, priorBytes.toString())
     builder.addCode(body.build())
 }
 
 /**
- * Bounding `@UseCodec` peek where one or more prior fields are **not**
- * fixed-width but are self-framing — most importantly a dispatch variant's
- * re-read varint discriminator (the HTTP/3 frame's QUIC-varint `Type` before
- * the bounding `Length`). The fixed-prior sibling [appendPeekUseCodecScalar]
- * sums a compile-time `priorBytes`; here that sum is accumulated at runtime
- * into `__priorBytes`:
- *
- *  - a `FixedSize` prior contributes its constant `wireBytes`;
- *  - a `ProtocolMessageScalar` or self-delimiting variable-length
- *    `UseCodecScalar` prior contributes the width its own codec's
- *    `frameSize` declares — measured at `baseOffset + __priorBytes`,
- *    exactly the dispatcher's discriminator-framing idiom, so peek and decode
- *    read the same bytes. A non-`Complete` prior result (the discriminator
- *    isn't fully buffered, or itself yields `NoFraming`) propagates straight
- *    out.
- *
- * After the priors, the bounded length is materialized and decoded against a
- * non-consuming `peekBuffer` view (underflow → `NeedsMoreData`, the same
- * contract as [appendPeekUseCodecScalar]) and the frame total is
- * `__priorBytes + lengthWidth + value`.
+ * Bounding `@UseCodec` peek where one or more prior fields are **not** fixed-width but are
+ * self-framing — a dispatch variant's re-read varint discriminator before the bounding
+ * `Length` (the HTTP/3 frame shape). Each prior contributes its fixed width or the width
+ * its own codec's `frameSize` declares (once those bytes have arrived), accumulated into
+ * `__priorBytes`; the length codec's `peekLength` then reads the field at that offset.
  */
 internal fun appendPeekBoundingDynamicPrior(
     builder: FunSpec.Builder,
     shape: CodecShape,
     field: FieldSpec.UseCodecScalar,
-    peekBudget: Int,
 ) {
     val priors = shape.fields.takeWhile { it !== field }
     val body = CodeBlock.builder()
@@ -495,54 +405,7 @@ internal fun appendPeekBoundingDynamicPrior(
                 error("priorAreFramable should have excluded ${prior::class.simpleName}")
         }
     }
-    body.addStatement(
-        "if (stream.available() - baseOffset < __priorBytes + 1) return %T.NeedsMoreData",
-        FRAME_SIZE_CN,
-    )
-    val peekViewVar = "__${field.name}PeekView"
-    body.addStatement(
-        "val %L = stream.peekBuffer(baseOffset + __priorBytes, %L) ?: return %T.NeedsMoreData",
-        peekViewVar,
-        peekBudget,
-        FRAME_SIZE_CN,
-    )
-    body.beginControlFlow("try")
-    val priorPosVar = "__${field.name}PriorPos"
-    body.addStatement("val %L = %L.position()", priorPosVar, peekViewVar)
-    body.beginControlFlow("val %L = try", field.name)
-    body.addStatement(
-        "%T.decode(%L, %T.Empty)",
-        field.codecType,
-        peekViewVar,
-        DECODE_CONTEXT_CN,
-    )
-    body.nextControlFlow("catch (__e: %T)", ClassName("kotlin", "Throwable"))
-    body.beginControlFlow("when (__e::class.simpleName)")
-    body.addStatement(
-        "%S, %S, %S -> return %T.NeedsMoreData",
-        "BufferUnderflowException",
-        "IndexOutOfBoundsException",
-        "ArrayIndexOutOfBoundsException",
-        FRAME_SIZE_CN,
-    )
-    body.addStatement("else -> throw __e")
-    body.endControlFlow()
-    body.endControlFlow()
-    val widthVar = "__${field.name}Width"
-    body.addStatement("val %L = %L.position() - %L", widthVar, peekViewVar, priorPosVar)
-    body.addStatement(
-        "return %T.declared(__priorBytes + %L, %L)",
-        FRAME_SIZE_CN,
-        widthVar,
-        declaredLengthArg(field.name, field.fieldType),
-    )
-    body.nextControlFlow("finally")
-    body.addStatement(
-        "(%L as? %T)?.freeNativeMemory()",
-        peekViewVar,
-        PLATFORM_BUFFER_CN,
-    )
-    body.endControlFlow()
+    appendPeekLengthReturn(body, field.codecType, "__priorBytes")
     builder.addCode(body.build())
 }
 
@@ -570,7 +433,7 @@ internal fun appendPeekEnum(
     val body = CodeBlock.builder()
     val widthVar = "__${field.name}Width"
     appendFrameWidth(body, widthVar, CodeBlock.of("%T", UNSIGNED_VARINT_CODEC_CN), priorBytes.toString())
-    body.addStatement("return %T.declared(%L, %L)", FRAME_SIZE_CN, priorBytes + suffixBytes, widthVar)
+    body.addStatement("return %T.declared(0, %LL + %L)", FRAME_SIZE_CN, priorBytes + suffixBytes, widthVar)
     builder.addCode(body.build())
 }
 
@@ -609,25 +472,19 @@ internal fun appendPeekVariableLengthUseCodecScalar(
     // NeedsMoreData / Unframed propagate unchanged; a declared width sizes the whole frame.
     val widthVar = "__${field.name}Width"
     appendFrameWidth(body, widthVar, CodeBlock.of("%T", field.codecType), priorBytes.toString())
-    body.addStatement("return %T.declared(%L, %L)", FRAME_SIZE_CN, priorBytes + suffixBytes, widthVar)
+    body.addStatement("return %T.declared(0, %LL + %L)", FRAME_SIZE_CN, priorBytes + suffixBytes, widthVar)
     builder.addCode(body.build())
 }
 
 /**
- * Emit peek for a shape carrying a terminal
- * `@LengthPrefixed @UseCodec val: List<E>` field. Mirrors
- * [appendPeekUseCodecScalar]: drives the prefix codec against a
- * non-consuming `stream.peekBuffer(...)` view, measures observed
- * codec width, computes total = priorBytes + width +
- * decodedValue.toInt(). The decoded UInt is the body byte count, so
- * adding it to the prefix bytes yields the full frame size. Caller
- * has already gated on `priorAreFixed && isTerminal`.
+ * Peek for a terminal `@LengthPrefixed @UseCodec val: List<E>`: the prefix codec's
+ * `peekLength` reads the body byte count after the fixed priors. Caller has already gated
+ * on `priorAreFixed && isTerminal`.
  */
 internal fun appendPeekLengthPrefixedUseCodecList(
     builder: FunSpec.Builder,
     shape: CodecShape,
     field: FieldSpec.LengthPrefixedUseCodecList,
-    peekBudget: Int,
 ) {
     val priorBytes =
         shape.fields
@@ -635,58 +492,7 @@ internal fun appendPeekLengthPrefixedUseCodecList(
             .filterIsInstance<FieldSpec.FixedSize>()
             .sumOf { it.wireBytes }
     val body = CodeBlock.builder()
-    body.addStatement(
-        "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
-        priorBytes + 1,
-        FRAME_SIZE_CN,
-    )
-    val peekViewVar = "__${field.name}PeekView"
-    body.addStatement(
-        "val %L = stream.peekBuffer(baseOffset + %L, %L) ?: return %T.NeedsMoreData",
-        peekViewVar,
-        priorBytes,
-        peekBudget,
-        FRAME_SIZE_CN,
-    )
-    body.beginControlFlow("try")
-    val priorPosVar = "__${field.name}PriorPos"
-    val lengthVar = "__${field.name}Length"
-    body.addStatement("val %L = %L.position()", priorPosVar, peekViewVar)
-    body.beginControlFlow("val %L = try", lengthVar)
-    body.addStatement(
-        "%T.decode(%L, %T.Empty)",
-        field.codecType,
-        peekViewVar,
-        DECODE_CONTEXT_CN,
-    )
-    body.nextControlFlow("catch (__e: %T)", ClassName("kotlin", "Throwable"))
-    body.beginControlFlow("when (__e::class.simpleName)")
-    body.addStatement(
-        "%S, %S, %S -> return %T.NeedsMoreData",
-        "BufferUnderflowException",
-        "IndexOutOfBoundsException",
-        "ArrayIndexOutOfBoundsException",
-        FRAME_SIZE_CN,
-    )
-    body.addStatement("else -> throw __e")
-    body.endControlFlow()
-    body.endControlFlow()
-    val widthVar = "__${field.name}Width"
-    body.addStatement("val %L = %L.position() - %L", widthVar, peekViewVar, priorPosVar)
-    body.addStatement(
-        "return %T.declared(%L + %L, %L.toLong())",
-        FRAME_SIZE_CN,
-        priorBytes,
-        widthVar,
-        lengthVar,
-    )
-    body.nextControlFlow("finally")
-    body.addStatement(
-        "(%L as? %T)?.freeNativeMemory()",
-        peekViewVar,
-        PLATFORM_BUFFER_CN,
-    )
-    body.endControlFlow()
+    appendPeekLengthReturn(body, field.codecType, priorBytes.toString())
     builder.addCode(body.build())
 }
 
@@ -868,7 +674,7 @@ internal fun appendSequentialPeek(
                 )
         }
     }
-    body.addStatement("return %T.declared(__offset.toLong())", FRAME_SIZE_CN)
+    body.addStatement("return %T.declared(0, __offset.toLong())", FRAME_SIZE_CN)
     builder.addCode(body.build())
 }
 
@@ -1298,7 +1104,7 @@ internal fun appendFrameWidth(
 ) {
     body.addStatement(
         "val %L = %L.frameSize(stream, baseOffset + %L).fold(" +
-            "declared = { it }, needsMoreData = { return %T.NeedsMoreData }, unframed = { return %T.Unframed })",
+            "declared = { __h, __b -> __h + __b }, needsMoreData = { return %T.NeedsMoreData }, unframed = { return %T.Unframed })",
         widthVar,
         codec,
         offsetExpr,
@@ -1322,6 +1128,30 @@ internal fun appendPriorFrameWidth(
         "if (%L > stream.available() - baseOffset - %L) return %T.NeedsMoreData",
         widthVar,
         offsetExpr,
+        FRAME_SIZE_CN,
+    )
+}
+
+/**
+ * `return <lengthCodec>.peekLength(stream, baseOffset + <headerExpr>)`, re-based: the frame's
+ * header is the [headerExpr] bytes before the length field plus the field itself, and its
+ * body is the length the field declares. The length codec reads the field with primitive
+ * stream peeks, so nothing is sliced, decoded or caught.
+ */
+internal fun appendPeekLengthReturn(
+    body: CodeBlock.Builder,
+    lengthCodec: ClassName,
+    headerExpr: String,
+) {
+    body.addStatement(
+        "return %T.peekLength(stream, baseOffset + %L).fold(" +
+            "declared = { __lengthWidth, __bodyBytes -> %T.declared(%L + __lengthWidth, __bodyBytes) }, " +
+            "needsMoreData = { %T.NeedsMoreData }, unframed = { %T.Unframed })",
+        lengthCodec,
+        headerExpr,
+        FRAME_SIZE_CN,
+        headerExpr,
+        FRAME_SIZE_CN,
         FRAME_SIZE_CN,
     )
 }

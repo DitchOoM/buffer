@@ -6,7 +6,8 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttUnsubscribeTopic
 import com.ditchoom.buffer.codec.test.protocols.mqttv5.suback.V5SubAckReasonCode
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImage
@@ -192,7 +193,7 @@ class MqttV5SubscribeFamilyCodecTest {
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
             stream.append(buf)
-            assertEquals(PeekResult.Complete(totalBytes), jpegDispatcher().peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), jpegDispatcher().peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()

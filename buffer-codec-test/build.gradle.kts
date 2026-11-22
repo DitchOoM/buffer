@@ -212,6 +212,20 @@ tasks
 // `jdk.ObjectAllocationOutsideTLAB`, which is reported per-allocation rather
 // than per-TLAB-rotation — without this, byte[] allocations that fit inside
 // an existing TLAB never trigger an event and the assertion is non-deterministic.
+// The allocation test again with escape analysis off: a zero there holds by construction,
+// not because C2 scalar-replaced a box. Runs after every jvmTest, so CI's jvm lane covers it.
+val jvmTestNoEscapeAnalysis by tasks.registering(Test::class) {
+    description = "FrameSizeAllocationTest with -XX:-DoEscapeAnalysis"
+    group = "verification"
+    val jvmTest = tasks.named<Test>("jvmTest").get()
+    testClassesDirs = jvmTest.testClassesDirs
+    classpath = jvmTest.classpath
+    javaLauncher.set(jvmTest.javaLauncher)
+    jvmArgs("-XX:-UseTLAB", "-XX:-DoEscapeAnalysis")
+    filter { includeTestsMatching("com.ditchoom.buffer.codec.test.alloc.FrameSizeAllocationTest") }
+}
+tasks.named<Test>("jvmTest") { finalizedBy(jvmTestNoEscapeAnalysis) }
+
 tasks.named<Test>("jvmTest") {
     jvmArgs("-XX:-UseTLAB")
     // CodecSnapshotTest reads KSP-generated output and compares against

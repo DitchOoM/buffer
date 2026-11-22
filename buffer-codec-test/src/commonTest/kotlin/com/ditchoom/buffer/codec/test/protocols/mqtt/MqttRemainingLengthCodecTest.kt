@@ -5,7 +5,7 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -124,14 +124,14 @@ class MqttRemainingLengthCodecTest {
 
     @Test
     fun wireSizeReportsExactByteWidth() {
-        assertEquals(WireSize.Exact(1), MqttRemainingLengthCodec.wireSize(0u, EncodeContext.Empty))
-        assertEquals(WireSize.Exact(1), MqttRemainingLengthCodec.wireSize(127u, EncodeContext.Empty))
-        assertEquals(WireSize.Exact(2), MqttRemainingLengthCodec.wireSize(128u, EncodeContext.Empty))
-        assertEquals(WireSize.Exact(2), MqttRemainingLengthCodec.wireSize(16_383u, EncodeContext.Empty))
-        assertEquals(WireSize.Exact(3), MqttRemainingLengthCodec.wireSize(16_384u, EncodeContext.Empty))
-        assertEquals(WireSize.Exact(3), MqttRemainingLengthCodec.wireSize(2_097_151u, EncodeContext.Empty))
-        assertEquals(WireSize.Exact(4), MqttRemainingLengthCodec.wireSize(2_097_152u, EncodeContext.Empty))
-        assertEquals(WireSize.Exact(4), MqttRemainingLengthCodec.wireSize(0x0FFF_FFFFu, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(1), MqttRemainingLengthCodec.wireBytes(0u, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(1), MqttRemainingLengthCodec.wireBytes(127u, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(2), MqttRemainingLengthCodec.wireBytes(128u, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(2), MqttRemainingLengthCodec.wireBytes(16_383u, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(3), MqttRemainingLengthCodec.wireBytes(16_384u, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(3), MqttRemainingLengthCodec.wireBytes(2_097_151u, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(4), MqttRemainingLengthCodec.wireBytes(2_097_152u, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(4), MqttRemainingLengthCodec.wireBytes(0x0FFF_FFFFu, EncodeContext.Empty))
     }
 
     @Test

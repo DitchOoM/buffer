@@ -8,7 +8,7 @@ import com.ditchoom.buffer.stream.StreamProcessor
  * Unsigned LEB128 variable-length integer codec for [UInt] — the classic 7-bits-per-byte,
  * high-bit-as-continuation encoding (protobuf varint, DWARF LEB128). A self-delimiting
  * [VariableLengthCodec], so it reports `Exact(encodedLength)` at runtime (no BackPatch) and
- * frames a stream via [peekValue].
+ * frames a stream via [frameSize].
  *
  * ```text
  *  value range          bytes
@@ -108,42 +108,7 @@ object UnsignedVarIntCodec : VariableLengthCodec<UInt> {
         return result
     }
 
-    override fun peekValue(
-        stream: StreamProcessor,
-        baseOffset: Int,
-    ): VarLenPeek<UInt> {
-        var result = 0u
-        var shift = 0
-        var i = 0
-        while (true) {
-            if (stream.available() - baseOffset < i + 1) return VarLenPeek.NeedsMoreData
-            val b = stream.peekByte(baseOffset + i).toInt() and 0xFF
-            // 5th byte: reject value bits beyond 2^32 (see decode) rather than truncate.
-            if (i == MAX_BYTES - 1 && b and FIFTH_BYTE_OVERFLOW_MASK != 0) {
-                throw DecodeException(
-                    fieldPath = "UnsignedVarInt",
-                    bufferPosition = baseOffset + i,
-                    expected = "a 5th byte within UInt range (high bits 0x70 clear)",
-                    actual = "a 5th byte carrying value bits beyond 2^32",
-                )
-            }
-            result = result or ((b and VALUE_MASK).toUInt() shl shift)
-            i++
-            if (b and CONTINUATION_BIT == 0) break
-            shift += VALUE_BITS_PER_BYTE
-            if (i >= MAX_BYTES) {
-                throw DecodeException(
-                    fieldPath = "UnsignedVarInt",
-                    bufferPosition = baseOffset + i,
-                    expected = "a terminating byte within $MAX_BYTES bytes (UInt range)",
-                    actual = "a $MAX_BYTES-byte sequence still requesting continuation",
-                )
-            }
-        }
-        return VarLenPeek.Decoded(result, i)
-    }
-
-    /** The varint's width alone: no [VarLenPeek.Decoded] to allocate, the same validation as [peekValue]. */
+    /** The varint's width, scanned byte by byte: nothing to allocate. Rejects the same over-long sequences as [decode]. */
     override fun frameSize(
         stream: StreamProcessor,
         baseOffset: Int,
@@ -161,7 +126,7 @@ object UnsignedVarIntCodec : VariableLengthCodec<UInt> {
                 )
             }
             i++
-            if (b and CONTINUATION_BIT == 0) return FrameSize.declared(i.toLong())
+            if (b and CONTINUATION_BIT == 0) return FrameSize.declared(0, i.toLong())
             if (i >= MAX_BYTES) {
                 throw DecodeException(
                     fieldPath = "UnsignedVarInt",

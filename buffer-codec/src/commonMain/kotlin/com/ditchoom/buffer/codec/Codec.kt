@@ -3,53 +3,6 @@ package com.ditchoom.buffer.codec
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.stream.StreamProcessor
-import kotlin.jvm.JvmInline
-
-/**
- * Reports the encoded byte size of a value. Boxes [Exact] on every call; [WireByteCount]
- * answers the same question without allocating.
- */
-@Deprecated(
-    "Use WireByteCount, returned by Encoder.wireBytes.",
-    ReplaceWith("WireByteCount", "com.ditchoom.buffer.codec.WireByteCount"),
-)
-sealed interface WireSize {
-    /** Codec knows the exact byte count up front; framework pre-allocates. */
-    @Suppress("DEPRECATION")
-    @JvmInline
-    value class Exact(
-        val bytes: Int,
-    ) : WireSize
-
-    /** Framework uses a growable write buffer + back-patches length-prefixed framing. */
-    @Suppress("DEPRECATION")
-    data object BackPatch : WireSize
-}
-
-/**
- * Result of peeking a frame size from a [StreamProcessor]. Boxes [Complete] on every
- * call and cannot report a size whose bytes have not all arrived; [FrameSize] does both.
- */
-@Deprecated(
-    "Use FrameSize, returned by FrameDetector.frameSize.",
-    ReplaceWith("FrameSize", "com.ditchoom.buffer.codec.FrameSize"),
-)
-sealed interface PeekResult {
-    /** A complete frame is available; [bytes] is its total size. */
-    @Suppress("DEPRECATION")
-    @JvmInline
-    value class Complete(
-        val bytes: Int,
-    ) : PeekResult
-
-    /** More bytes are required before a frame size can be determined. */
-    @Suppress("DEPRECATION")
-    data object NeedsMoreData : PeekResult
-
-    /** This codec does not participate in frame detection. */
-    @Suppress("DEPRECATION")
-    data object NoFraming : PeekResult
-}
 
 /** Writes [T] to a [WriteBuffer]. */
 interface Encoder<in T> {
@@ -60,26 +13,13 @@ interface Encoder<in T> {
     )
 
     /**
-     * The encoded size of [value], without allocating. Override this one; the default
-     * asks the deprecated [wireSize], so an encoder written against it keeps working.
+     * The encoded size of [value], without allocating. Defaults to [WireByteCount.BackPatch],
+     * which is always correct; an exact size lets the framework allocate once.
      */
-    @Suppress("DEPRECATION")
     fun wireBytes(
         value: T,
         context: EncodeContext,
-    ): WireByteCount = WireByteCount.from(wireSize(value, context))
-
-    /** The encoded size of [value] as a boxed [WireSize]. Defaults to [WireSize.BackPatch]. */
-    @Suppress("DEPRECATION")
-    @Deprecated(
-        "Call wireBytes. An encoder that overrides only wireBytes answers BackPatch here; " +
-            "while callers of wireSize remain, also override it as `wireBytes(value, context).toWireSize()`.",
-        ReplaceWith("wireBytes(value, context)"),
-    )
-    fun wireSize(
-        value: T,
-        context: EncodeContext,
-    ): WireSize = WireSize.BackPatch
+    ): WireByteCount = WireByteCount.BackPatch
 
     /**
      * Starting-capacity hint consulted by `encodeToPlatformBuffer` when
@@ -150,32 +90,15 @@ interface SuspendingDecoder<out T> {
  */
 interface FrameDetector {
     /**
-     * The size of the frame starting [baseOffset] bytes into [stream], without consuming
-     * it or allocating. Report the declared total as soon as it is known, even before the
-     * frame has arrived, so a streaming loop can reject an oversized frame early.
-     *
-     * Override this one; the default asks the deprecated [peekFrameSize], so a detector
-     * written against it keeps working. Overriding only this makes [peekFrameSize] answer
-     * `NoFraming`, so also forward that while its callers remain.
+     * The size of the frame starting [baseOffset] bytes into [stream], read without
+     * consuming or allocating. Declare it as soon as the codec knows it, before the
+     * frame has arrived, so a streaming loop can reject or skip an oversized frame
+     * early. Defaults to [FrameSize.Unframed].
      */
-    @Suppress("DEPRECATION")
     fun frameSize(
         stream: StreamProcessor,
         baseOffset: Int = 0,
-    ): FrameSize = FrameSize.from(peekFrameSize(stream, baseOffset))
-
-    /** The frame size as a boxed [PeekResult]. Defaults to [PeekResult.NoFraming]. */
-    @Suppress("DEPRECATION")
-    @Deprecated(
-        "Call frameSize. A detector that overrides only frameSize answers NoFraming here; while callers " +
-            "of peekFrameSize remain, also override it as " +
-            "`frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)`.",
-        ReplaceWith("frameSize(stream, baseOffset)"),
-    )
-    fun peekFrameSize(
-        stream: StreamProcessor,
-        baseOffset: Int = 0,
-    ): PeekResult = PeekResult.NoFraming
+    ): FrameSize = FrameSize.Unframed
 }
 
 /**

@@ -5,8 +5,9 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -77,16 +78,16 @@ class MySqlPacketHeaderCodecTest {
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(WireSize.Exact(4), MySqlPacketHeaderCodec.wireSize(sampleHeader, EncodeContext.Empty))
-            assertEquals(PeekResult.NeedsMoreData, MySqlPacketHeaderCodec.peekFrameSize(stream))
+            assertEquals(WireByteCount.exact(4), MySqlPacketHeaderCodec.wireBytes(sampleHeader, EncodeContext.Empty))
+            assertEquals(PeekOutcome.NeedsMoreData, MySqlPacketHeaderCodec.peekOutcome(stream))
             for (i in 0 until 3) {
                 val one = BufferFactory.Default.allocate(1)
                 one.writeByte(sampleWire[i])
                 one.resetForRead()
                 stream.append(one)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    MySqlPacketHeaderCodec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    MySqlPacketHeaderCodec.peekOutcome(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -94,7 +95,7 @@ class MySqlPacketHeaderCodecTest {
             last.writeByte(sampleWire[3])
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(4), MySqlPacketHeaderCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(4), MySqlPacketHeaderCodec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()

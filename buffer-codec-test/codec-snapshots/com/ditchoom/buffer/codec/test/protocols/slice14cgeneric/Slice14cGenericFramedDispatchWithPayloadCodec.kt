@@ -1,7 +1,6 @@
 package com.ditchoom.buffer.codec.test.protocols.slice14cgeneric
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
@@ -15,18 +14,13 @@ import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.Payload
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
 import com.ditchoom.buffer.codec.test.protocols.slice14c.Slice14cTinyHeader
 import com.ditchoom.buffer.stream.StreamProcessor
-import kotlin.Deprecated
 import kotlin.Int
-import kotlin.ReplaceWith
 import kotlin.String
-import kotlin.Suppress
-import kotlin.Throwable
 
 public class Slice14cGenericFramedDispatchWithPayloadCodec<P : Payload>(
   private val payloadCodec: Codec<P>,
@@ -102,13 +96,6 @@ public class Slice14cGenericFramedDispatchWithPayloadCodec<P : Payload>(
 
   override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = Companion.frameSize(stream, baseOffset)
 
-  @Deprecated(
-    message = "Call frameSize.",
-    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
-
   public class Partial<P : Payload> internal constructor(
     public val `header`: Slice14cTinyHeader,
     public val topic: String,
@@ -125,32 +112,7 @@ public class Slice14cGenericFramedDispatchWithPayloadCodec<P : Payload>(
   }
 
   public companion object : FrameDetector {
-    override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
-      if (stream.available() - baseOffset < 2) return FrameSize.NeedsMoreData
-      val __framingPeek = stream.peekBuffer(baseOffset + 1, 5) ?: return FrameSize.NeedsMoreData
-      try {
-        val __framingPeekStart = __framingPeek.position()
-        val __framingLength = try {
-          MqttRemainingLengthCodec.decode(__framingPeek, DecodeContext.Empty)
-        } catch (__e: Throwable) {
-          when (__e::class.simpleName) {
-            "BufferUnderflowException", "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException" -> return FrameSize.NeedsMoreData
-            else -> throw __e
-          }
-        }
-        val __framingPrefixWidth = __framingPeek.position() - __framingPeekStart
-        return FrameSize.declared(1 + __framingPrefixWidth, __framingLength.toLong())
-      } finally {
-        (__framingPeek as? PlatformBuffer)?.freeNativeMemory()
-      }
-    }
-
-    @Deprecated(
-      message = "Call frameSize.",
-      replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
-    )
-    @Suppress("DEPRECATION")
-    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
+    override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = MqttRemainingLengthCodec.peekLength(stream, baseOffset + 1).fold(declared = { __lengthWidth, __bodyBytes -> FrameSize.declared(1 + __lengthWidth, __bodyBytes) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
 
     public fun <P : Payload> partial(buffer: ReadBuffer, context: DecodeContext): Partial<P> {
       val header = Slice14cTinyHeader(buffer.readUByte())

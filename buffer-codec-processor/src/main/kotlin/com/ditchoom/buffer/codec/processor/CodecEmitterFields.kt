@@ -3,7 +3,6 @@ package com.ditchoom.buffer.codec.processor
 import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.CodeBlock
 import com.squareup.kotlinpoet.TypeName
-import com.squareup.kotlinpoet.U_INT
 
 /*
  * CodecEmitterFields — the per-field-type encode/decode emit family extracted
@@ -1162,8 +1161,8 @@ private fun appendLengthPrefixedExactBranch(
         "throw %T(fieldPath = %S, reason = %P)",
         ENCODE_EXCEPTION_CN,
         fieldPath,
-        "wireSize declared \${$byteCountVar} bytes but encode wrote " +
-            "\${buffer.position() - $bodyStartVar} — the codec's wireSize and encode disagree",
+        "wireBytes declared \${$byteCountVar} bytes but encode wrote " +
+            "\${buffer.position() - $bodyStartVar} — the codec's wireBytes and encode disagree",
     )
     body.endControlFlow()
 }
@@ -2286,8 +2285,8 @@ internal fun appendEncodeLengthPrefixedListBody(
             allExactVar,
         )
         body.endControlFlow()
-        // A body past UInt range cannot be prefixed exactly; the staging encoder reports it.
-        body.beginControlFlow("if (%L && %L <= %T.MAX_VALUE.toLong())", allExactVar, bodyBytesVar, U_INT)
+        // A body past Int range takes the staging encoder, the same bound wireBytes uses.
+        body.beginControlFlow("if (%L && %L <= Int.MAX_VALUE)", allExactVar, bodyBytesVar)
         body.addStatement(
             "%T.encode(buffer, %L.toUInt(), context)",
             spec.codecType,

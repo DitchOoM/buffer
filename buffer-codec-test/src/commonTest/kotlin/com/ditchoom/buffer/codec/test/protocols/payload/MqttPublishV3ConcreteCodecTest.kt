@@ -5,8 +5,9 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -138,7 +139,7 @@ class MqttPublishV3ConcreteCodecTest {
         // the user codec itself returns Exact (JpegImageCodec does).
         // Promotion to runtime-Exact is a follow-on with a vector that
         // measurably benefits.
-        assertEquals(WireSize.BackPatch, MqttPublishV3ConcreteCodec.wireSize(msg, EncodeContext.Empty))
+        assertEquals(WireByteCount.BackPatch, MqttPublishV3ConcreteCodec.wireBytes(msg, EncodeContext.Empty))
     }
 
     @Test
@@ -150,7 +151,7 @@ class MqttPublishV3ConcreteCodecTest {
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NoFraming, MqttPublishV3ConcreteCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NoFraming, MqttPublishV3ConcreteCodec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()

@@ -6,8 +6,9 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.readFrame
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.payload.TextPayload
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -48,7 +49,7 @@ class WideLengthDeferredFramePeekTest {
         // reaches `readBufferScoped`.
         val stream = streamOf(headerOf(0x7FFFFFFFu))
         try {
-            assertFailsWith<DecodeException> { WideLengthDeferredFrameCodec.peekFrameSize(stream) }
+            assertFailsWith<DecodeException> { WideLengthDeferredFrameCodec.peekOutcome(stream) }
         } finally {
             stream.release()
         }
@@ -62,7 +63,7 @@ class WideLengthDeferredFramePeekTest {
         buf.writeString("hi")
         val stream = streamOf(buf)
         try {
-            assertEquals(PeekResult.Complete(7), WideLengthDeferredFrameCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(7), WideLengthDeferredFrameCodec.peekOutcome(stream))
         } finally {
             stream.release()
         }

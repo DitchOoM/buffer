@@ -8,8 +8,9 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.mqtt.suback.MqttV3SubAckReturnCode
 import com.ditchoom.buffer.codec.test.protocols.mqtt.suback.MqttV3SubAckReturnCodeFailureCodec
 import com.ditchoom.buffer.codec.test.protocols.mqtt.suback.MqttV3SubAckReturnCodeSuccessMaximumQoS0Codec
@@ -275,8 +276,8 @@ class MqttSubAckCodecTest {
                 one.resetForRead()
                 stream.append(one)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    MqttPacketSubAckCodec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    MqttPacketSubAckCodec.peekOutcome(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -284,7 +285,7 @@ class MqttSubAckCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), MqttPacketSubAckCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), MqttPacketSubAckCodec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -308,7 +309,7 @@ class MqttSubAckCodecTest {
             b1.writeByte(encoded.readByte())
             b1.resetForRead()
             stream.append(b1)
-            assertEquals(PeekResult.NeedsMoreData, MqttPacketSubAckCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, MqttPacketSubAckCodec.peekOutcome(stream))
 
             // Second byte is the first var-int byte (continuation bit set since 200 > 127).
             val b2 = BufferFactory.Default.allocate(1)
@@ -316,8 +317,8 @@ class MqttSubAckCodecTest {
             b2.resetForRead()
             stream.append(b2)
             assertEquals(
-                PeekResult.NeedsMoreData,
-                MqttPacketSubAckCodec.peekFrameSize(stream),
+                PeekOutcome.NeedsMoreData,
+                MqttPacketSubAckCodec.peekOutcome(stream),
                 "var-int continuation bit set, need second byte",
             )
 
@@ -327,8 +328,8 @@ class MqttSubAckCodecTest {
             b3.resetForRead()
             stream.append(b3)
             assertEquals(
-                PeekResult.NeedsMoreData,
-                MqttPacketSubAckCodec.peekFrameSize(stream),
+                PeekOutcome.NeedsMoreData,
+                MqttPacketSubAckCodec.peekOutcome(stream),
                 "var-int complete but still need 200 body bytes",
             )
 
@@ -338,13 +339,13 @@ class MqttSubAckCodecTest {
                 one.writeByte(encoded.readByte())
                 one.resetForRead()
                 stream.append(one)
-                assertEquals(PeekResult.NeedsMoreData, MqttPacketSubAckCodec.peekFrameSize(stream))
+                assertEquals(PeekOutcome.NeedsMoreData, MqttPacketSubAckCodec.peekOutcome(stream))
             }
             val last = BufferFactory.Default.allocate(1)
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), MqttPacketSubAckCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), MqttPacketSubAckCodec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -406,8 +407,8 @@ class MqttSubAckCodecTest {
 
         for (case in cases) {
             assertEquals(
-                WireSize.Exact(1),
-                case.codec.wireSize(case.singleton, EncodeContext.Empty),
+                WireByteCount.exact(1),
+                case.codec.wireBytes(case.singleton, EncodeContext.Empty),
                 "${case.name} wireSize",
             )
 
@@ -431,8 +432,8 @@ class MqttSubAckCodecTest {
             val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
             try {
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    case.codec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    case.codec.peekOutcome(stream),
                     "${case.name} peek with empty stream",
                 )
                 val byteBuf = BufferFactory.Default.allocate(1, ByteOrder.BIG_ENDIAN)
@@ -440,8 +441,8 @@ class MqttSubAckCodecTest {
                 byteBuf.resetForRead()
                 stream.append(byteBuf)
                 assertEquals(
-                    PeekResult.Complete(1),
-                    case.codec.peekFrameSize(stream),
+                    PeekOutcome.Complete(1),
+                    case.codec.peekOutcome(stream),
                     "${case.name} peek with one byte available",
                 )
             } finally {

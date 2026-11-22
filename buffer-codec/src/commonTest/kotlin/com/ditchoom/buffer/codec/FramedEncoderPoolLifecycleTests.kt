@@ -6,6 +6,7 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.withPooling
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -72,10 +73,24 @@ class FramedEncoderPoolLifecycleTests {
             buffer.writeByte((value and 0xFFu).toByte())
         }
 
-        override fun wireSize(
+        override fun wireBytes(
             value: UInt,
             context: EncodeContext,
-        ): WireSize = WireSize.Exact(2)
+        ): WireByteCount = WireByteCount.exact(2)
+
+        override fun peekLength(
+            stream: StreamProcessor,
+            baseOffset: Int,
+        ): FrameSize =
+            if (stream.available() - baseOffset < 2) {
+                FrameSize.NeedsMoreData
+            } else {
+                val hi = stream.peekByte(baseOffset).toLong() and 0xFF
+                val lo = stream.peekByte(baseOffset + 1).toLong() and 0xFF
+                FrameSize.declared(2, (hi shl 8) or lo)
+            }
+
+        override fun encodedWidth(bodyBytes: Long): Int = 2
 
         override fun applyBound(
             buffer: ReadBuffer,

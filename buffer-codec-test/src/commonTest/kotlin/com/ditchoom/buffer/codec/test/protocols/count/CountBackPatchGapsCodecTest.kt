@@ -2,7 +2,7 @@ package com.ditchoom.buffer.codec.test.protocols.count
 
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.encodeToPlatformBuffer
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -14,7 +14,7 @@ import kotlin.test.assertEquals
  * result `as WireSize.Exact` and threw `ClassCastException` on every
  * `encodeToPlatformBuffer` call.
  *
- * Contract: BackPatch-element lists report `WireSize.BackPatch` (never
+ * Contract: BackPatch-element lists report `WireByteCount.BackPatch` (never
  * throw) and round-trip for empty / one / many elements. Exact-element
  * lists must NOT regress to BackPatch — `CountPrefixedListCodecTest.
  * wireSizeFixedListIsExact` pins that side.
@@ -32,7 +32,7 @@ class CountBackPatchGapsCodecTest {
                         CountSealedEntry(2u, CountBadge.Anonymous),
                     ),
             )
-        assertEquals(WireSize.BackPatch, CountSealedEntryListCodec.wireSize(msg, EncodeContext.Empty))
+        assertEquals(WireByteCount.BackPatch, CountSealedEntryListCodec.wireBytes(msg, EncodeContext.Empty))
     }
 
     @Test
@@ -58,7 +58,7 @@ class CountBackPatchGapsCodecTest {
     @Test
     fun taggedListWireSizeIsBackPatchNotThrow() {
         val msg = CountTaggedList(tags = listOf(CountTaggedEntry(CountTag("x"))))
-        assertEquals(WireSize.BackPatch, CountTaggedListCodec.wireSize(msg, EncodeContext.Empty))
+        assertEquals(WireByteCount.BackPatch, CountTaggedListCodec.wireBytes(msg, EncodeContext.Empty))
     }
 
     @Test
@@ -87,7 +87,7 @@ class CountBackPatchGapsCodecTest {
         // element to BackPatch even though CountInnerFixed is all-fixed; the
         // list must inherit BackPatch instead of CCEing on the Exact cast.
         val msg = CountNestedEntryList(entries = listOf(CountNestedEntry(CountInnerFixed(5))))
-        assertEquals(WireSize.BackPatch, CountNestedEntryListCodec.wireSize(msg, EncodeContext.Empty))
+        assertEquals(WireByteCount.BackPatch, CountNestedEntryListCodec.wireBytes(msg, EncodeContext.Empty))
     }
 
     @Test

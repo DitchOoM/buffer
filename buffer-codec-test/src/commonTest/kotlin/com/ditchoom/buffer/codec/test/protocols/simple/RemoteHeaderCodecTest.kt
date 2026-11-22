@@ -6,8 +6,9 @@ import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -103,7 +104,7 @@ class RemoteHeaderCodecTest {
     fun wireSizeIsExactBasedOnPayloadLength() {
         // WireSize.Exact = headerBytes + value.payloadLength.toInt.
         val msg = RemoteHeader(payloadLength = 5u, flags = 0u, correlationId = 0u, payload = "12345")
-        assertEquals(WireSize.Exact(2 + 1 + 4 + 5), RemoteHeaderCodec.wireSize(msg, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact((2 + 1 + 4 + 5).toLong()), RemoteHeaderCodec.wireBytes(msg, EncodeContext.Empty))
     }
 
     @Test
@@ -111,7 +112,7 @@ class RemoteHeaderCodecTest {
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, RemoteHeaderCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, RemoteHeaderCodec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -134,7 +135,7 @@ class RemoteHeaderCodecTest {
 
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, RemoteHeaderCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, RemoteHeaderCodec.peekOutcome(stream))
 
             for (i in 0 until totalBytes - 1) {
                 val one = BufferFactory.Default.allocate(1)
@@ -142,8 +143,8 @@ class RemoteHeaderCodecTest {
                 one.resetForRead()
                 stream.append(one)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    RemoteHeaderCodec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    RemoteHeaderCodec.peekOutcome(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -151,7 +152,7 @@ class RemoteHeaderCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), RemoteHeaderCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), RemoteHeaderCodec.peekOutcome(stream))
 
             val decoded =
                 stream.readBufferScoped(totalBytes) {

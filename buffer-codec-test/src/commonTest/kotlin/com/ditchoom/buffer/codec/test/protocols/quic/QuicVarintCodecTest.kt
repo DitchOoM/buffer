@@ -5,8 +5,8 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.VarLenPeek
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -67,24 +67,21 @@ class QuicVarintCodecTest {
     fun wireSizeIsAlwaysExactAndAgreesWithEncodedLength() {
         for ((value, bytes) in vectors) {
             assertEquals(
-                WireSize.Exact(bytes.size),
-                QuicVarintCodec.wireSize(value, EncodeContext.Empty),
+                WireByteCount.exact(bytes.size.toLong()),
+                QuicVarintCodec.wireBytes(value, EncodeContext.Empty),
                 "wireSize($value)",
             )
         }
     }
 
     @Test
-    fun peekValueReportsValueAndLengthWithoutConsuming() {
+    fun frameSizeReportsTheWidthAndPeekAsLengthTheValueWithoutConsuming() {
         for ((value, bytes) in vectors) {
             withStream(bytes) { stream ->
                 val before = stream.available()
-                assertEquals(
-                    VarLenPeek.Decoded(value, bytes.size),
-                    QuicVarintCodec.peekValue(stream),
-                    "peekValue($value)",
-                )
-                assertEquals(before, stream.available(), "peekValue must not consume")
+                assertEquals(FrameSize.declared(0, bytes.size.toLong()), QuicVarintCodec.frameSize(stream), "frameSize($value)")
+                assertEquals(FrameSize.declared(bytes.size, value), QuicVarintCodec.peekAsLength(stream, 0), "peekAsLength($value)")
+                assertEquals(before, stream.available(), "a peek must not consume")
             }
         }
     }
@@ -100,18 +97,18 @@ class QuicVarintCodecTest {
     }
 
     @Test
-    fun peekValueNeedsMoreDataOnShortPrefix() {
+    fun frameSizeNeedsMoreDataOnShortPrefix() {
         // Empty stream — can't even read byte 0.
         withStream(emptyList()) { stream ->
-            assertEquals(VarLenPeek.NeedsMoreData, QuicVarintCodec.peekValue(stream))
+            assertEquals(FrameSize.NeedsMoreData, QuicVarintCodec.frameSize(stream))
         }
         // First byte announces a 4-byte varint (class 10) but only 1 byte present.
         withStream(listOf(0x80)) { stream ->
-            assertEquals(VarLenPeek.NeedsMoreData, QuicVarintCodec.peekValue(stream))
+            assertEquals(FrameSize.NeedsMoreData, QuicVarintCodec.frameSize(stream))
         }
         // 3 of the 4 bytes present — still short.
         withStream(listOf(0x80, 0x00, 0x00)) { stream ->
-            assertEquals(VarLenPeek.NeedsMoreData, QuicVarintCodec.peekValue(stream))
+            assertEquals(FrameSize.NeedsMoreData, QuicVarintCodec.frameSize(stream))
         }
     }
 

@@ -11,7 +11,7 @@ import com.ditchoom.buffer.codec.annotations.When
  * driven by that source. Validates the emitter capability
  * (sibling-Boolean `@When`, `Boolean` as a 1-byte scalar,
  * `WireSize` collapsing to `BackPatch` per,
- * and `peekFrameSize` peeking a boolean source statically).
+ * and `frameSize` peeking a boolean source statically).
  *
  * Wire layout:
  *   - `WithOptional(hasExtra = false)`            → `00`

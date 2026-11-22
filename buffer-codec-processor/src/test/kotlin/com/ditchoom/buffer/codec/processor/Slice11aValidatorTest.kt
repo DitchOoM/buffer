@@ -43,7 +43,7 @@ class Slice11aValidatorTest {
                 import com.ditchoom.buffer.codec.Codec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
                 import com.ditchoom.buffer.codec.annotations.When
@@ -53,7 +53,7 @@ class Slice11aValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: Int, context: EncodeContext) {
                         buffer.writeInt(value)
                     }
-                    override fun wireSize(value: Int, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun wireBytes(value: Int, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
                 }
 
                 @ProtocolMessage
@@ -87,7 +87,7 @@ class Slice11aValidatorTest {
                 import com.ditchoom.buffer.codec.Codec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.PacketType
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -109,8 +109,8 @@ class Slice11aValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: ReasonCode, context: EncodeContext) {
                         ReasonCodeCodec.encode(buffer, value, context)
                     }
-                    override fun wireSize(value: ReasonCode, context: EncodeContext): WireSize =
-                        ReasonCodeCodec.wireSize(value, context)
+                    override fun wireBytes(value: ReasonCode, context: EncodeContext): WireByteCount =
+                        ReasonCodeCodec.wireBytes(value, context)
                 }
 
                 @ProtocolMessage

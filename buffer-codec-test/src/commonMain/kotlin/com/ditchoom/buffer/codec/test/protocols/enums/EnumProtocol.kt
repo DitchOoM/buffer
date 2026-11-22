@@ -34,7 +34,7 @@ data class Style(
 
 /**
  * Single-enum message: one self-delimiting varint ordinal + a fixed suffix, so its codec frames
- * via `peekFrameSize` (unlike [Style], whose two enums collapse to `NoFraming` — the same
+ * via `frameSize` (unlike [Style], whose two enums collapse to `NoFraming` — the same
  * single-variable-field limitation the varint `@UseCodec` peek has).
  */
 @ProtocolMessage

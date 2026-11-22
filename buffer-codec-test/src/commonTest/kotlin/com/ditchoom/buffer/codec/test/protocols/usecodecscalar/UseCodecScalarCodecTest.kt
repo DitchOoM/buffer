@@ -4,8 +4,9 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -52,8 +53,8 @@ class UseCodecScalarCodecTest {
         // it and composes: 4 (id: Int) + 4 (zig-zag body) — no BackPatch
         // collapse, so encodeToPlatformBuffer allocates exactly once.
         assertEquals(
-            WireSize.Exact(8),
-            ZigZagFrameCodec.wireSize(ZigZagFrame(id = 1, value = 1u), EncodeContext.Empty),
+            WireByteCount.exact(8),
+            ZigZagFrameCodec.wireBytes(ZigZagFrame(id = 1, value = 1u), EncodeContext.Empty),
         )
     }
 
@@ -69,7 +70,7 @@ class UseCodecScalarCodecTest {
             buffer.writeInt(0x54)
             buffer.resetForRead()
             processor.append(buffer)
-            assertEquals(PeekResult.NoFraming, ZigZagFrameCodec.peekFrameSize(processor, baseOffset = 0))
+            assertEquals(PeekOutcome.NoFraming, ZigZagFrameCodec.peekOutcome(processor, baseOffset = 0))
         } finally {
             processor.release()
             pool.clear()
@@ -141,8 +142,8 @@ class UseCodecScalarCodecTest {
     fun boundedFrameWireSizeIsBackPatch() {
         // Conservative collapse — runtime-Exact composition is a follow-on.
         assertEquals(
-            WireSize.BackPatch,
-            BoundedFrameCodec.wireSize(BoundedFrame(0, 0u, BinaryData(byteArrayOf())), EncodeContext.Empty),
+            WireByteCount.BackPatch,
+            BoundedFrameCodec.wireBytes(BoundedFrame(0, 0u, BinaryData(byteArrayOf())), EncodeContext.Empty),
         )
     }
 
@@ -151,7 +152,7 @@ class UseCodecScalarCodecTest {
         // tag (2 BE) + length (4 LE = 3) + 3 payload bytes = 9 total bytes.
         // The generic @UseCodec peek walker drives Le32LengthCodec against
         // a non-consuming view, measures its 4-byte width, and reports
-        // PeekResult.Complete(2 + 4 + 3) = Complete(9).
+        // PeekOutcome.Complete(2 + 4 + 3) = Complete(9).
         val pool = BufferPool(defaultBufferSize = 64)
         val processor = StreamProcessor.create(pool)
         try {
@@ -163,8 +164,8 @@ class UseCodecScalarCodecTest {
             buffer.writeByte(0xCC.toByte())
             buffer.resetForRead()
             processor.append(buffer)
-            val peek = BoundedFrameCodec.peekFrameSize(processor)
-            assertTrue(peek is PeekResult.Complete, "expected Complete, got $peek")
+            val peek = BoundedFrameCodec.peekOutcome(processor)
+            assertTrue(peek is PeekOutcome.Complete, "expected Complete, got $peek")
             assertEquals(9, peek.bytes)
         } finally {
             processor.release()
@@ -195,9 +196,9 @@ class UseCodecScalarCodecTest {
                 chunk.writeByte(full.readByte())
                 chunk.resetForRead()
                 processor.append(chunk)
-                val peek = BoundedFrameCodec.peekFrameSize(processor)
+                val peek = BoundedFrameCodec.peekOutcome(processor)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
+                    PeekOutcome.NeedsMoreData,
                     peek,
                     "after $i of $totalBytes bytes, expected NeedsMoreData but got $peek",
                 )
@@ -207,8 +208,8 @@ class UseCodecScalarCodecTest {
             last.writeByte(full.readByte())
             last.resetForRead()
             processor.append(last)
-            val peek = BoundedFrameCodec.peekFrameSize(processor)
-            assertTrue(peek is PeekResult.Complete, "expected Complete, got $peek")
+            val peek = BoundedFrameCodec.peekOutcome(processor)
+            assertTrue(peek is PeekOutcome.Complete, "expected Complete, got $peek")
             assertEquals(8, peek.bytes)
         } finally {
             processor.release()
@@ -233,8 +234,8 @@ class UseCodecScalarCodecTest {
             val availableBefore = processor.available()
             assertEquals(8, availableBefore)
             repeat(5) {
-                val peek = BoundedFrameCodec.peekFrameSize(processor)
-                assertTrue(peek is PeekResult.Complete)
+                val peek = BoundedFrameCodec.peekOutcome(processor)
+                assertTrue(peek is PeekOutcome.Complete)
                 assertEquals(8, peek.bytes)
                 assertEquals(availableBefore, processor.available(), "peek must be non-consuming")
             }

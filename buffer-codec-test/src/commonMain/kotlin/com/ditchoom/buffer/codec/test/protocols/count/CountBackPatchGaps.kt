@@ -11,7 +11,7 @@ import kotlin.jvm.JvmInline
  * `@Count` fixtures whose ELEMENT wireSize is BackPatch for a reason the
  * one-level annotation scan (`detectElementBackPatch`) historically missed.
  * Each shape here used to generate a `wireSize()` that cast the element
- * codec's `WireSize` `as WireSize.Exact` and threw `ClassCastException` on
+ * codec's `WireSize` `as WireByteCount.exact` and threw `ClassCastException` on
  * every `encodeToPlatformBuffer` call — even a 1-element list.
  *
  * The contract under test: a `@Count` list whose element wireSize is

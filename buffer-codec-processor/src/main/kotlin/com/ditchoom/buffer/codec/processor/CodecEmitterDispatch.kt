@@ -1,6 +1,5 @@
 package com.ditchoom.buffer.codec.processor
 
-import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.CodeBlock
 import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.FunSpec
@@ -546,7 +545,7 @@ internal fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
                 // The variant's body excludes the discriminator byte, so a declared size
                 // grows by that byte; the other states pass through.
                 body.addStatement(
-                    "%L -> %L.frameSize(stream, baseOffset + 1).fold(declared = { %T.declared(1, it) }, " +
+                    "%L -> %L.frameSize(stream, baseOffset + 1).fold(declared = { __h, __b -> %T.declared(1 + __h, __b) }, " +
                         "needsMoreData = { %T.NeedsMoreData }, unframed = { %T.Unframed })",
                     variant.dispatchLabel(shape.discriminator.labelFormat),
                     variant.codecReceiver(),
@@ -617,9 +616,9 @@ internal fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
         is Discriminator.Varint -> {
             // Variable-width discriminator: its byte count isn't known
             // statically, so measure it via the value class codec's own
-            // peekFrameSize (which delegates to the consumer's
+            // frameSize (which delegates to the consumer's
             // VariableLengthCodec). If the prefix is too short to frame the
-            // discriminator, propagate NeedsMoreData / NoFraming unchanged.
+            // discriminator, propagate NeedsMoreData / Unframed unchanged.
             appendPriorFrameWidth(body, "__discWidth", CodeBlock.of("%T", disc.codecClassName), "0")
             // Decode the discriminator from a non-consuming view of exactly
             // its measured width to recover the dispatch value, then PURE-
@@ -730,12 +729,12 @@ internal fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
                 builder.addFunction(buildDispatchDecodeFun(shape))
                 if (framed) {
                     builder.addFunction(buildFramedByDispatchOnEncodeFun(shape, parentTypeRef))
-                    builder.addFunctions(withLegacyPeekFrameSize(buildFramedByDispatchOnPeekFun(shape)))
+                    builder.addFunction(buildFramedByDispatchOnPeekFun(shape))
                 } else {
                     builder.addFunction(buildDispatchEncodeFun(shape))
-                    builder.addFunctions(withLegacyWireSize(buildDispatchWireSizeFun(shape)))
+                    builder.addFunction(buildDispatchWireSizeFun(shape))
                     builder.addFunction(buildDispatchSizeHintFun(shape))
-                    builder.addFunctions(withLegacyPeekFrameSize(buildDispatchPeekFun(shape)))
+                    builder.addFunction(buildDispatchPeekFun(shape))
                 }
                 builder.build()
             }
@@ -794,18 +793,17 @@ internal fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
                     // generic codec's and hoists the same way (#348).
                     val peek = buildFramedByDispatchOnPeekFun(shape)
                     builder.addFunction(memberPeekFun(peek))
-                    builder.addFunction(legacyPeekFrameSizeFun(peek))
                     builder.addCodecCompanion(peek = peek, aggregator = aggregator)
                 } else {
                     builder.addFunction(buildDispatchEncodeFun(shape))
-                    builder.addFunctions(withLegacyWireSize(buildDispatchWireSizeFun(shape)))
+                    builder.addFunction(buildDispatchWireSizeFun(shape))
                     builder.addFunction(buildDispatchSizeHintFun(shape))
                     // The one shape whose peek genuinely cannot hoist: it routes
                     // through per-variant receivers, and a generic variant's is a
                     // constructor-injected instance field. Member-only, and no
                     // `peek` passed below — `requireCodecIndependentPeek` would
                     // reject this body on sight.
-                    builder.addFunctions(withLegacyPeekFrameSize(buildDispatchPeekFun(shape)))
+                    builder.addFunction(buildDispatchPeekFun(shape))
                     builder.addCodecCompanion(aggregator = aggregator)
                 }
                 builder.build()
@@ -899,78 +897,17 @@ internal fun buildFramedByDispatchOnPeekFun(shape: DispatchShape): FunSpec {
             .addParameter("baseOffset", INT)
             .returns(FRAME_SIZE_CN)
     val body = CodeBlock.builder()
-    val headerWidthExpr: String
     if (shape.discriminator is Discriminator.Varint) {
-        // Variable-width discriminator: measure its width via the value
-        // class codec's own peek (works for unknown/GREASE types too —
-        // a varint self-delimits regardless of whether the dispatch
-        // value is recognized), then walk the framing prefix at the
-        // measured offset with the framing codec's worst-case budget.
+        // Variable-width discriminator: its codec declares the width (unknown/GREASE types
+        // too — a varint self-delimits), and the framing length follows it.
         val disc = shape.discriminator as Discriminator.Varint
-        // The header and at least one prefix byte must have arrived.
-        appendFrameWidth(body, "__headerWidth", CodeBlock.of("%T", disc.codecClassName), "0")
-        body.addStatement(
-            "if (__headerWidth >= stream.available() - baseOffset) return %T.NeedsMoreData",
-            FRAME_SIZE_CN,
-        )
+        appendPriorFrameWidth(body, "__headerWidth", CodeBlock.of("%T", disc.codecClassName), "0")
         body.addStatement("val __headerWireWidth = __headerWidth.toInt()")
-        body.addStatement(
-            "val __framingPeek = stream.peekBuffer(baseOffset + __headerWireWidth, %T.maxWireSize) " +
-                "?: return %T.NeedsMoreData",
-            framedBy.codecClassName,
-            FRAME_SIZE_CN,
-        )
-        headerWidthExpr = "__headerWireWidth"
+        appendPeekLengthReturn(body, framedBy.codecClassName, "__headerWireWidth")
     } else {
         val headerWireWidth = shape.discriminator.wireWidth.requireFixed("dispatchOnDiscriminator")
-        body.addStatement(
-            "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
-            headerWireWidth + 1,
-            FRAME_SIZE_CN,
-        )
-        val peekBudget = 5
-        body.addStatement(
-            "val __framingPeek = stream.peekBuffer(baseOffset + %L, %L) ?: return %T.NeedsMoreData",
-            headerWireWidth,
-            peekBudget,
-            FRAME_SIZE_CN,
-        )
-        headerWidthExpr = headerWireWidth.toString()
+        appendPeekLengthReturn(body, framedBy.codecClassName, headerWireWidth.toString())
     }
-    body.beginControlFlow("try")
-    body.addStatement("val __framingPeekStart = __framingPeek.position()")
-    body.beginControlFlow("val __framingLength = try")
-    body.addStatement(
-        "%T.decode(__framingPeek, %T.Empty)",
-        framedBy.codecClassName,
-        DECODE_CONTEXT_CN,
-    )
-    body.nextControlFlow("catch (__e: %T)", ClassName("kotlin", "Throwable"))
-    body.beginControlFlow("when (__e::class.simpleName)")
-    body.addStatement(
-        "%S, %S, %S -> return %T.NeedsMoreData",
-        "BufferUnderflowException",
-        "IndexOutOfBoundsException",
-        "ArrayIndexOutOfBoundsException",
-        FRAME_SIZE_CN,
-    )
-    body.addStatement("else -> throw __e")
-    body.endControlFlow()
-    body.endControlFlow()
-    body.addStatement(
-        "val __framingPrefixWidth = __framingPeek.position() - __framingPeekStart",
-    )
-    body.addStatement(
-        "return %T.declared(%L + __framingPrefixWidth, __framingLength.toLong())",
-        FRAME_SIZE_CN,
-        headerWidthExpr,
-    )
-    body.nextControlFlow("finally")
-    body.addStatement(
-        "(__framingPeek as? %T)?.freeNativeMemory()",
-        PLATFORM_BUFFER_CN,
-    )
-    body.endControlFlow()
     builder.addCode(body.build())
     return builder.build()
 }
@@ -1292,8 +1229,8 @@ internal fun PayloadCodecSource.codecReceiver(): CodeBlock =
  */
 internal fun LengthSource.encodeAccessor(): String =
     when (this) {
-        is LengthSource.Sibling -> "value.$siblingName.toInt()"
-        is LengthSource.ValueClassProperty -> "value.$siblingName.$propertyName"
+        is LengthSource.Sibling -> "value.$siblingName.toLong()"
+        is LengthSource.ValueClassProperty -> "value.$siblingName.$propertyName.toLong()"
     }
 
 /**

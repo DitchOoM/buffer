@@ -3,7 +3,7 @@ package com.ditchoom.buffer.codec.test.protocols.boundary
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.encodeToPlatformBuffer
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -35,7 +35,7 @@ class MisdeclaredWireSizeTest {
     fun honestCodecComposesExactAndRoundTrips() {
         val msg = HonestHost(kind = 1, inner = HonestInner(0xDEADBEEFu))
         // 1 (kind) + 2 (prefix) + 4 (body).
-        assertEquals(WireSize.Exact(7), HonestHostCodec.wireSize(msg, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(7), HonestHostCodec.wireBytes(msg, EncodeContext.Empty))
         val buf = HonestHostCodec.encodeToPlatformBuffer(msg)
         assertEquals(msg, HonestHostCodec.decode(buf, DecodeContext.Empty))
     }

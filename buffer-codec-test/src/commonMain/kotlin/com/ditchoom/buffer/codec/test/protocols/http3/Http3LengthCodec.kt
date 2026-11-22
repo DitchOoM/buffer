@@ -5,8 +5,10 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.BoundingLengthCodec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec
+import com.ditchoom.buffer.stream.StreamProcessor
 
 /**
  * The HTTP/3 frame **Length** field (RFC 9114 §7.1) as a [BoundingLengthCodec].
@@ -40,10 +42,17 @@ object Http3LengthCodec : BoundingLengthCodec<ULong> {
         context: EncodeContext,
     ) = QuicVarintCodec.encode(buffer, value, context)
 
-    override fun wireSize(
+    override fun wireBytes(
         value: ULong,
         context: EncodeContext,
-    ): WireSize = WireSize.Exact(QuicVarintCodec.encodedLength(value))
+    ): WireByteCount = WireByteCount.exact((QuicVarintCodec.encodedLength(value)).toLong())
+
+    override fun peekLength(
+        stream: StreamProcessor,
+        baseOffset: Int,
+    ): FrameSize = QuicVarintCodec.peekAsLength(stream, baseOffset)
+
+    override fun encodedWidth(bodyBytes: Long): Int = QuicVarintCodec.encodedLength(bodyBytes.toULong())
 
     override fun applyBound(
         buffer: ReadBuffer,

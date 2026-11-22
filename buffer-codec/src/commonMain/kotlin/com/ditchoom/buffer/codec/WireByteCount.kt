@@ -7,8 +7,7 @@ import kotlin.jvm.JvmInline
  * takes, or that it is only known after encoding (the framework then writes into a
  * growable buffer and back-patches any length prefix).
  *
- * A value class over one `Long`, returned directly: on the JVM it is a bare `long`, so
- * sizing a value allocates nothing.
+ * A value class over one `Long`: `>= 0` is the exact size, `-1` is back-patch.
  */
 @JvmInline
 public value class WireByteCount
@@ -22,18 +21,6 @@ public value class WireByteCount
             backPatch: () -> R,
         ): R = if (bits >= 0L) exact(bits) else backPatch()
 
-        /**
-         * This answer for a caller of the deprecated [Encoder.wireSize]. An exact size past
-         * `Int` range cannot be pre-allocated, so it becomes [WireSize.BackPatch].
-         */
-        @Suppress("DEPRECATION")
-        @Deprecated("Bridge for implementing the deprecated Encoder.wireSize; call wireBytes instead.")
-        public fun toWireSize(): WireSize =
-            fold(
-                exact = { if (it > Int.MAX_VALUE) WireSize.BackPatch else WireSize.Exact(it.toInt()) },
-                backPatch = { WireSize.BackPatch },
-            )
-
         override fun toString(): String = fold({ "WireByteCount.exact($it)" }, { "WireByteCount.BackPatch" })
 
         public companion object {
@@ -45,25 +32,11 @@ public value class WireByteCount
             /**
              * The value encodes to exactly [bytes] bytes.
              *
-             * @throws NegativeWireByteCountException when [bytes] is negative.
+             * @throws EncodeException when [bytes] is negative: the encoder reporting it is broken.
              */
             public fun exact(bytes: Long): WireByteCount {
-                if (bytes < 0L) throw NegativeWireByteCountException(bytes)
+                if (bytes < 0L) throw EncodeException(fieldPath = "<wireBytes>", reason = "exact size $bytes is negative")
                 return WireByteCount(bytes)
             }
-
-            /** The same answer from an encoder still on the deprecated [WireSize]. */
-            @Suppress("DEPRECATION")
-            @Deprecated("Bridge from the deprecated WireSize; implement wireBytes instead.")
-            public fun from(old: WireSize): WireByteCount =
-                when (old) {
-                    is WireSize.Exact -> exact(old.bytes.toLong())
-                    WireSize.BackPatch -> BackPatch
-                }
         }
     }
-
-/** An encoder reported a negative exact size, which no encoding has. */
-public class NegativeWireByteCountException(
-    public val bytes: Long,
-) : EncodeException(fieldPath = "<wireBytes>", reason = "exact size $bytes is negative")

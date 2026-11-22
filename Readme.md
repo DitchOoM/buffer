@@ -95,7 +95,7 @@ data class SensorReading(
 )
 ```
 
-The KSP processor generates a full `Codec<SensorReading>` — encode, decode, and wireSize — at compile time:
+The KSP processor generates a full `Codec<SensorReading>` — encode, decode, and wireBytes — at compile time:
 
 ```kotlin
 val buffer = BufferFactory.Default.allocate(64)

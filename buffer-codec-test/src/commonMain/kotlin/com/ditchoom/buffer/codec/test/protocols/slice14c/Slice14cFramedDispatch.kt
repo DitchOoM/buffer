@@ -13,7 +13,7 @@ import kotlin.jvm.JvmInline
  * -prep — sealed-parent + `@FramedBy(after = "header")`
  * probe. Exercises the emitter prep work that the v3/v5 substitution
  * ( proper) leans on, isolated from the 28 MQTT fixtures so a
- * regression in the inherited-detection / after-X / peekFrameSize /
+ * regression in the inherited-detection / after-X / frameSize /
  * dispatcher-integration emit shows up as a focused failure here rather
  * than a wave of round-trip breaks.
  *

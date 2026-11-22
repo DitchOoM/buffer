@@ -2,7 +2,6 @@ package com.ditchoom.buffer.codec.test.protocols.lengthprefixedusecodec
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
@@ -11,18 +10,11 @@ import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.LengthPrefixedListEncoder
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
-import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.codec.test.protocols.usecodecscalar.Le32LengthCodec
 import com.ditchoom.buffer.stream.StreamProcessor
-import kotlin.Deprecated
 import kotlin.Int
-import kotlin.ReplaceWith
-import kotlin.Suppress
-import kotlin.Throwable
-import kotlin.UInt
 
 public object Le32PropertyBagCodec : Codec<Le32PropertyBag> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): Le32PropertyBag {
@@ -69,7 +61,7 @@ public object Le32PropertyBagCodec : Codec<Le32PropertyBag> {
     while (__propertiesAllExact && __propertiesElements.hasNext()) {
       __propertiesBodyBytes += PropertyEntryCodec.wireBytes(__propertiesElements.next(), context).fold(exact = { it }, backPatch = { __propertiesAllExact = false; 0L })
     }
-    if (__propertiesAllExact && __propertiesBodyBytes <= UInt.MAX_VALUE.toLong()) {
+    if (__propertiesAllExact && __propertiesBodyBytes <= Int.MAX_VALUE) {
       Le32LengthCodec.encode(buffer, __propertiesBodyBytes.toUInt(), context)
       for (__elem in value.properties) {
         PropertyEntryCodec.encode(buffer, __elem, context)
@@ -81,48 +73,16 @@ public object Le32PropertyBagCodec : Codec<Le32PropertyBag> {
 
   override fun wireBytes(`value`: Le32PropertyBag, context: EncodeContext): WireByteCount {
     var __propertiesBodyBytes = 0L
-    for (__elem in value.properties) {
-      __propertiesBodyBytes += PropertyEntryCodec.wireBytes(__elem, context).fold(exact = { it }, backPatch = { return WireByteCount.BackPatch })
+    val __propertiesBodyBytesList = value.properties
+    for (__i in 0 until __propertiesBodyBytesList.size) {
+      __propertiesBodyBytes += PropertyEntryCodec.wireBytes(__propertiesBodyBytesList[__i], context).fold(exact = { it }, backPatch = { return WireByteCount.BackPatch })
     }
     if (__propertiesBodyBytes > Int.MAX_VALUE.toLong()) return WireByteCount.BackPatch
-    val __propertiesPrefixBytes = Le32LengthCodec.wireBytes(__propertiesBodyBytes.toUInt(), context).fold(exact = { it }, backPatch = { return WireByteCount.BackPatch })
-    val __propertiesSize = __propertiesPrefixBytes + __propertiesBodyBytes
+    val __propertiesSize = Le32LengthCodec.encodedWidth(__propertiesBodyBytes) + __propertiesBodyBytes
     return WireByteCount.exact(0L + __propertiesSize)
   }
 
-  @Deprecated(
-    message = "Call wireBytes.",
-    replaceWith = ReplaceWith("wireBytes(value, context)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun wireSize(`value`: Le32PropertyBag, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
-
   override fun sizeHint(`value`: Le32PropertyBag, context: EncodeContext): Int = 0
 
-  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
-    if (stream.available() - baseOffset < 1) return FrameSize.NeedsMoreData
-    val __propertiesPeekView = stream.peekBuffer(baseOffset + 0, 5) ?: return FrameSize.NeedsMoreData
-    try {
-      val __propertiesPriorPos = __propertiesPeekView.position()
-      val __propertiesLength = try {
-        Le32LengthCodec.decode(__propertiesPeekView, DecodeContext.Empty)
-      } catch (__e: Throwable) {
-        when (__e::class.simpleName) {
-          "BufferUnderflowException", "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException" -> return FrameSize.NeedsMoreData
-          else -> throw __e
-        }
-      }
-      val __propertiesWidth = __propertiesPeekView.position() - __propertiesPriorPos
-      return FrameSize.declared(0 + __propertiesWidth, __propertiesLength.toLong())
-    } finally {
-      (__propertiesPeekView as? PlatformBuffer)?.freeNativeMemory()
-    }
-  }
-
-  @Deprecated(
-    message = "Call frameSize.",
-    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = Le32LengthCodec.peekLength(stream, baseOffset + 0).fold(declared = { __lengthWidth, __bodyBytes -> FrameSize.declared(0 + __lengthWidth, __bodyBytes) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
 }

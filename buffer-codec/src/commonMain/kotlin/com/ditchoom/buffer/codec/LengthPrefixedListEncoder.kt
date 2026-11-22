@@ -5,7 +5,7 @@ import com.ditchoom.buffer.WriteBuffer
 
 /**
  * Runtime entry point for the generated encode of a `@LengthPrefixed @UseCodec List<T>`
- * section whose elements are [WireSize.BackPatch] — variable-length, so the body byte
+ * section whose elements are [WireByteCount.BackPatch] — variable-length, so the body byte
  * count isn't known until the elements are encoded.
  *
  * Encodes every element into a growable scratch buffer to measure the exact body size,

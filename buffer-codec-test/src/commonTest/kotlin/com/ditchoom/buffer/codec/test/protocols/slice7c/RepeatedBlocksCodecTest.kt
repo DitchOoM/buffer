@@ -5,8 +5,9 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -147,10 +148,10 @@ class RepeatedBlocksCodecTest {
                         RepeatedBlock(blockId = 2u, blockKind = 2u),
                     ),
             )
-        assertEquals(WireSize.Exact(11), RepeatedBlocksCodec.wireSize(three, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(11), RepeatedBlocksCodec.wireBytes(three, EncodeContext.Empty))
 
         val empty = RepeatedBlocks(streamId = 1u, blocks = emptyList())
-        assertEquals(WireSize.Exact(2), RepeatedBlocksCodec.wireSize(empty, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(2), RepeatedBlocksCodec.wireBytes(empty, EncodeContext.Empty))
     }
 
     @Test
@@ -161,7 +162,7 @@ class RepeatedBlocksCodecTest {
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NoFraming, RepeatedBlocksCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NoFraming, RepeatedBlocksCodec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()

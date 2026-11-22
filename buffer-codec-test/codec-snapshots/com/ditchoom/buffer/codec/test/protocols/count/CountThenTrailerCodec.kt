@@ -7,17 +7,12 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.UnsignedVarIntCodec
 import com.ditchoom.buffer.codec.WireByteCount
-import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.swapBytes
-import kotlin.Deprecated
 import kotlin.Int
-import kotlin.ReplaceWith
-import kotlin.Suppress
 
 public object CountThenTrailerCodec : Codec<CountThenTrailer> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): CountThenTrailer {
@@ -47,19 +42,13 @@ public object CountThenTrailerCodec : Codec<CountThenTrailer> {
   override fun wireBytes(`value`: CountThenTrailer, context: EncodeContext): WireByteCount {
     val __pointsCountSize = UnsignedVarIntCodec.encodedLength(value.points.size.toUInt()).toLong()
     var __pointsElementsSize = 0L
-    for (__elem in value.points) {
-      __pointsElementsSize += CountPointCodec.wireBytes(__elem, context).fold(exact = { it }, backPatch = { return WireByteCount.BackPatch })
+    val __pointsElementsSizeList = value.points
+    for (__i in 0 until __pointsElementsSizeList.size) {
+      __pointsElementsSize += CountPointCodec.wireBytes(__pointsElementsSizeList[__i], context).fold(exact = { it }, backPatch = { return WireByteCount.BackPatch })
     }
     val __pointsSize = __pointsCountSize + __pointsElementsSize
     return WireByteCount.exact(4L + __pointsSize)
   }
-
-  @Deprecated(
-    message = "Call wireBytes.",
-    replaceWith = ReplaceWith("wireBytes(value, context)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun wireSize(`value`: CountThenTrailer, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: CountThenTrailer, context: EncodeContext): Int {
     var __hint = 5
@@ -70,11 +59,4 @@ public object CountThenTrailerCodec : Codec<CountThenTrailer> {
   }
 
   override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = FrameSize.Unframed
-
-  @Deprecated(
-    message = "Call frameSize.",
-    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

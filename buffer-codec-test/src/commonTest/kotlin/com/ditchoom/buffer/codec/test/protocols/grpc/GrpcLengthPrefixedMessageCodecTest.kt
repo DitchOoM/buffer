@@ -6,10 +6,11 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.byteSize
 import com.ditchoom.buffer.codec.handleEquals
 import com.ditchoom.buffer.codec.ownedBytesFrom
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -85,15 +86,15 @@ class GrpcLengthPrefixedMessageCodecTest {
             for (i in 0 until total - 1) {
                 appendByte(stream, source.readByte())
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    GrpcLengthPrefixedMessageCodec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    GrpcLengthPrefixedMessageCodec.peekOutcome(stream),
                     "after ${i + 1}/$total bytes",
                 )
             }
             appendByte(stream, source.readByte())
             assertEquals(
-                PeekResult.Complete(total),
-                GrpcLengthPrefixedMessageCodec.peekFrameSize(stream),
+                PeekOutcome.Complete(total),
+                GrpcLengthPrefixedMessageCodec.peekOutcome(stream),
                 "fully buffered",
             )
             val decodeBuffer = BufferFactory.Default.allocate(total + 16, ByteOrder.BIG_ENDIAN)

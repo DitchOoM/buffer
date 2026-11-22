@@ -36,7 +36,7 @@ class FramedByValidatorTest {
                 import com.ditchoom.buffer.codec.BoundingLengthCodec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.FramedBy
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 
@@ -46,7 +46,9 @@ class FramedByValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
                     }
-                    override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
+                    override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
+                    override fun encodedWidth(bodyBytes: Long): Int = maxWireSize
                     override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
                         buffer.setLimit(buffer.position() + decodedValue.toInt())
                     }
@@ -77,7 +79,7 @@ class FramedByValidatorTest {
                 import com.ditchoom.buffer.codec.Codec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.FramedBy
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 
@@ -86,7 +88,7 @@ class FramedByValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
                     }
-                    override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
                 }
 
                 @ProtocolMessage
@@ -114,7 +116,7 @@ class FramedByValidatorTest {
                 import com.ditchoom.buffer.codec.BoundingLengthCodec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.FramedBy
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 
@@ -124,7 +126,9 @@ class FramedByValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
                     }
-                    override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
+                    override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
+                    override fun encodedWidth(bodyBytes: Long): Int = maxWireSize
                     override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
                         buffer.setLimit(buffer.position() + decodedValue.toInt())
                     }
@@ -155,7 +159,7 @@ class FramedByValidatorTest {
                 import com.ditchoom.buffer.codec.BoundingLengthCodec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.FramedBy
                 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
@@ -166,7 +170,9 @@ class FramedByValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
                     }
-                    override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
+                    override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
+                    override fun encodedWidth(bodyBytes: Long): Int = maxWireSize
                     override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
                         buffer.setLimit(buffer.position() + decodedValue.toInt())
                     }
@@ -400,7 +406,7 @@ class FramedByValidatorTest {
             import com.ditchoom.buffer.codec.BoundingLengthCodec
             import com.ditchoom.buffer.codec.DecodeContext
             import com.ditchoom.buffer.codec.EncodeContext
-            import com.ditchoom.buffer.codec.WireSize
+            import com.ditchoom.buffer.codec.WireByteCount
             import com.ditchoom.buffer.codec.annotations.FramedBy
             import com.ditchoom.buffer.codec.annotations.PacketType
             import com.ditchoom.buffer.codec.annotations.ProtocolMessage
@@ -415,7 +421,9 @@ class FramedByValidatorTest {
                 override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                     buffer.writeInt(value.toInt())
                 }
-                override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
+                override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
+                override fun encodedWidth(bodyBytes: Long): Int = maxWireSize
                 override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
                     buffer.setLimit(buffer.position() + decodedValue.toInt())
                 }

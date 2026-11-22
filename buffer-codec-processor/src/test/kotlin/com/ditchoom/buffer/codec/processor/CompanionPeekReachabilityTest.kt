@@ -198,6 +198,8 @@ class CompanionPeekReachabilityTest {
                     buffer.writeInt(value.toInt())
                 }
                 override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
+                override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
+                override fun encodedWidth(bodyBytes: Long): Int = maxWireSize
                 override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
                     buffer.setLimit(buffer.position() + decodedValue.toInt())
                 }

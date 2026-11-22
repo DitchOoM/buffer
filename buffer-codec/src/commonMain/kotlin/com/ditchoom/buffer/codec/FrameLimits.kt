@@ -28,9 +28,6 @@ public const val DEFAULT_MAX_FRAME_BYTES: Int = 4 * 1024 * 1024
  * declared, before the frame has arrived, so a peer that declares a large
  * frame and never sends it is rejected once the declaration is buffered.
  * Generated codecs declare the size as soon as their length field arrives.
- * A detector that implements only the deprecated `peekFrameSize` cannot
- * declare a size early, so for it the check happens once the whole frame
- * has arrived.
  *
  * ```kotlin
  * val ctx = DecodeContext.Empty.with(MaxFrameBytesKey, 64 * 1024)

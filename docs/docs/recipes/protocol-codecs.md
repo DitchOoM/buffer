@@ -186,7 +186,7 @@ widths are big-endian (network byte order).
 For a length carrier that sits immediately before its data, **prefer
 `@LengthPrefixed` over a separate length field plus `@LengthFrom`** — a
 standalone length field encodes the same quantity twice (the prefix and the
-value's own `wireSize`), an impossible-state class the validator rejects.
+value's own `wireBytes`), an impossible-state class the validator rejects.
 
 ### `@RemainingBytes` — Consume Remaining Bytes
 
@@ -634,7 +634,7 @@ unknown.raw               // a PlatformBuffer holding AA BB CC
 OpCodec.encode(unknown, EncodeContext.Empty, factory)  // → 99 03 AA BB CC, byte-identical
 ```
 
-`peekFrameSize` works on unknown ops too — the length prefix gives the frame
+`frameSize` works on unknown ops too — the length prefix gives the frame
 extent without a registered variant — so unknown frames participate in
 streaming exactly like known ones.
 
@@ -682,10 +682,10 @@ enum may carry `@EnumDefault` (a second is a compile error).
 `@WireBytes` and `@WireOrder` are rejected on an enum field — the varint owns
 the wire shape and is byte-order-independent.
 
-`wireSize` stays runtime-`Exact` (the varint reports `Exact(encodedLength)`), so
+`wireBytes` stays exact (the varint reports `exact(encodedLength)`), so
 a message carrying enum fields keeps the precompute path rather than degrading
 to back-patch. A message whose only variable-width field is a single enum frames
-via `peekFrameSize`; two or more variable-width fields collapse to `NoFraming`
+via `frameSize`; two or more variable-width fields collapse to `Unframed`
 (the same single-variable-field limitation the `@UseCodec` peek has).
 
 **Overriding the encoding.** The LEB128-of-ordinal is just the zero-annotation
@@ -904,24 +904,25 @@ library ships `AsciiStringCodec` as a 7-bit-ASCII reference implementation.
 An `enum class` field rides as its `ordinal` in an unsigned LEB128 varint with
 no annotation — see [Enum Fields](#enum-fields--ordinal-as-a-self-delimiting-varint).
 
-## Stream Framing with `peekFrameSize`
+## Stream Framing with `frameSize`
 
-The processor generates `peekFrameSize(stream, baseOffset): PeekResult` on
-every codec whose frame size is determinable from the wire format. It inspects
-a `StreamProcessor` to determine the total bytes the codec will read, without
-consuming any data.
+The processor generates `frameSize(stream, baseOffset): FrameSize` on every
+codec whose frame size is determinable from the wire format. It inspects a
+`StreamProcessor` without consuming or allocating, and declares the frame's
+size as soon as the length field has arrived, before the frame itself has:
 
 ```kotlin
-import com.ditchoom.buffer.codec.PeekResult
-
-sealed interface PeekResult {
-    value class Complete(val bytes: Int) : PeekResult  // a full frame is buffered
-    data object NeedsMoreData : PeekResult             // wait for the next chunk
-    data object NoFraming : PeekResult                 // this codec can't peek
-}
+// FrameSize is a value class over one Long; read it with fold:
+size.fold(
+    declared = { headerBytes, bodyBytes -> /* the framing header it read, and the rest */ },
+    needsMoreData = { /* the length field has not arrived yet */ },
+    unframed = { /* this codec cannot frame a stream */ },
+)
 ```
 
-This eliminates the manual offset math in streaming decode loops:
+`readFrame` runs the loop for you: it rejects a declaration over
+`MaxFrameBytesKey` immediately, returns `null` while a frame under the cap is
+still arriving, and decodes it once it is complete.
 
 ```kotlin
 // Before: manual offset math, easy to get wrong
@@ -935,44 +936,53 @@ while (stream.available() >= 3) {
 
 // After: generated, always correct
 while (true) {
-    when (val frame = PacketCodec.peekFrameSize(stream)) {
-        is PeekResult.Complete -> {
-            val msg = stream.readBufferScoped(frame.bytes) {
-                PacketCodec.decode(this, DecodeContext.Empty)
-            }
-            handleMessage(msg)
-        }
-        PeekResult.NeedsMoreData -> break          // wait for more bytes
-        PeekResult.NoFraming -> error("PacketCodec does not support stream framing")
-    }
+    val msg = PacketCodec.readFrame(stream, context) ?: break // null: append more bytes, retry
+    handleMessage(msg)
 }
 ```
 
-A codec that does not participate in framing returns `NoFraming` — the default.
-This makes a codec used at a streaming boundary fail loudly instead of silently
-hanging the receive loop.
+A reader that will not decode a frame (over its cap, or an unknown type) uses
+the two parts to stream or skip it without parsing the header again:
 
-**What the generator handles** (the codec emits a real `peekFrameSize`):
+```kotlin
+PacketCodec.frameSize(stream).fold(
+    declared = { header, body ->
+        if (header + body > cap) {
+            skip(header + body) // or stream the body that starts `header` bytes in
+        } else if (stream.available() >= header + body) {
+            handle(stream.readBufferScoped((header + body).toInt()) { PacketCodec.decode(this, context) })
+        }
+    },
+    needsMoreData = { /* wait */ },
+    unframed = { error("PacketCodec does not support stream framing") },
+)
+```
+
+A codec that does not participate in framing answers `FrameSize.Unframed` — the
+default — so a codec used at a streaming boundary fails loudly (`readFrame`
+throws `UnframedCodecException`) instead of silently hanging the receive loop.
+
+**What the generator handles** (the codec emits a real `frameSize`):
 
 - Fixed-size fields — accumulated into constant offsets
 - `@LengthPrefixed` — peeks the prefix (1/2/4 bytes), always treated as unsigned
 - `@LengthFrom("field")` — peeks the referenced field's value at its known offset
 - `@When` conditions — peeks the boolean (or value-class property) and branches
 - `@WireBytes` custom widths — byte-by-byte assembly
-- `@UseCodec` with a length annotation — bounded the same as the length type
+- A bounding `@UseCodec` length, `@LengthPrefixed @UseCodec` lists and
+  `@FramedBy` — the length codec's `peekLength` reads the field
 - Multiple variable-length fields — sequential peek with dynamic offset tracking
 - Sealed dispatch — peeks the discriminator, branches per variant, delegates
 - `@DispatchOn` — peeks the value-class or data-class discriminator
-- `@FramedBy` — peeks the framing length prefix
-- Nested `@ProtocolMessage` — delegates to the nested codec's `peekFrameSize`
+- Nested `@ProtocolMessage` — delegates to the nested codec's `frameSize`
 - A single enum field (with fixed priors/suffix) — peeks the self-delimiting
   ordinal varint and adds the fixed bytes
 
-**When generation is skipped** (the codec compiles, `peekFrameSize` returns `NoFraming`):
+**When generation is skipped** (the codec compiles, `frameSize` returns `Unframed`):
 
 - `@RemainingBytes` at top level — no length on the wire
 - `@UseCodec` without a length annotation, or delegating to a hand-written codec
-  that itself returns `NoFraming`
+  that itself returns `Unframed`
 - Two or more variable-width fields where more than one is an enum (or an enum
   plus a variable-length suffix) — only a single variable field can frame
 
@@ -980,7 +990,7 @@ hanging the receive loop.
 
 A codec for a message with a generic payload (`<P : Payload>`) takes the
 payload codec as a constructor parameter — but framing never consults it. The
-frame size comes from header scalars, so `peekFrameSize` is emitted on the
+frame size comes from header scalars, so `frameSize` is emitted on the
 codec's **companion**, right beside `partial()`, and is callable with no
 instance:
 
@@ -996,19 +1006,20 @@ data class Packet<P : Payload>(
 // No Codec<P> anywhere in this loop — the payload codec is chosen from the
 // header, which is the whole reason for deferring it.
 while (true) {
-    when (val frame = PacketCodec.peekFrameSize(stream)) {
-        is PeekResult.Complete -> {
-            val packet = stream.readBufferScoped(frame.bytes) {
-                val partial = PacketCodec.partial<MyPayload>(this, DecodeContext.Empty)
-                partial.complete(codecFor(partial.group, partial.command))
-            }
-            handlePacket(packet)
-        }
-        PeekResult.NeedsMoreData -> {
-            stream.append(transport.receive() ?: break)  // pull more bytes, retry
-        }
-        PeekResult.NoFraming -> error("PacketCodec does not support stream framing")
+    val total = PacketCodec.frameSize(stream).foldTotal(
+        declared = { it },
+        needsMoreData = { -1L },
+        unframed = { error("PacketCodec does not support stream framing") },
+    )
+    if (total < 0 || stream.available() < total) {
+        stream.append(transport.receive() ?: break) // pull more bytes, retry
+        continue
     }
+    val packet = stream.readBufferScoped(total.toInt()) {
+        val partial = PacketCodec.partial<MyPayload>(this, DecodeContext.Empty)
+        partial.complete(codecFor(partial.group, partial.command))
+    }
+    handlePacket(packet)
 }
 ```
 
@@ -1023,10 +1034,10 @@ receiver is the constructor-injected codec field.
 
 Every other generic codec gets the companion entry point, whether or not its
 shape can frame — the same placement `object` codecs have always had, where
-`FooCodec.peekFrameSize(...)` resolves on any codec. **Framing is a runtime
+`FooCodec.frameSize(...)` resolves on any codec. **Framing is a runtime
 answer, not a static property.** `Codec` extends `FrameDetector`, whose default
-returns `NoFraming`, so a shape the walker cannot frame answers
-`PeekResult.NoFraming` rather than failing to compile. Handle that arm — the
+returns `Unframed`, so a shape the walker cannot frame answers
+`FrameSize.Unframed` rather than failing to compile. Handle that arm — the
 loop above does, with `error(...)`. Codecs emitted as `object`s — any message
 without a generic payload — are already their own static receiver and are
 unaffected.
@@ -1041,7 +1052,7 @@ freely.
 ```kotlin
 interface Encoder<in T> {
     fun encode(buffer: WriteBuffer, value: T, context: EncodeContext)
-    fun wireSize(value: T, context: EncodeContext): WireSize = WireSize.BackPatch
+    fun wireBytes(value: T, context: EncodeContext): WireByteCount = WireByteCount.BackPatch
 }
 
 interface Decoder<out T> {
@@ -1049,24 +1060,19 @@ interface Decoder<out T> {
 }
 
 interface FrameDetector {
-    fun peekFrameSize(stream: StreamProcessor, baseOffset: Int = 0): PeekResult = PeekResult.NoFraming
+    fun frameSize(stream: StreamProcessor, baseOffset: Int = 0): FrameSize = FrameSize.Unframed
 }
 
 interface Codec<T> : Encoder<T>, Decoder<T>, FrameDetector
 ```
 
-`wireSize` reports the on-wire byte count so the framework can pre-allocate:
+`wireBytes` reports the on-wire byte count so the framework can pre-allocate.
+`WireByteCount` is a value class over one `Long`, read with
+`fold(exact = { bytes -> }, backPatch = { })`.
 
-```kotlin
-sealed interface WireSize {
-    value class Exact(val bytes: Int) : WireSize  // size known up front
-    data object BackPatch : WireSize              // variable — framework grows + back-patches
-}
-```
-
-Return `WireSize.Exact(n)` from a fixed-size codec. Variable-length codecs
+Return `WireByteCount.exact(n)` from a fixed-size codec. Variable-length codecs
 (UTF-8 strings, sealed dispatch with variable variants, generic payloads)
-return `WireSize.BackPatch`: the framework encodes into a `GrowableWriteBuffer`
+return `WireByteCount.BackPatch`: the framework encodes into a `GrowableWriteBuffer`
 and patches any preceding length prefix once the body size is known.
 
 A `Decoder` must not retain the buffer past `decode` — the framework releases
@@ -1171,7 +1177,7 @@ object SensorReadingCodec : Codec<SensorReading> {
         buffer.writeInt(value.temperature)
     }
 
-    override fun wireSize(value: SensorReading, context: EncodeContext) = WireSize.Exact(6)
+    override fun wireBytes(value: SensorReading, context: EncodeContext) = WireByteCount.exact(6)
 }
 ```
 
@@ -1199,11 +1205,10 @@ object AsciiStringCodec : Codec<String> {
         buffer.writeString(value, Charset.UTF8)
     }
 
-    override fun wireSize(value: String, context: EncodeContext): WireSize =
-        WireSize.Exact(value.length)
+    override fun wireBytes(value: String, context: EncodeContext): WireByteCount =
+        WireByteCount.exact(value.length.toLong())
 
-    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult =
-        PeekResult.NoFraming
+    override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = FrameSize.Unframed
 }
 ```
 
@@ -1211,14 +1216,21 @@ object AsciiStringCodec : Codec<String> {
 
 `@FramedBy` and the `@LengthPrefixed @UseCodec` list shape need a codec that not
 only encodes/decodes a length value but also **bounds the buffer** by it.
-`BoundingLengthCodec<T>` extends `Codec<T>` with two extra members:
+`BoundingLengthCodec<T>` extends `Codec<T>` with four extra members:
 
 ```kotlin
 interface BoundingLengthCodec<T : Any> : Codec<T> {
     val maxWireSize: Int                                  // widest the prefix can be
     fun applyBound(buffer: ReadBuffer, decodedValue: T)   // narrow limit() by the decoded length
+    fun peekLength(stream: StreamProcessor, baseOffset: Int): FrameSize // the field, peeked: (width, length)
+    fun encodedWidth(bodyBytes: Long): Int                // prefix width for a length, without boxing T
 }
 ```
+
+`peekLength` is what generated peeks call; read the field with
+`StreamProcessor.peekByte` (no slice, no decode, no allocation) and report
+`FrameSize.declared(headerBytes = <field width>, bodyBytes = <length>)`, or
+`FrameSize.NeedsMoreData` until the field has arrived.
 
 An MQTT remaining-length codec (variable-byte integer, 1–4 bytes) implements it like this:
 
@@ -1253,15 +1265,34 @@ object MqttRemainingLengthCodec : BoundingLengthCodec<UInt> {
         } while (remaining > 0u)
     }
 
-    override fun wireSize(value: UInt, context: EncodeContext): WireSize =
-        WireSize.Exact(
-            when {
-                value < 128u -> 1
-                value < 16_384u -> 2
-                value < 2_097_152u -> 3
-                else -> 4
-            },
+    override fun encodedWidth(bodyBytes: Long): Int =
+        when {
+            bodyBytes < 128 -> 1
+            bodyBytes < 16_384 -> 2
+            bodyBytes < 2_097_152 -> 3
+            else -> 4
+        }
+
+    override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount =
+        WireByteCount.exact(encodedWidth(value.toLong()).toLong())
+
+    override fun peekLength(stream: StreamProcessor, baseOffset: Int): FrameSize {
+        var value = 0L
+        var multiplier = 1L
+        for (i in 0 until 4) {
+            if (stream.available() - baseOffset <= i) return FrameSize.NeedsMoreData
+            val encoded = stream.peekByte(baseOffset + i).toInt() and 0xFF
+            value += (encoded and 0x7F) * multiplier
+            if (encoded and 0x80 == 0) return FrameSize.declared(i + 1, value)
+            multiplier *= 128
+        }
+        throw DecodeException(
+            fieldPath = "MqttRemainingLength",
+            bufferPosition = baseOffset + 4,
+            expected = "continuation bit clear within 4 bytes",
+            actual = "5th continuation byte",
         )
+    }
 
     override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
         buffer.setLimit(buffer.position() + decodedValue.toInt())
@@ -1287,10 +1318,11 @@ object EnvelopeCodec : Codec<Envelope> {
         SensorReadingCodec.encode(buffer, value.sensor, context)
     }
 
-    override fun wireSize(value: Envelope, context: EncodeContext): WireSize {
-        val inner = SensorReadingCodec.wireSize(value.sensor, context)
-        return if (inner is WireSize.Exact) WireSize.Exact(1 + inner.bytes) else WireSize.BackPatch
-    }
+    override fun wireBytes(value: Envelope, context: EncodeContext): WireByteCount =
+        SensorReadingCodec.wireBytes(value.sensor, context).fold(
+            exact = { WireByteCount.exact(1 + it) },
+            backPatch = { WireByteCount.BackPatch },
+        )
 }
 ```
 
@@ -1340,16 +1372,8 @@ withPool { pool ->
             processor.append(chunk)
 
             while (true) {
-                when (val frame = MessageCodec.peekFrameSize(processor)) {
-                    is PeekResult.Complete -> {
-                        val message = processor.readBufferScoped(frame.bytes) {
-                            MessageCodec.decode(this, DecodeContext.Empty)
-                        }
-                        handleMessage(message)
-                    }
-                    PeekResult.NeedsMoreData -> break
-                    PeekResult.NoFraming -> error("MessageCodec cannot frame a stream")
-                }
+                val message = MessageCodec.readFrame(processor) ?: break // null: wait for more bytes
+                handleMessage(message)
             }
         }
     } finally {
@@ -1372,7 +1396,7 @@ they don't validate `remaining()` before every read. This is by design: the
   frame to a codec; `readBufferScoped` releases the frame buffer back to the
   pool when the block returns
 
-`peekFrameSize` is the preferred gate (above). When you must frame by hand,
+`frameSize` / `readFrame` is the preferred gate (above). When you must frame by hand,
 peek the length, then check `available()` before reading:
 
 ```kotlin
@@ -1534,7 +1558,7 @@ fun RiffBitmap(buffer: ReadBuffer, modifier: Modifier = Modifier) {
 ### Writing the Container
 
 Codecs with a variable-length field (here, `ImageMetadata`'s `@LengthPrefixed`
-title) report `WireSize.BackPatch` from `wireSize` — their size isn't known up
+title) report `WireByteCount.BackPatch` from `wireBytes` — their size isn't known up
 front. Encode the metadata into a scratch buffer first and measure its
 `position()`:
 

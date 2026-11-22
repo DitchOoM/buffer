@@ -99,7 +99,7 @@ public fun <T> Codec<T>.readFrame(
     stream: StreamProcessor,
     context: DecodeContext = DecodeContext.Empty,
 ): T? =
-    frameSize(stream).fold(
+    frameSize(stream).foldTotal(
         declared = { bytes ->
             val maxFrameBytes = context[MaxFrameBytesKey] ?: DEFAULT_MAX_FRAME_BYTES
             if (bytes < 1L || bytes > maxFrameBytes) {

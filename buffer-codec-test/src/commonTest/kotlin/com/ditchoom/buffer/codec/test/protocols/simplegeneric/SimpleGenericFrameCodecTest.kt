@@ -4,7 +4,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.test.protocols.payload.TextPayload
 import com.ditchoom.buffer.codec.test.protocols.payload.TextPayloadCodec
 import kotlin.test.Test
@@ -89,12 +89,12 @@ class SimpleGenericFrameCodecTest {
         // Status body is a single UByte; the dispatcher adds the discriminator
         // byte → Exact(2). Command carries @RemainingBytes payload → BackPatch.
         assertEquals(
-            WireSize.Exact(2),
-            codec.wireSize(SimpleGenericFrame.Status(code = 0u), EncodeContext.Empty),
+            WireByteCount.exact(2),
+            codec.wireBytes(SimpleGenericFrame.Status(code = 0u), EncodeContext.Empty),
         )
         assertEquals(
-            WireSize.BackPatch,
-            codec.wireSize(
+            WireByteCount.BackPatch,
+            codec.wireBytes(
                 SimpleGenericFrame.Command(counter = 0u, payload = TextPayload("x")),
                 EncodeContext.Empty,
             ),

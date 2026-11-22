@@ -6,8 +6,9 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -62,8 +63,8 @@ class VarintLengthFrameCodecTest {
             0x3FFF_FFFF_FFFF_FFFFuL to 8,
         )) {
             assertEquals(
-                WireSize.Exact(varintWidth + 1),
-                VarintLengthFrameCodec.wireSize(VarintLengthFrame(value = value, tag = 0xABu), EncodeContext.Empty),
+                WireByteCount.exact((varintWidth + 1).toLong()),
+                VarintLengthFrameCodec.wireBytes(VarintLengthFrame(value = value, tag = 0xABu), EncodeContext.Empty),
                 "wireSize for value $value",
             )
         }
@@ -94,15 +95,15 @@ class VarintLengthFrameCodecTest {
             for (i in 0 until total - 1) {
                 appendByte(stream, source.readByte())
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    VarintLengthFrameCodec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    VarintLengthFrameCodec.peekOutcome(stream),
                     "after ${i + 1}/$total bytes",
                 )
             }
             appendByte(stream, source.readByte())
             assertEquals(
-                PeekResult.Complete(total),
-                VarintLengthFrameCodec.peekFrameSize(stream),
+                PeekOutcome.Complete(total),
+                VarintLengthFrameCodec.peekOutcome(stream),
                 "fully buffered",
             )
         } finally {

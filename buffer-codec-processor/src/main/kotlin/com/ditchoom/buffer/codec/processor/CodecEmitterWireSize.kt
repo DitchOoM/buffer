@@ -173,22 +173,22 @@ internal fun buildWireSizeFun(
                         elementCodec = f.spec.elementCodecClassName,
                         sumVar = bodyBytesVar,
                     )
-                    // The prefix encodes the body size as a UInt; a body past that range
-                    // cannot be prefixed, so the encode path reports it.
+                    // A body past Int range cannot be in one buffer; the encode path's staging
+                    // encoder reports it (the same bound the encode's exact path uses).
                     builder.addStatement(
                         "if (%L > %T.MAX_VALUE.toLong()) return %T.BackPatch",
                         bodyBytesVar,
                         INT,
                         WIRE_BYTE_COUNT_CN,
                     )
-                    val prefixVar = "__${f.name}PrefixBytes"
-                    appendExactOrBackPatch(
-                        builder,
-                        prefixVar,
-                        CodeBlock.of("%T", f.spec.codecType),
-                        "$bodyBytesVar.toUInt()",
+                    // The prefix width through the length codec's non-generic entry: no boxed UInt.
+                    builder.addStatement(
+                        "val %L = %T.encodedWidth(%L) + %L",
+                        "__${f.name}Size",
+                        f.spec.codecType,
+                        bodyBytesVar,
+                        bodyBytesVar,
                     )
-                    builder.addStatement("val %L = %L + %L", "__${f.name}Size", prefixVar, bodyBytesVar)
                 }
                 else -> {}
             }
@@ -347,8 +347,8 @@ internal fun appendCountListWireSizeLocal(
  * Emit the element-size probe loop shared by the `@Count` and terminal
  * `@RemainingBytes List<E>` wireSize sums:
  * ```
- * var <sumVar> = 0
- * for (__elem in <listAccessor>) {
+ * var <sumVar> = 0L
+ * for (__i in 0 until <list>.size) {
  *     when (val __elemSize = ElementCodec.wireSize(__elem, context)) {
  *         is WireSize.Exact -> <sumVar> += __elemSize.bytes
  *         WireSize.BackPatch -> return WireSize.BackPatch
@@ -364,12 +364,16 @@ private fun appendElementWireSizeProbeLoop(
     elementCodec: TypeName,
     sumVar: String,
 ) {
+    // Indexed, not `for (e in list)`: an iterator per call would be the size path's only allocation.
+    val listVar = "${sumVar}List"
     builder.addStatement("var %L = 0L", sumVar)
-    builder.beginControlFlow("for (__elem in %L)", listAccessor)
+    builder.addStatement("val %L = %L", listVar, listAccessor)
+    builder.beginControlFlow("for (__i in 0 until %L.size)", listVar)
     builder.addStatement(
-        "%L += %T.wireBytes(__elem, context).fold(exact = { it }, backPatch = { return %T.BackPatch })",
+        "%L += %T.wireBytes(%L[__i], context).fold(exact = { it }, backPatch = { return %T.BackPatch })",
         sumVar,
         elementCodec,
+        listVar,
         WIRE_BYTE_COUNT_CN,
     )
     builder.endControlFlow()

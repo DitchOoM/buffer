@@ -8,7 +8,8 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameDetector
-import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImage
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImageCodec
 import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
@@ -288,7 +289,7 @@ class MqttPacketCodecTest {
             two.writeByte(0x00)
             two.resetForRead()
             stream.append(two)
-            assertEquals(PeekResult.Complete(2), jpegDispatcher().peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(2), jpegDispatcher().peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -300,7 +301,7 @@ class MqttPacketCodecTest {
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, jpegDispatcher().peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, jpegDispatcher().peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -323,18 +324,18 @@ class MqttPacketCodecTest {
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         val detector: FrameDetector = MqttPacketCodec
         try {
-            assertEquals(PeekResult.NeedsMoreData, MqttPacketCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, MqttPacketCodec.peekOutcome(stream))
             val two = BufferFactory.Default.allocate(2)
             two.writeByte(0xC0.toByte())
             two.writeByte(0x00)
             two.resetForRead()
             stream.append(two)
-            assertEquals(PeekResult.Complete(2), MqttPacketCodec.peekFrameSize(stream))
-            assertEquals(PeekResult.Complete(2), detector.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(2), MqttPacketCodec.peekOutcome(stream))
+            assertEquals(PeekOutcome.Complete(2), detector.peekOutcome(stream))
             // Instance and companion agree — the member forwards to the body.
             assertEquals(
-                jpegDispatcher().peekFrameSize(stream),
-                MqttPacketCodec.peekFrameSize(stream),
+                jpegDispatcher().peekOutcome(stream),
+                MqttPacketCodec.peekOutcome(stream),
             )
         } finally {
             stream.release()
@@ -367,7 +368,7 @@ class MqttPacketCodecTest {
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
             stream.append(encoded)
-            assertEquals(PeekResult.Complete(totalBytes), MqttPacketCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), MqttPacketCodec.peekOutcome(stream))
             val decoded =
                 stream.readBufferScoped(totalBytes) {
                     jpegDispatcher().decode(this, DecodeContext.Empty)
@@ -392,15 +393,15 @@ class MqttPacketCodecTest {
             one.resetForRead()
             stream.append(one)
             assertEquals(
-                PeekResult.NeedsMoreData,
-                jpegDispatcher().peekFrameSize(stream),
+                PeekOutcome.NeedsMoreData,
+                jpegDispatcher().peekOutcome(stream),
                 "header alone — peek still needs the var-int byte",
             )
             val two = BufferFactory.Default.allocate(1)
             two.writeByte(0x00)
             two.resetForRead()
             stream.append(two)
-            assertEquals(PeekResult.Complete(2), jpegDispatcher().peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(2), jpegDispatcher().peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -426,7 +427,7 @@ class MqttPacketCodecTest {
 
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, jpegDispatcher().peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, jpegDispatcher().peekOutcome(stream))
 
             for (i in 0 until totalBytes - 1) {
                 val one = BufferFactory.Default.allocate(1)
@@ -434,8 +435,8 @@ class MqttPacketCodecTest {
                 one.resetForRead()
                 stream.append(one)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    jpegDispatcher().peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    jpegDispatcher().peekOutcome(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -443,7 +444,7 @@ class MqttPacketCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), jpegDispatcher().peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), jpegDispatcher().peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()

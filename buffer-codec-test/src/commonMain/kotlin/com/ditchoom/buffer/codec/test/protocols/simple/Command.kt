@@ -8,8 +8,8 @@ import com.ditchoom.buffer.codec.annotations.ProtocolMessage
  * Doctrine vector for simple `@PacketType` sealed dispatch.
  *
  * `Ping` exercises the all-scalar variant path (dispatcher reports
- * `WireSize.Exact(1 + 8)`); `Echo` exercises the variable-terminal
- * variant path (dispatcher reports `WireSize.BackPatch` because the
+ * `WireByteCount.exact(1 + 8)`); `Echo` exercises the variable-terminal
+ * variant path (dispatcher reports `WireByteCount.BackPatch` because the
  * variant terminal is `@LengthPrefixed val: String`).
  *
  * Wire layout:

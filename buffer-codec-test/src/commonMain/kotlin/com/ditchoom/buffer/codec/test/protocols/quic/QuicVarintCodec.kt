@@ -4,7 +4,7 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.VarLenPeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.VariableLengthCodec
 import com.ditchoom.buffer.stream.StreamProcessor
 
@@ -86,18 +86,33 @@ object QuicVarintCodec : VariableLengthCodec<ULong> {
         return value
     }
 
-    override fun peekValue(
+    /** The width alone: the two high bits of byte 0 give `1 shl class` bytes (RFC 9000 §16). */
+    override fun frameSize(
         stream: StreamProcessor,
         baseOffset: Int,
-    ): VarLenPeek<ULong> {
-        if (stream.available() - baseOffset < 1) return VarLenPeek.NeedsMoreData
+    ): FrameSize {
+        if (stream.available() - baseOffset < 1) return FrameSize.NeedsMoreData
+        val width = 1 shl ((stream.peekByte(baseOffset).toInt() and 0xFF) ushr 6)
+        return if (stream.available() - baseOffset < width) FrameSize.NeedsMoreData else FrameSize.declared(0, width.toLong())
+    }
+
+    /**
+     * The varint at [baseOffset] read as a length field: its width as the header and its
+     * value as the declared body, with primitive peeks only. For the length codecs that
+     * wrap this varint.
+     */
+    internal fun peekAsLength(
+        stream: StreamProcessor,
+        baseOffset: Int,
+    ): FrameSize {
+        if (stream.available() - baseOffset < 1) return FrameSize.NeedsMoreData
         val first = stream.peekByte(baseOffset).toInt() and 0xFF
-        val length = 1 shl (first shr 6)
-        if (stream.available() - baseOffset < length) return VarLenPeek.NeedsMoreData
-        var value = (first and 0x3F).toULong()
-        for (i in 1 until length) {
-            value = (value shl 8) or (stream.peekByte(baseOffset + i).toInt() and 0xFF).toULong()
+        val width = 1 shl (first ushr 6)
+        if (stream.available() - baseOffset < width) return FrameSize.NeedsMoreData
+        var value = (first and 0x3F).toLong()
+        for (i in 1 until width) {
+            value = (value shl 8) or (stream.peekByte(baseOffset + i).toLong() and 0xFF)
         }
-        return VarLenPeek.Decoded(value, length)
+        return FrameSize.declared(width, value)
     }
 }

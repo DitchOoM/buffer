@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.flow
  *
  * A Codec plugs in UNCHANGED — each datagram is already one whole message, so the codec's whole-buffer
  * encode/decode is called directly. What does not carry over from the byte trichotomy is the stream
- * framing driver (StreamProcessor / peekFrameSize): feeding pre-framed datagrams through it would
+ * framing driver (StreamProcessor / frameSize): feeding pre-framed datagrams through it would
  * concatenate them and dissolve kernel boundaries. These adapters are therefore much simpler than
  * ByteSource.typed — no processor, no pool.
  */

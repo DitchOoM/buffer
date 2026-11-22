@@ -6,7 +6,7 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -84,7 +84,7 @@ class TcpSegmentByFlagsCodecTest {
             TcpSegmentByFlags.FinAck(),
             TcpSegmentByFlags.Rst(),
         )) {
-            assertEquals(WireSize.Exact(1), TcpSegmentByFlagsCodec.wireSize(v, EncodeContext.Empty))
+            assertEquals(WireByteCount.exact(1), TcpSegmentByFlagsCodec.wireBytes(v, EncodeContext.Empty))
         }
     }
 

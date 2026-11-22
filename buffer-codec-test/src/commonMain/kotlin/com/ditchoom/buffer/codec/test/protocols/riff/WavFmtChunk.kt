@@ -14,7 +14,7 @@ import com.ditchoom.buffer.codec.annotations.WireOrder
  *
  * Vector for `@LengthPrefixed` on a `@ProtocolMessage` field
  * (R3 widening). Encode emits the prefix carrying `WavFmtBodyCodec`'s
- * `wireSize`; decode reads the prefix, `setLimit`-bounds, decodes the
+ * `wireBytes`; decode reads the prefix, `setLimit`-bounds, decodes the
  * body, and restores the outer limit so a chunk embedded inside a RIFF
  * LIST stays composable.
  *

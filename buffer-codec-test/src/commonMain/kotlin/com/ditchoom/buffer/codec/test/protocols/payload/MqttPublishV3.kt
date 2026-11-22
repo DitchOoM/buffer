@@ -7,7 +7,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.Payload
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.annotations.Endianness
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
@@ -128,10 +128,10 @@ object TextPayloadCodec : Codec<TextPayload> {
         buffer.writeString(value.text, Charset.UTF8)
     }
 
-    override fun wireSize(
+    override fun wireBytes(
         value: TextPayload,
         context: EncodeContext,
-    ): WireSize = WireSize.BackPatch
+    ): WireByteCount = WireByteCount.BackPatch
 }
 
 /**
@@ -233,8 +233,8 @@ object JpegImageCodec : Codec<JpegImage> {
         buffer.write(value.nativeBitmap.bitmapPixels())
     }
 
-    override fun wireSize(
+    override fun wireBytes(
         value: JpegImage,
         context: EncodeContext,
-    ): WireSize = WireSize.Exact(4 + value.nativeBitmap.bitmapPixelSize())
+    ): WireByteCount = WireByteCount.exact((4 + value.nativeBitmap.bitmapPixelSize()).toLong())
 }

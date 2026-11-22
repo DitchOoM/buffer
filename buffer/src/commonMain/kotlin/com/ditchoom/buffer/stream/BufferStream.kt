@@ -342,12 +342,16 @@ internal class DefaultStreamProcessor(
 
     override fun peekByte(offset: Int): Byte {
         require(totalAvailable > offset) { "Not enough data: need ${offset + 1}, have $totalAvailable" }
+        // An index loop: `for (chunk in chunks)` allocates an iterator on every peek.
         var remaining = offset
-        for (chunk in chunks) {
+        var index = 0
+        while (index < chunks.size) {
+            val chunk = chunks[index]
             if (remaining < chunk.remaining()) {
                 return chunk.get(chunk.position() + remaining)
             }
             remaining -= chunk.remaining()
+            index++
         }
         throw IllegalStateException("Unexpected end of data")
     }
@@ -414,13 +418,16 @@ internal class DefaultStreamProcessor(
         var startChunkIndex = 0
         var startInChunk = 0
         var skipRemaining = offset
-        for ((index, chunk) in chunks.withIndex()) {
+        var scan = 0
+        while (scan < chunks.size) {
+            val chunk = chunks[scan]
             if (skipRemaining < chunk.remaining()) {
-                startChunkIndex = index
+                startChunkIndex = scan
                 startInChunk = skipRemaining
                 break
             }
             skipRemaining -= chunk.remaining()
+            scan++
         }
 
         val firstChunk = chunks[startChunkIndex]

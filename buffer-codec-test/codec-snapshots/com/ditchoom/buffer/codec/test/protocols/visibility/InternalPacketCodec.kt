@@ -9,15 +9,10 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FrameTooLargeException
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireByteCount
-import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
-import kotlin.Deprecated
 import kotlin.Int
-import kotlin.ReplaceWith
-import kotlin.Suppress
 
 internal object InternalPacketCodec : Codec<InternalPacket> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): InternalPacket {
@@ -57,13 +52,6 @@ internal object InternalPacketCodec : Codec<InternalPacket> {
 
   override fun wireBytes(`value`: InternalPacket, context: EncodeContext): WireByteCount = WireByteCount.BackPatch
 
-  @Deprecated(
-    message = "Call wireBytes.",
-    replaceWith = ReplaceWith("wireBytes(value, context)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun wireSize(`value`: InternalPacket, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
-
   override fun sizeHint(`value`: InternalPacket, context: EncodeContext): Int = 6 + value.name.length
 
   override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
@@ -78,13 +66,6 @@ internal object InternalPacketCodec : Codec<InternalPacket> {
       throw FrameTooLargeException(declaredBytes = __offset.toLong() + 2 + namePrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 2 + namePrefix.toInt()
-    return FrameSize.declared(__offset.toLong())
+    return FrameSize.declared(0, __offset.toLong())
   }
-
-  @Deprecated(
-    message = "Call frameSize.",
-    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

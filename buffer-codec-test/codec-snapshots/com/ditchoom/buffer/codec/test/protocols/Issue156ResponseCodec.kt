@@ -7,14 +7,9 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
-import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
-import kotlin.Deprecated
 import kotlin.Int
-import kotlin.ReplaceWith
-import kotlin.Suppress
 
 public object Issue156ResponseCodec : Codec<Issue156Response> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): Issue156Response {
@@ -45,13 +40,6 @@ public object Issue156ResponseCodec : Codec<Issue156Response> {
     is Issue156Response.LedStateSet -> WireByteCount.exact(4L)
   }
 
-  @Deprecated(
-    message = "Call wireBytes.",
-    replaceWith = ReplaceWith("wireBytes(value, context)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun wireSize(`value`: Issue156Response, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
-
   override fun sizeHint(`value`: Issue156Response, context: EncodeContext): Int = 1 + when (value) {
     is Issue156Response.LedStateSet -> Issue156ResponseLedStateSetCodec.sizeHint(value, context)
   }
@@ -60,17 +48,10 @@ public object Issue156ResponseCodec : Codec<Issue156Response> {
     if (stream.available() - baseOffset < 1) return FrameSize.NeedsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF
     return when (discriminator) {
-      0x20 -> Issue156ResponseLedStateSetCodec.frameSize(stream, baseOffset + 1).fold(declared = { FrameSize.declared(1, it) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
+      0x20 -> Issue156ResponseLedStateSetCodec.frameSize(stream, baseOffset + 1).fold(declared = { __h, __b -> FrameSize.declared(1 + __h, __b) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
       else -> {
         throw DecodeException(fieldPath = "Issue156Response.discriminator", bufferPosition = baseOffset, expected = "one of {0x20}", actual = """0x${discriminator.toString(16).padStart(2, '0').uppercase()}""")
       }
     }
   }
-
-  @Deprecated(
-    message = "Call frameSize.",
-    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

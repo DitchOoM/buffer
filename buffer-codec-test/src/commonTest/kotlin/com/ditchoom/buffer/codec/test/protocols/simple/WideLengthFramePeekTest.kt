@@ -10,8 +10,9 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.MaxFrameBytesKey
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.readFrame
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -59,7 +60,7 @@ class WideLengthFramePeekTest {
         // negative, and a negative `Complete` reaches `readBufferScoped`.
         val stream = streamOf(frameBytes(0x7FFFFFFFu))
         try {
-            assertFailsWith<DecodeException> { WideLengthFrameCodec.peekFrameSize(stream) }
+            assertFailsWith<DecodeException> { WideLengthFrameCodec.peekOutcome(stream) }
         } finally {
             stream.release()
         }
@@ -70,7 +71,7 @@ class WideLengthFramePeekTest {
         val payload = "hi".encodeToByteArray()
         val stream = streamOf(frameBytes(payload.size.toUInt(), payload))
         try {
-            assertEquals(PeekResult.Complete(5 + payload.size), WideLengthFrameCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(5 + payload.size), WideLengthFrameCodec.peekOutcome(stream))
         } finally {
             stream.release()
         }
@@ -94,10 +95,8 @@ class WideLengthFramePeekTest {
     fun frameSizeDeclaresTheSizeOfAnIncompleteFrame() {
         val stream = streamOf(frameBytes(64u))
         try {
-            assertEquals(FrameSize.declared(5 + 64), WideLengthFrameCodec.frameSize(stream))
-            // The deprecated API still reports the only incomplete state it has.
-            @Suppress("DEPRECATION")
-            assertEquals(PeekResult.NeedsMoreData, WideLengthFrameCodec.peekFrameSize(stream))
+            assertEquals(FrameSize.declared(0, 5L + 64), WideLengthFrameCodec.frameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, WideLengthFrameCodec.peekOutcome(stream))
         } finally {
             stream.release()
         }

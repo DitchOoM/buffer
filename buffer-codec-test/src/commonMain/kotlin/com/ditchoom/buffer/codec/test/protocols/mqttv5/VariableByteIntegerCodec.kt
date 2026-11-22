@@ -6,7 +6,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 
 /**
  * Non-bounding VBI codec for v5
@@ -67,16 +67,16 @@ object VariableByteIntegerCodec : Codec<UInt> {
         } while (remaining > 0u)
     }
 
-    override fun wireSize(
+    override fun wireBytes(
         value: UInt,
         context: EncodeContext,
-    ): WireSize =
-        WireSize.Exact(
+    ): WireByteCount =
+        WireByteCount.exact(
             when {
                 value < 128u -> 1
                 value < 16_384u -> 2
                 value < 2_097_152u -> 3
                 else -> 4
-            },
+            }.toLong(),
         )
 }

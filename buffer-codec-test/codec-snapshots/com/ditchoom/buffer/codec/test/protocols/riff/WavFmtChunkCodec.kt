@@ -10,15 +10,10 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FrameTooLargeException
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
-import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.swapBytes
-import kotlin.Deprecated
 import kotlin.Int
-import kotlin.ReplaceWith
-import kotlin.Suppress
 
 public object WavFmtChunkCodec : Codec<WavFmtChunk> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): WavFmtChunk {
@@ -72,7 +67,7 @@ public object WavFmtChunkCodec : Codec<WavFmtChunk> {
         val bodyBodyStart = buffer.position()
         WavFmtBodyCodec.encode(buffer, value.body, context)
         if (buffer.position() - bodyBodyStart != bodyByteCount) {
-          throw EncodeException(fieldPath = "WavFmtChunk.body", reason = """wireSize declared ${bodyByteCount} bytes but encode wrote ${buffer.position() - bodyBodyStart} — the codec's wireSize and encode disagree""")
+          throw EncodeException(fieldPath = "WavFmtChunk.body", reason = """wireBytes declared ${bodyByteCount} bytes but encode wrote ${buffer.position() - bodyBodyStart} — the codec's wireBytes and encode disagree""")
         }
       },
       backPatch = {
@@ -98,13 +93,6 @@ public object WavFmtChunkCodec : Codec<WavFmtChunk> {
     return WireByteCount.exact(8L + __bodySize)
   }
 
-  @Deprecated(
-    message = "Call wireBytes.",
-    replaceWith = ReplaceWith("wireBytes(value, context)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun wireSize(`value`: WavFmtChunk, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
-
   override fun sizeHint(`value`: WavFmtChunk, context: EncodeContext): Int = 8 + WavFmtBodyCodec.sizeHint(value.body, context)
 
   override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
@@ -121,13 +109,6 @@ public object WavFmtChunkCodec : Codec<WavFmtChunk> {
       throw FrameTooLargeException(declaredBytes = __offset.toLong() + 4 + bodyPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 4 + bodyPrefix.toInt()
-    return FrameSize.declared(__offset.toLong())
+    return FrameSize.declared(0, __offset.toLong())
   }
-
-  @Deprecated(
-    message = "Call frameSize.",
-    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

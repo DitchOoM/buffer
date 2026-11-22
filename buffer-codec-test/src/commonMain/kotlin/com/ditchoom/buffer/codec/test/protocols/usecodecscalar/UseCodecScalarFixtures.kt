@@ -6,20 +6,22 @@ import com.ditchoom.buffer.codec.BoundingLengthCodec
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
 import com.ditchoom.buffer.codec.annotations.UseCodec
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
+import com.ditchoom.buffer.stream.StreamProcessor
 
 /**
  * Doctrine vector — exercises bare `@UseCodec val:
  * <scalar>` (no framing annotation) against:
  *   - a plain `Codec<UInt>` user codec ([ZigZagUIntCodec]) — non-bounding
  *     emit path: `decode` reads via the codec, `encode` writes via the
- *     codec, `wireSize` collapses to `WireSize.BackPatch`,
- *     `peekFrameSize` to `PeekResult.NoFraming`. No try/finally wrapping.
+ *     codec, `wireBytes` collapses to `WireByteCount.BackPatch`,
+ *     `frameSize` to `FrameSize.Unframed`. No try/finally wrapping.
  *   - a `BoundingLengthCodec<UInt>` user codec ([Le32LengthCodec]) — the
  *     bounding emit path: outer limit captured into `__lengthOuterLimit`
  *     before decode, `applyBound` called after decode, subsequent fields
@@ -55,10 +57,10 @@ object ZigZagUIntCodec : Codec<UInt> {
         buffer.writeInt(zig)
     }
 
-    override fun wireSize(
+    override fun wireBytes(
         value: UInt,
         context: EncodeContext,
-    ): WireSize = WireSize.Exact(4)
+    ): WireByteCount = WireByteCount.exact(4)
 }
 
 /**
@@ -94,10 +96,22 @@ object Le32LengthCodec : BoundingLengthCodec<UInt> {
         buffer.writeByte(((v ushr 24) and 0xFF).toByte())
     }
 
-    override fun wireSize(
+    override fun wireBytes(
         value: UInt,
         context: EncodeContext,
-    ): WireSize = WireSize.Exact(4)
+    ): WireByteCount = WireByteCount.exact(4)
+
+    override fun peekLength(
+        stream: StreamProcessor,
+        baseOffset: Int,
+    ): FrameSize {
+        if (stream.available() - baseOffset < 4) return FrameSize.NeedsMoreData
+        var value = 0L
+        for (i in 3 downTo 0) value = (value shl 8) or (stream.peekByte(baseOffset + i).toLong() and 0xFF)
+        return FrameSize.declared(4, value)
+    }
+
+    override fun encodedWidth(bodyBytes: Long): Int = 4
 
     override fun applyBound(
         buffer: ReadBuffer,
@@ -169,10 +183,22 @@ object Be64LengthCodec : BoundingLengthCodec<ULong> {
         buffer.writeLong(value.toLong())
     }
 
-    override fun wireSize(
+    override fun wireBytes(
         value: ULong,
         context: EncodeContext,
-    ): WireSize = WireSize.Exact(8)
+    ): WireByteCount = WireByteCount.exact(8)
+
+    override fun peekLength(
+        stream: StreamProcessor,
+        baseOffset: Int,
+    ): FrameSize {
+        if (stream.available() - baseOffset < 8) return FrameSize.NeedsMoreData
+        var value = 0uL
+        for (i in 0 until 8) value = (value shl 8) or (stream.peekByte(baseOffset + i).toULong() and 0xFFuL)
+        return FrameSize.declared(8, value)
+    }
+
+    override fun encodedWidth(bodyBytes: Long): Int = 8
 
     override fun applyBound(
         buffer: ReadBuffer,
@@ -199,10 +225,22 @@ object SignedBe32LengthCodec : BoundingLengthCodec<Int> {
         buffer.writeInt(value)
     }
 
-    override fun wireSize(
+    override fun wireBytes(
         value: Int,
         context: EncodeContext,
-    ): WireSize = WireSize.Exact(4)
+    ): WireByteCount = WireByteCount.exact(4)
+
+    override fun peekLength(
+        stream: StreamProcessor,
+        baseOffset: Int,
+    ): FrameSize {
+        if (stream.available() - baseOffset < 4) return FrameSize.NeedsMoreData
+        var value = 0
+        for (i in 0 until 4) value = (value shl 8) or (stream.peekByte(baseOffset + i).toInt() and 0xFF)
+        return FrameSize.declared(4, value.toLong()) // a negative declaration is refused here
+    }
+
+    override fun encodedWidth(bodyBytes: Long): Int = 4
 
     override fun applyBound(
         buffer: ReadBuffer,

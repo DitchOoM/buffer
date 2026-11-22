@@ -9,15 +9,10 @@ import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FrameTooLargeException
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
-import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.test.protocols.payload.TextPayloadCodec
 import com.ditchoom.buffer.stream.StreamProcessor
-import kotlin.Deprecated
 import kotlin.Int
-import kotlin.ReplaceWith
-import kotlin.Suppress
 import kotlin.UByte
 import kotlin.UShort
 
@@ -88,13 +83,6 @@ public object SmpFrameCodec : Codec<SmpFrame> {
 
   override fun wireBytes(`value`: SmpFrame, context: EncodeContext): WireByteCount = WireByteCount.BackPatch
 
-  @Deprecated(
-    message = "Call wireBytes.",
-    replaceWith = ReplaceWith("wireBytes(value, context)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun wireSize(`value`: SmpFrame, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
-
   override fun sizeHint(`value`: SmpFrame, context: EncodeContext): Int = 8
 
   override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
@@ -119,15 +107,8 @@ public object SmpFrameCodec : Codec<SmpFrame> {
       throw FrameTooLargeException(declaredBytes = if (payloadBytes < 0) payloadBytes.toLong() else __offset.toLong() + payloadBytes, maxBytes = Int.MAX_VALUE)
     }
     __offset += payloadBytes
-    return FrameSize.declared(__offset.toLong())
+    return FrameSize.declared(0, __offset.toLong())
   }
-
-  @Deprecated(
-    message = "Call frameSize.",
-    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
-  )
-  @Suppress("DEPRECATION")
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 
   public fun partial(buffer: ReadBuffer, context: DecodeContext): Partial {
     val __batch2 = buffer.readLong()

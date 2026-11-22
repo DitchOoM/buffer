@@ -6,7 +6,8 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImage
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImageCodec
@@ -76,7 +77,7 @@ class MqttV5PingReqCodecTest {
             two.writeByte(0x00)
             two.resetForRead()
             stream.append(two)
-            assertEquals(PeekResult.Complete(2), jpegDispatcher().peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(2), jpegDispatcher().peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -90,15 +91,15 @@ class MqttV5PingReqCodecTest {
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, jpegDispatcher().peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, jpegDispatcher().peekOutcome(stream))
 
             val one = BufferFactory.Default.allocate(1)
             one.writeByte(0xC0.toByte())
             one.resetForRead()
             stream.append(one)
             assertEquals(
-                PeekResult.NeedsMoreData,
-                jpegDispatcher().peekFrameSize(stream),
+                PeekOutcome.NeedsMoreData,
+                jpegDispatcher().peekOutcome(stream),
                 "header alone — peek still needs the var-int byte",
             )
 
@@ -106,7 +107,7 @@ class MqttV5PingReqCodecTest {
             two.writeByte(0x00)
             two.resetForRead()
             stream.append(two)
-            assertEquals(PeekResult.Complete(2), jpegDispatcher().peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(2), jpegDispatcher().peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()

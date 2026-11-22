@@ -6,7 +6,8 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -301,7 +302,7 @@ class MqttConnectCodecTest {
 
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, MqttPacketConnectCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, MqttPacketConnectCodec.peekOutcome(stream))
 
             for (i in 0 until totalBytes - 1) {
                 val one = BufferFactory.Default.allocate(1)
@@ -309,8 +310,8 @@ class MqttConnectCodecTest {
                 one.resetForRead()
                 stream.append(one)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    MqttPacketConnectCodec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    MqttPacketConnectCodec.peekOutcome(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -318,7 +319,7 @@ class MqttConnectCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), MqttPacketConnectCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), MqttPacketConnectCodec.peekOutcome(stream))
 
             val decoded =
                 stream.readBufferScoped(totalBytes) {
@@ -360,7 +361,7 @@ class MqttConnectCodecTest {
                     it.resetForRead()
                 },
             )
-            assertEquals(PeekResult.Complete(expectedTotal), MqttPacketConnectCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(expectedTotal), MqttPacketConnectCodec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()

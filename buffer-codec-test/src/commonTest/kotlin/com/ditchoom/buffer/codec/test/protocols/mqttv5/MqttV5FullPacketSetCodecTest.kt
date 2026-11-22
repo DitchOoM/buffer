@@ -6,7 +6,8 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttConnectFlags
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttUnsubscribeTopic
@@ -231,8 +232,8 @@ class MqttV5FullPacketSetCodecTest {
         try {
             fullStream.append(encodeViaDispatcher(original))
             assertEquals(
-                PeekResult.Complete(expectedTotalBytes),
-                dispatcher.peekFrameSize(fullStream),
+                PeekOutcome.Complete(expectedTotalBytes),
+                dispatcher.peekOutcome(fullStream),
                 "fully-buffered peekFrameSize Complete for ${original::class.simpleName}",
             )
         } finally {
@@ -251,8 +252,8 @@ class MqttV5FullPacketSetCodecTest {
                 one.resetForRead()
                 dripStream.append(one)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    dispatcher.peekFrameSize(dripStream),
+                    PeekOutcome.NeedsMoreData,
+                    dispatcher.peekOutcome(dripStream),
                     "${original::class.simpleName} after ${i + 1} of $expectedTotalBytes bytes",
                 )
             }
@@ -261,8 +262,8 @@ class MqttV5FullPacketSetCodecTest {
             last.resetForRead()
             dripStream.append(last)
             assertEquals(
-                PeekResult.Complete(expectedTotalBytes),
-                dispatcher.peekFrameSize(dripStream),
+                PeekOutcome.Complete(expectedTotalBytes),
+                dispatcher.peekOutcome(dripStream),
                 "${original::class.simpleName} final byte completes the frame",
             )
         } finally {
