@@ -12,9 +12,16 @@ import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.Payload
+import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.toPeekResult
+import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 import kotlin.UByte
 import kotlin.UShort
 
@@ -87,9 +94,23 @@ public class SmpGenericFrameCodec<P : Payload>(
 
   override fun wireBytes(`value`: SmpGenericFrame<P>, context: EncodeContext): WireByteCount = WireByteCount.BackPatch
 
+  @Deprecated(
+    message = "Call wireBytes, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: SmpGenericFrame<P>, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
+
   override fun sizeHint(`value`: SmpGenericFrame<P>, context: EncodeContext): Int = 8
 
   override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = Companion.frameSize(stream, baseOffset)
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 
   public class Partial<P : Payload> internal constructor(
     public val op: UByte,
@@ -149,6 +170,13 @@ public class SmpGenericFrameCodec<P : Payload>(
       __offset += payloadBytes
       return FrameSize.declared(0, __offset.toLong())
     }
+
+    @Deprecated(
+      message = "Call frameSize, which does not box. Removed in the next major release.",
+      replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+    )
+    @Suppress("DEPRECATION")
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 
     public fun <P : Payload> partial(buffer: ReadBuffer, context: DecodeContext): Partial<P> {
       val __batch2 = buffer.readLong()

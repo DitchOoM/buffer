@@ -137,4 +137,44 @@ object UnsignedVarIntCodec : VariableLengthCodec<UInt> {
             }
         }
     }
+
+    @Suppress("DEPRECATION")
+    @Deprecated(
+        "Call frameSize for the width and decode for the value. Removed in the next major release.",
+        ReplaceWith("frameSize(stream, baseOffset)"),
+    )
+    override fun peekValue(
+        stream: StreamProcessor,
+        baseOffset: Int,
+    ): VarLenPeek<UInt> {
+        var result = 0u
+        var shift = 0
+        var i = 0
+        while (true) {
+            if (stream.available() - baseOffset < i + 1) return VarLenPeek.NeedsMoreData
+            val b = stream.peekByte(baseOffset + i).toInt() and 0xFF
+            // 5th byte: reject value bits beyond 2^32 (see decode) rather than truncate.
+            if (i == MAX_BYTES - 1 && b and FIFTH_BYTE_OVERFLOW_MASK != 0) {
+                throw DecodeException(
+                    fieldPath = "UnsignedVarInt",
+                    bufferPosition = baseOffset + i,
+                    expected = "a 5th byte within UInt range (high bits 0x70 clear)",
+                    actual = "a 5th byte carrying value bits beyond 2^32",
+                )
+            }
+            result = result or ((b and VALUE_MASK).toUInt() shl shift)
+            i++
+            if (b and CONTINUATION_BIT == 0) break
+            shift += VALUE_BITS_PER_BYTE
+            if (i >= MAX_BYTES) {
+                throw DecodeException(
+                    fieldPath = "UnsignedVarInt",
+                    bufferPosition = baseOffset + i,
+                    expected = "a terminating byte within $MAX_BYTES bytes (UInt range)",
+                    actual = "a $MAX_BYTES-byte sequence still requesting continuation",
+                )
+            }
+        }
+        return VarLenPeek.Decoded(result, i)
+    }
 }

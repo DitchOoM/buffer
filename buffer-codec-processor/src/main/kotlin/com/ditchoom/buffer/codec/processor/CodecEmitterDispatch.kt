@@ -729,12 +729,12 @@ internal fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
                 builder.addFunction(buildDispatchDecodeFun(shape))
                 if (framed) {
                     builder.addFunction(buildFramedByDispatchOnEncodeFun(shape, parentTypeRef))
-                    builder.addFunction(buildFramedByDispatchOnPeekFun(shape))
+                    builder.addFunctions(withLegacyPeekFrameSize(buildFramedByDispatchOnPeekFun(shape)))
                 } else {
                     builder.addFunction(buildDispatchEncodeFun(shape))
-                    builder.addFunction(buildDispatchWireSizeFun(shape))
+                    builder.addFunctions(withLegacyWireSize(buildDispatchWireSizeFun(shape)))
                     builder.addFunction(buildDispatchSizeHintFun(shape))
-                    builder.addFunction(buildDispatchPeekFun(shape))
+                    builder.addFunctions(withLegacyPeekFrameSize(buildDispatchPeekFun(shape)))
                 }
                 builder.build()
             }
@@ -793,17 +793,18 @@ internal fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
                     // generic codec's and hoists the same way (#348).
                     val peek = buildFramedByDispatchOnPeekFun(shape)
                     builder.addFunction(memberPeekFun(peek))
+                    builder.addFunction(legacyPeekFrameSizeFun(peek))
                     builder.addCodecCompanion(peek = peek, aggregator = aggregator)
                 } else {
                     builder.addFunction(buildDispatchEncodeFun(shape))
-                    builder.addFunction(buildDispatchWireSizeFun(shape))
+                    builder.addFunctions(withLegacyWireSize(buildDispatchWireSizeFun(shape)))
                     builder.addFunction(buildDispatchSizeHintFun(shape))
                     // The one shape whose peek genuinely cannot hoist: it routes
                     // through per-variant receivers, and a generic variant's is a
                     // constructor-injected instance field. Member-only, and no
                     // `peek` passed below — `requireCodecIndependentPeek` would
                     // reject this body on sight.
-                    builder.addFunction(buildDispatchPeekFun(shape))
+                    builder.addFunctions(withLegacyPeekFrameSize(buildDispatchPeekFun(shape)))
                     builder.addCodecCompanion(aggregator = aggregator)
                 }
                 builder.build()

@@ -314,7 +314,7 @@ class EmitterDiagnosticsValidatorTest {
                 object Bound1 : BoundingLengthCodec<Int> {
                     override val maxWireSize: Int = 4
                     override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
-                    override fun encodedWidth(bodyBytes: Long): Int = maxWireSize
+                    override fun encodedWidth(bodyBytes: Long): com.ditchoom.buffer.codec.WireByteCount = com.ditchoom.buffer.codec.WireByteCount.exact(maxWireSize.toLong())
                     override fun applyBound(buffer: ReadBuffer, decodedValue: Int) {
                         buffer.setLimit(buffer.position() + decodedValue)
                     }
@@ -328,7 +328,7 @@ class EmitterDiagnosticsValidatorTest {
                 object Bound2 : BoundingLengthCodec<Int> {
                     override val maxWireSize: Int = 4
                     override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
-                    override fun encodedWidth(bodyBytes: Long): Int = maxWireSize
+                    override fun encodedWidth(bodyBytes: Long): com.ditchoom.buffer.codec.WireByteCount = com.ditchoom.buffer.codec.WireByteCount.exact(maxWireSize.toLong())
                     override fun applyBound(buffer: ReadBuffer, decodedValue: Int) {
                         buffer.setLimit(buffer.position() + decodedValue)
                     }

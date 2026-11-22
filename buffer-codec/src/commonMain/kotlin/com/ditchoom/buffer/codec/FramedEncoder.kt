@@ -50,10 +50,19 @@ public object FramedEncoder {
             growable.position(maxSlack)
             writeBody(growable)
             val bodyBytes = growable.position() - maxSlack
-            val actualPrefixWidth =
-                framingCodec.encodedWidth(bodyBytes.toLong()).also { width ->
-                    if (width !in 0..framingCodec.maxWireSize) throw FramingSizeException(framingCodec)
-                }
+            // A codec that cannot tell the width from the length alone sizes it through wireBytes.
+            val prefixBytes =
+                framingCodec.encodedWidth(bodyBytes.toLong()).fold(
+                    exact = { it },
+                    backPatch = {
+                        framingCodec.wireBytes(bodyBytes.toUInt(), context).fold(
+                            exact = { it },
+                            backPatch = { throw FramingSizeException(framingCodec) },
+                        )
+                    },
+                )
+            if (prefixBytes > framingCodec.maxWireSize) throw FramingSizeException(framingCodec)
+            val actualPrefixWidth = prefixBytes.toInt()
             val sliceStart = maxSlack - actualPrefixWidth - headerWireWidth
             val buffer: PlatformBuffer = growable.innerBuffer()
             buffer.position(sliceStart)

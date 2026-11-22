@@ -7,10 +7,17 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.toPeekResult
+import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.swapBytes
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object RepeatedBlocksCodec : Codec<RepeatedBlocks> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): RepeatedBlocks {
@@ -44,6 +51,13 @@ public object RepeatedBlocksCodec : Codec<RepeatedBlocks> {
     return WireByteCount.exact(2L + __blocksBodySize)
   }
 
+  @Deprecated(
+    message = "Call wireBytes, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: RepeatedBlocks, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
+
   override fun sizeHint(`value`: RepeatedBlocks, context: EncodeContext): Int {
     var __hint = 2
     for (__elem in value.blocks) {
@@ -53,4 +67,11 @@ public object RepeatedBlocksCodec : Codec<RepeatedBlocks> {
   }
 
   override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = FrameSize.Unframed
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

@@ -1,5 +1,7 @@
 package com.ditchoom.buffer.codec
 
+import com.ditchoom.buffer.BufferUnderflowException
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.stream.StreamProcessor
 
@@ -45,23 +47,31 @@ interface BoundingLengthCodec<T : Any> : Codec<T> {
     )
 
     /**
-     * The length field at [baseOffset] of [stream], read without consuming or allocating:
+     * The length field at [baseOffset] of [stream], read without consuming it:
      * `FrameSize.declared(headerBytes = <width of the field>, bodyBytes = <declared length>)`,
      * or [FrameSize.NeedsMoreData] while the field has not fully arrived. Generated peeks
-     * call this instead of decoding a slice, so it must read with [StreamProcessor.peekByte]
-     * (or the other fixed-width peeks) only.
+     * call this.
+     *
+     * Override it with [StreamProcessor.peekByte] reads (or the other fixed-width peeks):
+     * that allocates nothing. The default decodes the field from a peeked view of up to
+     * [maxWireSize] bytes, which allocates the view and boxes the decoded value; it reads a
+     * value of an integer type (`UByte`..`ULong`, `Byte`..`Long`) and answers
+     * [FrameSize.Unframed] for any other `T`.
      */
     fun peekLength(
         stream: StreamProcessor,
         baseOffset: Int,
-    ): FrameSize
+    ): FrameSize = peekLengthByDecoding(stream, baseOffset)
 
     /**
-     * How many bytes this codec writes for a declared length of [bodyBytes]: the same
-     * number `wireBytes(<that length>)` reports, without passing the value through the
-     * generic `T` (which boxes a `UInt`).
+     * How many bytes this codec writes for a declared length of [bodyBytes], without
+     * passing the value through the generic `T` (which boxes a `UInt`). Override it with
+     * the exact width.
+     *
+     * The default is [WireByteCount.BackPatch]: the width is not known without encoding, so
+     * callers size the field through [wireBytes] with the length as a `T`, which boxes.
      */
-    fun encodedWidth(bodyBytes: Long): Int
+    fun encodedWidth(bodyBytes: Long): WireByteCount = WireByteCount.BackPatch
 
     /**
      * The maximum number of bytes this codec ever writes for a single
@@ -73,4 +83,40 @@ interface BoundingLengthCodec<T : Any> : Codec<T> {
      * the wire width.
      */
     val maxWireSize: Int
+}
+
+/** [BoundingLengthCodec.peekLength]'s default: decode the field from a peeked view. */
+private fun <T : Any> BoundingLengthCodec<T>.peekLengthByDecoding(
+    stream: StreamProcessor,
+    baseOffset: Int,
+): FrameSize {
+    val budget = maxWireSize
+    val view = stream.peekBuffer(baseOffset, budget) ?: return FrameSize.NeedsMoreData
+    try {
+        val start = view.position()
+        val value =
+            try {
+                decode(view, DecodeContext.Empty)
+            } catch (shortView: BufferUnderflowException) {
+                if (view.limit() - start < budget) return FrameSize.NeedsMoreData
+                throw shortView
+            } catch (shortView: IndexOutOfBoundsException) {
+                if (view.limit() - start < budget) return FrameSize.NeedsMoreData
+                throw shortView
+            }
+        val width = view.position() - start
+        return when (value) {
+            is ULong -> FrameSize.declared(width, value)
+            is UInt -> FrameSize.declared(width, value.toLong())
+            is UShort -> FrameSize.declared(width, value.toLong())
+            is UByte -> FrameSize.declared(width, value.toLong())
+            is Long -> FrameSize.declared(width, value)
+            is Int -> FrameSize.declared(width, value.toLong())
+            is Short -> FrameSize.declared(width, value.toLong())
+            is Byte -> FrameSize.declared(width, value.toLong())
+            else -> FrameSize.Unframed
+        }
+    } finally {
+        (view as? PlatformBuffer)?.freeNativeMemory()
+    }
 }

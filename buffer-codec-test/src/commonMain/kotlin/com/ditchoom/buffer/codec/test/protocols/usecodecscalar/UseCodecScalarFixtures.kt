@@ -111,7 +111,7 @@ object Le32LengthCodec : BoundingLengthCodec<UInt> {
         return FrameSize.declared(4, value)
     }
 
-    override fun encodedWidth(bodyBytes: Long): Int = 4
+    override fun encodedWidth(bodyBytes: Long): WireByteCount = WireByteCount.exact(4)
 
     override fun applyBound(
         buffer: ReadBuffer,
@@ -198,7 +198,7 @@ object Be64LengthCodec : BoundingLengthCodec<ULong> {
         return FrameSize.declared(8, value)
     }
 
-    override fun encodedWidth(bodyBytes: Long): Int = 8
+    override fun encodedWidth(bodyBytes: Long): WireByteCount = WireByteCount.exact(8)
 
     override fun applyBound(
         buffer: ReadBuffer,
@@ -240,7 +240,7 @@ object SignedBe32LengthCodec : BoundingLengthCodec<Int> {
         return FrameSize.declared(4, value.toLong()) // a negative declaration is refused here
     }
 
-    override fun encodedWidth(bodyBytes: Long): Int = 4
+    override fun encodedWidth(bodyBytes: Long): WireByteCount = WireByteCount.exact(4)
 
     override fun applyBound(
         buffer: ReadBuffer,

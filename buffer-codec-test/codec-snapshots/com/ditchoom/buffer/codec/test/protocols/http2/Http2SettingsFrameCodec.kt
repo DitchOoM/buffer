@@ -10,10 +10,17 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FrameTooLargeException
+import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.toPeekResult
+import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.swapBytes
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object Http2SettingsFrameCodec : Codec<Http2SettingsFrame> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): Http2SettingsFrame {
@@ -72,6 +79,13 @@ public object Http2SettingsFrameCodec : Codec<Http2SettingsFrame> {
 
   override fun wireBytes(`value`: Http2SettingsFrame, context: EncodeContext): WireByteCount = WireByteCount.exact(9L + value.length.toLong())
 
+  @Deprecated(
+    message = "Call wireBytes, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: Http2SettingsFrame, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
+
   override fun sizeHint(`value`: Http2SettingsFrame, context: EncodeContext): Int = 9
 
   override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
@@ -98,4 +112,11 @@ public object Http2SettingsFrameCodec : Codec<Http2SettingsFrame> {
     __offset += entriesBytes
     return FrameSize.declared(0, __offset.toLong())
   }
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

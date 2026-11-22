@@ -52,7 +52,8 @@ object Http3LengthCodec : BoundingLengthCodec<ULong> {
         baseOffset: Int,
     ): FrameSize = QuicVarintCodec.peekAsLength(stream, baseOffset)
 
-    override fun encodedWidth(bodyBytes: Long): Int = QuicVarintCodec.encodedLength(bodyBytes.toULong())
+    override fun encodedWidth(bodyBytes: Long): WireByteCount =
+        WireByteCount.exact(QuicVarintCodec.encodedLength(bodyBytes.toULong()).toLong())
 
     override fun applyBound(
         buffer: ReadBuffer,

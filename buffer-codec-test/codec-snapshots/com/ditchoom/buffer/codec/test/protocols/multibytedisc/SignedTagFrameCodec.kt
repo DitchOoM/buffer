@@ -7,9 +7,16 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.toPeekResult
+import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object SignedTagFrameCodec : Codec<SignedTagFrame> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): SignedTagFrame {
@@ -42,6 +49,13 @@ public object SignedTagFrameCodec : Codec<SignedTagFrame> {
     is SignedTagFrame.Beta -> SignedTagFrameBetaCodec.wireBytes(value, context)
   }
 
+  @Deprecated(
+    message = "Call wireBytes, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: SignedTagFrame, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
+
   override fun sizeHint(`value`: SignedTagFrame, context: EncodeContext): Int = when (value) {
     is SignedTagFrame.Alpha -> SignedTagFrameAlphaCodec.sizeHint(value, context)
     is SignedTagFrame.Beta -> SignedTagFrameBetaCodec.sizeHint(value, context)
@@ -64,4 +78,11 @@ public object SignedTagFrameCodec : Codec<SignedTagFrame> {
       }
     }
   }
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

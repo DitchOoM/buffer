@@ -7,12 +7,19 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
+import com.ditchoom.buffer.codec.toPeekResult
+import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
 import kotlin.Short
+import kotlin.Suppress
 import kotlin.ULong
 
 public object U64BoundedFrameCodec : Codec<U64BoundedFrame> {
@@ -59,9 +66,23 @@ public object U64BoundedFrameCodec : Codec<U64BoundedFrame> {
 
   override fun wireBytes(`value`: U64BoundedFrame, context: EncodeContext): WireByteCount = WireByteCount.BackPatch
 
+  @Deprecated(
+    message = "Call wireBytes, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: U64BoundedFrame, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
+
   override fun sizeHint(`value`: U64BoundedFrame, context: EncodeContext): Int = 2
 
   override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = Be64LengthCodec.peekLength(stream, baseOffset + 2).fold(declared = { __lengthWidth, __bodyBytes -> FrameSize.declared(2 + __lengthWidth, __bodyBytes) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 
   public fun partial(buffer: ReadBuffer, context: DecodeContext): Partial {
     val tag = buffer.readShort()

@@ -9,10 +9,17 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FrameTooLargeException
+import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.toPeekResult
+import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object MqttV5PropertyUserPropertyCodec : Codec<MqttV5Property.UserProperty> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): MqttV5Property.UserProperty {
@@ -74,6 +81,13 @@ public object MqttV5PropertyUserPropertyCodec : Codec<MqttV5Property.UserPropert
 
   override fun wireBytes(`value`: MqttV5Property.UserProperty, context: EncodeContext): WireByteCount = WireByteCount.BackPatch
 
+  @Deprecated(
+    message = "Call wireBytes, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: MqttV5Property.UserProperty, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
+
   override fun sizeHint(`value`: MqttV5Property.UserProperty, context: EncodeContext): Int = 5 + value.key.length + value.value.length
 
   override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
@@ -98,4 +112,11 @@ public object MqttV5PropertyUserPropertyCodec : Codec<MqttV5Property.UserPropert
     __offset += 2 + valuePrefix.toInt()
     return FrameSize.declared(0, __offset.toLong())
   }
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

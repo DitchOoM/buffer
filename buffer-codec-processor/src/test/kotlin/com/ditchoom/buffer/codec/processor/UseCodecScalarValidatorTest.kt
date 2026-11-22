@@ -93,7 +93,7 @@ class UseCodecScalarValidatorTest {
                     }
                     override fun wireBytes(value: Len, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
                     override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
-                    override fun encodedWidth(bodyBytes: Long): Int = maxWireSize
+                    override fun encodedWidth(bodyBytes: Long): com.ditchoom.buffer.codec.WireByteCount = com.ditchoom.buffer.codec.WireByteCount.exact(maxWireSize.toLong())
                     override fun applyBound(buffer: ReadBuffer, decodedValue: Len) {
                         buffer.setLimit(buffer.position() + decodedValue.raw.toInt())
                     }
@@ -218,7 +218,7 @@ class UseCodecScalarValidatorTest {
                     }
                     override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
                     override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
-                    override fun encodedWidth(bodyBytes: Long): Int = maxWireSize
+                    override fun encodedWidth(bodyBytes: Long): com.ditchoom.buffer.codec.WireByteCount = com.ditchoom.buffer.codec.WireByteCount.exact(maxWireSize.toLong())
                     override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
                         buffer.setLimit(buffer.position() + decodedValue.toInt())
                     }
@@ -502,7 +502,7 @@ class UseCodecScalarValidatorTest {
                     }
                     override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
                     override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
-                    override fun encodedWidth(bodyBytes: Long): Int = maxWireSize
+                    override fun encodedWidth(bodyBytes: Long): com.ditchoom.buffer.codec.WireByteCount = com.ditchoom.buffer.codec.WireByteCount.exact(maxWireSize.toLong())
                     override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
                         buffer.setLimit(buffer.position() + decodedValue.toInt())
                     }
@@ -596,7 +596,7 @@ class UseCodecScalarValidatorTest {
                     }
                     override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
                     override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
-                    override fun encodedWidth(bodyBytes: Long): Int = maxWireSize
+                    override fun encodedWidth(bodyBytes: Long): com.ditchoom.buffer.codec.WireByteCount = com.ditchoom.buffer.codec.WireByteCount.exact(maxWireSize.toLong())
                     override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
                         buffer.setLimit(buffer.position() + decodedValue.toInt())
                     }
@@ -651,7 +651,7 @@ class UseCodecScalarValidatorTest {
                     }
                     override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
                     override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
-                    override fun encodedWidth(bodyBytes: Long): Int = maxWireSize
+                    override fun encodedWidth(bodyBytes: Long): com.ditchoom.buffer.codec.WireByteCount = com.ditchoom.buffer.codec.WireByteCount.exact(maxWireSize.toLong())
                     override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
                         buffer.setLimit(buffer.position() + decodedValue.toInt())
                     }
@@ -723,7 +723,7 @@ class UseCodecScalarValidatorTest {
                     }
                     override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
                     override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
-                    override fun encodedWidth(bodyBytes: Long): Int = maxWireSize
+                    override fun encodedWidth(bodyBytes: Long): com.ditchoom.buffer.codec.WireByteCount = com.ditchoom.buffer.codec.WireByteCount.exact(maxWireSize.toLong())
                     override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
                         buffer.setLimit(buffer.position() + decodedValue.toInt())
                     }

@@ -181,12 +181,19 @@ internal fun buildWireSizeFun(
                         INT,
                         WIRE_BYTE_COUNT_CN,
                     )
-                    // The prefix width through the length codec's non-generic entry: no boxed UInt.
+                    // The prefix width through the length codec's non-generic entry (no boxed
+                    // UInt); a codec that cannot tell it from the length alone answers through
+                    // wireBytes.
                     builder.addStatement(
-                        "val %L = %T.encodedWidth(%L) + %L",
+                        "val %L = %T.encodedWidth(%L).fold(exact = { it }, backPatch = { " +
+                            "%T.wireBytes(%L.toUInt(), context).fold(exact = { it }, backPatch = { return %T.BackPatch }) " +
+                            "}) + %L",
                         "__${f.name}Size",
                         f.spec.codecType,
                         bodyBytesVar,
+                        f.spec.codecType,
+                        bodyBytesVar,
+                        WIRE_BYTE_COUNT_CN,
                         bodyBytesVar,
                     )
                 }

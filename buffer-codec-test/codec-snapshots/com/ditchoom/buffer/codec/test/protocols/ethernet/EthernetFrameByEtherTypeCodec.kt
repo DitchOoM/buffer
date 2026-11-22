@@ -7,9 +7,16 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.toPeekResult
+import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object EthernetFrameByEtherTypeCodec : Codec<EthernetFrameByEtherType> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): EthernetFrameByEtherType {
@@ -48,6 +55,13 @@ public object EthernetFrameByEtherTypeCodec : Codec<EthernetFrameByEtherType> {
     is EthernetFrameByEtherType.Ipv6 -> EthernetFrameByEtherTypeIpv6Codec.wireBytes(value, context)
   }
 
+  @Deprecated(
+    message = "Call wireBytes, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: EthernetFrameByEtherType, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
+
   override fun sizeHint(`value`: EthernetFrameByEtherType, context: EncodeContext): Int = when (value) {
     is EthernetFrameByEtherType.Ipv4 -> EthernetFrameByEtherTypeIpv4Codec.sizeHint(value, context)
     is EthernetFrameByEtherType.Arp -> EthernetFrameByEtherTypeArpCodec.sizeHint(value, context)
@@ -72,4 +86,11 @@ public object EthernetFrameByEtherTypeCodec : Codec<EthernetFrameByEtherType> {
       }
     }
   }
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

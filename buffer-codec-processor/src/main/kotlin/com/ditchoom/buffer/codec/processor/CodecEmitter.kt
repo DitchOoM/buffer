@@ -244,7 +244,7 @@ internal class CodecEmitter(
                 .addSuperinterface(FRAME_DETECTOR_CN)
                 .addFunction(buildFramedByDecodeFun(shape, framedBy))
                 .addFunction(buildFramedByEncodeFun(shape, framedBy))
-                .addFunction(buildFramedByPeekFrameFun(shape, framedBy))
+                .addFunctions(withLegacyPeekFrameSize(buildFramedByPeekFrameFun(shape, framedBy)))
                 .build()
         return FileSpec
             .builder(shape.packageName, shape.codecSimpleName)
@@ -487,12 +487,12 @@ internal class CodecEmitter(
                     .addSuperinterface(CODEC_CN.parameterizedBy(shape.messageClassName))
                     .addFunction(buildDecodeFun(shape))
                     .addFunction(buildEncodeFun(shape))
-                    .addFunction(buildWireSizeFun(shape))
+                    .addFunctions(withLegacyWireSize(buildWireSizeFun(shape)))
                     .addFunction(buildSizeHintFun(shape))
                     // An `object` codec is already its own static receiver, so
                     // the body stays on it — no companion needed. This is the
                     // placement a class-shaped codec's companion mirrors.
-                    .addFunction(buildPeekFrame(shape))
+                    .addFunctions(withLegacyPeekFrameSize(buildPeekFrame(shape)))
                     .also { builder ->
                         // Every codec carrying a typed payload field
                         // gets a `Partial` nested class plus a `partial(buffer,
@@ -545,9 +545,10 @@ internal class CodecEmitter(
             ).addSuperinterface(CODEC_CN.parameterizedBy(parameterizedMessage))
             .addFunction(buildDecodeFun(shape, parameterizedMessage))
             .addFunction(buildEncodeFun(shape, parameterizedMessage))
-            .addFunction(buildWireSizeFun(shape, parameterizedMessage))
+            .addFunctions(withLegacyWireSize(buildWireSizeFun(shape, parameterizedMessage)))
             .addFunction(buildSizeHintFun(shape, parameterizedMessage))
             .addFunction(memberPeekFun(peek))
+            .addFunction(legacyPeekFrameSizeFun(peek))
             .also { builder ->
                 // For the (class) shape, `Partial` is a
                 // nested class (independent type parameter <P : Payload>) and
@@ -604,6 +605,7 @@ internal class CodecEmitter(
             .addFunction(buildFramedByDecodeFun(shape, framedBy, parameterizedMessage))
             .addFunction(buildFramedByEncodeFun(shape, framedBy, parameterizedMessage))
             .addFunction(memberPeekFun(peek))
+            .addFunction(legacyPeekFrameSizeFun(peek))
             .also { builder ->
                 // Same placement rule as the unframed generic codec, through the
                 // same helper: framing derives from the length prefix, never
@@ -1912,6 +1914,7 @@ internal fun TypeSpec.Builder.addCodecCompanion(
         // same-named function on it.
         companion.addSuperinterface(FRAME_DETECTOR_CN)
         companion.addFunction(peek)
+        companion.addFunction(legacyPeekFrameSizeFun(peek))
     }
     partial?.let { companion.addFunction(it) }
     return addType(companion.build())

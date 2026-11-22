@@ -90,7 +90,7 @@ class FramedEncoderPoolLifecycleTests {
                 FrameSize.declared(2, (hi shl 8) or lo)
             }
 
-        override fun encodedWidth(bodyBytes: Long): Int = 2
+        override fun encodedWidth(bodyBytes: Long): WireByteCount = WireByteCount.exact(2)
 
         override fun applyBound(
             buffer: ReadBuffer,

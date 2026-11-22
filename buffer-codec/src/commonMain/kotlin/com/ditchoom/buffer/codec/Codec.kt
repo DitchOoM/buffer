@@ -13,13 +13,35 @@ interface Encoder<in T> {
     )
 
     /**
-     * The encoded size of [value], without allocating. Defaults to [WireByteCount.BackPatch],
-     * which is always correct; an exact size lets the framework allocate once.
+     * The encoded size of [value], without allocating. An exact size lets the framework
+     * allocate once; [WireByteCount.BackPatch] is always correct.
+     *
+     * Override this one. The default asks the deprecated [wireSize], so an encoder written
+     * against it keeps working; [wireSize] never calls back here, so an encoder overriding
+     * neither answers [WireByteCount.BackPatch].
      */
+    @Suppress("DEPRECATION")
     fun wireBytes(
         value: T,
         context: EncodeContext,
-    ): WireByteCount = WireByteCount.BackPatch
+    ): WireByteCount = WireByteCount.from(wireSize(value, context))
+
+    /**
+     * The encoded size of [value] as a boxed [WireSize]. Defaults to [WireSize.BackPatch]: an
+     * encoder that overrides only [wireBytes] answers BackPatch here unless it also forwards
+     * this as `wireBytes(value, context).toWireSize()`.
+     */
+    @Suppress("DEPRECATION")
+    @Deprecated(
+        "Call wireBytes, which does not box. An encoder that overrides only wireBytes answers BackPatch here; " +
+            "while callers of wireSize remain, also override it as `wireBytes(value, context).toWireSize()`. " +
+            "Removed in the next major release.",
+        ReplaceWith("wireBytes(value, context)"),
+    )
+    fun wireSize(
+        value: T,
+        context: EncodeContext,
+    ): WireSize = WireSize.BackPatch
 
     /**
      * Starting-capacity hint consulted by `encodeToPlatformBuffer` when
@@ -93,12 +115,36 @@ interface FrameDetector {
      * The size of the frame starting [baseOffset] bytes into [stream], read without
      * consuming or allocating. Declare it as soon as the codec knows it, before the
      * frame has arrived, so a streaming loop can reject or skip an oversized frame
-     * early. Defaults to [FrameSize.Unframed].
+     * early.
+     *
+     * Override this one. The default asks the deprecated [peekFrameSize], so a detector
+     * written against it keeps working; [peekFrameSize] never calls back here, so a detector
+     * overriding neither answers [FrameSize.Unframed].
      */
+    @Suppress("DEPRECATION")
     fun frameSize(
         stream: StreamProcessor,
         baseOffset: Int = 0,
-    ): FrameSize = FrameSize.Unframed
+    ): FrameSize = FrameSize.from(peekFrameSize(stream, baseOffset))
+
+    /**
+     * The frame size as a boxed [PeekResult], [PeekResult.Complete] only once the whole frame
+     * has arrived. Defaults to [PeekResult.NoFraming]: a detector that overrides only
+     * [frameSize] answers NoFraming here unless it also forwards this as
+     * `frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)`.
+     */
+    @Suppress("DEPRECATION")
+    @Deprecated(
+        "Call frameSize, which does not box. A detector that overrides only frameSize answers NoFraming here; " +
+            "while callers of peekFrameSize remain, also override it as " +
+            "`frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)`. " +
+            "Removed in the next major release.",
+        ReplaceWith("frameSize(stream, baseOffset)"),
+    )
+    fun peekFrameSize(
+        stream: StreamProcessor,
+        baseOffset: Int = 0,
+    ): PeekResult = PeekResult.NoFraming
 }
 
 /**

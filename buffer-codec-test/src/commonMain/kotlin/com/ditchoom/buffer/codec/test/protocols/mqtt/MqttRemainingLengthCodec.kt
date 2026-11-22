@@ -103,13 +103,15 @@ object MqttRemainingLengthCodec : BoundingLengthCodec<UInt> {
         )
     }
 
-    override fun encodedWidth(bodyBytes: Long): Int =
-        when {
-            bodyBytes < 128 -> 1
-            bodyBytes < 16_384 -> 2
-            bodyBytes < 2_097_152 -> 3
-            else -> 4
-        }
+    override fun encodedWidth(bodyBytes: Long): WireByteCount =
+        WireByteCount.exact(
+            when {
+                bodyBytes < 128 -> 1L
+                bodyBytes < 16_384 -> 2L
+                bodyBytes < 2_097_152 -> 3L
+                else -> 4L
+            },
+        )
 
     override fun applyBound(
         buffer: ReadBuffer,

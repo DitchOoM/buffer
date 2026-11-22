@@ -84,7 +84,7 @@ class CompanionPeekPlacementTest {
                 )
         val companion = builder.build().typeSpecs.single()
         assertTrue(companion.isCompanion)
-        assertEquals(listOf("frameSize"), companion.funSpecs.map { it.name })
+        assertEquals(listOf("frameSize", "peekFrameSize"), companion.funSpecs.map { it.name })
     }
 
     /**
@@ -100,7 +100,7 @@ class CompanionPeekPlacementTest {
                 .addCodecCompanion(peek = peekFun("return FrameSize.Unframed"))
         val companion = builder.build().typeSpecs.single()
         assertTrue(companion.isCompanion)
-        assertEquals(listOf("frameSize"), companion.funSpecs.map { it.name })
+        assertEquals(listOf("frameSize", "peekFrameSize"), companion.funSpecs.map { it.name })
     }
 
     /**
@@ -181,7 +181,7 @@ class CompanionPeekPlacementTest {
                 )
         val companion = builder.build().typeSpecs.single()
         assertEquals(
-            listOf("decodeAggregating", "frameSize"),
+            listOf("decodeAggregating", "frameSize", "peekFrameSize"),
             companion.funSpecs.map { it.name }.sorted(),
         )
         assertEquals(1, companion.superinterfaces.size, "the companion is a FrameDetector value")

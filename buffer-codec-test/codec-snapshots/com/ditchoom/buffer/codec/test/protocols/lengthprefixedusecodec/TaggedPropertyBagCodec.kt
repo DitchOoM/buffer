@@ -10,11 +10,18 @@ import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.LengthPrefixedListEncoder
+import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
+import com.ditchoom.buffer.codec.toPeekResult
+import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object TaggedPropertyBagCodec : Codec<TaggedPropertyBag> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): TaggedPropertyBag {
@@ -80,11 +87,25 @@ public object TaggedPropertyBagCodec : Codec<TaggedPropertyBag> {
       __propertiesBodyBytes += PropertyEntryCodec.wireBytes(__propertiesBodyBytesList[__i], context).fold(exact = { it }, backPatch = { return WireByteCount.BackPatch })
     }
     if (__propertiesBodyBytes > Int.MAX_VALUE.toLong()) return WireByteCount.BackPatch
-    val __propertiesSize = MqttRemainingLengthCodec.encodedWidth(__propertiesBodyBytes) + __propertiesBodyBytes
+    val __propertiesSize = MqttRemainingLengthCodec.encodedWidth(__propertiesBodyBytes).fold(exact = { it }, backPatch = { MqttRemainingLengthCodec.wireBytes(__propertiesBodyBytes.toUInt(), context).fold(exact = { it }, backPatch = { return WireByteCount.BackPatch }) }) + __propertiesBodyBytes
     return WireByteCount.exact(1L + __propertiesSize)
   }
+
+  @Deprecated(
+    message = "Call wireBytes, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: TaggedPropertyBag, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: TaggedPropertyBag, context: EncodeContext): Int = 1
 
   override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = MqttRemainingLengthCodec.peekLength(stream, baseOffset + 1).fold(declared = { __lengthWidth, __bodyBytes -> FrameSize.declared(1 + __lengthWidth, __bodyBytes) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }
