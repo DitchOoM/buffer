@@ -7,6 +7,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
@@ -20,7 +21,7 @@ public object MqttV5PropertyAuthenticationDataCodec : Codec<MqttV5Property.Authe
     val dataPrefixB1 = buffer.readUByte().toUInt()
     val dataPrefix = ((dataPrefixB0 shl 8) or dataPrefixB1)
     if (dataPrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "AuthenticationData.data", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = dataPrefix.toString())
+      throw FrameTooLargeException(declaredBytes = dataPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val dataLength = dataPrefix.toInt()
     if (dataLength > buffer.remaining()) {
@@ -82,7 +83,7 @@ public object MqttV5PropertyAuthenticationDataCodec : Codec<MqttV5Property.Authe
     val dataPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val dataPrefix = ((dataPrefixB0 shl 8) or dataPrefixB1).toUInt()
     if (dataPrefix > (Int.MAX_VALUE - __offset - 2).toUInt()) {
-      throw DecodeException(fieldPath = "AuthenticationData.data", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + dataPrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 2 + dataPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 2 + dataPrefix.toInt()
     return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData

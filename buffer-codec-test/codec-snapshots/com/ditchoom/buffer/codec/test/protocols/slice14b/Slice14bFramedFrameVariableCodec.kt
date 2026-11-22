@@ -9,6 +9,7 @@ import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameDetector
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
@@ -38,7 +39,7 @@ public object Slice14bFramedFrameVariableCodec : FrameDetector {
       val messagePrefixB1 = buffer.readUByte().toUInt()
       val messagePrefix = ((messagePrefixB0 shl 8) or messagePrefixB1)
       if (messagePrefix > Int.MAX_VALUE.toUInt()) {
-        throw DecodeException(fieldPath = "Slice14bFramedFrameVariable.message", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = messagePrefix.toString())
+        throw FrameTooLargeException(declaredBytes = messagePrefix.toLong(), maxBytes = Int.MAX_VALUE)
       }
       val messageLength = messagePrefix.toInt()
       val message = buffer.readText(messageLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))

@@ -5,8 +5,8 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
-import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
@@ -21,7 +21,7 @@ public object IntPrefixedStringCodec : Codec<IntPrefixedString> {
     val namePrefixB3 = buffer.readUByte().toUInt()
     val namePrefix = ((namePrefixB0 shl 24) or (namePrefixB1 shl 16) or (namePrefixB2 shl 8) or namePrefixB3)
     if (namePrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "IntPrefixedString.name", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = namePrefix.toString())
+      throw FrameTooLargeException(declaredBytes = namePrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val nameLength = namePrefix.toInt()
     val name = buffer.readText(nameLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -61,7 +61,7 @@ public object IntPrefixedStringCodec : Codec<IntPrefixedString> {
     val namePrefixB3 = stream.peekByte(baseOffset + __offset + 3).toInt() and 0xFF
     val namePrefix = ((namePrefixB0 shl 24) or (namePrefixB1 shl 16) or (namePrefixB2 shl 8) or namePrefixB3).toUInt()
     if (namePrefix > (Int.MAX_VALUE - __offset - 4).toUInt()) {
-      throw DecodeException(fieldPath = "IntPrefixedString.name", bufferPosition = baseOffset + __offset, expected = "__offset + 4 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 4 + namePrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 4 + namePrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 4 + namePrefix.toInt()
     return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData

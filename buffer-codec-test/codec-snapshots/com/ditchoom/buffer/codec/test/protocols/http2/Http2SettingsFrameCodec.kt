@@ -8,6 +8,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -26,7 +27,7 @@ public object Http2SettingsFrameCodec : Codec<Http2SettingsFrame> {
     val flags = (__batch1 and 0xFF).toUByte()
     val streamId = Http2StreamId(buffer.readUInt())
     if (length > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "Http2SettingsFrame.entries", bufferPosition = -1, expected = "@LengthFrom source <= ${'$'}{Int.MAX_VALUE}", actual = length.toString())
+      throw FrameTooLargeException(declaredBytes = length.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val entriesBytes = length.toInt()
     if (entriesBytes > buffer.remaining()) {
@@ -88,11 +89,11 @@ public object Http2SettingsFrameCodec : Codec<Http2SettingsFrame> {
     if (stream.available() - baseOffset < __offset + 4) return PeekResult.NeedsMoreData
     __offset += 4
     if (length > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "Http2SettingsFrame.entries", bufferPosition = -1, expected = "@LengthFrom source <= ${'$'}{Int.MAX_VALUE}", actual = length.toString())
+      throw FrameTooLargeException(declaredBytes = length.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val entriesBytes = length.toInt()
     if (entriesBytes < 0 || entriesBytes > Int.MAX_VALUE - __offset) {
-      throw DecodeException(fieldPath = "Http2SettingsFrame.entries", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + entriesBytes.toLong()}""")
+      throw FrameTooLargeException(declaredBytes = if (entriesBytes < 0) entriesBytes.toLong() else __offset.toLong() + entriesBytes, maxBytes = Int.MAX_VALUE)
     }
     if (stream.available() - baseOffset < __offset + entriesBytes) return PeekResult.NeedsMoreData
     __offset += entriesBytes

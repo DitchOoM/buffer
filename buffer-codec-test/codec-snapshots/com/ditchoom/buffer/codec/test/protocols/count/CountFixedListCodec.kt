@@ -8,13 +8,14 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.UnsignedVarIntCodec
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
 
 public object CountFixedListCodec : Codec<CountFixedList> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): CountFixedList {
     val id = buffer.readUByte()
-    val __pointsCount = UnsignedVarIntCodec.decode(buffer, context).toInt()
+    val __pointsCount = declaredFrameBytes(0, UnsignedVarIntCodec.decode(buffer, context).toLong())
     val points = ArrayList<CountPoint>(__pointsCount.coerceIn(0, 1_024))
     repeat(__pointsCount) {
       points += CountPointCodec.decode(buffer, context)

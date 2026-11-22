@@ -7,6 +7,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -16,7 +17,7 @@ public object LpByteWrappedTailCodec : Codec<LpByteWrappedTail> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): LpByteWrappedTail {
     val bodyPrefix = buffer.readUByte().toUInt()
     if (bodyPrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "LpByteWrappedTail.body", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = bodyPrefix.toString())
+      throw FrameTooLargeException(declaredBytes = bodyPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val bodyLength = bodyPrefix.toInt()
     if (bodyLength > buffer.remaining()) {
@@ -86,7 +87,7 @@ public object LpByteWrappedTailCodec : Codec<LpByteWrappedTail> {
     if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData
     val bodyPrefix = (stream.peekByte(baseOffset + __offset).toInt() and 0xFF).toUInt()
     if (bodyPrefix > (Int.MAX_VALUE - __offset - 1).toUInt()) {
-      throw DecodeException(fieldPath = "LpByteWrappedTail.body", bufferPosition = baseOffset + __offset, expected = "__offset + 1 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 1 + bodyPrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 1 + bodyPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 1 + bodyPrefix.toInt()
     return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData

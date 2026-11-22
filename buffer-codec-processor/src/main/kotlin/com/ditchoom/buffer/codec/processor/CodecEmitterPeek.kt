@@ -820,7 +820,6 @@ internal fun appendSequentialPeek(
                 appendSequentialPeekLengthPrefixed(
                     body = body,
                     name = field.name,
-                    ownerSimpleName = field.ownerSimpleName,
                     prefixWidth = field.prefixWidth,
                     prefixWireOrder = field.prefixWireOrder,
                 )
@@ -828,7 +827,6 @@ internal fun appendSequentialPeek(
                 appendSequentialPeekLengthPrefixed(
                     body = body,
                     name = field.name,
-                    ownerSimpleName = field.ownerSimpleName,
                     prefixWidth = field.prefixWidth,
                     prefixWireOrder = field.prefixWireOrder,
                 )
@@ -836,14 +834,12 @@ internal fun appendSequentialPeek(
                 appendSequentialPeekLengthFrom(
                     body = body,
                     name = field.name,
-                    ownerSimpleName = field.ownerSimpleName,
                     source = field.source,
                 )
             is FieldSpec.LengthFromList ->
                 appendSequentialPeekLengthFrom(
                     body = body,
                     name = field.name,
-                    ownerSimpleName = field.ownerSimpleName,
                     source = field.source,
                 )
             is FieldSpec.LengthFromMessage ->
@@ -853,7 +849,6 @@ internal fun appendSequentialPeek(
                 appendSequentialPeekLengthFrom(
                     body = body,
                     name = field.name,
-                    ownerSimpleName = field.ownerSimpleName,
                     source = field.source,
                 )
             is FieldSpec.RemainingBytesProtocolMessageList ->
@@ -882,7 +877,6 @@ internal fun appendSequentialPeek(
                         appendSequentialPeekLengthFrom(
                             body = body,
                             name = field.name,
-                            ownerSimpleName = field.ownerSimpleName,
                             source = extent.source,
                         )
                 }
@@ -913,7 +907,6 @@ internal fun appendSequentialPeek(
                 appendSequentialPeekLengthPrefixed(
                     body = body,
                     name = field.name,
-                    ownerSimpleName = field.ownerSimpleName,
                     prefixWidth = field.prefixWidth,
                     prefixWireOrder = field.prefixWireOrder,
                 )
@@ -998,7 +991,6 @@ internal fun appendPeekAvailabilityCheck(
 internal fun appendSequentialPeekLengthPrefixed(
     body: CodeBlock.Builder,
     name: String,
-    ownerSimpleName: String,
     prefixWidth: Int,
     prefixWireOrder: Endianness,
 ) {
@@ -1011,11 +1003,10 @@ internal fun appendSequentialPeekLengthPrefixed(
         prefixWidth,
     )
     body.addStatement(
-        "throw %T(fieldPath = %S, bufferPosition = baseOffset + __offset, expected = %S, actual = %P)",
-        DECODE_EXCEPTION_CN,
-        "$ownerSimpleName.$name",
-        "__offset + $prefixWidth + length prefix <= \${Int.MAX_VALUE}",
-        "\${__offset + $prefixWidth + $prefixVar.toInt()}",
+        "throw %T(declaredBytes = __offset.toLong() + %L + %L.toLong(), maxBytes = Int.MAX_VALUE)",
+        FRAME_TOO_LARGE_EXCEPTION_CN,
+        prefixWidth,
+        prefixVar,
     )
     body.endControlFlow()
     body.addStatement(
@@ -1037,7 +1028,6 @@ internal fun appendSequentialPeekLengthPrefixed(
 internal fun appendSequentialPeekLengthFrom(
     body: CodeBlock.Builder,
     name: String,
-    ownerSimpleName: String,
     source: LengthSource,
 ) {
     if (source is LengthSource.Sibling) {
@@ -1045,8 +1035,6 @@ internal fun appendSequentialPeekLengthFrom(
             body = body,
             siblingAccessor = source.siblingName,
             siblingKind = source.siblingKind,
-            ownerSimpleName = ownerSimpleName,
-            fieldName = name,
         )
     }
     body.addStatement(
@@ -1064,11 +1052,11 @@ internal fun appendSequentialPeekLengthFrom(
     val bytesVar = "${name}Bytes"
     body.beginControlFlow("if (%L < 0 || %L > Int.MAX_VALUE - __offset)", bytesVar, bytesVar)
     body.addStatement(
-        "throw %T(fieldPath = %S, bufferPosition = baseOffset + __offset, expected = %S, actual = %P)",
-        DECODE_EXCEPTION_CN,
-        "$ownerSimpleName.$name",
-        "__offset + @LengthFrom source in 0..\${Int.MAX_VALUE}",
-        "\${__offset.toLong() + $bytesVar.toLong()}",
+        "throw %T(declaredBytes = if (%L < 0) %L.toLong() else __offset.toLong() + %L, maxBytes = Int.MAX_VALUE)",
+        FRAME_TOO_LARGE_EXCEPTION_CN,
+        bytesVar,
+        bytesVar,
+        bytesVar,
     )
     body.endControlFlow()
     body.addStatement(
@@ -1100,7 +1088,6 @@ internal fun appendSequentialPeekConditional(
             appendSequentialPeekLengthPrefixed(
                 body = body,
                 name = field.name,
-                ownerSimpleName = field.ownerSimpleName,
                 prefixWidth = inner.prefixWidth,
                 prefixWireOrder = inner.prefixWireOrder,
             )
@@ -1130,7 +1117,6 @@ internal fun appendSequentialPeekConditional(
             appendSequentialPeekLengthPrefixed(
                 body = body,
                 name = field.name,
-                ownerSimpleName = field.ownerSimpleName,
                 prefixWidth = inner.prefixWidth,
                 prefixWireOrder = inner.prefixWireOrder,
             )
@@ -1277,62 +1263,35 @@ internal fun appendPeekScalar(
 }
 
 /**
- * Int.MAX_VALUE guard for `@LengthFrom` siblings whose
- * range exceeds `Int`. `UByte` (max 255), `UShort` (max 65535),
- * `Byte` (max 127), `Short` (max 32767), and `Int` (identity)
- * fit in a non-negative `Int` and skip the guard. `UInt`,
- * `ULong`, and `Long` need the runtime check.
+ * Range guard for a `@LengthFrom` sibling: a length below zero or past `Int.MAX_VALUE`
+ * cannot address a buffer, so it throws `FrameTooLargeException` (the one typed failure for
+ * an unusable declared size) before `toInt()` could wrap it. `UByte` / `UShort` always fit
+ * and skip the guard.
  */
 internal fun appendLengthFromIntMaxGuard(
     body: CodeBlock.Builder,
     siblingAccessor: String,
     siblingKind: ScalarKind,
-    ownerSimpleName: String,
-    fieldName: String,
 ) {
-    val needsGuard =
+    val (condition, declared) =
         when (siblingKind) {
-            ScalarKind.UByte, ScalarKind.UShort, ScalarKind.Byte, ScalarKind.Short, ScalarKind.Int -> false
-            ScalarKind.UInt -> true
-            ScalarKind.ULong -> true
-            ScalarKind.Long -> true
+            ScalarKind.UByte, ScalarKind.UShort -> return
+            ScalarKind.Byte, ScalarKind.Short, ScalarKind.Int ->
+                "$siblingAccessor < 0" to "$siblingAccessor.toLong()"
+            ScalarKind.UInt -> "$siblingAccessor > Int.MAX_VALUE.toUInt()" to "$siblingAccessor.toLong()"
+            ScalarKind.Long ->
+                "$siblingAccessor < 0L || $siblingAccessor > Int.MAX_VALUE.toLong()" to siblingAccessor
+            ScalarKind.ULong ->
+                "$siblingAccessor > Int.MAX_VALUE.toULong()" to
+                    "(if ($siblingAccessor > Long.MAX_VALUE.toULong()) Long.MAX_VALUE else $siblingAccessor.toLong())"
             ScalarKind.Boolean ->
                 error("Boolean is rejected by analyzeLengthFromStringField; this branch is unreachable.")
             ScalarKind.Float, ScalarKind.Double ->
                 error("Float / Double are not valid @LengthFrom siblings; analyzeLengthFromStringField rejects them.")
         }
-    if (!needsGuard) return
-    val (cmp, actualExpr) =
-        when (siblingKind) {
-            ScalarKind.UInt -> "Int.MAX_VALUE.toUInt()" to "$siblingAccessor.toString()"
-            ScalarKind.ULong -> "Int.MAX_VALUE.toULong()" to "$siblingAccessor.toString()"
-            ScalarKind.Long -> "Int.MAX_VALUE.toLong()" to "$siblingAccessor.toString()"
-            else -> error("unreachable")
-        }
-    body.beginControlFlow("if (%L > %L)", siblingAccessor, cmp)
-    body.addStatement(
-        "throw %T(fieldPath = %S, bufferPosition = -1, expected = %S, actual = %L)",
-        DECODE_EXCEPTION_CN,
-        "$ownerSimpleName.$fieldName",
-        "@LengthFrom source <= \${Int.MAX_VALUE}",
-        actualExpr,
-    )
+    body.beginControlFlow("if (%L)", condition)
+    body.addStatement("throw %T(declaredBytes = %L, maxBytes = Int.MAX_VALUE)", FRAME_TOO_LARGE_EXCEPTION_CN, declared)
     body.endControlFlow()
-    // For signed siblings, also reject negative values. Otherwise
-    // toInt() returns a negative length and readString would
-    // either throw or read past the buffer end with a confusing
-    // error.
-    if (siblingKind == ScalarKind.Long) {
-        body.beginControlFlow("if (%L < 0L)", siblingAccessor)
-        body.addStatement(
-            "throw %T(fieldPath = %S, bufferPosition = -1, expected = %S, actual = %L.toString())",
-            DECODE_EXCEPTION_CN,
-            "$ownerSimpleName.$fieldName",
-            "@LengthFrom source >= 0",
-            siblingAccessor,
-        )
-        body.endControlFlow()
-    }
 }
 
 /**

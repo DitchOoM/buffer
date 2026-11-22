@@ -9,6 +9,7 @@ import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameDetector
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
@@ -39,7 +40,7 @@ public object ForwardCompatibleOpSetTitleCodec : FrameDetector {
       val titlePrefixB1 = buffer.readUByte().toUInt()
       val titlePrefix = ((titlePrefixB0 shl 8) or titlePrefixB1)
       if (titlePrefix > Int.MAX_VALUE.toUInt()) {
-        throw DecodeException(fieldPath = "SetTitle.title", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = titlePrefix.toString())
+        throw FrameTooLargeException(declaredBytes = titlePrefix.toLong(), maxBytes = Int.MAX_VALUE)
       }
       val titleLength = titlePrefix.toInt()
       val title = buffer.readText(titleLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))

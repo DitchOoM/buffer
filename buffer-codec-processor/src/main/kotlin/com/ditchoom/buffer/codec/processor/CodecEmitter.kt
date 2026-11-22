@@ -1781,8 +1781,6 @@ internal class CodecEmitter(
                             body = body,
                             siblingAccessor = extent.source.siblingName,
                             siblingKind = extent.source.siblingKind,
-                            ownerSimpleName = payloadField.ownerSimpleName,
-                            fieldName = payloadField.name,
                         )
                     }
                     appendOuterBoundWidenGuard(

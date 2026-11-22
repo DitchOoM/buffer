@@ -5,9 +5,9 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
-import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
@@ -20,7 +20,7 @@ public object LpPlainStringIdCodec : Codec<LpPlainStringId> {
     val idPrefixB1 = buffer.readUByte().toUInt()
     val idPrefix = ((idPrefixB0 shl 8) or idPrefixB1)
     if (idPrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "LpPlainStringId.id", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = idPrefix.toString())
+      throw FrameTooLargeException(declaredBytes = idPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val idLength = idPrefix.toInt()
     val id = buffer.readText(idLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -59,7 +59,7 @@ public object LpPlainStringIdCodec : Codec<LpPlainStringId> {
     val idPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val idPrefix = ((idPrefixB0 shl 8) or idPrefixB1).toUInt()
     if (idPrefix > (Int.MAX_VALUE - __offset - 2).toUInt()) {
-      throw DecodeException(fieldPath = "LpPlainStringId.id", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + idPrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 2 + idPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 2 + idPrefix.toInt()
     return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData
