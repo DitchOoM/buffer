@@ -5,6 +5,7 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.PeekedInteger
 import com.ditchoom.buffer.codec.VarLenPeek
 import com.ditchoom.buffer.codec.VariableLengthCodec
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -113,6 +114,20 @@ object QuicVarintCodec : VariableLengthCodec<ULong> {
             FrameSize.NeedsMoreData
         } else {
             FrameSize.declared(0, width.toLong())
+        }
+    }
+
+    /** The value with primitive peeks only; every QUIC varint value fits a non-negative `Long`. */
+    override fun peekInteger(
+        stream: StreamProcessor,
+        baseOffset: Int,
+    ): PeekedInteger {
+        if (stream.available() - baseOffset < 1) return PeekedInteger.NeedsMoreData
+        val width = widthAt(stream, baseOffset)
+        return if (stream.available() - baseOffset < width) {
+            PeekedInteger.NeedsMoreData
+        } else {
+            PeekedInteger.of(valueAt(stream, baseOffset, width))
         }
     }
 

@@ -12,6 +12,7 @@ import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.test.protocols.enums.Priority
 import com.ditchoom.buffer.codec.test.protocols.enums.Tagged
 import com.ditchoom.buffer.codec.test.protocols.enums.TaggedCodec
+import com.ditchoom.buffer.codec.test.protocols.http3.Http3FrameCodec
 import com.ditchoom.buffer.codec.test.protocols.http3.Http3FrameSettingsCodec
 import com.ditchoom.buffer.codec.test.protocols.http3fc.Http3FcFrameCodec
 import com.ditchoom.buffer.codec.test.protocols.lengthprefixedusecodec.PropertyBagFrame
@@ -151,6 +152,28 @@ class FrameSizeAllocationTest {
             assertPeeksAllocateNothing(
                 "@FramedBy + bounding",
                 arrayOf(Http3FcFrameCodec, MqttPacketCodec, BoundedFrameCodec, Http3FrameSettingsCodec),
+                streams,
+            )
+        } finally {
+            streams.forEach { it.release() }
+        }
+    }
+
+    @Test
+    fun theUnframedVarintDispatcherPeeksWithoutAllocating() {
+        val streams =
+            arrayOf(
+                // DATA: type 0x00 (1-byte varint), length 3, body.
+                streamOf(0x00, 0x03, 1, 2, 3),
+                // Extension: type 64 (2-byte varint 0x40 0x40), length 1, body.
+                streamOf(0x40, 0x40, 0x01, 7),
+                // HEADERS: type 0x01, length 2, body.
+                streamOf(0x01, 0x02, 4, 5),
+            )
+        try {
+            assertPeeksAllocateNothing(
+                "varint dispatcher",
+                arrayOf(Http3FrameCodec, Http3FrameCodec, Http3FrameCodec),
                 streams,
             )
         } finally {

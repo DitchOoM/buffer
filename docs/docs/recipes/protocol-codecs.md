@@ -1096,12 +1096,28 @@ override fun wireSize(value: T, context: EncodeContext): WireSize = wireBytes(va
 |---|---|
 | `FrameDetector.peekFrameSize` → `PeekResult` | `frameSize` → `FrameSize` |
 | `Encoder.wireSize` → `WireSize` | `wireBytes` → `WireByteCount` |
-| `VariableLengthCodec.peekValue` → `VarLenPeek` | `frameSize` for the width, `decode` for the value |
+| `VariableLengthCodec.peekValue` → `VarLenPeek` | `frameSize` for the width, `peekInteger` (or `decode`) for the value |
 
 A `VariableLengthCodec` still implements `peekValue`: it stays abstract until the
-next major release, so overriding it draws a deprecation warning. Its
-`frameSize` default derives the width from `peekValue` and allocates the result;
-override `frameSize` with a width-only scan.
+next major release, so overriding it draws a deprecation warning. The defaults of
+`frameSize` and `peekInteger` derive from `peekValue` and allocate its result;
+override both with primitive peeks. `peekInteger` returns a `PeekedInteger`, a
+value class over one `Long`: the value as a non-negative `Long`,
+`NeedsMoreData`, or `NotRepresentable` (negative, non-integer, or past
+`Long.MAX_VALUE`; the caller decodes instead). A dispatcher whose
+`@DispatchOn` discriminator wraps a varint reads the dispatch value through it,
+so its `frameSize` slices nothing.
+
+```kotlin
+override fun peekInteger(stream: StreamProcessor, baseOffset: Int): PeekedInteger {
+    if (stream.available() - baseOffset < 1) return PeekedInteger.NeedsMoreData
+    val width = 1 shl ((stream.peekByte(baseOffset).toInt() and 0xFF) ushr 6) // QUIC varint
+    if (stream.available() - baseOffset < width) return PeekedInteger.NeedsMoreData
+    var value = stream.peekByte(baseOffset).toLong() and 0x3F
+    for (i in 1 until width) value = (value shl 8) or (stream.peekByte(baseOffset + i).toLong() and 0xFF)
+    return PeekedInteger.of(value)
+}
+```
 
 `wireBytes` reports the on-wire byte count so the framework can pre-allocate.
 `WireByteCount` is a value class over one `Long`, read with

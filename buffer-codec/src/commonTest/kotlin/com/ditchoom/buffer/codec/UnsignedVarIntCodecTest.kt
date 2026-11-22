@@ -63,6 +63,7 @@ class UnsignedVarIntCodecTest {
                         UnsignedVarIntCodec.frameSize(stream),
                         "value $value after ${i + 1} bytes",
                     )
+                    assertEquals(PeekedInteger.NeedsMoreData, UnsignedVarIntCodec.peekInteger(stream, 0))
                 }
                 appendByte(stream, src.readByte())
                 assertEquals(
@@ -70,6 +71,7 @@ class UnsignedVarIntCodecTest {
                     UnsignedVarIntCodec.frameSize(stream),
                     "value $value complete",
                 )
+                assertEquals(PeekedInteger.of(value.toLong()), UnsignedVarIntCodec.peekInteger(stream, 0))
             } finally {
                 stream.release()
                 pool.clear()

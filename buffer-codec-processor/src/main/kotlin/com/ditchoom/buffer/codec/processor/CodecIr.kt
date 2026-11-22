@@ -237,6 +237,11 @@ internal sealed interface Discriminator {
         val innerPropertyName: String,
         /** The inner property's scalar kind (Long / ULong for QUIC varints). */
         val innerKind: ScalarKind,
+        /**
+         * The inner property's `@UseCodec` `VariableLengthCodec` object. The unframed
+         * dispatcher's peek reads the dispatch value through its `peekInteger`.
+         */
+        val innerCodecClassName: ClassName,
     ) : Discriminator {
         override val labelFormat: LabelFormat get() = LabelFormat.Decimal
         override val ownership: DiscriminatorOwnership get() = DiscriminatorOwnership.ReReadByVariant

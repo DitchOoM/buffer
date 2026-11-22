@@ -4,6 +4,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.FrameDetector
+import com.ditchoom.buffer.codec.test.protocols.http3.Http3FrameCodec
 import com.ditchoom.buffer.codec.test.protocols.http3.Http3FrameSettingsCodec
 import com.ditchoom.buffer.codec.test.protocols.http3fc.Http3FcFrameCodec
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttPacketCodec
@@ -13,13 +14,21 @@ import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 
 /**
- * The platform allocation checks' workload: `frameSize` over five generated codec shapes
+ * The platform allocation checks' workload: `frameSize` over six generated codec shapes
  * (`@FramedBy` dispatcher and packet, two bounding `@UseCodec` shapes, a length-prefixed
- * walk) through one call site.
+ * walk, an unframed varint dispatcher) through one call site.
  */
 class FrameSizeWorkload {
     private val detectors: Array<FrameDetector> =
-        arrayOf(Http3FcFrameCodec, MqttPacketCodec, BoundedFrameCodec, Http3FrameSettingsCodec, BytePrefixedStringCodec)
+        arrayOf(
+            Http3FcFrameCodec,
+            MqttPacketCodec,
+            BoundedFrameCodec,
+            Http3FrameSettingsCodec,
+            BytePrefixedStringCodec,
+            Http3FrameCodec,
+            Http3FrameCodec,
+        )
     private val streams =
         arrayOf(
             streamOf(0x00, 0x03, 1, 2, 3),
@@ -27,6 +36,10 @@ class FrameSizeWorkload {
             streamOf(0x00, 0x01, 0x02, 0x00, 0x00, 0x00, 9, 9),
             streamOf(0x04, 0x02, 1, 2),
             streamOf(0x02, 'h'.code, 'i'.code),
+            // Unframed dispatcher on a QUIC-varint discriminator: DATA (1-byte type) and an
+            // extension frame (type 64, a 2-byte varint).
+            streamOf(0x00, 0x03, 1, 2, 3),
+            streamOf(0x40, 0x40, 0x01, 7),
         )
 
     private fun streamOf(vararg bytes: Int): StreamProcessor {

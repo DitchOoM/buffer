@@ -621,33 +621,21 @@ internal fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
             // VariableLengthCodec). If the prefix is too short to frame the
             // discriminator, propagate NeedsMoreData / Unframed unchanged.
             appendPriorFrameWidth(body, "__discWidth", CodeBlock.of("%T", disc.codecClassName), "0")
-            // Decode the discriminator from a non-consuming view of exactly
-            // its measured width to recover the dispatch value, then PURE-
-            // DELEGATE to the variant at baseOffset (the variant re-reads the
-            // self-delimiting discriminator as its first field, so no `1 +`).
-            body.addStatement(
-                "val __discView = stream.peekBuffer(baseOffset, __discWidth.toInt()) ?: return %T.NeedsMoreData",
-                FRAME_SIZE_CN,
+            // Recover the dispatch value through the inner codec's peekInteger (primitive
+            // peeks, no slice), rebuilding the value class from it. A value peekInteger
+            // cannot represent is decoded from a non-consuming view of exactly the measured
+            // width instead. Then PURE-DELEGATE to the variant at baseOffset (the variant
+            // re-reads the self-delimiting discriminator as its first field, so no `1 +`).
+            body.add(
+                "val __dispatchValue = %T.peekInteger(stream, baseOffset).fold(\n",
+                disc.innerCodecClassName,
             )
-            body.beginControlFlow("val __dispatchValue = try")
-            body.addStatement(
-                "val __discriminator = %T.decode(__discView, %T.Empty)",
-                disc.codecClassName,
-                DECODE_CONTEXT_CN,
-            )
-            body.addStatement(
-                "%L",
-                dispatchValueIntCoercion(
-                    disc.dispatchValueKind,
-                    "__discriminator.${disc.dispatchValueProperty}",
-                ),
-            )
-            body.nextControlFlow("finally")
-            body.addStatement(
-                "(__discView as? %T)?.freeNativeMemory()",
-                PLATFORM_BUFFER_CN,
-            )
-            body.endControlFlow()
+            body.indent()
+            body.add("value = { __raw -> %L },\n", dispatchValueFromPeekedInteger(disc))
+            body.add("needsMoreData = { return %T.NeedsMoreData },\n", FRAME_SIZE_CN)
+            body.add("notRepresentable = {%L},\n", decodeDiscriminatorFromView(disc))
+            body.unindent()
+            body.add(")\n")
             body.beginControlFlow("return when (__dispatchValue)")
             for (variant in shape.variants) {
                 body.addStatement(
@@ -1368,4 +1356,53 @@ internal fun appendPeekFixedScalar(
                     "should have rejected this shape.",
             )
     }
+}
+
+/**
+ * The dispatch value decoded through the value class's codec from a non-consuming view of
+ * exactly `__discWidth` bytes: the peek's path for a value `peekInteger` cannot represent.
+ */
+private fun decodeDiscriminatorFromView(disc: Discriminator.Varint): CodeBlock =
+    CodeBlock
+        .builder()
+        .add("\n")
+        .indent()
+        .addStatement(
+            "val __discView = stream.peekBuffer(baseOffset, __discWidth.toInt()) ?: return %T.NeedsMoreData",
+            FRAME_SIZE_CN,
+        ).beginControlFlow("try")
+        .addStatement(
+            "%L",
+            dispatchValueIntCoercion(
+                disc.dispatchValueKind,
+                "%T.decode(__discView, %T.Empty).${disc.dispatchValueProperty}",
+            ).let { CodeBlock.of(it, disc.codecClassName, DECODE_CONTEXT_CN) },
+        ).nextControlFlow("finally")
+        .addStatement("(__discView as? %T)?.freeNativeMemory()", PLATFORM_BUFFER_CN)
+        .endControlFlow()
+        .unindent()
+        .build()
+
+/**
+ * The dispatch value from `__raw`, the non-negative `Long` the inner codec peeked: the value
+ * class rebuilt around it, then its dispatch property. An inner scalar that is not an integer
+ * decodes from the view instead.
+ */
+private fun dispatchValueFromPeekedInteger(disc: Discriminator.Varint): CodeBlock {
+    val raw =
+        when (disc.innerKind) {
+            ScalarKind.Long -> "__raw"
+            ScalarKind.ULong -> "__raw.toULong()"
+            ScalarKind.Int -> "__raw.toInt()"
+            ScalarKind.UInt -> "__raw.toUInt()"
+            ScalarKind.Short -> "__raw.toShort()"
+            ScalarKind.UShort -> "__raw.toUShort()"
+            ScalarKind.Byte -> "__raw.toByte()"
+            ScalarKind.UByte -> "__raw.toUByte()"
+            ScalarKind.Boolean, ScalarKind.Float, ScalarKind.Double -> return decodeDiscriminatorFromView(disc)
+        }
+    return CodeBlock.of(
+        dispatchValueIntCoercion(disc.dispatchValueKind, "%T($raw).${disc.dispatchValueProperty}"),
+        disc.className,
+    )
 }

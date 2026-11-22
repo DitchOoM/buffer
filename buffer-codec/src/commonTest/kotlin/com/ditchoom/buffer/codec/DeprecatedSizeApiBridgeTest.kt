@@ -278,8 +278,24 @@ class DeprecatedSizeApiBridgeTest {
     /** Overrides exactly what main required: decode, encode, encodedLength, peekValue. */
     private object OldStyleVarint : TwoByteVarint
 
-    /** Adds the width-only frameSize the new API asks for. */
+    /** Adds the width-only frameSize and the primitive peekInteger the new API asks for. */
     private object NewStyleVarint : TwoByteVarint {
+        override fun peekInteger(
+            stream: StreamProcessor,
+            baseOffset: Int,
+        ): PeekedInteger {
+            if (stream.available() - baseOffset < 1) return PeekedInteger.NeedsMoreData
+            val first = stream.peekByte(baseOffset).toInt() and 0xFF
+            return when {
+                first < 0x80 -> PeekedInteger.of(first.toLong())
+                stream.available() - baseOffset < 2 -> PeekedInteger.NeedsMoreData
+                else -> {
+                    val second = stream.peekByte(baseOffset + 1).toInt() and 0xFF
+                    PeekedInteger.of((((first and 0x7F) shl 8) or second).toLong())
+                }
+            }
+        }
+
         override fun frameSize(
             stream: StreamProcessor,
             baseOffset: Int,
@@ -299,6 +315,53 @@ class DeprecatedSizeApiBridgeTest {
         withStream(0x81) { stream -> assertEquals(FrameSize.NeedsMoreData, OldStyleVarint.frameSize(stream)) }
         withStream(0x81, 0x02) { stream -> assertEquals(FrameSize.declared(0, 2L), OldStyleVarint.frameSize(stream)) }
         assertEquals(WireByteCount.exact(2), OldStyleVarint.wireBytes(0x102, EncodeContext.Empty))
+    }
+
+    @Test
+    fun peekIntegerDefaultsFromPeekValueAndAgreesWithAnOverride() {
+        withStream(0x81) { stream ->
+            assertEquals(PeekedInteger.NeedsMoreData, OldStyleVarint.peekInteger(stream, 0))
+            assertEquals(PeekedInteger.NeedsMoreData, NewStyleVarint.peekInteger(stream, 0))
+        }
+        withStream(0x81, 0x02) { stream ->
+            assertEquals(PeekedInteger.of(0x102L), OldStyleVarint.peekInteger(stream, 0))
+            assertEquals(PeekedInteger.of(0x102L), NewStyleVarint.peekInteger(stream, 0))
+        }
+    }
+
+    /** A varint whose decoded value is not an integer: the default cannot represent it. */
+    private object TextVarint : VariableLengthCodec<String> {
+        override fun encodedLength(value: String): Int = 1
+
+        override fun decode(
+            buffer: ReadBuffer,
+            context: DecodeContext,
+        ): String = buffer.readByte().toString()
+
+        override fun encode(
+            buffer: WriteBuffer,
+            value: String,
+            context: EncodeContext,
+        ) {
+            buffer.writeByte(value.toByte())
+        }
+
+        @Deprecated("Call frameSize for the width and decode for the value.")
+        @Suppress("DEPRECATION")
+        override fun peekValue(
+            stream: StreamProcessor,
+            baseOffset: Int,
+        ): VarLenPeek<String> =
+            if (stream.available() - baseOffset < 1) {
+                VarLenPeek.NeedsMoreData
+            } else {
+                VarLenPeek.Decoded(stream.peekByte(baseOffset).toString(), 1)
+            }
+    }
+
+    @Test
+    fun peekIntegerDefaultCannotRepresentANonIntegerValue() {
+        withStream(0x05) { stream -> assertEquals(PeekedInteger.NotRepresentable, TextVarint.peekInteger(stream, 0)) }
     }
 
     @Test

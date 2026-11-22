@@ -11,6 +11,7 @@ import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec
 import com.ditchoom.buffer.codec.toPeekResult
 import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -73,13 +74,18 @@ public object Http3FrameCodec : Codec<Http3Frame> {
   override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
     val __discWidth = Http3FrameTypeCodec.frameSize(stream, baseOffset + 0).fold(declared = { __h, __b -> __h + __b }, needsMoreData = { return FrameSize.NeedsMoreData }, unframed = { return FrameSize.Unframed })
     if (__discWidth > stream.available() - baseOffset - 0) return FrameSize.NeedsMoreData
-    val __discView = stream.peekBuffer(baseOffset, __discWidth.toInt()) ?: return FrameSize.NeedsMoreData
-    val __dispatchValue = try {
-      val __discriminator = Http3FrameTypeCodec.decode(__discView, DecodeContext.Empty)
-      __discriminator.type
-    } finally {
-      (__discView as? PlatformBuffer)?.freeNativeMemory()
-    }
+    val __dispatchValue = QuicVarintCodec.peekInteger(stream, baseOffset).fold(
+      value = { __raw -> Http3FrameType(__raw.toULong()).type },
+      needsMoreData = { return FrameSize.NeedsMoreData },
+      notRepresentable = {
+        val __discView = stream.peekBuffer(baseOffset, __discWidth.toInt()) ?: return FrameSize.NeedsMoreData
+        try {
+          Http3FrameTypeCodec.decode(__discView, DecodeContext.Empty).type
+        } finally {
+          (__discView as? PlatformBuffer)?.freeNativeMemory()
+        }
+      },
+    )
     return when (__dispatchValue) {
       0 -> Http3FrameDataCodec.frameSize(stream, baseOffset)
       1 -> Http3FrameHeadersCodec.frameSize(stream, baseOffset)

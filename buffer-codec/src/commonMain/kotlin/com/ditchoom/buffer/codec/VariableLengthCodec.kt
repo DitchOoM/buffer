@@ -20,12 +20,17 @@ import com.ditchoom.buffer.stream.StreamProcessor
  *    [FrameSize.NeedsMoreData] while the prefix is too short to tell. Its default
  *    derives the width from [peekValue], which allocates; an override that scans
  *    the width only allocates nothing.
+ *  - [peekInteger] reports the value at `baseOffset` as a [PeekedInteger], for
+ *    generated dispatchers on a varint discriminator. Its default derives from
+ *    [peekValue], which allocates; an override with primitive peeks allocates nothing.
  *  - [peekValue] stays abstract until the next major release, so a codec written
- *    against it keeps compiling and [frameSize]'s default always has an answer.
+ *    against it keeps compiling and the defaults of [frameSize] and [peekInteger]
+ *    always have an answer.
  *
  * One correctness invariant the type system can't express: [Encoder.encode]
- * must write exactly [encodedLength] bytes, and [frameSize] must report that
- * same width for the encoded value. A round-trip test is the right place to pin
+ * must write exactly [encodedLength] bytes, [frameSize] must report that
+ * same width for the encoded value, and [peekInteger] the value [decode] returns
+ * (or [PeekedInteger.NotRepresentable]). A round-trip test is the right place to pin
  * this down.
  */
 interface VariableLengthCodec<T> : Codec<T> {
@@ -79,6 +84,21 @@ interface VariableLengthCodec<T> : Codec<T> {
             VarLenPeek.NeedsMoreData -> FrameSize.NeedsMoreData
         }
 
+    /**
+     * The value at [baseOffset] as a non-negative `Long`, without consuming it; see
+     * [PeekedInteger]. The default asks [peekValue] and allocates its result; override it
+     * with primitive peeks.
+     */
+    @Suppress("DEPRECATION")
+    fun peekInteger(
+        stream: StreamProcessor,
+        baseOffset: Int,
+    ): PeekedInteger =
+        when (val peeked = peekValue(stream, baseOffset)) {
+            is VarLenPeek.Decoded -> integerOf(peeked.value)
+            VarLenPeek.NeedsMoreData -> PeekedInteger.NeedsMoreData
+        }
+
     @Suppress("DEPRECATION")
     @Deprecated(
         "Call frameSize, which does not box. Removed in the next major release.",
@@ -89,3 +109,17 @@ interface VariableLengthCodec<T> : Codec<T> {
         baseOffset: Int,
     ): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }
+
+/** A decoded value of an integer type as a [PeekedInteger]; any other type is not representable. */
+private fun integerOf(value: Any?): PeekedInteger =
+    when (value) {
+        is ULong -> PeekedInteger.of(value)
+        is UInt -> PeekedInteger.of(value.toLong())
+        is UShort -> PeekedInteger.of(value.toLong())
+        is UByte -> PeekedInteger.of(value.toLong())
+        is Long -> PeekedInteger.of(value)
+        is Int -> PeekedInteger.of(value.toLong())
+        is Short -> PeekedInteger.of(value.toLong())
+        is Byte -> PeekedInteger.of(value.toLong())
+        else -> PeekedInteger.NotRepresentable
+    }

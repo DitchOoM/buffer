@@ -150,11 +150,31 @@ object UnsignedVarIntCodec : VariableLengthCodec<UInt> {
         stream: StreamProcessor,
         baseOffset: Int,
     ): VarLenPeek<UInt> {
+        val needsMoreData = VarLenPeek.NeedsMoreData
+        return scan(stream, baseOffset, { value, width -> VarLenPeek.Decoded(value, width) }) { needsMoreData }
+    }
+
+    /** The value, scanned byte by byte: nothing to allocate. Rejects the same sequences as [decode]. */
+    override fun peekInteger(
+        stream: StreamProcessor,
+        baseOffset: Int,
+    ): PeekedInteger {
+        val needsMoreData = PeekedInteger.NeedsMoreData
+        return scan(stream, baseOffset, { value, _ -> PeekedInteger.of(value.toLong()) }) { needsMoreData }
+    }
+
+    /** Reads the varint at [baseOffset] into [decoded] (value, width), or [needsMoreData]. */
+    private inline fun <R> scan(
+        stream: StreamProcessor,
+        baseOffset: Int,
+        decoded: (value: UInt, width: Int) -> R,
+        needsMoreData: () -> R,
+    ): R {
         var result = 0u
         var shift = 0
         var i = 0
         while (true) {
-            if (stream.available() - baseOffset < i + 1) return VarLenPeek.NeedsMoreData
+            if (stream.available() - baseOffset < i + 1) return needsMoreData()
             val b = stream.peekByte(baseOffset + i).toInt() and 0xFF
             // 5th byte: reject value bits beyond 2^32 (see decode) rather than truncate.
             if (i == MAX_BYTES - 1 && b and FIFTH_BYTE_OVERFLOW_MASK != 0) {
@@ -178,6 +198,6 @@ object UnsignedVarIntCodec : VariableLengthCodec<UInt> {
                 )
             }
         }
-        return VarLenPeek.Decoded(result, i)
+        return decoded(result, i)
     }
 }
