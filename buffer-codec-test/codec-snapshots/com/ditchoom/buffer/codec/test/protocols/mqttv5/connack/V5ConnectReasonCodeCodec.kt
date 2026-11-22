@@ -6,11 +6,15 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object V5ConnectReasonCodeCodec : Codec<V5ConnectReasonCode> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): V5ConnectReasonCode {
@@ -78,30 +82,37 @@ public object V5ConnectReasonCodeCodec : Codec<V5ConnectReasonCode> {
     }
   }
 
-  override fun wireSize(`value`: V5ConnectReasonCode, context: EncodeContext): WireSize = when (value) {
-    is V5ConnectReasonCode.Success -> V5ConnectReasonCodeSuccessCodec.wireSize(value, context)
-    is V5ConnectReasonCode.UnspecifiedError -> V5ConnectReasonCodeUnspecifiedErrorCodec.wireSize(value, context)
-    is V5ConnectReasonCode.MalformedPacket -> V5ConnectReasonCodeMalformedPacketCodec.wireSize(value, context)
-    is V5ConnectReasonCode.ProtocolError -> V5ConnectReasonCodeProtocolErrorCodec.wireSize(value, context)
-    is V5ConnectReasonCode.ImplementationSpecificError -> V5ConnectReasonCodeImplementationSpecificErrorCodec.wireSize(value, context)
-    is V5ConnectReasonCode.UnsupportedProtocolVersion -> V5ConnectReasonCodeUnsupportedProtocolVersionCodec.wireSize(value, context)
-    is V5ConnectReasonCode.ClientIdentifierNotValid -> V5ConnectReasonCodeClientIdentifierNotValidCodec.wireSize(value, context)
-    is V5ConnectReasonCode.BadUserNameOrPassword -> V5ConnectReasonCodeBadUserNameOrPasswordCodec.wireSize(value, context)
-    is V5ConnectReasonCode.NotAuthorized -> V5ConnectReasonCodeNotAuthorizedCodec.wireSize(value, context)
-    is V5ConnectReasonCode.ServerUnavailable -> V5ConnectReasonCodeServerUnavailableCodec.wireSize(value, context)
-    is V5ConnectReasonCode.ServerBusy -> V5ConnectReasonCodeServerBusyCodec.wireSize(value, context)
-    is V5ConnectReasonCode.Banned -> V5ConnectReasonCodeBannedCodec.wireSize(value, context)
-    is V5ConnectReasonCode.BadAuthenticationMethod -> V5ConnectReasonCodeBadAuthenticationMethodCodec.wireSize(value, context)
-    is V5ConnectReasonCode.TopicNameInvalid -> V5ConnectReasonCodeTopicNameInvalidCodec.wireSize(value, context)
-    is V5ConnectReasonCode.PacketTooLarge -> V5ConnectReasonCodePacketTooLargeCodec.wireSize(value, context)
-    is V5ConnectReasonCode.QuotaExceeded -> V5ConnectReasonCodeQuotaExceededCodec.wireSize(value, context)
-    is V5ConnectReasonCode.PayloadFormatInvalid -> V5ConnectReasonCodePayloadFormatInvalidCodec.wireSize(value, context)
-    is V5ConnectReasonCode.RetainNotSupported -> V5ConnectReasonCodeRetainNotSupportedCodec.wireSize(value, context)
-    is V5ConnectReasonCode.QoSNotSupported -> V5ConnectReasonCodeQoSNotSupportedCodec.wireSize(value, context)
-    is V5ConnectReasonCode.UseAnotherServer -> V5ConnectReasonCodeUseAnotherServerCodec.wireSize(value, context)
-    is V5ConnectReasonCode.ServerMoved -> V5ConnectReasonCodeServerMovedCodec.wireSize(value, context)
-    is V5ConnectReasonCode.ConnectionRateExceeded -> V5ConnectReasonCodeConnectionRateExceededCodec.wireSize(value, context)
+  override fun wireBytes(`value`: V5ConnectReasonCode, context: EncodeContext): WireByteCount = when (value) {
+    is V5ConnectReasonCode.Success -> V5ConnectReasonCodeSuccessCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.UnspecifiedError -> V5ConnectReasonCodeUnspecifiedErrorCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.MalformedPacket -> V5ConnectReasonCodeMalformedPacketCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.ProtocolError -> V5ConnectReasonCodeProtocolErrorCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.ImplementationSpecificError -> V5ConnectReasonCodeImplementationSpecificErrorCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.UnsupportedProtocolVersion -> V5ConnectReasonCodeUnsupportedProtocolVersionCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.ClientIdentifierNotValid -> V5ConnectReasonCodeClientIdentifierNotValidCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.BadUserNameOrPassword -> V5ConnectReasonCodeBadUserNameOrPasswordCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.NotAuthorized -> V5ConnectReasonCodeNotAuthorizedCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.ServerUnavailable -> V5ConnectReasonCodeServerUnavailableCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.ServerBusy -> V5ConnectReasonCodeServerBusyCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.Banned -> V5ConnectReasonCodeBannedCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.BadAuthenticationMethod -> V5ConnectReasonCodeBadAuthenticationMethodCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.TopicNameInvalid -> V5ConnectReasonCodeTopicNameInvalidCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.PacketTooLarge -> V5ConnectReasonCodePacketTooLargeCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.QuotaExceeded -> V5ConnectReasonCodeQuotaExceededCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.PayloadFormatInvalid -> V5ConnectReasonCodePayloadFormatInvalidCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.RetainNotSupported -> V5ConnectReasonCodeRetainNotSupportedCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.QoSNotSupported -> V5ConnectReasonCodeQoSNotSupportedCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.UseAnotherServer -> V5ConnectReasonCodeUseAnotherServerCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.ServerMoved -> V5ConnectReasonCodeServerMovedCodec.wireBytes(value, context)
+    is V5ConnectReasonCode.ConnectionRateExceeded -> V5ConnectReasonCodeConnectionRateExceededCodec.wireBytes(value, context)
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: V5ConnectReasonCode, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: V5ConnectReasonCode, context: EncodeContext): Int = when (value) {
     is V5ConnectReasonCode.Success -> V5ConnectReasonCodeSuccessCodec.sizeHint(value, context)
@@ -128,39 +139,44 @@ public object V5ConnectReasonCodeCodec : Codec<V5ConnectReasonCode> {
     is V5ConnectReasonCode.ConnectionRateExceeded -> V5ConnectReasonCodeConnectionRateExceededCodec.sizeHint(value, context)
   }
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
-    if (stream.available() - baseOffset < 1) return FramePeek.needsMoreData
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
+    if (stream.available() - baseOffset < 1) return FrameSize.NeedsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()
     val __discriminator = V5ConnectReasonCodeRaw(__discRaw)
     val __dispatchValue = __discriminator.id
     return when (__dispatchValue) {
-      0 -> V5ConnectReasonCodeSuccessCodec.peekFrame(stream, baseOffset)
-      128 -> V5ConnectReasonCodeUnspecifiedErrorCodec.peekFrame(stream, baseOffset)
-      129 -> V5ConnectReasonCodeMalformedPacketCodec.peekFrame(stream, baseOffset)
-      130 -> V5ConnectReasonCodeProtocolErrorCodec.peekFrame(stream, baseOffset)
-      131 -> V5ConnectReasonCodeImplementationSpecificErrorCodec.peekFrame(stream, baseOffset)
-      132 -> V5ConnectReasonCodeUnsupportedProtocolVersionCodec.peekFrame(stream, baseOffset)
-      133 -> V5ConnectReasonCodeClientIdentifierNotValidCodec.peekFrame(stream, baseOffset)
-      134 -> V5ConnectReasonCodeBadUserNameOrPasswordCodec.peekFrame(stream, baseOffset)
-      135 -> V5ConnectReasonCodeNotAuthorizedCodec.peekFrame(stream, baseOffset)
-      136 -> V5ConnectReasonCodeServerUnavailableCodec.peekFrame(stream, baseOffset)
-      137 -> V5ConnectReasonCodeServerBusyCodec.peekFrame(stream, baseOffset)
-      138 -> V5ConnectReasonCodeBannedCodec.peekFrame(stream, baseOffset)
-      140 -> V5ConnectReasonCodeBadAuthenticationMethodCodec.peekFrame(stream, baseOffset)
-      144 -> V5ConnectReasonCodeTopicNameInvalidCodec.peekFrame(stream, baseOffset)
-      149 -> V5ConnectReasonCodePacketTooLargeCodec.peekFrame(stream, baseOffset)
-      151 -> V5ConnectReasonCodeQuotaExceededCodec.peekFrame(stream, baseOffset)
-      153 -> V5ConnectReasonCodePayloadFormatInvalidCodec.peekFrame(stream, baseOffset)
-      154 -> V5ConnectReasonCodeRetainNotSupportedCodec.peekFrame(stream, baseOffset)
-      155 -> V5ConnectReasonCodeQoSNotSupportedCodec.peekFrame(stream, baseOffset)
-      156 -> V5ConnectReasonCodeUseAnotherServerCodec.peekFrame(stream, baseOffset)
-      157 -> V5ConnectReasonCodeServerMovedCodec.peekFrame(stream, baseOffset)
-      159 -> V5ConnectReasonCodeConnectionRateExceededCodec.peekFrame(stream, baseOffset)
+      0 -> V5ConnectReasonCodeSuccessCodec.frameSize(stream, baseOffset)
+      128 -> V5ConnectReasonCodeUnspecifiedErrorCodec.frameSize(stream, baseOffset)
+      129 -> V5ConnectReasonCodeMalformedPacketCodec.frameSize(stream, baseOffset)
+      130 -> V5ConnectReasonCodeProtocolErrorCodec.frameSize(stream, baseOffset)
+      131 -> V5ConnectReasonCodeImplementationSpecificErrorCodec.frameSize(stream, baseOffset)
+      132 -> V5ConnectReasonCodeUnsupportedProtocolVersionCodec.frameSize(stream, baseOffset)
+      133 -> V5ConnectReasonCodeClientIdentifierNotValidCodec.frameSize(stream, baseOffset)
+      134 -> V5ConnectReasonCodeBadUserNameOrPasswordCodec.frameSize(stream, baseOffset)
+      135 -> V5ConnectReasonCodeNotAuthorizedCodec.frameSize(stream, baseOffset)
+      136 -> V5ConnectReasonCodeServerUnavailableCodec.frameSize(stream, baseOffset)
+      137 -> V5ConnectReasonCodeServerBusyCodec.frameSize(stream, baseOffset)
+      138 -> V5ConnectReasonCodeBannedCodec.frameSize(stream, baseOffset)
+      140 -> V5ConnectReasonCodeBadAuthenticationMethodCodec.frameSize(stream, baseOffset)
+      144 -> V5ConnectReasonCodeTopicNameInvalidCodec.frameSize(stream, baseOffset)
+      149 -> V5ConnectReasonCodePacketTooLargeCodec.frameSize(stream, baseOffset)
+      151 -> V5ConnectReasonCodeQuotaExceededCodec.frameSize(stream, baseOffset)
+      153 -> V5ConnectReasonCodePayloadFormatInvalidCodec.frameSize(stream, baseOffset)
+      154 -> V5ConnectReasonCodeRetainNotSupportedCodec.frameSize(stream, baseOffset)
+      155 -> V5ConnectReasonCodeQoSNotSupportedCodec.frameSize(stream, baseOffset)
+      156 -> V5ConnectReasonCodeUseAnotherServerCodec.frameSize(stream, baseOffset)
+      157 -> V5ConnectReasonCodeServerMovedCodec.frameSize(stream, baseOffset)
+      159 -> V5ConnectReasonCodeConnectionRateExceededCodec.frameSize(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "V5ConnectReasonCode.discriminator", bufferPosition = baseOffset, expected = "one of {0, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 140, 144, 149, 151, 153, 154, 155, 156, 157, 159}", actual = """${__dispatchValue}""")
       }
     }
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

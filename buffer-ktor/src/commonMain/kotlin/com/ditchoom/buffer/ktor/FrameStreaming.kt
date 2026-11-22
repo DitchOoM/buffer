@@ -26,7 +26,7 @@ private const val DEFAULT_FRAME_CHUNK_SIZE = 8 * 1024
  *
  * Each collection drives a private [StreamProcessor]: channel bytes are pulled in chunks and
  * appended, and every complete frame — sized by the codec's generated
- * [peekFrameSize][com.ditchoom.buffer.codec.FrameDetector.peekFrameSize] — is decoded and emitted
+ * [frameSize][com.ditchoom.buffer.codec.FrameDetector.frameSize] — is decoded and emitted
  * before the next channel read. The flow completes when the channel closes for read; a trailing
  * partial frame at clean close is discarded. The processor and its chunk pool are released when
  * collection ends (normally, on error, or on cancellation).

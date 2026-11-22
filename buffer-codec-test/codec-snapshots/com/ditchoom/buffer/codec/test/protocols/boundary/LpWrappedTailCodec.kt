@@ -7,11 +7,15 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object LpWrappedTailCodec : Codec<LpWrappedTail> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): LpWrappedTail {
@@ -47,9 +51,12 @@ public object LpWrappedTailCodec : Codec<LpWrappedTail> {
     context: EncodeContext,
   ) {
     buffer.writeByte(value.kind)
-    when (val bodyWireSize = WrappedLabelCodec.wireSize(value.body, context)) {
-      is WireSize.Exact -> {
-        val bodyByteCount = bodyWireSize.bytes
+    WrappedLabelCodec.wireBytes(value.body, context).fold(
+      exact = { bodyWireBytes ->
+        if (bodyWireBytes > Int.MAX_VALUE) {
+          throw EncodeException(fieldPath = "LpWrappedTail.body", reason = """encoded message byte length ${bodyWireBytes} exceeds Int.MAX_VALUE""")
+        }
+        val bodyByteCount = bodyWireBytes.toInt()
         if (bodyByteCount > 65_535) {
           throw EncodeException(fieldPath = "LpWrappedTail.body", reason = """encoded message byte length ${bodyByteCount} exceeds @LengthPrefixed(LengthPrefix.Short) max 65535""")
         }
@@ -61,8 +68,8 @@ public object LpWrappedTailCodec : Codec<LpWrappedTail> {
         if (buffer.position() - bodyBodyStart != bodyByteCount) {
           throw EncodeException(fieldPath = "LpWrappedTail.body", reason = """wireSize declared ${bodyByteCount} bytes but encode wrote ${buffer.position() - bodyBodyStart} — the codec's wireSize and encode disagree""")
         }
-      }
-      WireSize.BackPatch -> {
+      },
+      backPatch = {
         val bodySizePosition = buffer.position()
         repeat(2) { buffer.writeUByte(0u) }
         val bodyBodyStart = buffer.position()
@@ -77,22 +84,29 @@ public object LpWrappedTailCodec : Codec<LpWrappedTail> {
         buffer.writeUByte(((bodyPatchPrefix shr 8) and 0xFFu).toUByte())
         buffer.writeUByte((bodyPatchPrefix and 0xFFu).toUByte())
         buffer.position(bodyEndPosition)
-      }
-    }
+      },
+    )
   }
 
-  override fun wireSize(`value`: LpWrappedTail, context: EncodeContext): WireSize = when (val bodySize = WrappedLabelCodec.wireSize(value.body, context)) {
-    is WireSize.Exact -> WireSize.Exact(3 + bodySize.bytes)
-    WireSize.BackPatch -> WireSize.BackPatch
+  override fun wireBytes(`value`: LpWrappedTail, context: EncodeContext): WireByteCount {
+    val __bodySize = WrappedLabelCodec.wireBytes(value.body, context).fold(exact = { it }, backPatch = { return WireByteCount.BackPatch })
+    return WireByteCount.exact(3L + __bodySize)
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: LpWrappedTail, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: LpWrappedTail, context: EncodeContext): Int = 3 + WrappedLabelCodec.sizeHint(value.body, context)
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 1) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData
     __offset += 1
-    if (stream.available() - baseOffset < __offset + 2) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 2) return FrameSize.NeedsMoreData
     val bodyPrefixB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
     val bodyPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val bodyPrefix = ((bodyPrefixB0 shl 8) or bodyPrefixB1).toUInt()
@@ -100,8 +114,13 @@ public object LpWrappedTailCodec : Codec<LpWrappedTail> {
       throw DecodeException(fieldPath = "LpWrappedTail.body", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + bodyPrefix.toInt()}""")
     }
     __offset += 2 + bodyPrefix.toInt()
-    return FramePeek.forDeclaredSize(__offset, stream.available() - baseOffset)
+    return FrameSize.declared(__offset.toLong())
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

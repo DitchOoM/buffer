@@ -5,12 +5,16 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object DispatchVarintUnionMixedCodec : Codec<DispatchVarintUnion.Mixed> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): DispatchVarintUnion.Mixed {
@@ -28,24 +32,29 @@ public object DispatchVarintUnionMixedCodec : Codec<DispatchVarintUnion.Mixed> {
     buffer.writeByte(if (value.flag) 1.toByte() else 0.toByte())
   }
 
-  override fun wireSize(`value`: DispatchVarintUnion.Mixed, context: EncodeContext): WireSize {
-    val __vSize = when (val __s = QuicVarintCodec.wireSize(value.v, context)) {
-      is WireSize.Exact -> __s.bytes
-      WireSize.BackPatch -> return WireSize.BackPatch
-    }
-    return WireSize.Exact(1 + __vSize)
+  override fun wireBytes(`value`: DispatchVarintUnion.Mixed, context: EncodeContext): WireByteCount {
+    val __vSize = QuicVarintCodec.encodedLength(value.v).toLong()
+    return WireByteCount.exact(1L + __vSize)
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: DispatchVarintUnion.Mixed, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: DispatchVarintUnion.Mixed, context: EncodeContext): Int = 1
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
-    val __vFrame = QuicVarintCodec.peekFrame(stream, baseOffset + 0)
-    if (!__vFrame.isComplete) {
-      return __vFrame.withoutDeclaredSize()
-    }
-    val __total = 0 + __vFrame.size + 1
-    return FramePeek.forDeclaredSize(__total, stream.available() - baseOffset)
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
+    val __vWidth = QuicVarintCodec.frameSize(stream, baseOffset + 0).fold(declared = { it }, needsMoreData = { return FrameSize.NeedsMoreData }, unframed = { return FrameSize.Unframed })
+    return FrameSize.declared(1, __vWidth)
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

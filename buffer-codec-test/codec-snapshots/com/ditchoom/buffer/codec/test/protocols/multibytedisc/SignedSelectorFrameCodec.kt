@@ -6,11 +6,15 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object SignedSelectorFrameCodec : Codec<SignedSelectorFrame> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): SignedSelectorFrame {
@@ -38,18 +42,25 @@ public object SignedSelectorFrameCodec : Codec<SignedSelectorFrame> {
     }
   }
 
-  override fun wireSize(`value`: SignedSelectorFrame, context: EncodeContext): WireSize = when (value) {
-    is SignedSelectorFrame.Two -> SignedSelectorFrameTwoCodec.wireSize(value, context)
-    is SignedSelectorFrame.Nine -> SignedSelectorFrameNineCodec.wireSize(value, context)
+  override fun wireBytes(`value`: SignedSelectorFrame, context: EncodeContext): WireByteCount = when (value) {
+    is SignedSelectorFrame.Two -> SignedSelectorFrameTwoCodec.wireBytes(value, context)
+    is SignedSelectorFrame.Nine -> SignedSelectorFrameNineCodec.wireBytes(value, context)
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: SignedSelectorFrame, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: SignedSelectorFrame, context: EncodeContext): Int = when (value) {
     is SignedSelectorFrame.Two -> SignedSelectorFrameTwoCodec.sizeHint(value, context)
     is SignedSelectorFrame.Nine -> SignedSelectorFrameNineCodec.sizeHint(value, context)
   }
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
-    if (stream.available() - baseOffset < 8) return FramePeek.needsMoreData
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
+    if (stream.available() - baseOffset < 8) return FrameSize.NeedsMoreData
     val __discRawB0 = stream.peekByte(baseOffset + 0).toLong() and 0xFFL
     val __discRawB1 = stream.peekByte(baseOffset + 0 + 1).toLong() and 0xFFL
     val __discRawB2 = stream.peekByte(baseOffset + 0 + 2).toLong() and 0xFFL
@@ -62,13 +73,18 @@ public object SignedSelectorFrameCodec : Codec<SignedSelectorFrame> {
     val __discriminator = SignedSelector(__discRaw)
     val __dispatchValue = __discriminator.kind
     return when (__dispatchValue) {
-      2 -> SignedSelectorFrameTwoCodec.peekFrame(stream, baseOffset)
-      9 -> SignedSelectorFrameNineCodec.peekFrame(stream, baseOffset)
+      2 -> SignedSelectorFrameTwoCodec.frameSize(stream, baseOffset)
+      9 -> SignedSelectorFrameNineCodec.frameSize(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "SignedSelectorFrame.discriminator", bufferPosition = baseOffset, expected = "one of {2, 9}", actual = """${__dispatchValue}""")
       }
     }
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

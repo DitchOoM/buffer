@@ -16,7 +16,7 @@ import com.ditchoom.buffer.pool.PoolReleasable
  *   2. Positions the growable past the slack region and invokes [writeBody]
  *      to write the body fields into the buffer.
  *   3. Computes `bodyBytes = position - maxSlack` and asks [framingCodec] for
- *      the actual prefix width via `wireSize(bodyBytes, context).asExact`.
+ *      the actual prefix width via `wireBytes(bodyBytes, context)`.
  *   4. Right-flushes the prefix (and optional header) into the slack region
  *      so the wire bytes lie contiguously: `[header?][prefix][body]`.
  *   5. Returns a [ReadBuffer] slice spanning exactly those wire bytes.
@@ -50,11 +50,14 @@ public object FramedEncoder {
             growable.position(maxSlack)
             writeBody(growable)
             val bodyBytes = growable.position() - maxSlack
-            val prefixWireSize = framingCodec.wireSize(bodyBytes.toUInt(), context)
-            require(prefixWireSize is WireSize.Exact) {
-                "framing codec ${framingCodec::class.simpleName} returned non-Exact wire size for prefix"
-            }
-            val actualPrefixWidth = prefixWireSize.bytes
+            val actualPrefixWidth =
+                framingCodec.wireBytes(bodyBytes.toUInt(), context).fold(
+                    exact = { width ->
+                        if (width > framingCodec.maxWireSize) throw FramingSizeException(framingCodec)
+                        width.toInt()
+                    },
+                    backPatch = { throw FramingSizeException(framingCodec) },
+                )
             val sliceStart = maxSlack - actualPrefixWidth - headerWireWidth
             val buffer: PlatformBuffer = growable.innerBuffer()
             buffer.position(sliceStart)
@@ -89,3 +92,14 @@ public object FramedEncoder {
         }
     }
 }
+
+/**
+ * A `@FramedBy` header or length prefix must report an exact size that fits the framing
+ * slack; [encoder] did not.
+ */
+public class FramingSizeException(
+    public val encoder: Encoder<*>,
+) : EncodeException(
+        fieldPath = "@FramedBy",
+        reason = "${encoder::class.simpleName}.wireBytes is not an exact size within the framing slack",
+    )

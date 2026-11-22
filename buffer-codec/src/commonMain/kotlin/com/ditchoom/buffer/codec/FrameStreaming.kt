@@ -12,8 +12,9 @@ private const val MAX_ENCODE_CAPACITY = 1 shl 30 // 1 GiB safety ceiling
  * Encodes [value] with this [Encoder] into a fresh [PlatformBuffer] allocated by [factory],
  * positioned for reading (`position = 0`, `limit = encoded size`).
  *
- * When the encoder reports a [WireSize.Exact] size the buffer is allocated exactly once. For
- * [WireSize.BackPatch] encoders the capacity starts from an estimate and doubles on
+ * When the encoder reports an exact [WireByteCount] size the buffer is allocated exactly once. For
+ * [WireByteCount.BackPatch] encoders (and exact sizes past `Int` range) the capacity starts from an
+ * estimate and doubles on
  * [BufferOverflowException] until the value fits (capped at 1 GiB). [IllegalArgumentException] is
  * treated the same way as a backstop: a position seek past the current limit signals out-of-bounds
  * differently per platform (java.nio throws [IllegalArgumentException] rather than
@@ -37,14 +38,14 @@ public fun <T> Encoder<T>.encodeToPlatformBuffer(
     factory: BufferFactory = BufferFactory.Default,
     context: EncodeContext = EncodeContext.Empty,
 ): PlatformBuffer {
+    // BackPatch starts from the encoder's lower-bound guess (generated codecs sum fixed
+    // widths + String.length per string field); clamped ≥ 1 so a zero size still
+    // allocates. Under-hints grow-and-retry.
     var capacity =
-        when (val size = wireSize(value, context)) {
-            is WireSize.Exact -> maxOf(size.bytes, 1)
-            // The encoder's lower-bound guess (generated codecs sum fixed
-            // widths + String.length per string field); clamped ≥ 1 so a
-            // zero hint still allocates. Under-hints grow-and-retry.
-            WireSize.BackPatch -> maxOf(sizeHint(value, context), 1)
-        }
+        wireBytes(value, context).fold(
+            exact = { if (it > Int.MAX_VALUE) maxOf(sizeHint(value, context), 1) else maxOf(it.toInt(), 1) },
+            backPatch = { maxOf(sizeHint(value, context), 1) },
+        )
     while (true) {
         val buffer = factory.allocate(capacity)
         var freeOnExit = true
@@ -78,24 +79,19 @@ private fun grownCapacityOrRethrow(
 
 /**
  * Reads the next complete frame from [stream], or returns `null` when the stream does not yet hold
- * a whole frame (either the framing header hasn't arrived, or the header is present but the body is
- * still incomplete). A `null` return is the streaming loop's signal to pull more transport bytes,
+ * a whole frame. A `null` return is the streaming loop's signal to pull more transport bytes,
  * [StreamProcessor.append] them, and retry.
  *
- * Uses this codec's [FrameDetector.peekFrame] (allocation-free for generated codecs) to size the frame without consuming
- * bytes, then decodes exactly that many via [StreamProcessor.readBufferScoped] so the sliced frame
- * is released back to the pool after [Decoder.decode] returns.
+ * Sizes the frame with [FrameDetector.frameSize] without consuming bytes, then decodes exactly
+ * that many via [StreamProcessor.readBufferScoped], so the sliced frame is released back to the
+ * pool after [Decoder.decode] returns.
  *
- * The declared frame size is checked against [MaxFrameBytesKey] (defaulting to
- * [DEFAULT_MAX_FRAME_BYTES]) before any bytes are sliced. This is the only bound on how much a
- * streaming loop will accumulate: a peer that declares a frame far larger than it intends to send
- * would otherwise have the caller buffer transport bytes indefinitely, waiting for a frame that
- * never completes. The check rejects non-positive sizes for the same reason — a codec whose
- * `peekFrameSize` arithmetic overflowed must not reach [StreamProcessor.readBufferScoped].
+ * A declared size is checked against [MaxFrameBytesKey] (defaulting to [DEFAULT_MAX_FRAME_BYTES])
+ * as soon as the codec reports it, before the frame has arrived and before anything is sliced: a
+ * peer that declares a frame far larger than it sends cannot make the caller buffer toward it.
  *
- * @throws IllegalStateException if this codec does not participate in frame detection
- *   ([PeekResult.NoFraming]) — i.e. its wire format has no determinable frame size. Such a codec
- *   cannot drive a streaming loop; frame it explicitly (e.g. a length prefix) instead.
+ * @throws UnframedCodecException if this codec reports [FrameSize.Unframed]: its wire format has
+ *   no determinable frame size, so frame it explicitly (e.g. a length prefix).
  * @throws FrameTooLargeException if the declared frame size exceeds the ceiling in effect or is
  *   not a positive byte count.
  */
@@ -103,35 +99,26 @@ public fun <T> Codec<T>.readFrame(
     stream: StreamProcessor,
     context: DecodeContext = DecodeContext.Empty,
 ): T? =
-    peekFrame(stream).let { peek ->
-        when (peek.kind) {
-            FramePeekKind.Complete -> {
-                val size = peek.size
-                checkFrameSize(size, context)
-                if (stream.available() < size) null else stream.readBufferScoped(size) { decode(this, context) }
+    frameSize(stream).fold(
+        declared = { bytes ->
+            val maxFrameBytes = context[MaxFrameBytesKey] ?: DEFAULT_MAX_FRAME_BYTES
+            if (bytes < 1L || bytes > maxFrameBytes) {
+                throw FrameTooLargeException(declaredBytes = bytes, maxBytes = maxFrameBytes)
             }
-            // The codec already knows how large the frame will be; reject an oversized or
-            // malformed declaration now instead of buffering toward it (issue #308).
-            FramePeekKind.DeclaredIncomplete -> {
-                checkFrameSize(peek.size, context)
-                null
-            }
-            FramePeekKind.NeedsMoreData -> null
-            FramePeekKind.NoFraming ->
-                throw IllegalStateException(
-                    "Codec ${this::class.simpleName} does not support frame detection " +
-                        "(peekFrameSize returned NoFraming); its wire format has no determinable frame " +
-                        "size. Streaming requires a self-delimiting format (e.g. a length prefix).",
-                )
-        }
-    }
+            val size = bytes.toInt()
+            if (stream.available() < size) null else stream.readBufferScoped(size) { decode(this, context) }
+        },
+        needsMoreData = { null },
+        unframed = { throw UnframedCodecException(this) },
+    )
 
-private fun checkFrameSize(
-    declaredBytes: Int,
-    context: DecodeContext,
-) {
-    val maxFrameBytes = context[MaxFrameBytesKey] ?: DEFAULT_MAX_FRAME_BYTES
-    if (declaredBytes !in 1..maxFrameBytes) {
-        throw FrameTooLargeException(declaredBytes = declaredBytes, maxBytes = maxFrameBytes)
-    }
-}
+/**
+ * [detector] reports [FrameSize.Unframed], so a stream of its frames cannot be split. Extends
+ * [IllegalStateException], which `readFrame` threw for this case before.
+ */
+public class UnframedCodecException(
+    public val detector: FrameDetector,
+) : IllegalStateException(
+        "${detector::class.simpleName} reports FrameSize.Unframed; " +
+            "streaming needs a self-delimiting format such as a length prefix",
+    )

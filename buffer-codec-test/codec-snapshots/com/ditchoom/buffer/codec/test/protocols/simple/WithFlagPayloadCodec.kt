@@ -8,13 +8,17 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
 import kotlin.String
+import kotlin.Suppress
 
 public object WithFlagPayloadCodec : Codec<WithFlagPayload> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): WithFlagPayload {
@@ -59,18 +63,25 @@ public object WithFlagPayloadCodec : Codec<WithFlagPayload> {
     }
   }
 
-  override fun wireSize(`value`: WithFlagPayload, context: EncodeContext): WireSize = WireSize.BackPatch
+  override fun wireBytes(`value`: WithFlagPayload, context: EncodeContext): WireByteCount = WireByteCount.BackPatch
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: WithFlagPayload, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: WithFlagPayload, context: EncodeContext): Int = 1
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 1) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData
     val flagsRaw = stream.peekByte(baseOffset + __offset).toUByte()
     val flags = SmallFlags(flagsRaw)
     __offset += 1
     if (flags.want) {
-      if (stream.available() - baseOffset < __offset + 2) return FramePeek.needsMoreData
+      if (stream.available() - baseOffset < __offset + 2) return FrameSize.NeedsMoreData
       val payloadPrefixB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
       val payloadPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
       val payloadPrefix = ((payloadPrefixB0 shl 8) or payloadPrefixB1).toUInt()
@@ -79,8 +90,13 @@ public object WithFlagPayloadCodec : Codec<WithFlagPayload> {
       }
       __offset += 2 + payloadPrefix.toInt()
     }
-    return FramePeek.forDeclaredSize(__offset, stream.available() - baseOffset)
+    return FrameSize.declared(__offset.toLong())
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

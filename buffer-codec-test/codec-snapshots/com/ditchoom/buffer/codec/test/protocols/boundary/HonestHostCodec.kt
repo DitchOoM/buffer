@@ -7,11 +7,15 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object HonestHostCodec : Codec<HonestHost> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): HonestHost {
@@ -47,9 +51,12 @@ public object HonestHostCodec : Codec<HonestHost> {
     context: EncodeContext,
   ) {
     buffer.writeByte(value.kind)
-    when (val innerWireSize = HonestInnerCodec.wireSize(value.inner, context)) {
-      is WireSize.Exact -> {
-        val innerByteCount = innerWireSize.bytes
+    HonestInnerCodec.wireBytes(value.inner, context).fold(
+      exact = { innerWireBytes ->
+        if (innerWireBytes > Int.MAX_VALUE) {
+          throw EncodeException(fieldPath = "HonestHost.inner", reason = """encoded message byte length ${innerWireBytes} exceeds Int.MAX_VALUE""")
+        }
+        val innerByteCount = innerWireBytes.toInt()
         if (innerByteCount > 65_535) {
           throw EncodeException(fieldPath = "HonestHost.inner", reason = """encoded message byte length ${innerByteCount} exceeds @LengthPrefixed(LengthPrefix.Short) max 65535""")
         }
@@ -61,8 +68,8 @@ public object HonestHostCodec : Codec<HonestHost> {
         if (buffer.position() - innerBodyStart != innerByteCount) {
           throw EncodeException(fieldPath = "HonestHost.inner", reason = """wireSize declared ${innerByteCount} bytes but encode wrote ${buffer.position() - innerBodyStart} — the codec's wireSize and encode disagree""")
         }
-      }
-      WireSize.BackPatch -> {
+      },
+      backPatch = {
         val innerSizePosition = buffer.position()
         repeat(2) { buffer.writeUByte(0u) }
         val innerBodyStart = buffer.position()
@@ -77,22 +84,29 @@ public object HonestHostCodec : Codec<HonestHost> {
         buffer.writeUByte(((innerPatchPrefix shr 8) and 0xFFu).toUByte())
         buffer.writeUByte((innerPatchPrefix and 0xFFu).toUByte())
         buffer.position(innerEndPosition)
-      }
-    }
+      },
+    )
   }
 
-  override fun wireSize(`value`: HonestHost, context: EncodeContext): WireSize = when (val innerSize = HonestInnerCodec.wireSize(value.inner, context)) {
-    is WireSize.Exact -> WireSize.Exact(3 + innerSize.bytes)
-    WireSize.BackPatch -> WireSize.BackPatch
+  override fun wireBytes(`value`: HonestHost, context: EncodeContext): WireByteCount {
+    val __innerSize = HonestInnerCodec.wireBytes(value.inner, context).fold(exact = { it }, backPatch = { return WireByteCount.BackPatch })
+    return WireByteCount.exact(3L + __innerSize)
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: HonestHost, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: HonestHost, context: EncodeContext): Int = 3 + HonestInnerCodec.sizeHint(value.inner, context)
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 1) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData
     __offset += 1
-    if (stream.available() - baseOffset < __offset + 2) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 2) return FrameSize.NeedsMoreData
     val innerPrefixB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
     val innerPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val innerPrefix = ((innerPrefixB0 shl 8) or innerPrefixB1).toUInt()
@@ -100,8 +114,13 @@ public object HonestHostCodec : Codec<HonestHost> {
       throw DecodeException(fieldPath = "HonestHost.inner", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + innerPrefix.toInt()}""")
     }
     __offset += 2 + innerPrefix.toInt()
-    return FramePeek.forDeclaredSize(__offset, stream.available() - baseOffset)
+    return FrameSize.declared(__offset.toLong())
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

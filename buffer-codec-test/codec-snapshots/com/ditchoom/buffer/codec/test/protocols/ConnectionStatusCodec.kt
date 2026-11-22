@@ -6,11 +6,15 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object ConnectionStatusCodec : Codec<ConnectionStatus> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): ConnectionStatus {
@@ -52,12 +56,19 @@ public object ConnectionStatusCodec : Codec<ConnectionStatus> {
     }
   }
 
-  override fun wireSize(`value`: ConnectionStatus, context: EncodeContext): WireSize = when (value) {
-    is ConnectionStatus.Disconnected -> WireSize.Exact(1)
-    is ConnectionStatus.Connecting -> WireSize.Exact(2)
-    is ConnectionStatus.Connected -> WireSize.Exact(1)
-    is ConnectionStatus.Failed -> WireSize.Exact(1)
+  override fun wireBytes(`value`: ConnectionStatus, context: EncodeContext): WireByteCount = when (value) {
+    is ConnectionStatus.Disconnected -> WireByteCount.exact(1L)
+    is ConnectionStatus.Connecting -> WireByteCount.exact(2L)
+    is ConnectionStatus.Connected -> WireByteCount.exact(1L)
+    is ConnectionStatus.Failed -> WireByteCount.exact(1L)
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: ConnectionStatus, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: ConnectionStatus, context: EncodeContext): Int = 1 + when (value) {
     is ConnectionStatus.Disconnected -> ConnectionStatusDisconnectedCodec.sizeHint(value, context)
@@ -66,19 +77,24 @@ public object ConnectionStatusCodec : Codec<ConnectionStatus> {
     is ConnectionStatus.Failed -> ConnectionStatusFailedCodec.sizeHint(value, context)
   }
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
-    if (stream.available() - baseOffset < 1) return FramePeek.needsMoreData
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
+    if (stream.available() - baseOffset < 1) return FrameSize.NeedsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF
     return when (discriminator) {
-      0x00 -> ConnectionStatusDisconnectedCodec.peekFrame(stream, baseOffset + 1).withPrefix(1)
-      0x01 -> ConnectionStatusConnectingCodec.peekFrame(stream, baseOffset + 1).withPrefix(1)
-      0x02 -> ConnectionStatusConnectedCodec.peekFrame(stream, baseOffset + 1).withPrefix(1)
-      0x03 -> ConnectionStatusFailedCodec.peekFrame(stream, baseOffset + 1).withPrefix(1)
+      0x00 -> ConnectionStatusDisconnectedCodec.frameSize(stream, baseOffset + 1).fold(declared = { FrameSize.declared(1, it) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
+      0x01 -> ConnectionStatusConnectingCodec.frameSize(stream, baseOffset + 1).fold(declared = { FrameSize.declared(1, it) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
+      0x02 -> ConnectionStatusConnectedCodec.frameSize(stream, baseOffset + 1).fold(declared = { FrameSize.declared(1, it) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
+      0x03 -> ConnectionStatusFailedCodec.frameSize(stream, baseOffset + 1).fold(declared = { FrameSize.declared(1, it) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
       else -> {
         throw DecodeException(fieldPath = "ConnectionStatus.discriminator", bufferPosition = baseOffset, expected = "one of {0x00, 0x01, 0x02, 0x03}", actual = """0x${discriminator.toString(16).padStart(2, '0').uppercase()}""")
       }
     }
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

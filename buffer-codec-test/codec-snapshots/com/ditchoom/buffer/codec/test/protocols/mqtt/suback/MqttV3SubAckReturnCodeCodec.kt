@@ -6,11 +6,15 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object MqttV3SubAckReturnCodeCodec : Codec<MqttV3SubAckReturnCode> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): MqttV3SubAckReturnCode {
@@ -42,12 +46,19 @@ public object MqttV3SubAckReturnCodeCodec : Codec<MqttV3SubAckReturnCode> {
     }
   }
 
-  override fun wireSize(`value`: MqttV3SubAckReturnCode, context: EncodeContext): WireSize = when (value) {
-    is MqttV3SubAckReturnCode.SuccessMaximumQoS0 -> MqttV3SubAckReturnCodeSuccessMaximumQoS0Codec.wireSize(value, context)
-    is MqttV3SubAckReturnCode.SuccessMaximumQoS1 -> MqttV3SubAckReturnCodeSuccessMaximumQoS1Codec.wireSize(value, context)
-    is MqttV3SubAckReturnCode.SuccessMaximumQoS2 -> MqttV3SubAckReturnCodeSuccessMaximumQoS2Codec.wireSize(value, context)
-    is MqttV3SubAckReturnCode.Failure -> MqttV3SubAckReturnCodeFailureCodec.wireSize(value, context)
+  override fun wireBytes(`value`: MqttV3SubAckReturnCode, context: EncodeContext): WireByteCount = when (value) {
+    is MqttV3SubAckReturnCode.SuccessMaximumQoS0 -> MqttV3SubAckReturnCodeSuccessMaximumQoS0Codec.wireBytes(value, context)
+    is MqttV3SubAckReturnCode.SuccessMaximumQoS1 -> MqttV3SubAckReturnCodeSuccessMaximumQoS1Codec.wireBytes(value, context)
+    is MqttV3SubAckReturnCode.SuccessMaximumQoS2 -> MqttV3SubAckReturnCodeSuccessMaximumQoS2Codec.wireBytes(value, context)
+    is MqttV3SubAckReturnCode.Failure -> MqttV3SubAckReturnCodeFailureCodec.wireBytes(value, context)
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: MqttV3SubAckReturnCode, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: MqttV3SubAckReturnCode, context: EncodeContext): Int = when (value) {
     is MqttV3SubAckReturnCode.SuccessMaximumQoS0 -> MqttV3SubAckReturnCodeSuccessMaximumQoS0Codec.sizeHint(value, context)
@@ -56,21 +67,26 @@ public object MqttV3SubAckReturnCodeCodec : Codec<MqttV3SubAckReturnCode> {
     is MqttV3SubAckReturnCode.Failure -> MqttV3SubAckReturnCodeFailureCodec.sizeHint(value, context)
   }
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
-    if (stream.available() - baseOffset < 1) return FramePeek.needsMoreData
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
+    if (stream.available() - baseOffset < 1) return FrameSize.NeedsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()
     val __discriminator = MqttV3SubAckReturnCodeRaw(__discRaw)
     val __dispatchValue = __discriminator.id
     return when (__dispatchValue) {
-      0 -> MqttV3SubAckReturnCodeSuccessMaximumQoS0Codec.peekFrame(stream, baseOffset)
-      1 -> MqttV3SubAckReturnCodeSuccessMaximumQoS1Codec.peekFrame(stream, baseOffset)
-      2 -> MqttV3SubAckReturnCodeSuccessMaximumQoS2Codec.peekFrame(stream, baseOffset)
-      128 -> MqttV3SubAckReturnCodeFailureCodec.peekFrame(stream, baseOffset)
+      0 -> MqttV3SubAckReturnCodeSuccessMaximumQoS0Codec.frameSize(stream, baseOffset)
+      1 -> MqttV3SubAckReturnCodeSuccessMaximumQoS1Codec.frameSize(stream, baseOffset)
+      2 -> MqttV3SubAckReturnCodeSuccessMaximumQoS2Codec.frameSize(stream, baseOffset)
+      128 -> MqttV3SubAckReturnCodeFailureCodec.frameSize(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "MqttV3SubAckReturnCode.discriminator", bufferPosition = baseOffset, expected = "one of {0, 1, 2, 128}", actual = """${__dispatchValue}""")
       }
     }
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

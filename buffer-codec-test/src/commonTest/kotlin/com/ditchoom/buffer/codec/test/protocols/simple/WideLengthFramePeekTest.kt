@@ -7,7 +7,7 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeekKind
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.MaxFrameBytesKey
 import com.ditchoom.buffer.codec.PeekResult
@@ -78,10 +78,9 @@ class WideLengthFramePeekTest {
 
     @Test
     fun readFrameRejectsAnOversizedDeclarationBeforeTheFrameArrives() {
-        // Issue #308. The peek walk computes 8 MiB + header and reports it as
-        // `DeclaredIncomplete`, so `readFrame` checks the ceiling now instead of
-        // returning null while a caller keeps appending bytes the peer never
-        // intends to send.
+        // The peek walk declares 8 MiB + header before the body arrives, so `readFrame`
+        // checks the ceiling now instead of returning null while a caller keeps
+        // appending bytes the peer never intends to send.
         val stream = streamOf(frameBytes(8u * 1024u * 1024u))
         try {
             val thrown = assertFailsWith<FrameTooLargeException> { WideLengthFrameCodec.readFrame(stream) }
@@ -92,13 +91,12 @@ class WideLengthFramePeekTest {
     }
 
     @Test
-    fun peekFrameReportsTheDeclaredSizeOfAnIncompleteFrame() {
+    fun frameSizeDeclaresTheSizeOfAnIncompleteFrame() {
         val stream = streamOf(frameBytes(64u))
         try {
-            val peek = WideLengthFrameCodec.peekFrame(stream)
-            assertEquals(FramePeekKind.DeclaredIncomplete, peek.kind)
-            assertEquals(5 + 64, peek.size)
-            // The older API still reports the only incomplete state it has.
+            assertEquals(FrameSize.declared(5 + 64), WideLengthFrameCodec.frameSize(stream))
+            // The deprecated API still reports the only incomplete state it has.
+            @Suppress("DEPRECATION")
             assertEquals(PeekResult.NeedsMoreData, WideLengthFrameCodec.peekFrameSize(stream))
         } finally {
             stream.release()

@@ -121,7 +121,7 @@ Annotations cover common binary protocol patterns:
 - `@ForwardCompatible(unknown)` + `@UnknownVariant` — skip and preserve unrecognized sealed variants byte-identically (forward-compatible relay/persistence)
 - Value classes wrapping primitives — zero-overhead typed wrappers (e.g., `value class PacketId(val raw: UShort)`)
 
-Generated codecs also provide `peekFrameSize(stream)` for zero-boilerplate stream framing and `CodecContext` for typed runtime configuration through codec chains.
+Generated codecs also provide `frameSize(stream)` (and `readFrame`) for zero-boilerplate stream framing and `CodecContext` for typed runtime configuration through codec chains.
 
 Generated codecs implement the same `Codec<T>` interface used for manual codecs, so all patterns (streaming, round-trip testing, composition) work unchanged.
 

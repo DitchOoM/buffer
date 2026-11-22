@@ -5,11 +5,15 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object MqttV5PropertySubscriptionIdentifierCodec : Codec<MqttV5Property.SubscriptionIdentifier> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): MqttV5Property.SubscriptionIdentifier {
@@ -27,17 +31,26 @@ public object MqttV5PropertySubscriptionIdentifierCodec : Codec<MqttV5Property.S
     VariableByteIntegerCodec.encode(buffer, value.value, context)
   }
 
-  override fun wireSize(`value`: MqttV5Property.SubscriptionIdentifier, context: EncodeContext): WireSize {
-    val __valueSize = when (val __s = VariableByteIntegerCodec.wireSize(value.value, context)) {
-      is WireSize.Exact -> __s.bytes
-      WireSize.BackPatch -> return WireSize.BackPatch
-    }
-    return WireSize.Exact(1 + __valueSize)
+  override fun wireBytes(`value`: MqttV5Property.SubscriptionIdentifier, context: EncodeContext): WireByteCount {
+    val __valueSize = VariableByteIntegerCodec.wireBytes(value.value, context).fold(exact = { it }, backPatch = { return WireByteCount.BackPatch })
+    return WireByteCount.exact(1L + __valueSize)
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: MqttV5Property.SubscriptionIdentifier, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: MqttV5Property.SubscriptionIdentifier, context: EncodeContext): Int = 1
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek = FramePeek.noFraming
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = FrameSize.Unframed
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

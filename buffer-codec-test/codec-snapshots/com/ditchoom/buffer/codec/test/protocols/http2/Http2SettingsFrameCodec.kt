@@ -8,12 +8,16 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.swapBytes
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object Http2SettingsFrameCodec : Codec<Http2SettingsFrame> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): Http2SettingsFrame {
@@ -70,23 +74,30 @@ public object Http2SettingsFrameCodec : Codec<Http2SettingsFrame> {
     }
   }
 
-  override fun wireSize(`value`: Http2SettingsFrame, context: EncodeContext): WireSize = WireSize.Exact(9 + value.length.toInt())
+  override fun wireBytes(`value`: Http2SettingsFrame, context: EncodeContext): WireByteCount = WireByteCount.exact(9L + value.length.toInt())
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: Http2SettingsFrame, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: Http2SettingsFrame, context: EncodeContext): Int = 9
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 3) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 3) return FrameSize.NeedsMoreData
     val lengthB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
     val lengthB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val lengthB2 = stream.peekByte(baseOffset + __offset + 2).toInt() and 0xFF
     val length = ((lengthB0 shl 16) or (lengthB1 shl 8) or lengthB2).toUInt()
     __offset += 3
-    if (stream.available() - baseOffset < __offset + 1) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData
     __offset += 1
-    if (stream.available() - baseOffset < __offset + 1) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData
     __offset += 1
-    if (stream.available() - baseOffset < __offset + 4) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 4) return FrameSize.NeedsMoreData
     __offset += 4
     if (length > Int.MAX_VALUE.toUInt()) {
       throw DecodeException(fieldPath = "Http2SettingsFrame.entries", bufferPosition = -1, expected = "@LengthFrom source <= ${'$'}{Int.MAX_VALUE}", actual = length.toString())
@@ -95,10 +106,14 @@ public object Http2SettingsFrameCodec : Codec<Http2SettingsFrame> {
     if (entriesBytes < 0 || entriesBytes > Int.MAX_VALUE - __offset) {
       throw DecodeException(fieldPath = "Http2SettingsFrame.entries", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + entriesBytes.toLong()}""")
     }
-    if (stream.available() - baseOffset < __offset + entriesBytes) return FramePeek.declaredIncomplete(__offset + entriesBytes)
     __offset += entriesBytes
-    return FramePeek.forDeclaredSize(__offset, stream.available() - baseOffset)
+    return FrameSize.declared(__offset.toLong())
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

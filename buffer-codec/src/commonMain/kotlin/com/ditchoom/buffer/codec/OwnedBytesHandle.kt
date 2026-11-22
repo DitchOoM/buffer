@@ -114,8 +114,8 @@ fun ownedBytesFallbackFactory(): BufferFactory = BufferFactory.Default
  * to [BufferFactoryKey] (falling back to [ownedBytesFallbackFactory] —
  * [BufferFactory.Default] on every platform), copies the remaining wire
  * bytes into it, and wraps the result in an [OwnedBytesHandle]. Encode
- * writes the handle's bytes into the target buffer; [wireSize] is
- * [WireSize.Exact] of the carried byte count.
+ * writes the handle's bytes into the target buffer; [wireBytes] is the
+ * exact carried byte count.
  *
  * Use as the default codec on a missing-codec path (e.g., MqttCodec's
  * fallback when no per-topic publish codec is registered). For codecs
@@ -143,6 +143,13 @@ object OwnedBytesHandleCodec : Codec<OwnedBytesHandle> {
         buffer.write(value.asReadBuffer())
     }
 
+    override fun wireBytes(
+        value: OwnedBytesHandle,
+        context: EncodeContext,
+    ): WireByteCount = WireByteCount.exact(value.byteSize().toLong())
+
+    @Suppress("DEPRECATION")
+    @Deprecated("Call wireBytes.", ReplaceWith("wireBytes(value, context)"))
     override fun wireSize(
         value: OwnedBytesHandle,
         context: EncodeContext,

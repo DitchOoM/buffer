@@ -29,17 +29,16 @@ sealed interface VarLenPeek<out T> {
  * The contract is narrower than [Codec] on purpose, so illegal states are
  * unrepresentable:
  *  - [encodedLength] returns a plain [Int]: the size of a value already in hand
- *    is *total*, so there is no `BackPatch` to reach for. [wireSize] is derived
- *    as [WireSize.Exact], keeping enclosing messages on the precompute path
- *    rather than degrading the whole chain to back-patching.
+ *    is *total*, so there is no `BackPatch` to reach for. [wireBytes] is derived
+ *    as an exact size, keeping enclosing messages on the precompute path.
  *  - [peekValue] returns [VarLenPeek]: a stream prefix genuinely *can* be
- *    incomplete, so `NeedsMoreData` is a real state. [peekFrameSize] is derived
- *    from it.
+ *    incomplete, so `NeedsMoreData` is a real state. [frameSize] is derived
+ *    from it. The derived [frameSize] allocates the [VarLenPeek.Decoded] unless
+ *    the JIT removes it; a codec on a hot path overrides [frameSize] with a
+ *    width-only scan, as [UnsignedVarIntCodec] does.
  *
  * A consumer therefore implements exactly four methods — [Decoder.decode],
- * [Encoder.encode], [encodedLength], and [peekValue] — and the two wider [Codec]
- * return types ([WireSize], [PeekResult]) are filled in here so they cannot
- * carry a value this contract forbids.
+ * [Encoder.encode], [encodedLength], and [peekValue].
  *
  * One correctness invariant the type system can't express: [Encoder.encode]
  * must write exactly [encodedLength] bytes, and that count must equal the
@@ -61,26 +60,31 @@ interface VariableLengthCodec<T> : Codec<T> {
         baseOffset: Int = 0,
     ): VarLenPeek<T>
 
+    override fun wireBytes(
+        value: T,
+        context: EncodeContext,
+    ): WireByteCount = WireByteCount.exact(encodedLength(value).toLong())
+
+    @Suppress("DEPRECATION")
+    @Deprecated("Call wireBytes.", ReplaceWith("wireBytes(value, context)"))
     override fun wireSize(
         value: T,
         context: EncodeContext,
     ): WireSize = WireSize.Exact(encodedLength(value))
 
+    override fun frameSize(
+        stream: StreamProcessor,
+        baseOffset: Int,
+    ): FrameSize =
+        when (val peeked = peekValue(stream, baseOffset)) {
+            is VarLenPeek.Decoded -> FrameSize.declared(peeked.byteCount.toLong())
+            VarLenPeek.NeedsMoreData -> FrameSize.NeedsMoreData
+        }
+
+    @Suppress("DEPRECATION")
+    @Deprecated("Call frameSize.", ReplaceWith("frameSize(stream, baseOffset)"))
     override fun peekFrameSize(
         stream: StreamProcessor,
         baseOffset: Int,
-    ): PeekResult =
-        when (val peeked = peekValue(stream, baseOffset)) {
-            is VarLenPeek.Decoded -> PeekResult.Complete(peeked.byteCount)
-            VarLenPeek.NeedsMoreData -> PeekResult.NeedsMoreData
-        }
-
-    override fun peekFrame(
-        stream: StreamProcessor,
-        baseOffset: Int,
-    ): FramePeek =
-        when (val peeked = peekValue(stream, baseOffset)) {
-            is VarLenPeek.Decoded -> FramePeek.complete(peeked.byteCount)
-            VarLenPeek.NeedsMoreData -> FramePeek.needsMoreData
-        }
+    ): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

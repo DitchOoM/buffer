@@ -3,6 +3,7 @@ package com.ditchoom.buffer.codec.processor
 import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.CodeBlock
 import com.squareup.kotlinpoet.TypeName
+import com.squareup.kotlinpoet.U_INT
 
 /*
  * CodecEmitterFields — the per-field-type encode/decode emit family extracted
@@ -1115,20 +1116,21 @@ internal fun appendEncodeLengthPrefixed(
     field: FieldSpec.LengthPrefixedMessage,
 ) {
     val fieldPath = "${field.ownerSimpleName}.${field.name}"
-    val sizeVar = "${field.name}WireSize"
-    body.beginControlFlow(
-        "when (val %L = %T.wireSize(value.%L, context))",
-        sizeVar,
-        field.codecType,
-        field.name,
-    )
-    body.beginControlFlow("is %T.Exact ->", WIRE_SIZE_CN)
+    val sizeVar = "${field.name}WireBytes"
+    body.add("%T.wireBytes(value.%L, context).fold(\n", field.codecType, field.name)
+    body.indent()
+    body.add("exact = { %L ->\n", sizeVar)
+    body.indent()
     appendLengthPrefixedExactBranch(body, field, fieldPath, sizeVar)
-    body.endControlFlow()
-    body.beginControlFlow("%T.BackPatch ->", WIRE_SIZE_CN)
+    body.unindent()
+    body.add("},\n")
+    body.add("backPatch = {\n")
+    body.indent()
     appendLengthPrefixedBackPatchBranch(body, field, fieldPath)
-    body.endControlFlow()
-    body.endControlFlow()
+    body.unindent()
+    body.add("},\n")
+    body.unindent()
+    body.add(")\n")
 }
 
 /** Exact branch: prefix from the declared size, then verify encode agreed. */
@@ -1139,7 +1141,15 @@ private fun appendLengthPrefixedExactBranch(
     sizeVar: String,
 ) {
     val byteCountVar = "${field.name}ByteCount"
-    body.addStatement("val %L = %L.bytes", byteCountVar, sizeVar)
+    body.beginControlFlow("if (%L > Int.MAX_VALUE)", sizeVar)
+    body.addStatement(
+        "throw %T(fieldPath = %S, reason = %P)",
+        ENCODE_EXCEPTION_CN,
+        fieldPath,
+        "encoded message byte length \${$sizeVar} exceeds Int.MAX_VALUE",
+    )
+    body.endControlFlow()
+    body.addStatement("val %L = %L.toInt()", byteCountVar, sizeVar)
     appendPrefixWidthGuard(body, byteCountVar, field.prefixWidth, fieldPath)
     val prefixVar = "${field.name}Prefix"
     body.addStatement("val %L = %L.toUInt()", prefixVar, byteCountVar)
@@ -2271,17 +2281,21 @@ internal fun appendEncodeLengthPrefixedListBody(
         // ClassCastException mid-encode.
         val bodyBytesVar = "__${namespacePrefix}BodyBytes"
         val allExactVar = "__${namespacePrefix}AllExact"
-        body.addStatement("var %L = 0", bodyBytesVar)
+        body.addStatement("var %L = 0L", bodyBytesVar)
         body.addStatement("var %L = true", allExactVar)
-        body.beginControlFlow("for (__elem in %L)", accessor)
-        body.addStatement("val __elemSize = %T.wireSize(__elem, context)", spec.elementCodecClassName)
-        body.beginControlFlow("if (__elemSize !is %T.Exact)", WIRE_SIZE_CN)
-        body.addStatement("%L = false", allExactVar)
-        body.addStatement("break")
+        val iteratorVar = "__${namespacePrefix}Elements"
+        body.addStatement("val %L = %L.iterator()", iteratorVar, accessor)
+        body.beginControlFlow("while (%L && %L.hasNext())", allExactVar, iteratorVar)
+        body.addStatement(
+            "%L += %T.wireBytes(%L.next(), context).fold(exact = { it }, backPatch = { %L = false; 0L })",
+            bodyBytesVar,
+            spec.elementCodecClassName,
+            iteratorVar,
+            allExactVar,
+        )
         body.endControlFlow()
-        body.addStatement("%L += __elemSize.bytes", bodyBytesVar)
-        body.endControlFlow()
-        body.beginControlFlow("if (%L)", allExactVar)
+        // A body past UInt range cannot be prefixed exactly; the staging encoder reports it.
+        body.beginControlFlow("if (%L && %L <= %T.MAX_VALUE.toLong())", allExactVar, bodyBytesVar, U_INT)
         body.addStatement(
             "%T.encode(buffer, %L.toUInt(), context)",
             spec.codecType,

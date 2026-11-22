@@ -5,12 +5,16 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.UnsignedVarIntCodec
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object CountFixedListCodec : Codec<CountFixedList> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): CountFixedList {
@@ -35,18 +39,22 @@ public object CountFixedListCodec : Codec<CountFixedList> {
     }
   }
 
-  override fun wireSize(`value`: CountFixedList, context: EncodeContext): WireSize {
-    val __pointsCountSize = (UnsignedVarIntCodec.wireSize(value.points.size.toUInt(), context) as WireSize.Exact).bytes
-    var __pointsElementsSize = 0
+  override fun wireBytes(`value`: CountFixedList, context: EncodeContext): WireByteCount {
+    val __pointsCountSize = UnsignedVarIntCodec.encodedLength(value.points.size.toUInt()).toLong()
+    var __pointsElementsSize = 0L
     for (__elem in value.points) {
-      when (val __elemSize = CountPointCodec.wireSize(__elem, context)) {
-        is WireSize.Exact -> __pointsElementsSize += __elemSize.bytes
-        WireSize.BackPatch -> return WireSize.BackPatch
-      }
+      __pointsElementsSize += CountPointCodec.wireBytes(__elem, context).fold(exact = { it }, backPatch = { return WireByteCount.BackPatch })
     }
     val __pointsSize = __pointsCountSize + __pointsElementsSize
-    return WireSize.Exact(1 + __pointsSize)
+    return WireByteCount.exact(1L + __pointsSize)
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: CountFixedList, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: CountFixedList, context: EncodeContext): Int {
     var __hint = 2
@@ -56,7 +64,12 @@ public object CountFixedListCodec : Codec<CountFixedList> {
     return __hint
   }
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek = FramePeek.noFraming
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = FrameSize.Unframed
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

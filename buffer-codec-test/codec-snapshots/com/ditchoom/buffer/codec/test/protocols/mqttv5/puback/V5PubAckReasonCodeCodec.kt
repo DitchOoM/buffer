@@ -6,11 +6,15 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object V5PubAckReasonCodeCodec : Codec<V5PubAckReasonCode> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): V5PubAckReasonCode {
@@ -54,18 +58,25 @@ public object V5PubAckReasonCodeCodec : Codec<V5PubAckReasonCode> {
     }
   }
 
-  override fun wireSize(`value`: V5PubAckReasonCode, context: EncodeContext): WireSize = when (value) {
-    is V5PubAckReasonCode.Success -> V5PubAckReasonCodeSuccessCodec.wireSize(value, context)
-    is V5PubAckReasonCode.NoMatchingSubscribers -> V5PubAckReasonCodeNoMatchingSubscribersCodec.wireSize(value, context)
-    is V5PubAckReasonCode.UnspecifiedError -> V5PubAckReasonCodeUnspecifiedErrorCodec.wireSize(value, context)
-    is V5PubAckReasonCode.ImplementationSpecificError -> V5PubAckReasonCodeImplementationSpecificErrorCodec.wireSize(value, context)
-    is V5PubAckReasonCode.NotAuthorized -> V5PubAckReasonCodeNotAuthorizedCodec.wireSize(value, context)
-    is V5PubAckReasonCode.TopicNameInvalid -> V5PubAckReasonCodeTopicNameInvalidCodec.wireSize(value, context)
-    is V5PubAckReasonCode.PacketIdentifierInUse -> V5PubAckReasonCodePacketIdentifierInUseCodec.wireSize(value, context)
-    is V5PubAckReasonCode.PacketIdentifierNotFound -> V5PubAckReasonCodePacketIdentifierNotFoundCodec.wireSize(value, context)
-    is V5PubAckReasonCode.QuotaExceeded -> V5PubAckReasonCodeQuotaExceededCodec.wireSize(value, context)
-    is V5PubAckReasonCode.PayloadFormatInvalid -> V5PubAckReasonCodePayloadFormatInvalidCodec.wireSize(value, context)
+  override fun wireBytes(`value`: V5PubAckReasonCode, context: EncodeContext): WireByteCount = when (value) {
+    is V5PubAckReasonCode.Success -> V5PubAckReasonCodeSuccessCodec.wireBytes(value, context)
+    is V5PubAckReasonCode.NoMatchingSubscribers -> V5PubAckReasonCodeNoMatchingSubscribersCodec.wireBytes(value, context)
+    is V5PubAckReasonCode.UnspecifiedError -> V5PubAckReasonCodeUnspecifiedErrorCodec.wireBytes(value, context)
+    is V5PubAckReasonCode.ImplementationSpecificError -> V5PubAckReasonCodeImplementationSpecificErrorCodec.wireBytes(value, context)
+    is V5PubAckReasonCode.NotAuthorized -> V5PubAckReasonCodeNotAuthorizedCodec.wireBytes(value, context)
+    is V5PubAckReasonCode.TopicNameInvalid -> V5PubAckReasonCodeTopicNameInvalidCodec.wireBytes(value, context)
+    is V5PubAckReasonCode.PacketIdentifierInUse -> V5PubAckReasonCodePacketIdentifierInUseCodec.wireBytes(value, context)
+    is V5PubAckReasonCode.PacketIdentifierNotFound -> V5PubAckReasonCodePacketIdentifierNotFoundCodec.wireBytes(value, context)
+    is V5PubAckReasonCode.QuotaExceeded -> V5PubAckReasonCodeQuotaExceededCodec.wireBytes(value, context)
+    is V5PubAckReasonCode.PayloadFormatInvalid -> V5PubAckReasonCodePayloadFormatInvalidCodec.wireBytes(value, context)
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: V5PubAckReasonCode, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: V5PubAckReasonCode, context: EncodeContext): Int = when (value) {
     is V5PubAckReasonCode.Success -> V5PubAckReasonCodeSuccessCodec.sizeHint(value, context)
@@ -80,27 +91,32 @@ public object V5PubAckReasonCodeCodec : Codec<V5PubAckReasonCode> {
     is V5PubAckReasonCode.PayloadFormatInvalid -> V5PubAckReasonCodePayloadFormatInvalidCodec.sizeHint(value, context)
   }
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
-    if (stream.available() - baseOffset < 1) return FramePeek.needsMoreData
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
+    if (stream.available() - baseOffset < 1) return FrameSize.NeedsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()
     val __discriminator = V5PubAckReasonCodeRaw(__discRaw)
     val __dispatchValue = __discriminator.id
     return when (__dispatchValue) {
-      0 -> V5PubAckReasonCodeSuccessCodec.peekFrame(stream, baseOffset)
-      16 -> V5PubAckReasonCodeNoMatchingSubscribersCodec.peekFrame(stream, baseOffset)
-      128 -> V5PubAckReasonCodeUnspecifiedErrorCodec.peekFrame(stream, baseOffset)
-      131 -> V5PubAckReasonCodeImplementationSpecificErrorCodec.peekFrame(stream, baseOffset)
-      135 -> V5PubAckReasonCodeNotAuthorizedCodec.peekFrame(stream, baseOffset)
-      144 -> V5PubAckReasonCodeTopicNameInvalidCodec.peekFrame(stream, baseOffset)
-      145 -> V5PubAckReasonCodePacketIdentifierInUseCodec.peekFrame(stream, baseOffset)
-      146 -> V5PubAckReasonCodePacketIdentifierNotFoundCodec.peekFrame(stream, baseOffset)
-      151 -> V5PubAckReasonCodeQuotaExceededCodec.peekFrame(stream, baseOffset)
-      153 -> V5PubAckReasonCodePayloadFormatInvalidCodec.peekFrame(stream, baseOffset)
+      0 -> V5PubAckReasonCodeSuccessCodec.frameSize(stream, baseOffset)
+      16 -> V5PubAckReasonCodeNoMatchingSubscribersCodec.frameSize(stream, baseOffset)
+      128 -> V5PubAckReasonCodeUnspecifiedErrorCodec.frameSize(stream, baseOffset)
+      131 -> V5PubAckReasonCodeImplementationSpecificErrorCodec.frameSize(stream, baseOffset)
+      135 -> V5PubAckReasonCodeNotAuthorizedCodec.frameSize(stream, baseOffset)
+      144 -> V5PubAckReasonCodeTopicNameInvalidCodec.frameSize(stream, baseOffset)
+      145 -> V5PubAckReasonCodePacketIdentifierInUseCodec.frameSize(stream, baseOffset)
+      146 -> V5PubAckReasonCodePacketIdentifierNotFoundCodec.frameSize(stream, baseOffset)
+      151 -> V5PubAckReasonCodeQuotaExceededCodec.frameSize(stream, baseOffset)
+      153 -> V5PubAckReasonCodePayloadFormatInvalidCodec.frameSize(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "V5PubAckReasonCode.discriminator", bufferPosition = baseOffset, expected = "one of {0, 16, 128, 131, 135, 144, 145, 146, 151, 153}", actual = """${__dispatchValue}""")
       }
     }
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

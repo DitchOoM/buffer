@@ -7,12 +7,16 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.Decoder
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameDetector
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 import kotlin.UByte
 
 public class SimpleGenericFrameCommandCodec<P : Payload>(
@@ -33,13 +37,25 @@ public class SimpleGenericFrameCommandCodec<P : Payload>(
     payloadCodec.encode(buffer, value.payload, context)
   }
 
-  override fun wireSize(`value`: SimpleGenericFrame.Command<P>, context: EncodeContext): WireSize = WireSize.BackPatch
+  override fun wireBytes(`value`: SimpleGenericFrame.Command<P>, context: EncodeContext): WireByteCount = WireByteCount.BackPatch
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: SimpleGenericFrame.Command<P>, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: SimpleGenericFrame.Command<P>, context: EncodeContext): Int = 1
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek = Companion.peekFrame(stream, baseOffset)
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = Companion.frameSize(stream, baseOffset)
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 
   public class Partial<P : Payload> internal constructor(
     public val counter: UByte,
@@ -53,9 +69,14 @@ public class SimpleGenericFrameCommandCodec<P : Payload>(
   }
 
   public companion object : FrameDetector {
-    override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek = FramePeek.noFraming
+    override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = FrameSize.Unframed
 
-    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+    @Deprecated(
+      message = "Call frameSize.",
+      replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+    )
+    @Suppress("DEPRECATION")
+    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 
     public fun <P : Payload> partial(buffer: ReadBuffer, context: DecodeContext): Partial<P> {
       val counter = buffer.readUByte()

@@ -6,11 +6,15 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object SignedTagFrameCodec : Codec<SignedTagFrame> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): SignedTagFrame {
@@ -38,18 +42,25 @@ public object SignedTagFrameCodec : Codec<SignedTagFrame> {
     }
   }
 
-  override fun wireSize(`value`: SignedTagFrame, context: EncodeContext): WireSize = when (value) {
-    is SignedTagFrame.Alpha -> SignedTagFrameAlphaCodec.wireSize(value, context)
-    is SignedTagFrame.Beta -> SignedTagFrameBetaCodec.wireSize(value, context)
+  override fun wireBytes(`value`: SignedTagFrame, context: EncodeContext): WireByteCount = when (value) {
+    is SignedTagFrame.Alpha -> SignedTagFrameAlphaCodec.wireBytes(value, context)
+    is SignedTagFrame.Beta -> SignedTagFrameBetaCodec.wireBytes(value, context)
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: SignedTagFrame, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: SignedTagFrame, context: EncodeContext): Int = when (value) {
     is SignedTagFrame.Alpha -> SignedTagFrameAlphaCodec.sizeHint(value, context)
     is SignedTagFrame.Beta -> SignedTagFrameBetaCodec.sizeHint(value, context)
   }
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
-    if (stream.available() - baseOffset < 4) return FramePeek.needsMoreData
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
+    if (stream.available() - baseOffset < 4) return FrameSize.NeedsMoreData
     val __discRawB0 = stream.peekByte(baseOffset + 0).toInt() and 0xFF
     val __discRawB1 = stream.peekByte(baseOffset + 0 + 1).toInt() and 0xFF
     val __discRawB2 = stream.peekByte(baseOffset + 0 + 2).toInt() and 0xFF
@@ -58,13 +69,18 @@ public object SignedTagFrameCodec : Codec<SignedTagFrame> {
     val __discriminator = SignedTag(__discRaw)
     val __dispatchValue = __discriminator.tag
     return when (__dispatchValue) {
-      -1 -> SignedTagFrameAlphaCodec.peekFrame(stream, baseOffset)
-      7 -> SignedTagFrameBetaCodec.peekFrame(stream, baseOffset)
+      -1 -> SignedTagFrameAlphaCodec.frameSize(stream, baseOffset)
+      7 -> SignedTagFrameBetaCodec.frameSize(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "SignedTagFrame.discriminator", bufferPosition = baseOffset, expected = "one of {-1, 7}", actual = """${__dispatchValue}""")
       }
     }
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

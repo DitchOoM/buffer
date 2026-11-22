@@ -611,8 +611,8 @@ object SealedBoxCodec : Codec<SealedBox> {
         SealedBox(OwnedBytesHandleCodec.decode(buffer, context))
     override fun encode(buffer: WriteBuffer, value: SealedBox, context: EncodeContext) =
         OwnedBytesHandleCodec.encode(buffer, value.handle, context)
-    override fun wireSize(value: SealedBox, context: EncodeContext) =
-        OwnedBytesHandleCodec.wireSize(value.handle, context)
+    override fun wireBytes(value: SealedBox, context: EncodeContext) =
+        OwnedBytesHandleCodec.wireBytes(value.handle, context)
 }
 
 @ProtocolMessage

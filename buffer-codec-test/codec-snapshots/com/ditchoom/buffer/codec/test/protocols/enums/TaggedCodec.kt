@@ -6,12 +6,16 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.UnsignedVarIntCodec
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object TaggedCodec : Codec<Tagged> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): Tagged {
@@ -30,21 +34,29 @@ public object TaggedCodec : Codec<Tagged> {
     buffer.writeUByte(value.id)
   }
 
-  override fun wireSize(`value`: Tagged, context: EncodeContext): WireSize {
-    val __levelSize = (UnsignedVarIntCodec.wireSize(value.level.ordinal.toUInt(), context) as WireSize.Exact).bytes
-    return WireSize.Exact(1 + __levelSize)
+  override fun wireBytes(`value`: Tagged, context: EncodeContext): WireByteCount {
+    val __levelSize = UnsignedVarIntCodec.encodedLength(value.level.ordinal.toUInt()).toLong()
+    return WireByteCount.exact(1L + __levelSize)
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: Tagged, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: Tagged, context: EncodeContext): Int = 2
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
-    val __levelFrame = UnsignedVarIntCodec.peekFrame(stream, baseOffset + 0)
-    if (!__levelFrame.isComplete) {
-      return __levelFrame.withoutDeclaredSize()
-    }
-    val __total = 0 + __levelFrame.size + 1
-    return FramePeek.forDeclaredSize(__total, stream.available() - baseOffset)
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
+    val __levelWidth = UnsignedVarIntCodec.frameSize(stream, baseOffset + 0).fold(declared = { it }, needsMoreData = { return FrameSize.NeedsMoreData }, unframed = { return FrameSize.Unframed })
+    return FrameSize.declared(1, __levelWidth)
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

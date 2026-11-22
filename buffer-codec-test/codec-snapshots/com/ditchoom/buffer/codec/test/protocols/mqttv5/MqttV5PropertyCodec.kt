@@ -6,11 +6,15 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object MqttV5PropertyCodec : Codec<MqttV5Property> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): MqttV5Property {
@@ -88,35 +92,42 @@ public object MqttV5PropertyCodec : Codec<MqttV5Property> {
     }
   }
 
-  override fun wireSize(`value`: MqttV5Property, context: EncodeContext): WireSize = when (value) {
-    is MqttV5Property.PayloadFormatIndicator -> MqttV5PropertyPayloadFormatIndicatorCodec.wireSize(value, context)
-    is MqttV5Property.MessageExpiryInterval -> MqttV5PropertyMessageExpiryIntervalCodec.wireSize(value, context)
-    is MqttV5Property.ContentType -> MqttV5PropertyContentTypeCodec.wireSize(value, context)
-    is MqttV5Property.ResponseTopic -> MqttV5PropertyResponseTopicCodec.wireSize(value, context)
-    is MqttV5Property.CorrelationData -> MqttV5PropertyCorrelationDataCodec.wireSize(value, context)
-    is MqttV5Property.SubscriptionIdentifier -> MqttV5PropertySubscriptionIdentifierCodec.wireSize(value, context)
-    is MqttV5Property.SessionExpiryInterval -> MqttV5PropertySessionExpiryIntervalCodec.wireSize(value, context)
-    is MqttV5Property.AssignedClientIdentifier -> MqttV5PropertyAssignedClientIdentifierCodec.wireSize(value, context)
-    is MqttV5Property.ServerKeepAlive -> MqttV5PropertyServerKeepAliveCodec.wireSize(value, context)
-    is MqttV5Property.AuthenticationMethod -> MqttV5PropertyAuthenticationMethodCodec.wireSize(value, context)
-    is MqttV5Property.AuthenticationData -> MqttV5PropertyAuthenticationDataCodec.wireSize(value, context)
-    is MqttV5Property.RequestProblemInformation -> MqttV5PropertyRequestProblemInformationCodec.wireSize(value, context)
-    is MqttV5Property.WillDelayInterval -> MqttV5PropertyWillDelayIntervalCodec.wireSize(value, context)
-    is MqttV5Property.RequestResponseInformation -> MqttV5PropertyRequestResponseInformationCodec.wireSize(value, context)
-    is MqttV5Property.ResponseInformation -> MqttV5PropertyResponseInformationCodec.wireSize(value, context)
-    is MqttV5Property.ServerReference -> MqttV5PropertyServerReferenceCodec.wireSize(value, context)
-    is MqttV5Property.ReasonString -> MqttV5PropertyReasonStringCodec.wireSize(value, context)
-    is MqttV5Property.ReceiveMaximum -> MqttV5PropertyReceiveMaximumCodec.wireSize(value, context)
-    is MqttV5Property.TopicAliasMaximum -> MqttV5PropertyTopicAliasMaximumCodec.wireSize(value, context)
-    is MqttV5Property.TopicAlias -> MqttV5PropertyTopicAliasCodec.wireSize(value, context)
-    is MqttV5Property.MaximumQoS -> MqttV5PropertyMaximumQoSCodec.wireSize(value, context)
-    is MqttV5Property.RetainAvailable -> MqttV5PropertyRetainAvailableCodec.wireSize(value, context)
-    is MqttV5Property.UserProperty -> MqttV5PropertyUserPropertyCodec.wireSize(value, context)
-    is MqttV5Property.MaximumPacketSize -> MqttV5PropertyMaximumPacketSizeCodec.wireSize(value, context)
-    is MqttV5Property.WildcardSubscriptionAvailable -> MqttV5PropertyWildcardSubscriptionAvailableCodec.wireSize(value, context)
-    is MqttV5Property.SubscriptionIdentifiersAvailable -> MqttV5PropertySubscriptionIdentifiersAvailableCodec.wireSize(value, context)
-    is MqttV5Property.SharedSubscriptionAvailable -> MqttV5PropertySharedSubscriptionAvailableCodec.wireSize(value, context)
+  override fun wireBytes(`value`: MqttV5Property, context: EncodeContext): WireByteCount = when (value) {
+    is MqttV5Property.PayloadFormatIndicator -> MqttV5PropertyPayloadFormatIndicatorCodec.wireBytes(value, context)
+    is MqttV5Property.MessageExpiryInterval -> MqttV5PropertyMessageExpiryIntervalCodec.wireBytes(value, context)
+    is MqttV5Property.ContentType -> MqttV5PropertyContentTypeCodec.wireBytes(value, context)
+    is MqttV5Property.ResponseTopic -> MqttV5PropertyResponseTopicCodec.wireBytes(value, context)
+    is MqttV5Property.CorrelationData -> MqttV5PropertyCorrelationDataCodec.wireBytes(value, context)
+    is MqttV5Property.SubscriptionIdentifier -> MqttV5PropertySubscriptionIdentifierCodec.wireBytes(value, context)
+    is MqttV5Property.SessionExpiryInterval -> MqttV5PropertySessionExpiryIntervalCodec.wireBytes(value, context)
+    is MqttV5Property.AssignedClientIdentifier -> MqttV5PropertyAssignedClientIdentifierCodec.wireBytes(value, context)
+    is MqttV5Property.ServerKeepAlive -> MqttV5PropertyServerKeepAliveCodec.wireBytes(value, context)
+    is MqttV5Property.AuthenticationMethod -> MqttV5PropertyAuthenticationMethodCodec.wireBytes(value, context)
+    is MqttV5Property.AuthenticationData -> MqttV5PropertyAuthenticationDataCodec.wireBytes(value, context)
+    is MqttV5Property.RequestProblemInformation -> MqttV5PropertyRequestProblemInformationCodec.wireBytes(value, context)
+    is MqttV5Property.WillDelayInterval -> MqttV5PropertyWillDelayIntervalCodec.wireBytes(value, context)
+    is MqttV5Property.RequestResponseInformation -> MqttV5PropertyRequestResponseInformationCodec.wireBytes(value, context)
+    is MqttV5Property.ResponseInformation -> MqttV5PropertyResponseInformationCodec.wireBytes(value, context)
+    is MqttV5Property.ServerReference -> MqttV5PropertyServerReferenceCodec.wireBytes(value, context)
+    is MqttV5Property.ReasonString -> MqttV5PropertyReasonStringCodec.wireBytes(value, context)
+    is MqttV5Property.ReceiveMaximum -> MqttV5PropertyReceiveMaximumCodec.wireBytes(value, context)
+    is MqttV5Property.TopicAliasMaximum -> MqttV5PropertyTopicAliasMaximumCodec.wireBytes(value, context)
+    is MqttV5Property.TopicAlias -> MqttV5PropertyTopicAliasCodec.wireBytes(value, context)
+    is MqttV5Property.MaximumQoS -> MqttV5PropertyMaximumQoSCodec.wireBytes(value, context)
+    is MqttV5Property.RetainAvailable -> MqttV5PropertyRetainAvailableCodec.wireBytes(value, context)
+    is MqttV5Property.UserProperty -> MqttV5PropertyUserPropertyCodec.wireBytes(value, context)
+    is MqttV5Property.MaximumPacketSize -> MqttV5PropertyMaximumPacketSizeCodec.wireBytes(value, context)
+    is MqttV5Property.WildcardSubscriptionAvailable -> MqttV5PropertyWildcardSubscriptionAvailableCodec.wireBytes(value, context)
+    is MqttV5Property.SubscriptionIdentifiersAvailable -> MqttV5PropertySubscriptionIdentifiersAvailableCodec.wireBytes(value, context)
+    is MqttV5Property.SharedSubscriptionAvailable -> MqttV5PropertySharedSubscriptionAvailableCodec.wireBytes(value, context)
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: MqttV5Property, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: MqttV5Property, context: EncodeContext): Int = when (value) {
     is MqttV5Property.PayloadFormatIndicator -> MqttV5PropertyPayloadFormatIndicatorCodec.sizeHint(value, context)
@@ -148,44 +159,49 @@ public object MqttV5PropertyCodec : Codec<MqttV5Property> {
     is MqttV5Property.SharedSubscriptionAvailable -> MqttV5PropertySharedSubscriptionAvailableCodec.sizeHint(value, context)
   }
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
-    if (stream.available() - baseOffset < 1) return FramePeek.needsMoreData
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
+    if (stream.available() - baseOffset < 1) return FrameSize.NeedsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()
     val __discriminator = MqttV5PropertyId(__discRaw)
     val __dispatchValue = __discriminator.id
     return when (__dispatchValue) {
-      1 -> MqttV5PropertyPayloadFormatIndicatorCodec.peekFrame(stream, baseOffset)
-      2 -> MqttV5PropertyMessageExpiryIntervalCodec.peekFrame(stream, baseOffset)
-      3 -> MqttV5PropertyContentTypeCodec.peekFrame(stream, baseOffset)
-      8 -> MqttV5PropertyResponseTopicCodec.peekFrame(stream, baseOffset)
-      9 -> MqttV5PropertyCorrelationDataCodec.peekFrame(stream, baseOffset)
-      11 -> MqttV5PropertySubscriptionIdentifierCodec.peekFrame(stream, baseOffset)
-      17 -> MqttV5PropertySessionExpiryIntervalCodec.peekFrame(stream, baseOffset)
-      18 -> MqttV5PropertyAssignedClientIdentifierCodec.peekFrame(stream, baseOffset)
-      19 -> MqttV5PropertyServerKeepAliveCodec.peekFrame(stream, baseOffset)
-      21 -> MqttV5PropertyAuthenticationMethodCodec.peekFrame(stream, baseOffset)
-      22 -> MqttV5PropertyAuthenticationDataCodec.peekFrame(stream, baseOffset)
-      23 -> MqttV5PropertyRequestProblemInformationCodec.peekFrame(stream, baseOffset)
-      24 -> MqttV5PropertyWillDelayIntervalCodec.peekFrame(stream, baseOffset)
-      25 -> MqttV5PropertyRequestResponseInformationCodec.peekFrame(stream, baseOffset)
-      26 -> MqttV5PropertyResponseInformationCodec.peekFrame(stream, baseOffset)
-      28 -> MqttV5PropertyServerReferenceCodec.peekFrame(stream, baseOffset)
-      31 -> MqttV5PropertyReasonStringCodec.peekFrame(stream, baseOffset)
-      33 -> MqttV5PropertyReceiveMaximumCodec.peekFrame(stream, baseOffset)
-      34 -> MqttV5PropertyTopicAliasMaximumCodec.peekFrame(stream, baseOffset)
-      35 -> MqttV5PropertyTopicAliasCodec.peekFrame(stream, baseOffset)
-      36 -> MqttV5PropertyMaximumQoSCodec.peekFrame(stream, baseOffset)
-      37 -> MqttV5PropertyRetainAvailableCodec.peekFrame(stream, baseOffset)
-      38 -> MqttV5PropertyUserPropertyCodec.peekFrame(stream, baseOffset)
-      39 -> MqttV5PropertyMaximumPacketSizeCodec.peekFrame(stream, baseOffset)
-      40 -> MqttV5PropertyWildcardSubscriptionAvailableCodec.peekFrame(stream, baseOffset)
-      41 -> MqttV5PropertySubscriptionIdentifiersAvailableCodec.peekFrame(stream, baseOffset)
-      42 -> MqttV5PropertySharedSubscriptionAvailableCodec.peekFrame(stream, baseOffset)
+      1 -> MqttV5PropertyPayloadFormatIndicatorCodec.frameSize(stream, baseOffset)
+      2 -> MqttV5PropertyMessageExpiryIntervalCodec.frameSize(stream, baseOffset)
+      3 -> MqttV5PropertyContentTypeCodec.frameSize(stream, baseOffset)
+      8 -> MqttV5PropertyResponseTopicCodec.frameSize(stream, baseOffset)
+      9 -> MqttV5PropertyCorrelationDataCodec.frameSize(stream, baseOffset)
+      11 -> MqttV5PropertySubscriptionIdentifierCodec.frameSize(stream, baseOffset)
+      17 -> MqttV5PropertySessionExpiryIntervalCodec.frameSize(stream, baseOffset)
+      18 -> MqttV5PropertyAssignedClientIdentifierCodec.frameSize(stream, baseOffset)
+      19 -> MqttV5PropertyServerKeepAliveCodec.frameSize(stream, baseOffset)
+      21 -> MqttV5PropertyAuthenticationMethodCodec.frameSize(stream, baseOffset)
+      22 -> MqttV5PropertyAuthenticationDataCodec.frameSize(stream, baseOffset)
+      23 -> MqttV5PropertyRequestProblemInformationCodec.frameSize(stream, baseOffset)
+      24 -> MqttV5PropertyWillDelayIntervalCodec.frameSize(stream, baseOffset)
+      25 -> MqttV5PropertyRequestResponseInformationCodec.frameSize(stream, baseOffset)
+      26 -> MqttV5PropertyResponseInformationCodec.frameSize(stream, baseOffset)
+      28 -> MqttV5PropertyServerReferenceCodec.frameSize(stream, baseOffset)
+      31 -> MqttV5PropertyReasonStringCodec.frameSize(stream, baseOffset)
+      33 -> MqttV5PropertyReceiveMaximumCodec.frameSize(stream, baseOffset)
+      34 -> MqttV5PropertyTopicAliasMaximumCodec.frameSize(stream, baseOffset)
+      35 -> MqttV5PropertyTopicAliasCodec.frameSize(stream, baseOffset)
+      36 -> MqttV5PropertyMaximumQoSCodec.frameSize(stream, baseOffset)
+      37 -> MqttV5PropertyRetainAvailableCodec.frameSize(stream, baseOffset)
+      38 -> MqttV5PropertyUserPropertyCodec.frameSize(stream, baseOffset)
+      39 -> MqttV5PropertyMaximumPacketSizeCodec.frameSize(stream, baseOffset)
+      40 -> MqttV5PropertyWildcardSubscriptionAvailableCodec.frameSize(stream, baseOffset)
+      41 -> MqttV5PropertySubscriptionIdentifiersAvailableCodec.frameSize(stream, baseOffset)
+      42 -> MqttV5PropertySharedSubscriptionAvailableCodec.frameSize(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "MqttV5Property.discriminator", bufferPosition = baseOffset, expected = "one of {1, 2, 3, 8, 9, 11, 17, 18, 19, 21, 22, 23, 24, 25, 26, 28, 31, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42}", actual = """${__dispatchValue}""")
       }
     }
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

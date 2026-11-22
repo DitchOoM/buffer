@@ -8,12 +8,16 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.swapBytes
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object TlsRecordCodec : Codec<TlsRecord> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): TlsRecord {
@@ -53,9 +57,12 @@ public object TlsRecordCodec : Codec<TlsRecord> {
     buffer.writeUByte(value.contentType)
     val legacyRecordVersionRaw = value.legacyRecordVersion.toShort()
     buffer.writeShort(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) legacyRecordVersionRaw else swapBytes(legacyRecordVersionRaw))
-    when (val fragmentWireSize = TlsHandshakeCodec.wireSize(value.fragment, context)) {
-      is WireSize.Exact -> {
-        val fragmentByteCount = fragmentWireSize.bytes
+    TlsHandshakeCodec.wireBytes(value.fragment, context).fold(
+      exact = { fragmentWireBytes ->
+        if (fragmentWireBytes > Int.MAX_VALUE) {
+          throw EncodeException(fieldPath = "TlsRecord.fragment", reason = """encoded message byte length ${fragmentWireBytes} exceeds Int.MAX_VALUE""")
+        }
+        val fragmentByteCount = fragmentWireBytes.toInt()
         if (fragmentByteCount > 65_535) {
           throw EncodeException(fieldPath = "TlsRecord.fragment", reason = """encoded message byte length ${fragmentByteCount} exceeds @LengthPrefixed(LengthPrefix.Short) max 65535""")
         }
@@ -67,8 +74,8 @@ public object TlsRecordCodec : Codec<TlsRecord> {
         if (buffer.position() - fragmentBodyStart != fragmentByteCount) {
           throw EncodeException(fieldPath = "TlsRecord.fragment", reason = """wireSize declared ${fragmentByteCount} bytes but encode wrote ${buffer.position() - fragmentBodyStart} — the codec's wireSize and encode disagree""")
         }
-      }
-      WireSize.BackPatch -> {
+      },
+      backPatch = {
         val fragmentSizePosition = buffer.position()
         repeat(2) { buffer.writeUByte(0u) }
         val fragmentBodyStart = buffer.position()
@@ -83,24 +90,31 @@ public object TlsRecordCodec : Codec<TlsRecord> {
         buffer.writeUByte(((fragmentPatchPrefix shr 8) and 0xFFu).toUByte())
         buffer.writeUByte((fragmentPatchPrefix and 0xFFu).toUByte())
         buffer.position(fragmentEndPosition)
-      }
-    }
+      },
+    )
   }
 
-  override fun wireSize(`value`: TlsRecord, context: EncodeContext): WireSize = when (val fragmentSize = TlsHandshakeCodec.wireSize(value.fragment, context)) {
-    is WireSize.Exact -> WireSize.Exact(5 + fragmentSize.bytes)
-    WireSize.BackPatch -> WireSize.BackPatch
+  override fun wireBytes(`value`: TlsRecord, context: EncodeContext): WireByteCount {
+    val __fragmentSize = TlsHandshakeCodec.wireBytes(value.fragment, context).fold(exact = { it }, backPatch = { return WireByteCount.BackPatch })
+    return WireByteCount.exact(5L + __fragmentSize)
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: TlsRecord, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: TlsRecord, context: EncodeContext): Int = 5 + TlsHandshakeCodec.sizeHint(value.fragment, context)
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 1) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData
     __offset += 1
-    if (stream.available() - baseOffset < __offset + 2) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 2) return FrameSize.NeedsMoreData
     __offset += 2
-    if (stream.available() - baseOffset < __offset + 2) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 2) return FrameSize.NeedsMoreData
     val fragmentPrefixB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
     val fragmentPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val fragmentPrefix = ((fragmentPrefixB0 shl 8) or fragmentPrefixB1).toUInt()
@@ -108,8 +122,13 @@ public object TlsRecordCodec : Codec<TlsRecord> {
       throw DecodeException(fieldPath = "TlsRecord.fragment", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + fragmentPrefix.toInt()}""")
     }
     __offset += 2 + fragmentPrefix.toInt()
-    return FramePeek.forDeclaredSize(__offset, stream.available() - baseOffset)
+    return FrameSize.declared(__offset.toLong())
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

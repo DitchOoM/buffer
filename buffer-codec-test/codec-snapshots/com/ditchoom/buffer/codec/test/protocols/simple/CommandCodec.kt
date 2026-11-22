@@ -6,11 +6,15 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object CommandCodec : Codec<Command> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): Command {
@@ -42,27 +46,39 @@ public object CommandCodec : Codec<Command> {
     }
   }
 
-  override fun wireSize(`value`: Command, context: EncodeContext): WireSize = when (value) {
-    is Command.Ping -> WireSize.Exact(9)
-    is Command.Echo -> WireSize.BackPatch
+  override fun wireBytes(`value`: Command, context: EncodeContext): WireByteCount = when (value) {
+    is Command.Ping -> WireByteCount.exact(9L)
+    is Command.Echo -> WireByteCount.BackPatch
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: Command, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: Command, context: EncodeContext): Int = 1 + when (value) {
     is Command.Ping -> CommandPingCodec.sizeHint(value, context)
     is Command.Echo -> CommandEchoCodec.sizeHint(value, context)
   }
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
-    if (stream.available() - baseOffset < 1) return FramePeek.needsMoreData
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
+    if (stream.available() - baseOffset < 1) return FrameSize.NeedsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF
     return when (discriminator) {
-      0x01 -> CommandPingCodec.peekFrame(stream, baseOffset + 1).withPrefix(1)
-      0x02 -> CommandEchoCodec.peekFrame(stream, baseOffset + 1).withPrefix(1)
+      0x01 -> CommandPingCodec.frameSize(stream, baseOffset + 1).fold(declared = { FrameSize.declared(1, it) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
+      0x02 -> CommandEchoCodec.frameSize(stream, baseOffset + 1).fold(declared = { FrameSize.declared(1, it) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
       else -> {
         throw DecodeException(fieldPath = "Command.discriminator", bufferPosition = baseOffset, expected = "one of {0x01, 0x02}", actual = """0x${discriminator.toString(16).padStart(2, '0').uppercase()}""")
       }
     }
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

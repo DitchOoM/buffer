@@ -8,12 +8,16 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.swapBytes
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object WavFmtChunkCodec : Codec<WavFmtChunk> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): WavFmtChunk {
@@ -53,9 +57,12 @@ public object WavFmtChunkCodec : Codec<WavFmtChunk> {
   ) {
     val fourCCRaw = value.fourCC.toInt()
     buffer.writeInt(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) fourCCRaw else swapBytes(fourCCRaw))
-    when (val bodyWireSize = WavFmtBodyCodec.wireSize(value.body, context)) {
-      is WireSize.Exact -> {
-        val bodyByteCount = bodyWireSize.bytes
+    WavFmtBodyCodec.wireBytes(value.body, context).fold(
+      exact = { bodyWireBytes ->
+        if (bodyWireBytes > Int.MAX_VALUE) {
+          throw EncodeException(fieldPath = "WavFmtChunk.body", reason = """encoded message byte length ${bodyWireBytes} exceeds Int.MAX_VALUE""")
+        }
+        val bodyByteCount = bodyWireBytes.toInt()
         val bodyPrefix = bodyByteCount.toUInt()
         buffer.writeUByte((bodyPrefix and 0xFFu).toUByte())
         buffer.writeUByte(((bodyPrefix shr 8) and 0xFFu).toUByte())
@@ -66,8 +73,8 @@ public object WavFmtChunkCodec : Codec<WavFmtChunk> {
         if (buffer.position() - bodyBodyStart != bodyByteCount) {
           throw EncodeException(fieldPath = "WavFmtChunk.body", reason = """wireSize declared ${bodyByteCount} bytes but encode wrote ${buffer.position() - bodyBodyStart} — the codec's wireSize and encode disagree""")
         }
-      }
-      WireSize.BackPatch -> {
+      },
+      backPatch = {
         val bodySizePosition = buffer.position()
         repeat(4) { buffer.writeUByte(0u) }
         val bodyBodyStart = buffer.position()
@@ -81,22 +88,29 @@ public object WavFmtChunkCodec : Codec<WavFmtChunk> {
         buffer.writeUByte(((bodyPatchPrefix shr 16) and 0xFFu).toUByte())
         buffer.writeUByte(((bodyPatchPrefix shr 24) and 0xFFu).toUByte())
         buffer.position(bodyEndPosition)
-      }
-    }
+      },
+    )
   }
 
-  override fun wireSize(`value`: WavFmtChunk, context: EncodeContext): WireSize = when (val bodySize = WavFmtBodyCodec.wireSize(value.body, context)) {
-    is WireSize.Exact -> WireSize.Exact(8 + bodySize.bytes)
-    WireSize.BackPatch -> WireSize.BackPatch
+  override fun wireBytes(`value`: WavFmtChunk, context: EncodeContext): WireByteCount {
+    val __bodySize = WavFmtBodyCodec.wireBytes(value.body, context).fold(exact = { it }, backPatch = { return WireByteCount.BackPatch })
+    return WireByteCount.exact(8L + __bodySize)
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: WavFmtChunk, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: WavFmtChunk, context: EncodeContext): Int = 8 + WavFmtBodyCodec.sizeHint(value.body, context)
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 4) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 4) return FrameSize.NeedsMoreData
     __offset += 4
-    if (stream.available() - baseOffset < __offset + 4) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 4) return FrameSize.NeedsMoreData
     val bodyPrefixB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
     val bodyPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val bodyPrefixB2 = stream.peekByte(baseOffset + __offset + 2).toInt() and 0xFF
@@ -106,8 +120,13 @@ public object WavFmtChunkCodec : Codec<WavFmtChunk> {
       throw DecodeException(fieldPath = "WavFmtChunk.body", bufferPosition = baseOffset + __offset, expected = "__offset + 4 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 4 + bodyPrefix.toInt()}""")
     }
     __offset += 4 + bodyPrefix.toInt()
-    return FramePeek.forDeclaredSize(__offset, stream.available() - baseOffset)
+    return FrameSize.declared(__offset.toLong())
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

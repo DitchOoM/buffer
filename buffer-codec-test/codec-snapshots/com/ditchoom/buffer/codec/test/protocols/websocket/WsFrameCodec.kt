@@ -6,12 +6,16 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public class WsFrameCodec<P : Payload>(
   private val payloadCodec: Codec<P>,
@@ -61,17 +65,24 @@ public class WsFrameCodec<P : Payload>(
     }
   }
 
-  override fun wireSize(`value`: WsFrame<P>, context: EncodeContext): WireSize {
+  override fun wireBytes(`value`: WsFrame<P>, context: EncodeContext): WireByteCount {
     @Suppress("UNCHECKED_CAST")
     return when (value) {
-      is WsFrame.Continuation<*> -> continuationCodec.wireSize(value as WsFrame.Continuation<P>, context)
-      is WsFrame.Text<*> -> textCodec.wireSize(value as WsFrame.Text<P>, context)
-      is WsFrame.Binary<*> -> binaryCodec.wireSize(value as WsFrame.Binary<P>, context)
-      is WsFrame.Close -> WsFrameCloseCodec.wireSize(value, context)
-      is WsFrame.Ping<*> -> pingCodec.wireSize(value as WsFrame.Ping<P>, context)
-      is WsFrame.Pong<*> -> pongCodec.wireSize(value as WsFrame.Pong<P>, context)
+      is WsFrame.Continuation<*> -> continuationCodec.wireBytes(value as WsFrame.Continuation<P>, context)
+      is WsFrame.Text<*> -> textCodec.wireBytes(value as WsFrame.Text<P>, context)
+      is WsFrame.Binary<*> -> binaryCodec.wireBytes(value as WsFrame.Binary<P>, context)
+      is WsFrame.Close -> WsFrameCloseCodec.wireBytes(value, context)
+      is WsFrame.Ping<*> -> pingCodec.wireBytes(value as WsFrame.Ping<P>, context)
+      is WsFrame.Pong<*> -> pongCodec.wireBytes(value as WsFrame.Pong<P>, context)
     }
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: WsFrame<P>, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: WsFrame<P>, context: EncodeContext): Int {
     @Suppress("UNCHECKED_CAST")
@@ -85,9 +96,14 @@ public class WsFrameCodec<P : Payload>(
     }
   }
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek = WsFrame.peekFrame(stream, baseOffset)
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = WsFrame.frameSize(stream, baseOffset)
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 
   public companion object {
     public fun <P : Payload> decodeAggregating(

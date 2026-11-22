@@ -6,12 +6,16 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public class DeferredDispatchFrameCodec<P : Payload>(
   private val payloadCodec: Codec<P>,
@@ -49,10 +53,17 @@ public class DeferredDispatchFrameCodec<P : Payload>(
     }
   }
 
-  override fun wireSize(`value`: DeferredDispatchFrame<P>, context: EncodeContext): WireSize = when (value) {
-    is DeferredDispatchFrame.Command<*> -> WireSize.BackPatch
-    is DeferredDispatchFrame.Status -> WireSize.Exact(2)
+  override fun wireBytes(`value`: DeferredDispatchFrame<P>, context: EncodeContext): WireByteCount = when (value) {
+    is DeferredDispatchFrame.Command<*> -> WireByteCount.BackPatch
+    is DeferredDispatchFrame.Status -> WireByteCount.exact(2L)
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: DeferredDispatchFrame<P>, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: DeferredDispatchFrame<P>, context: EncodeContext): Int {
     @Suppress("UNCHECKED_CAST")
@@ -62,17 +73,22 @@ public class DeferredDispatchFrameCodec<P : Payload>(
     }
   }
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
-    if (stream.available() - baseOffset < 1) return FramePeek.needsMoreData
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
+    if (stream.available() - baseOffset < 1) return FrameSize.NeedsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF
     return when (discriminator) {
-      0x0A -> commandCodec.peekFrame(stream, baseOffset + 1).withPrefix(1)
-      0xA0 -> DeferredDispatchFrameStatusCodec.peekFrame(stream, baseOffset + 1).withPrefix(1)
+      0x0A -> commandCodec.frameSize(stream, baseOffset + 1).fold(declared = { FrameSize.declared(1, it) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
+      0xA0 -> DeferredDispatchFrameStatusCodec.frameSize(stream, baseOffset + 1).fold(declared = { FrameSize.declared(1, it) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
       else -> {
         throw DecodeException(fieldPath = "DeferredDispatchFrame.discriminator", bufferPosition = baseOffset, expected = "one of {0x0A, 0xA0}", actual = """0x${discriminator.toString(16).padStart(2, '0').uppercase()}""")
       }
     }
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

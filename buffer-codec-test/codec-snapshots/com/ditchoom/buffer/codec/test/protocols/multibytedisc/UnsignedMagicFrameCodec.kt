@@ -6,11 +6,15 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object UnsignedMagicFrameCodec : Codec<UnsignedMagicFrame> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): UnsignedMagicFrame {
@@ -38,18 +42,25 @@ public object UnsignedMagicFrameCodec : Codec<UnsignedMagicFrame> {
     }
   }
 
-  override fun wireSize(`value`: UnsignedMagicFrame, context: EncodeContext): WireSize = when (value) {
-    is UnsignedMagicFrame.First -> UnsignedMagicFrameFirstCodec.wireSize(value, context)
-    is UnsignedMagicFrame.Second -> UnsignedMagicFrameSecondCodec.wireSize(value, context)
+  override fun wireBytes(`value`: UnsignedMagicFrame, context: EncodeContext): WireByteCount = when (value) {
+    is UnsignedMagicFrame.First -> UnsignedMagicFrameFirstCodec.wireBytes(value, context)
+    is UnsignedMagicFrame.Second -> UnsignedMagicFrameSecondCodec.wireBytes(value, context)
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: UnsignedMagicFrame, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: UnsignedMagicFrame, context: EncodeContext): Int = when (value) {
     is UnsignedMagicFrame.First -> UnsignedMagicFrameFirstCodec.sizeHint(value, context)
     is UnsignedMagicFrame.Second -> UnsignedMagicFrameSecondCodec.sizeHint(value, context)
   }
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
-    if (stream.available() - baseOffset < 8) return FramePeek.needsMoreData
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
+    if (stream.available() - baseOffset < 8) return FrameSize.NeedsMoreData
     val __discRawB0 = stream.peekByte(baseOffset + 0).toLong() and 0xFFL
     val __discRawB1 = stream.peekByte(baseOffset + 0 + 1).toLong() and 0xFFL
     val __discRawB2 = stream.peekByte(baseOffset + 0 + 2).toLong() and 0xFFL
@@ -62,13 +73,18 @@ public object UnsignedMagicFrameCodec : Codec<UnsignedMagicFrame> {
     val __discriminator = UnsignedMagic(__discRaw)
     val __dispatchValue = __discriminator.tag
     return when (__dispatchValue) {
-      17 -> UnsignedMagicFrameFirstCodec.peekFrame(stream, baseOffset)
-      34 -> UnsignedMagicFrameSecondCodec.peekFrame(stream, baseOffset)
+      17 -> UnsignedMagicFrameFirstCodec.frameSize(stream, baseOffset)
+      34 -> UnsignedMagicFrameSecondCodec.frameSize(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "UnsignedMagicFrame.discriminator", bufferPosition = baseOffset, expected = "one of {17, 34}", actual = """${__dispatchValue}""")
       }
     }
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

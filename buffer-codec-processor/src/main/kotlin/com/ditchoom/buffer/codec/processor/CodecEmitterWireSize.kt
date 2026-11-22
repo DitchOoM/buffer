@@ -8,8 +8,9 @@ import com.squareup.kotlinpoet.TypeName
 
 /*
  * CodecEmitterWireSize — buildWireSizeFun extracted from CodecEmitter (step 7).
- * Emits the codec's `wireSize(value): WireSize` override: literal Exact for
- * all-fixed shapes, BackPatch / runtime Exact sums for variable shapes. A
+ * Emits the codec's `wireBytes(value): WireByteCount` override (literal exact for
+ * all-fixed shapes, BackPatch / runtime exact sums for variable shapes) and the
+ * deprecated `wireSize` forwarder. A
  * stateless emit leaf (no batchCounter, codeGenerator or logger) moved verbatim
  * to package-internal top-level; CodecEmitter's buildFileSpec calls it
  * unqualified across the package. Byte-identical codegen verified by the
@@ -22,15 +23,15 @@ internal fun buildWireSizeFun(
 ): FunSpec {
     val builder =
         FunSpec
-            .builder("wireSize")
+            .builder("wireBytes")
             .addModifiers(KModifier.OVERRIDE)
             .addParameter("value", messageType)
             .addParameter("context", ENCODE_CONTEXT_CN)
-            .returns(WIRE_SIZE_CN)
+            .returns(WIRE_BYTE_COUNT_CN)
     // Any `@When` field collapses the message
     // wireSize to BackPatch — we don't attempt conditional-Exact arithmetic.
     if (shape.fields.any { it is FieldSpec.Conditional }) {
-        builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+        builder.addStatement("return %T.BackPatch", WIRE_BYTE_COUNT_CN)
         return builder.build()
     }
     // A `@RemainingBytes @UseCodec val: P` field's
@@ -40,7 +41,7 @@ internal fun buildWireSizeFun(
     // LengthPrefixedMessage) is a follow-on once we have a vector
     // where the size optimization actually matters.
     if (shape.fields.any { it is FieldSpec.DeferredPayload }) {
-        builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+        builder.addStatement("return %T.BackPatch", WIRE_BYTE_COUNT_CN)
         return builder.build()
     }
     // `@UseCodec` field shapes (bare scalar, `@LengthPrefixed` payload,
@@ -58,7 +59,7 @@ internal fun buildWireSizeFun(
     // BackPatch collapse on the parent — promoting to runtime-Exact-via-
     // cast is a follow-on once a vector benefits.
     if (shape.fields.any { it is FieldSpec.ProtocolMessageScalar }) {
-        builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+        builder.addStatement("return %T.BackPatch", WIRE_BYTE_COUNT_CN)
         return builder.build()
     }
     // Any `@LengthPrefixed val: String` collapses
@@ -67,7 +68,7 @@ internal fun buildWireSizeFun(
     // The rule applies regardless of position now that LPS
     // String can appear non-terminally.
     if (shape.fields.any { it is FieldSpec.LengthPrefixedString }) {
-        builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+        builder.addStatement("return %T.BackPatch", WIRE_BYTE_COUNT_CN)
         return builder.build()
     }
     // `@RemainingBytes val: String` collapses wireSize to BackPatch for the
@@ -75,7 +76,7 @@ internal fun buildWireSizeFun(
     // UTF-8 byte count is the walk the BackPatch path collapses into the
     // single writeString call.
     if (shape.fields.any { it is FieldSpec.RemainingBytesString }) {
-        builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+        builder.addStatement("return %T.BackPatch", WIRE_BYTE_COUNT_CN)
         return builder.build()
     }
     // `@RemainingBytes List<E>` where E is a
@@ -90,7 +91,7 @@ internal fun buildWireSizeFun(
             it is FieldSpec.RemainingBytesProtocolMessageList && it.elementIsBackPatch
         }
     ) {
-        builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+        builder.addStatement("return %T.BackPatch", WIRE_BYTE_COUNT_CN)
         return builder.build()
     }
     // Non-terminal `@RemainingBytes*` fields collapse the
@@ -107,7 +108,7 @@ internal fun buildWireSizeFun(
             it is FieldSpec.RemainingBytesProtocolMessageList && it.reservedTrailingBytes != 0
         }
     ) {
-        builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+        builder.addStatement("return %T.BackPatch", WIRE_BYTE_COUNT_CN)
         return builder.build()
     }
     // `@Count List<E>` with a BackPatch-shaped element collapses to BackPatch
@@ -115,7 +116,7 @@ internal fun buildWireSizeFun(
     // below casts each element wireSize `as Exact`, which would CCE on a
     // BackPatch element variant.
     if (shape.fields.any { it is FieldSpec.CountPrefixedProtocolMessageList && it.elementIsBackPatch }) {
-        builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+        builder.addStatement("return %T.BackPatch", WIRE_BYTE_COUNT_CN)
         return builder.build()
     }
 
@@ -133,42 +134,34 @@ internal fun buildWireSizeFun(
         val fixedBytes = shape.fields.sumOfFixedWireBytes().requireFixed("runtimeExactWireSize")
         for (f in runtimeExactVarFields) {
             when (f) {
-                is FieldSpec.UseCodecScalar -> {
-                    // The VariableLengthCodec contract fills wireSize in as
-                    // `Exact(encodedLength(value))`, but a user codec may
-                    // override it — degrade to BackPatch instead of casting
-                    // (a cast would CCE on a contract violation).
-                    builder.beginControlFlow(
-                        "val %L = when (val __s = %T.wireSize(value.%L, context))",
-                        "__${f.name}Size",
-                        f.codecType,
-                        f.name,
-                    )
-                    builder.addStatement("is %T.Exact -> __s.bytes", WIRE_SIZE_CN)
-                    builder.addStatement("%T.BackPatch -> return %T.BackPatch", WIRE_SIZE_CN, WIRE_SIZE_CN)
-                    builder.endControlFlow()
-                }
+                // A VariableLengthCodec's size is its `encodedLength`, called on the
+                // codec object itself so a value-class argument is passed unboxed.
+                is FieldSpec.UseCodecScalar ->
+                    if (f.isVariableLength) {
+                        builder.addStatement(
+                            "val %L = %T.encodedLength(value.%L).toLong()",
+                            "__${f.name}Size",
+                            f.codecType,
+                            f.name,
+                        )
+                    } else {
+                        val codec = CodeBlock.of("%T", f.codecType)
+                        appendExactOrBackPatch(builder, "__${f.name}Size", codec, "value.${f.name}")
+                    }
                 is FieldSpec.EnumScalar ->
                     builder.addStatement(
-                        "val %L = (%T.wireSize(value.%L.ordinal.toUInt(), context) as %T.Exact).bytes",
+                        "val %L = %T.encodedLength(value.%L.ordinal.toUInt()).toLong()",
                         "__${f.name}Size",
                         UNSIGNED_VARINT_CODEC_CN,
                         f.name,
-                        WIRE_SIZE_CN,
                     )
                 is FieldSpec.CountPrefixedProtocolMessageList ->
                     appendCountListWireSizeLocal(builder, f)
                 is FieldSpec.LengthPrefixedUseCodecPayload -> {
                     // Fixed-width prefix + probed payload body size.
-                    builder.beginControlFlow(
-                        "val %L = when (val __s = %T.wireSize(value.%L, context))",
-                        "__${f.name}Size",
-                        f.payloadCodecType,
-                        f.name,
-                    )
-                    builder.addStatement("is %T.Exact -> %L + __s.bytes", WIRE_SIZE_CN, f.prefixWidth)
-                    builder.addStatement("%T.BackPatch -> return %T.BackPatch", WIRE_SIZE_CN, WIRE_SIZE_CN)
-                    builder.endControlFlow()
+                    val bodyVar = "__${f.name}BodyBytes"
+                    appendExactOrBackPatch(builder, bodyVar, CodeBlock.of("%T", f.payloadCodecType), "value.${f.name}")
+                    builder.addStatement("val %L = %L + %L", "__${f.name}Size", f.prefixWidth, bodyVar)
                 }
                 is FieldSpec.LengthPrefixedUseCodecList -> {
                     // Probed element-size sum + the prefix codec's width for
@@ -180,22 +173,29 @@ internal fun buildWireSizeFun(
                         elementCodec = f.spec.elementCodecClassName,
                         sumVar = bodyBytesVar,
                     )
-                    builder.beginControlFlow(
-                        "val %L = when (val __p = %T.wireSize(%L.toUInt(), context))",
-                        "__${f.name}Size",
-                        f.spec.codecType,
+                    // The prefix encodes the body size as a UInt; a body past that range
+                    // cannot be prefixed, so the encode path reports it.
+                    builder.addStatement(
+                        "if (%L > %T.MAX_VALUE.toLong()) return %T.BackPatch",
                         bodyBytesVar,
+                        INT,
+                        WIRE_BYTE_COUNT_CN,
                     )
-                    builder.addStatement("is %T.Exact -> __p.bytes + %L", WIRE_SIZE_CN, bodyBytesVar)
-                    builder.addStatement("%T.BackPatch -> return %T.BackPatch", WIRE_SIZE_CN, WIRE_SIZE_CN)
-                    builder.endControlFlow()
+                    val prefixVar = "__${f.name}PrefixBytes"
+                    appendExactOrBackPatch(
+                        builder,
+                        prefixVar,
+                        CodeBlock.of("%T", f.spec.codecType),
+                        "$bodyBytesVar.toUInt()",
+                    )
+                    builder.addStatement("val %L = %L + %L", "__${f.name}Size", prefixVar, bodyBytesVar)
                 }
                 else -> {}
             }
         }
-        val sizeTerms = listOf(fixedBytes.toString()) + runtimeExactVarFields.map { "__${it.name}Size" }
+        val sizeTerms = listOf("${fixedBytes}L") + runtimeExactVarFields.map { "__${it.name}Size" }
         val sumExpr = sizeTerms.joinToString(" + ")
-        builder.addStatement("return %T.Exact(%L)", WIRE_SIZE_CN, sumExpr)
+        builder.addStatement("return %T.exact(%L)", WIRE_BYTE_COUNT_CN, sumExpr)
         return builder.build()
     }
     // Conservative fallbacks for `@UseCodec` shapes that did NOT qualify for
@@ -209,7 +209,7 @@ internal fun buildWireSizeFun(
                 it is FieldSpec.LengthPrefixedUseCodecPayload
         }
     ) {
-        builder.addStatement("return %T.BackPatch", WIRE_SIZE_CN)
+        builder.addStatement("return %T.BackPatch", WIRE_BYTE_COUNT_CN)
         return builder.build()
     }
     when (val terminal = shape.fields.lastOrNull()) {
@@ -220,21 +220,9 @@ internal fun buildWireSizeFun(
             // BackPatch instead of casting (a cast threw ClassCastException
             // on every encode).
             val headerBytes = shape.scalarHeaderBytes() + terminal.prefixWidth
-            builder.beginControlFlow(
-                "return when (val %L = %T.wireSize(value.%L, context))",
-                "${terminal.name}Size",
-                terminal.codecType,
-                terminal.name,
-            )
-            builder.addStatement(
-                "is %T.Exact -> %T.Exact(%L + %L.bytes)",
-                WIRE_SIZE_CN,
-                WIRE_SIZE_CN,
-                headerBytes,
-                "${terminal.name}Size",
-            )
-            builder.addStatement("%T.BackPatch -> %T.BackPatch", WIRE_SIZE_CN, WIRE_SIZE_CN)
-            builder.endControlFlow()
+            val bodyVar = "__${terminal.name}Size"
+            appendExactOrBackPatch(builder, bodyVar, CodeBlock.of("%T", terminal.codecType), "value.${terminal.name}")
+            builder.addStatement("return %T.exact(%LL + %L)", WIRE_BYTE_COUNT_CN, headerBytes, bodyVar)
         }
         is FieldSpec.LengthFromString -> {
             // Body byte count comes from the resolved LengthSource
@@ -242,8 +230,8 @@ internal fun buildWireSizeFun(
             // dotted). User-trusted.
             val prefixBytes = shape.scalarHeaderBytes()
             builder.addStatement(
-                "return %T.Exact(%L + %L)",
-                WIRE_SIZE_CN,
+                "return %T.exact(%LL + %L)",
+                WIRE_BYTE_COUNT_CN,
                 prefixBytes,
                 terminal.source.encodeAccessor(),
             )
@@ -252,8 +240,8 @@ internal fun buildWireSizeFun(
             // Same Exact shape via LengthSource.
             val prefixBytes = shape.scalarHeaderBytes()
             builder.addStatement(
-                "return %T.Exact(%L + %L)",
-                WIRE_SIZE_CN,
+                "return %T.exact(%LL + %L)",
+                WIRE_BYTE_COUNT_CN,
                 prefixBytes,
                 terminal.source.encodeAccessor(),
             )
@@ -267,8 +255,8 @@ internal fun buildWireSizeFun(
             // keeping it consistent with the body's encoded size.
             val prefixBytes = shape.scalarHeaderBytes()
             builder.addStatement(
-                "return %T.Exact(%L + %L)",
-                WIRE_SIZE_CN,
+                "return %T.exact(%LL + %L)",
+                WIRE_BYTE_COUNT_CN,
                 prefixBytes,
                 terminal.source.encodeAccessor(),
             )
@@ -289,8 +277,8 @@ internal fun buildWireSizeFun(
                 sumVar = bodySizeVar,
             )
             builder.addStatement(
-                "return %T.Exact(%L + %L)",
-                WIRE_SIZE_CN,
+                "return %T.exact(%LL + %L)",
+                WIRE_BYTE_COUNT_CN,
                 prefixBytes,
                 bodySizeVar,
             )
@@ -313,7 +301,7 @@ internal fun buildWireSizeFun(
                 (shape.singletonDispatchDiscriminator?.wireWidth ?: WireWidth.Zero)
                     .requireFixed("singletonDiscriminator")
             val total = shape.fields.sumOfFixedWireBytes().requireFixed("sumOfFixedWireBytes") + discriminatorBytes
-            builder.addStatement("return %T.Exact(%L)", WIRE_SIZE_CN, total)
+            builder.addStatement("return %T.exact(%LL)", WIRE_BYTE_COUNT_CN, total)
         }
     }
     return builder.build()
@@ -335,11 +323,10 @@ internal fun appendCountListWireSizeLocal(
 ) {
     val countSizeVar = "__${field.name}CountSize"
     builder.addStatement(
-        "val %L = (%T.wireSize(value.%L.size.toUInt(), context) as %T.Exact).bytes",
+        "val %L = %T.encodedLength(value.%L.size.toUInt()).toLong()",
         countSizeVar,
         UNSIGNED_VARINT_CODEC_CN,
         field.name,
-        WIRE_SIZE_CN,
     )
     val elementsSizeVar = "__${field.name}ElementsSize"
     appendElementWireSizeProbeLoop(
@@ -377,12 +364,14 @@ private fun appendElementWireSizeProbeLoop(
     elementCodec: TypeName,
     sumVar: String,
 ) {
-    builder.addStatement("var %L = 0", sumVar)
+    builder.addStatement("var %L = 0L", sumVar)
     builder.beginControlFlow("for (__elem in %L)", listAccessor)
-    builder.beginControlFlow("when (val __elemSize = %T.wireSize(__elem, context))", elementCodec)
-    builder.addStatement("is %T.Exact -> %L += __elemSize.bytes", WIRE_SIZE_CN, sumVar)
-    builder.addStatement("%T.BackPatch -> return %T.BackPatch", WIRE_SIZE_CN, WIRE_SIZE_CN)
-    builder.endControlFlow()
+    builder.addStatement(
+        "%L += %T.wireBytes(__elem, context).fold(exact = { it }, backPatch = { return %T.BackPatch })",
+        sumVar,
+        elementCodec,
+        WIRE_BYTE_COUNT_CN,
+    )
     builder.endControlFlow()
 }
 

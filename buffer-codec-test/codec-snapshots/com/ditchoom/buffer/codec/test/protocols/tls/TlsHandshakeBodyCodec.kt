@@ -6,13 +6,17 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.swapBytes
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 import kotlin.UShort
 
 public object TlsHandshakeBodyCodec : Codec<TlsHandshakeBody> {
@@ -33,13 +37,25 @@ public object TlsHandshakeBodyCodec : Codec<TlsHandshakeBody> {
     BinaryDataCodec.encode(buffer, value.random, context)
   }
 
-  override fun wireSize(`value`: TlsHandshakeBody, context: EncodeContext): WireSize = WireSize.BackPatch
+  override fun wireBytes(`value`: TlsHandshakeBody, context: EncodeContext): WireByteCount = WireByteCount.BackPatch
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: TlsHandshakeBody, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: TlsHandshakeBody, context: EncodeContext): Int = 2
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek = FramePeek.noFraming
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = FrameSize.Unframed
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 
   public fun partial(buffer: ReadBuffer, context: DecodeContext): Partial {
     val legacyVersionRaw = buffer.readShort()

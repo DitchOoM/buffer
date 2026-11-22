@@ -7,12 +7,16 @@ import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object RemoteHeaderCodec : Codec<RemoteHeader> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): RemoteHeader {
@@ -34,29 +38,40 @@ public object RemoteHeaderCodec : Codec<RemoteHeader> {
     buffer.writeText(value.payload, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
   }
 
-  override fun wireSize(`value`: RemoteHeader, context: EncodeContext): WireSize = WireSize.Exact(7 + value.payloadLength.toInt())
+  override fun wireBytes(`value`: RemoteHeader, context: EncodeContext): WireByteCount = WireByteCount.exact(7L + value.payloadLength.toInt())
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: RemoteHeader, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: RemoteHeader, context: EncodeContext): Int = 7 + value.payload.length
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 2) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 2) return FrameSize.NeedsMoreData
     val payloadLengthB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
     val payloadLengthB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val payloadLength = ((payloadLengthB0 shl 8) or payloadLengthB1).toUInt().toUShort()
     __offset += 2
-    if (stream.available() - baseOffset < __offset + 1) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData
     __offset += 1
-    if (stream.available() - baseOffset < __offset + 4) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 4) return FrameSize.NeedsMoreData
     __offset += 4
     val payloadBytes = payloadLength.toInt()
     if (payloadBytes < 0 || payloadBytes > Int.MAX_VALUE - __offset) {
       throw DecodeException(fieldPath = "RemoteHeader.payload", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + payloadBytes.toLong()}""")
     }
-    if (stream.available() - baseOffset < __offset + payloadBytes) return FramePeek.declaredIncomplete(__offset + payloadBytes)
     __offset += payloadBytes
-    return FramePeek.forDeclaredSize(__offset, stream.available() - baseOffset)
+    return FrameSize.declared(__offset.toLong())
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

@@ -7,12 +7,16 @@ import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object LpIntValueClassIdCodec : Codec<LpIntValueClassId> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): LpIntValueClassId {
@@ -49,13 +53,20 @@ public object LpIntValueClassIdCodec : Codec<LpIntValueClassId> {
     buffer.position(idEndPosition)
   }
 
-  override fun wireSize(`value`: LpIntValueClassId, context: EncodeContext): WireSize = WireSize.BackPatch
+  override fun wireBytes(`value`: LpIntValueClassId, context: EncodeContext): WireByteCount = WireByteCount.BackPatch
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: LpIntValueClassId, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: LpIntValueClassId, context: EncodeContext): Int = 4 + value.id.hex.length
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 4) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 4) return FrameSize.NeedsMoreData
     val idPrefixB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
     val idPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val idPrefixB2 = stream.peekByte(baseOffset + __offset + 2).toInt() and 0xFF
@@ -65,8 +76,13 @@ public object LpIntValueClassIdCodec : Codec<LpIntValueClassId> {
       throw DecodeException(fieldPath = "LpIntValueClassId.id", bufferPosition = baseOffset + __offset, expected = "__offset + 4 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 4 + idPrefix.toInt()}""")
     }
     __offset += 4 + idPrefix.toInt()
-    return FramePeek.forDeclaredSize(__offset, stream.available() - baseOffset)
+    return FrameSize.declared(__offset.toLong())
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

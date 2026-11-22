@@ -53,8 +53,8 @@ data class DeviceReport(
 ```
 
 The KSP processor generates `DeviceReportCodec` — an `object` implementing
-`Codec<DeviceReport>` with `encode`, `decode`, `wireSize`, and (when the wire
-format allows it) `peekFrameSize`:
+`Codec<DeviceReport>` with `encode`, `decode`, `wireBytes`, and (when the wire
+format allows it) `frameSize`:
 
 ```kotlin
 import com.ditchoom.buffer.BufferFactory
@@ -117,9 +117,9 @@ object DeviceReportCodec : Codec<DeviceReport> {
         buffer.writeString(value.deviceName)
     }
 
-    override fun wireSize(value: DeviceReport, context: EncodeContext): WireSize {
+    override fun wireBytes(value: DeviceReport, context: EncodeContext): WireByteCount {
         val nameBytes = value.deviceName.encodeToByteArray().size
-        return WireSize.Exact(1 + 2 + 4 + 8 + 8 + 8 + 4 + 1 + 2 + 2 + nameBytes)
+        return WireByteCount.exact(1L + 2 + 4 + 8 + 8 + 8 + 4 + 1 + 2 + 2 + nameBytes)
     }
 }
 ```

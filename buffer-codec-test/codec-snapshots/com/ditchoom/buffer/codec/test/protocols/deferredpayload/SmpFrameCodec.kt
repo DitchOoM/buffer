@@ -7,12 +7,16 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.test.protocols.payload.TextPayloadCodec
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 import kotlin.UByte
 import kotlin.UShort
 
@@ -81,37 +85,48 @@ public object SmpFrameCodec : Codec<SmpFrame> {
     TextPayloadCodec.encode(buffer, value.payload, context)
   }
 
-  override fun wireSize(`value`: SmpFrame, context: EncodeContext): WireSize = WireSize.BackPatch
+  override fun wireBytes(`value`: SmpFrame, context: EncodeContext): WireByteCount = WireByteCount.BackPatch
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: SmpFrame, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: SmpFrame, context: EncodeContext): Int = 8
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 1) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData
     __offset += 1
-    if (stream.available() - baseOffset < __offset + 1) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData
     __offset += 1
-    if (stream.available() - baseOffset < __offset + 2) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 2) return FrameSize.NeedsMoreData
     val payloadLengthB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
     val payloadLengthB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val payloadLength = ((payloadLengthB0 shl 8) or payloadLengthB1).toUInt().toUShort()
     __offset += 2
-    if (stream.available() - baseOffset < __offset + 2) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 2) return FrameSize.NeedsMoreData
     __offset += 2
-    if (stream.available() - baseOffset < __offset + 1) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData
     __offset += 1
-    if (stream.available() - baseOffset < __offset + 1) return FramePeek.needsMoreData
+    if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData
     __offset += 1
     val payloadBytes = payloadLength.toInt()
     if (payloadBytes < 0 || payloadBytes > Int.MAX_VALUE - __offset) {
       throw DecodeException(fieldPath = "SmpFrame.payload", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + payloadBytes.toLong()}""")
     }
-    if (stream.available() - baseOffset < __offset + payloadBytes) return FramePeek.declaredIncomplete(__offset + payloadBytes)
     __offset += payloadBytes
-    return FramePeek.forDeclaredSize(__offset, stream.available() - baseOffset)
+    return FrameSize.declared(__offset.toLong())
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 
   public fun partial(buffer: ReadBuffer, context: DecodeContext): Partial {
     val __batch2 = buffer.readLong()

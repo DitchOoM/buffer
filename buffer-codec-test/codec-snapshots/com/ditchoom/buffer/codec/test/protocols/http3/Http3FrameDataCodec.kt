@@ -7,13 +7,17 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 import kotlin.Throwable
 import kotlin.ULong
 
@@ -59,38 +63,47 @@ public object Http3FrameDataCodec : Codec<Http3Frame.Data> {
     BinaryDataCodec.encode(buffer, value.payload, context)
   }
 
-  override fun wireSize(`value`: Http3Frame.Data, context: EncodeContext): WireSize = WireSize.BackPatch
+  override fun wireBytes(`value`: Http3Frame.Data, context: EncodeContext): WireByteCount = WireByteCount.BackPatch
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: Http3Frame.Data, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: Http3Frame.Data, context: EncodeContext): Int = 0
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
     var __priorBytes = 0
-    val __frameTypeFrame = Http3FrameTypeCodec.peekFrame(stream, baseOffset + __priorBytes)
-    if (!__frameTypeFrame.isComplete) {
-      return __frameTypeFrame.withoutDeclaredSize()
-    }
-    __priorBytes += __frameTypeFrame.size
-    if (stream.available() - baseOffset < __priorBytes + 1) return FramePeek.needsMoreData
-    val __lengthPeekView = stream.peekBuffer(baseOffset + __priorBytes, 10) ?: return FramePeek.needsMoreData
+    val __frameTypeWidth = Http3FrameTypeCodec.frameSize(stream, baseOffset + __priorBytes).fold(declared = { it }, needsMoreData = { return FrameSize.NeedsMoreData }, unframed = { return FrameSize.Unframed })
+    if (__frameTypeWidth > stream.available() - baseOffset - __priorBytes) return FrameSize.NeedsMoreData
+    __priorBytes += __frameTypeWidth.toInt()
+    if (stream.available() - baseOffset < __priorBytes + 1) return FrameSize.NeedsMoreData
+    val __lengthPeekView = stream.peekBuffer(baseOffset + __priorBytes, 10) ?: return FrameSize.NeedsMoreData
     try {
       val __lengthPriorPos = __lengthPeekView.position()
       val length = try {
         Http3LengthCodec.decode(__lengthPeekView, DecodeContext.Empty)
       } catch (__e: Throwable) {
         when (__e::class.simpleName) {
-          "BufferUnderflowException", "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException" -> return FramePeek.needsMoreData
+          "BufferUnderflowException", "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException" -> return FrameSize.NeedsMoreData
           else -> throw __e
         }
       }
       val __lengthWidth = __lengthPeekView.position() - __lengthPriorPos
-      val __total = declaredFrameBytes(__priorBytes + __lengthWidth, length)
-      return FramePeek.forDeclaredSize(__total, stream.available() - baseOffset)
+      return FrameSize.declared(__priorBytes + __lengthWidth, length)
     } finally {
       (__lengthPeekView as? PlatformBuffer)?.freeNativeMemory()
     }
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 
   public fun partial(buffer: ReadBuffer, context: DecodeContext): Partial {
     val frameType = Http3FrameTypeCodec.decode(buffer, context)

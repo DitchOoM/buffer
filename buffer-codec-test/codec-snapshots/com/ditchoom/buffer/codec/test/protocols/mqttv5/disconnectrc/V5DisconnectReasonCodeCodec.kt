@@ -6,11 +6,15 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.FramePeek
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object V5DisconnectReasonCodeCodec : Codec<V5DisconnectReasonCode> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): V5DisconnectReasonCode {
@@ -90,36 +94,43 @@ public object V5DisconnectReasonCodeCodec : Codec<V5DisconnectReasonCode> {
     }
   }
 
-  override fun wireSize(`value`: V5DisconnectReasonCode, context: EncodeContext): WireSize = when (value) {
-    is V5DisconnectReasonCode.NormalDisconnection -> V5DisconnectReasonCodeNormalDisconnectionCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.DisconnectWithWillMessage -> V5DisconnectReasonCodeDisconnectWithWillMessageCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.UnspecifiedError -> V5DisconnectReasonCodeUnspecifiedErrorCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.MalformedPacket -> V5DisconnectReasonCodeMalformedPacketCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.ProtocolError -> V5DisconnectReasonCodeProtocolErrorCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.ImplementationSpecificError -> V5DisconnectReasonCodeImplementationSpecificErrorCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.NotAuthorized -> V5DisconnectReasonCodeNotAuthorizedCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.ServerBusy -> V5DisconnectReasonCodeServerBusyCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.ServerShuttingDown -> V5DisconnectReasonCodeServerShuttingDownCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.KeepAliveTimeout -> V5DisconnectReasonCodeKeepAliveTimeoutCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.SessionTakenOver -> V5DisconnectReasonCodeSessionTakenOverCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.TopicFilterInvalid -> V5DisconnectReasonCodeTopicFilterInvalidCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.TopicNameInvalid -> V5DisconnectReasonCodeTopicNameInvalidCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.ReceiveMaximumExceeded -> V5DisconnectReasonCodeReceiveMaximumExceededCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.TopicAliasInvalid -> V5DisconnectReasonCodeTopicAliasInvalidCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.PacketTooLarge -> V5DisconnectReasonCodePacketTooLargeCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.QuotaExceeded -> V5DisconnectReasonCodeQuotaExceededCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.AdministrativeAction -> V5DisconnectReasonCodeAdministrativeActionCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.PayloadFormatInvalid -> V5DisconnectReasonCodePayloadFormatInvalidCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.RetainNotSupported -> V5DisconnectReasonCodeRetainNotSupportedCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.QoSNotSupported -> V5DisconnectReasonCodeQoSNotSupportedCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.UseAnotherServer -> V5DisconnectReasonCodeUseAnotherServerCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.ServerMoved -> V5DisconnectReasonCodeServerMovedCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.SharedSubscriptionsNotSupported -> V5DisconnectReasonCodeSharedSubscriptionsNotSupportedCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.ConnectionRateExceeded -> V5DisconnectReasonCodeConnectionRateExceededCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.MaximumConnectTime -> V5DisconnectReasonCodeMaximumConnectTimeCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.SubscriptionIdentifiersNotSupported -> V5DisconnectReasonCodeSubscriptionIdentifiersNotSupportedCodec.wireSize(value, context)
-    is V5DisconnectReasonCode.WildcardSubscriptionsNotSupported -> V5DisconnectReasonCodeWildcardSubscriptionsNotSupportedCodec.wireSize(value, context)
+  override fun wireBytes(`value`: V5DisconnectReasonCode, context: EncodeContext): WireByteCount = when (value) {
+    is V5DisconnectReasonCode.NormalDisconnection -> V5DisconnectReasonCodeNormalDisconnectionCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.DisconnectWithWillMessage -> V5DisconnectReasonCodeDisconnectWithWillMessageCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.UnspecifiedError -> V5DisconnectReasonCodeUnspecifiedErrorCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.MalformedPacket -> V5DisconnectReasonCodeMalformedPacketCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.ProtocolError -> V5DisconnectReasonCodeProtocolErrorCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.ImplementationSpecificError -> V5DisconnectReasonCodeImplementationSpecificErrorCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.NotAuthorized -> V5DisconnectReasonCodeNotAuthorizedCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.ServerBusy -> V5DisconnectReasonCodeServerBusyCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.ServerShuttingDown -> V5DisconnectReasonCodeServerShuttingDownCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.KeepAliveTimeout -> V5DisconnectReasonCodeKeepAliveTimeoutCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.SessionTakenOver -> V5DisconnectReasonCodeSessionTakenOverCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.TopicFilterInvalid -> V5DisconnectReasonCodeTopicFilterInvalidCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.TopicNameInvalid -> V5DisconnectReasonCodeTopicNameInvalidCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.ReceiveMaximumExceeded -> V5DisconnectReasonCodeReceiveMaximumExceededCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.TopicAliasInvalid -> V5DisconnectReasonCodeTopicAliasInvalidCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.PacketTooLarge -> V5DisconnectReasonCodePacketTooLargeCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.QuotaExceeded -> V5DisconnectReasonCodeQuotaExceededCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.AdministrativeAction -> V5DisconnectReasonCodeAdministrativeActionCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.PayloadFormatInvalid -> V5DisconnectReasonCodePayloadFormatInvalidCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.RetainNotSupported -> V5DisconnectReasonCodeRetainNotSupportedCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.QoSNotSupported -> V5DisconnectReasonCodeQoSNotSupportedCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.UseAnotherServer -> V5DisconnectReasonCodeUseAnotherServerCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.ServerMoved -> V5DisconnectReasonCodeServerMovedCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.SharedSubscriptionsNotSupported -> V5DisconnectReasonCodeSharedSubscriptionsNotSupportedCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.ConnectionRateExceeded -> V5DisconnectReasonCodeConnectionRateExceededCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.MaximumConnectTime -> V5DisconnectReasonCodeMaximumConnectTimeCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.SubscriptionIdentifiersNotSupported -> V5DisconnectReasonCodeSubscriptionIdentifiersNotSupportedCodec.wireBytes(value, context)
+    is V5DisconnectReasonCode.WildcardSubscriptionsNotSupported -> V5DisconnectReasonCodeWildcardSubscriptionsNotSupportedCodec.wireBytes(value, context)
   }
+
+  @Deprecated(
+    message = "Call wireBytes.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: V5DisconnectReasonCode, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: V5DisconnectReasonCode, context: EncodeContext): Int = when (value) {
     is V5DisconnectReasonCode.NormalDisconnection -> V5DisconnectReasonCodeNormalDisconnectionCodec.sizeHint(value, context)
@@ -152,45 +163,50 @@ public object V5DisconnectReasonCodeCodec : Codec<V5DisconnectReasonCode> {
     is V5DisconnectReasonCode.WildcardSubscriptionsNotSupported -> V5DisconnectReasonCodeWildcardSubscriptionsNotSupportedCodec.sizeHint(value, context)
   }
 
-  override fun peekFrame(stream: StreamProcessor, baseOffset: Int): FramePeek {
-    if (stream.available() - baseOffset < 1) return FramePeek.needsMoreData
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
+    if (stream.available() - baseOffset < 1) return FrameSize.NeedsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()
     val __discriminator = V5DisconnectReasonCodeRaw(__discRaw)
     val __dispatchValue = __discriminator.id
     return when (__dispatchValue) {
-      0 -> V5DisconnectReasonCodeNormalDisconnectionCodec.peekFrame(stream, baseOffset)
-      4 -> V5DisconnectReasonCodeDisconnectWithWillMessageCodec.peekFrame(stream, baseOffset)
-      128 -> V5DisconnectReasonCodeUnspecifiedErrorCodec.peekFrame(stream, baseOffset)
-      129 -> V5DisconnectReasonCodeMalformedPacketCodec.peekFrame(stream, baseOffset)
-      130 -> V5DisconnectReasonCodeProtocolErrorCodec.peekFrame(stream, baseOffset)
-      131 -> V5DisconnectReasonCodeImplementationSpecificErrorCodec.peekFrame(stream, baseOffset)
-      135 -> V5DisconnectReasonCodeNotAuthorizedCodec.peekFrame(stream, baseOffset)
-      137 -> V5DisconnectReasonCodeServerBusyCodec.peekFrame(stream, baseOffset)
-      139 -> V5DisconnectReasonCodeServerShuttingDownCodec.peekFrame(stream, baseOffset)
-      141 -> V5DisconnectReasonCodeKeepAliveTimeoutCodec.peekFrame(stream, baseOffset)
-      142 -> V5DisconnectReasonCodeSessionTakenOverCodec.peekFrame(stream, baseOffset)
-      143 -> V5DisconnectReasonCodeTopicFilterInvalidCodec.peekFrame(stream, baseOffset)
-      144 -> V5DisconnectReasonCodeTopicNameInvalidCodec.peekFrame(stream, baseOffset)
-      147 -> V5DisconnectReasonCodeReceiveMaximumExceededCodec.peekFrame(stream, baseOffset)
-      148 -> V5DisconnectReasonCodeTopicAliasInvalidCodec.peekFrame(stream, baseOffset)
-      149 -> V5DisconnectReasonCodePacketTooLargeCodec.peekFrame(stream, baseOffset)
-      151 -> V5DisconnectReasonCodeQuotaExceededCodec.peekFrame(stream, baseOffset)
-      152 -> V5DisconnectReasonCodeAdministrativeActionCodec.peekFrame(stream, baseOffset)
-      153 -> V5DisconnectReasonCodePayloadFormatInvalidCodec.peekFrame(stream, baseOffset)
-      154 -> V5DisconnectReasonCodeRetainNotSupportedCodec.peekFrame(stream, baseOffset)
-      155 -> V5DisconnectReasonCodeQoSNotSupportedCodec.peekFrame(stream, baseOffset)
-      156 -> V5DisconnectReasonCodeUseAnotherServerCodec.peekFrame(stream, baseOffset)
-      157 -> V5DisconnectReasonCodeServerMovedCodec.peekFrame(stream, baseOffset)
-      158 -> V5DisconnectReasonCodeSharedSubscriptionsNotSupportedCodec.peekFrame(stream, baseOffset)
-      159 -> V5DisconnectReasonCodeConnectionRateExceededCodec.peekFrame(stream, baseOffset)
-      160 -> V5DisconnectReasonCodeMaximumConnectTimeCodec.peekFrame(stream, baseOffset)
-      161 -> V5DisconnectReasonCodeSubscriptionIdentifiersNotSupportedCodec.peekFrame(stream, baseOffset)
-      162 -> V5DisconnectReasonCodeWildcardSubscriptionsNotSupportedCodec.peekFrame(stream, baseOffset)
+      0 -> V5DisconnectReasonCodeNormalDisconnectionCodec.frameSize(stream, baseOffset)
+      4 -> V5DisconnectReasonCodeDisconnectWithWillMessageCodec.frameSize(stream, baseOffset)
+      128 -> V5DisconnectReasonCodeUnspecifiedErrorCodec.frameSize(stream, baseOffset)
+      129 -> V5DisconnectReasonCodeMalformedPacketCodec.frameSize(stream, baseOffset)
+      130 -> V5DisconnectReasonCodeProtocolErrorCodec.frameSize(stream, baseOffset)
+      131 -> V5DisconnectReasonCodeImplementationSpecificErrorCodec.frameSize(stream, baseOffset)
+      135 -> V5DisconnectReasonCodeNotAuthorizedCodec.frameSize(stream, baseOffset)
+      137 -> V5DisconnectReasonCodeServerBusyCodec.frameSize(stream, baseOffset)
+      139 -> V5DisconnectReasonCodeServerShuttingDownCodec.frameSize(stream, baseOffset)
+      141 -> V5DisconnectReasonCodeKeepAliveTimeoutCodec.frameSize(stream, baseOffset)
+      142 -> V5DisconnectReasonCodeSessionTakenOverCodec.frameSize(stream, baseOffset)
+      143 -> V5DisconnectReasonCodeTopicFilterInvalidCodec.frameSize(stream, baseOffset)
+      144 -> V5DisconnectReasonCodeTopicNameInvalidCodec.frameSize(stream, baseOffset)
+      147 -> V5DisconnectReasonCodeReceiveMaximumExceededCodec.frameSize(stream, baseOffset)
+      148 -> V5DisconnectReasonCodeTopicAliasInvalidCodec.frameSize(stream, baseOffset)
+      149 -> V5DisconnectReasonCodePacketTooLargeCodec.frameSize(stream, baseOffset)
+      151 -> V5DisconnectReasonCodeQuotaExceededCodec.frameSize(stream, baseOffset)
+      152 -> V5DisconnectReasonCodeAdministrativeActionCodec.frameSize(stream, baseOffset)
+      153 -> V5DisconnectReasonCodePayloadFormatInvalidCodec.frameSize(stream, baseOffset)
+      154 -> V5DisconnectReasonCodeRetainNotSupportedCodec.frameSize(stream, baseOffset)
+      155 -> V5DisconnectReasonCodeQoSNotSupportedCodec.frameSize(stream, baseOffset)
+      156 -> V5DisconnectReasonCodeUseAnotherServerCodec.frameSize(stream, baseOffset)
+      157 -> V5DisconnectReasonCodeServerMovedCodec.frameSize(stream, baseOffset)
+      158 -> V5DisconnectReasonCodeSharedSubscriptionsNotSupportedCodec.frameSize(stream, baseOffset)
+      159 -> V5DisconnectReasonCodeConnectionRateExceededCodec.frameSize(stream, baseOffset)
+      160 -> V5DisconnectReasonCodeMaximumConnectTimeCodec.frameSize(stream, baseOffset)
+      161 -> V5DisconnectReasonCodeSubscriptionIdentifiersNotSupportedCodec.frameSize(stream, baseOffset)
+      162 -> V5DisconnectReasonCodeWildcardSubscriptionsNotSupportedCodec.frameSize(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "V5DisconnectReasonCode.discriminator", bufferPosition = baseOffset, expected = "one of {0, 4, 128, 129, 130, 131, 135, 137, 139, 141, 142, 143, 144, 147, 148, 149, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162}", actual = """${__dispatchValue}""")
       }
     }
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = peekFrame(stream, baseOffset).toPeekResult()
+  @Deprecated(
+    message = "Call frameSize.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }
