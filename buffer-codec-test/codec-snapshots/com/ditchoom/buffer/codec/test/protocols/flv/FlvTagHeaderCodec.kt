@@ -6,10 +6,17 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.toPeekResult
+import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object FlvTagHeaderCodec : Codec<FlvTagHeader> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): FlvTagHeader {
@@ -57,9 +64,23 @@ public object FlvTagHeaderCodec : Codec<FlvTagHeader> {
     buffer.writeUByte((value.streamId and 0xFFu).toUByte())
   }
 
-  override fun wireSize(`value`: FlvTagHeader, context: EncodeContext): WireSize = WireSize.Exact(11)
+  override fun wireBytes(`value`: FlvTagHeader, context: EncodeContext): WireByteCount = WireByteCount.exact(11L)
+
+  @Deprecated(
+    message = "Call wireBytes, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: FlvTagHeader, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: FlvTagHeader, context: EncodeContext): Int = 11
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = if (stream.available() - baseOffset >= 11) PeekResult.Complete(11) else PeekResult.NeedsMoreData
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = FrameSize.declared(0, 11L)
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

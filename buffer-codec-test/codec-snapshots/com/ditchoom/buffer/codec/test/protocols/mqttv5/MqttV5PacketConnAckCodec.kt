@@ -1,21 +1,24 @@
 package com.ditchoom.buffer.codec.test.protocols.mqttv5
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameDetector
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
 import com.ditchoom.buffer.codec.test.protocols.mqttv5.connack.V5ConnectReasonCodeCodec
+import com.ditchoom.buffer.codec.toPeekResult
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
-import kotlin.Throwable
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object MqttV5PacketConnAckCodec : FrameDetector {
   public fun decode(buffer: ReadBuffer, context: DecodeContext): MqttV5Packet.ConnAck {
@@ -69,24 +72,12 @@ public object MqttV5PacketConnAckCodec : FrameDetector {
     V5PropertyBagCodec.encode(buffer, value.properties, context)
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 2) return PeekResult.NeedsMoreData
-    val __framingPeek = stream.peekBuffer(baseOffset + 1, 5) ?: return PeekResult.NeedsMoreData
-    try {
-      val __framingPeekStart = __framingPeek.position()
-      val __framingLength = try {
-        MqttRemainingLengthCodec.decode(__framingPeek, DecodeContext.Empty)
-      } catch (__e: Throwable) {
-        when (__e::class.simpleName) {
-          "BufferUnderflowException", "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException" -> return PeekResult.NeedsMoreData
-          else -> throw __e
-        }
-      }
-      val __framingPrefixWidth = __framingPeek.position() - __framingPeekStart
-      val __total = declaredFrameBytes(1 + __framingPrefixWidth, __framingLength.toLong())
-      return if (stream.available() - baseOffset >= __total) PeekResult.Complete(__total) else PeekResult.NeedsMoreData
-    } finally {
-      (__framingPeek as? PlatformBuffer)?.freeNativeMemory()
-    }
-  }
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = MqttRemainingLengthCodec.peekLength(stream, baseOffset + 1).fold(declared = { __lengthWidth, __bodyBytes -> FrameSize.declared(1 + __lengthWidth, __bodyBytes) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

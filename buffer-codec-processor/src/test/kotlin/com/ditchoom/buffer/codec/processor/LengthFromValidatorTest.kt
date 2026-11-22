@@ -392,7 +392,7 @@ class LengthFromValidatorTest {
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
                 import com.ditchoom.buffer.codec.Payload
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.LengthFrom
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -402,7 +402,7 @@ class LengthFromValidatorTest {
                 object BlobCodec : Codec<Blob> {
                     override fun decode(buffer: ReadBuffer, context: DecodeContext): Blob = Blob(0)
                     override fun encode(buffer: WriteBuffer, value: Blob, context: EncodeContext) {}
-                    override fun wireSize(value: Blob, context: EncodeContext): WireSize = WireSize.BackPatch
+                    override fun wireBytes(value: Blob, context: EncodeContext): WireByteCount = WireByteCount.BackPatch
                 }
 
                 @ProtocolMessage
@@ -453,7 +453,7 @@ class LengthFromValidatorTest {
                 import com.ditchoom.buffer.codec.Codec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.LengthFrom
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -463,7 +463,7 @@ class LengthFromValidatorTest {
                 object PlainCodec : Codec<Plain> {
                     override fun decode(buffer: ReadBuffer, context: DecodeContext): Plain = Plain(0)
                     override fun encode(buffer: WriteBuffer, value: Plain, context: EncodeContext) {}
-                    override fun wireSize(value: Plain, context: EncodeContext): WireSize = WireSize.BackPatch
+                    override fun wireBytes(value: Plain, context: EncodeContext): WireByteCount = WireByteCount.BackPatch
                 }
 
                 @ProtocolMessage

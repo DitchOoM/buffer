@@ -7,7 +7,7 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
@@ -448,8 +448,8 @@ private object WholeStringCodec : Codec<String> {
         context: DecodeContext,
     ): String = buffer.readString(buffer.remaining())
 
-    override fun wireSize(
+    override fun wireBytes(
         value: String,
         context: EncodeContext,
-    ): WireSize = WireSize.BackPatch
+    ): WireByteCount = WireByteCount.BackPatch
 }

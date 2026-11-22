@@ -4,7 +4,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -58,8 +58,8 @@ class MqttConnectProtocolNameCodecTest {
     @Test
     fun wireSizeIsBackPatch() {
         assertEquals(
-            WireSize.BackPatch,
-            MqttConnectProtocolNameCodec.wireSize(MqttConnectProtocolName("MQTT"), EncodeContext.Empty),
+            WireByteCount.BackPatch,
+            MqttConnectProtocolNameCodec.wireBytes(MqttConnectProtocolName("MQTT"), EncodeContext.Empty),
         )
     }
 }

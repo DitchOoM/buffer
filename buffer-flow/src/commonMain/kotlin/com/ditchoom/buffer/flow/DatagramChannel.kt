@@ -6,7 +6,7 @@ import com.ditchoom.buffer.ReadBuffer
  * The receive half of a datagram endpoint — the unreliable, pre-framed, **addressed** analogue of
  * [ByteSource].
  *
- * There is **no framing driver** here (no `StreamProcessor`, no `peekFrameSize`): the kernel already
+ * There is **no framing driver** here (no `StreamProcessor`, no `frameSize`): the kernel already
  * delivers one whole message per [receive], so a datagram source never dissolves message boundaries
  * the way the byte-stream shape does. [receive] returns exactly one [Datagram] (with its source
  * [Datagram.peer]) or a [DatagramReadResult.Closed].

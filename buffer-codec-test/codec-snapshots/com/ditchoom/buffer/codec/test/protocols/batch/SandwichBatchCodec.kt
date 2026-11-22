@@ -7,11 +7,18 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.toPeekResult
+import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.swapBytes
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 import kotlin.UInt
 
 public object SandwichBatchCodec : Codec<SandwichBatch> {
@@ -51,27 +58,41 @@ public object SandwichBatchCodec : Codec<SandwichBatch> {
     buffer.writeInt(if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) __batch4 else swapBytes(__batch4))
   }
 
-  override fun wireSize(`value`: SandwichBatch, context: EncodeContext): WireSize = WireSize.BackPatch
+  override fun wireBytes(`value`: SandwichBatch, context: EncodeContext): WireByteCount = WireByteCount.BackPatch
+
+  @Deprecated(
+    message = "Call wireBytes, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: SandwichBatch, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: SandwichBatch, context: EncodeContext): Int = 9
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 2) return FrameSize.NeedsMoreData
     __offset += 2
-    if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 2) return FrameSize.NeedsMoreData
     __offset += 2
-    if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData
     val gate = stream.peekByte(baseOffset + __offset) != 0.toByte()
     __offset += 1
     if (gate) {
-      if (stream.available() - baseOffset < __offset + 4) return PeekResult.NeedsMoreData
+      if (stream.available() - baseOffset < __offset + 4) return FrameSize.NeedsMoreData
       __offset += 4
     }
-    if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 2) return FrameSize.NeedsMoreData
     __offset += 2
-    if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 2) return FrameSize.NeedsMoreData
     __offset += 2
-    return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData
+    return FrameSize.declared(0, __offset.toLong())
   }
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

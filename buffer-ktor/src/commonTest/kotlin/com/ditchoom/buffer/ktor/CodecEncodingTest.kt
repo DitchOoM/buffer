@@ -6,7 +6,7 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.Encoder
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.test.protocols.simple.Command
 import com.ditchoom.buffer.codec.test.protocols.simple.CommandCodec
 import com.ditchoom.buffer.managed
@@ -16,10 +16,10 @@ import kotlin.test.assertFailsWith
 
 /** An [Encoder] that always throws a non-overflow exception, to exercise the failure-frees path. */
 private object ThrowingEncoder : Encoder<Command> {
-    override fun wireSize(
+    override fun wireBytes(
         value: Command,
         context: EncodeContext,
-    ): WireSize = WireSize.Exact(8)
+    ): WireByteCount = WireByteCount.exact(8)
 
     override fun encode(
         buffer: WriteBuffer,

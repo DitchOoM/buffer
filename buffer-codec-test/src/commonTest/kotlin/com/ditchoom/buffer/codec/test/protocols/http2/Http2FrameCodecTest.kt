@@ -10,8 +10,9 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.Payload
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -401,7 +402,7 @@ class Http2FrameCodecTest {
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, binaryDispatcher().peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, binaryDispatcher().peekOutcome(stream))
 
             // Three bytes — still not enough.
             val three = BufferFactory.Default.allocate(3)
@@ -410,7 +411,7 @@ class Http2FrameCodecTest {
             three.writeByte(0x08.toByte())
             three.resetForRead()
             stream.append(three)
-            assertEquals(PeekResult.NeedsMoreData, binaryDispatcher().peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, binaryDispatcher().peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -441,8 +442,8 @@ class Http2FrameCodecTest {
                 one.resetForRead()
                 stream.append(one)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    binaryDispatcher().peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    binaryDispatcher().peekOutcome(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -450,7 +451,7 @@ class Http2FrameCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), binaryDispatcher().peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), binaryDispatcher().peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -558,7 +559,7 @@ class Http2FrameCodecTest {
                 streamId = Http2StreamId(0u),
                 payload = Http2BinaryPayload(ByteArray(0)),
             )
-        assertEquals(WireSize.BackPatch, codec.wireSize(msg, EncodeContext.Empty))
+        assertEquals(WireByteCount.BackPatch, codec.wireBytes(msg, EncodeContext.Empty))
     }
 
     @Test
@@ -640,10 +641,10 @@ internal object Http2BinaryPayloadCodec : Codec<Http2BinaryPayload> {
         buffer.writeBytes(value.data)
     }
 
-    override fun wireSize(
+    override fun wireBytes(
         value: Http2BinaryPayload,
         context: EncodeContext,
-    ): WireSize = WireSize.Exact(value.data.size)
+    ): WireByteCount = WireByteCount.exact(value.data.size.toLong())
 }
 
 /**
@@ -669,8 +670,8 @@ internal object Http2OpaquePayloadCodec : Codec<Http2OpaquePayload> {
         buffer.writeULong(value.value)
     }
 
-    override fun wireSize(
+    override fun wireBytes(
         value: Http2OpaquePayload,
         context: EncodeContext,
-    ): WireSize = WireSize.Exact(8)
+    ): WireByteCount = WireByteCount.exact(8)
 }

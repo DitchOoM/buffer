@@ -5,15 +5,15 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 /**
@@ -110,9 +110,8 @@ class Slice15aLengthPrefixedPayloadCodecTest {
         // wireSize probes it and composes 2 (Short prefix) + 1 (body byte).
         // Before the @UseCodec promotion this collapsed to BackPatch.
         val msg = Slice15aLengthPrefixedPayload(data = BinaryData(byteArrayOf(0x42)))
-        val ws = Slice15aLengthPrefixedPayloadCodec.wireSize(msg, EncodeContext.Empty)
-        assertIs<WireSize.Exact>(ws)
-        assertEquals(3, ws.bytes)
+        val ws = Slice15aLengthPrefixedPayloadCodec.wireBytes(msg, EncodeContext.Empty)
+        assertEquals(WireByteCount.exact(3), ws)
     }
 
     @Test
@@ -127,8 +126,8 @@ class Slice15aLengthPrefixedPayloadCodecTest {
             buf.resetForRead()
             processor.append(buf)
             val availableBefore = processor.available()
-            val peek = Slice15aLengthPrefixedPayloadCodec.peekFrameSize(processor)
-            assertTrue(peek is PeekResult.Complete, "expected Complete, got $peek")
+            val peek = Slice15aLengthPrefixedPayloadCodec.peekOutcome(processor)
+            assertTrue(peek is PeekOutcome.Complete, "expected Complete, got $peek")
             assertEquals(6, peek.bytes)
             assertEquals(availableBefore, processor.available(), "peek must be non-consuming")
         } finally {
@@ -155,9 +154,9 @@ class Slice15aLengthPrefixedPayloadCodecTest {
                 chunk.writeByte(full.readByte())
                 chunk.resetForRead()
                 processor.append(chunk)
-                val peek = Slice15aLengthPrefixedPayloadCodec.peekFrameSize(processor)
+                val peek = Slice15aLengthPrefixedPayloadCodec.peekOutcome(processor)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
+                    PeekOutcome.NeedsMoreData,
                     peek,
                     "after $i of $totalBytes bytes, expected NeedsMoreData but got $peek",
                 )
@@ -166,8 +165,8 @@ class Slice15aLengthPrefixedPayloadCodecTest {
             last.writeByte(full.readByte())
             last.resetForRead()
             processor.append(last)
-            val peek = Slice15aLengthPrefixedPayloadCodec.peekFrameSize(processor)
-            assertTrue(peek is PeekResult.Complete, "expected Complete, got $peek")
+            val peek = Slice15aLengthPrefixedPayloadCodec.peekOutcome(processor)
+            assertTrue(peek is PeekOutcome.Complete, "expected Complete, got $peek")
             assertEquals(totalBytes, peek.bytes)
         } finally {
             processor.release()

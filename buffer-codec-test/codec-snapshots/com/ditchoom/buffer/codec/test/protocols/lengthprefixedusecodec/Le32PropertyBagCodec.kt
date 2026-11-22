@@ -2,21 +2,26 @@ package com.ditchoom.buffer.codec.test.protocols.lengthprefixedusecodec
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.LengthPrefixedListEncoder
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.codec.test.protocols.usecodecscalar.Le32LengthCodec
+import com.ditchoom.buffer.codec.toPeekResult
+import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
-import kotlin.Throwable
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object Le32PropertyBagCodec : Codec<Le32PropertyBag> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): Le32PropertyBag {
@@ -57,17 +62,13 @@ public object Le32PropertyBagCodec : Codec<Le32PropertyBag> {
     `value`: Le32PropertyBag,
     context: EncodeContext,
   ) {
-    var __propertiesBodyBytes = 0
+    var __propertiesBodyBytes = 0L
     var __propertiesAllExact = true
-    for (__elem in value.properties) {
-      val __elemSize = PropertyEntryCodec.wireSize(__elem, context)
-      if (__elemSize !is WireSize.Exact) {
-        __propertiesAllExact = false
-        break
-      }
-      __propertiesBodyBytes += __elemSize.bytes
+    val __propertiesElements = value.properties.iterator()
+    while (__propertiesAllExact && __propertiesElements.hasNext()) {
+      __propertiesBodyBytes += PropertyEntryCodec.wireBytes(__propertiesElements.next(), context).fold(exact = { it }, backPatch = { __propertiesAllExact = false; 0L })
     }
-    if (__propertiesAllExact) {
+    if (__propertiesAllExact && __propertiesBodyBytes <= Int.MAX_VALUE) {
       Le32LengthCodec.encode(buffer, __propertiesBodyBytes.toUInt(), context)
       for (__elem in value.properties) {
         PropertyEntryCodec.encode(buffer, __elem, context)
@@ -77,41 +78,32 @@ public object Le32PropertyBagCodec : Codec<Le32PropertyBag> {
     }
   }
 
-  override fun wireSize(`value`: Le32PropertyBag, context: EncodeContext): WireSize {
-    var __propertiesBodyBytes = 0
-    for (__elem in value.properties) {
-      when (val __elemSize = PropertyEntryCodec.wireSize(__elem, context)) {
-        is WireSize.Exact -> __propertiesBodyBytes += __elemSize.bytes
-        WireSize.BackPatch -> return WireSize.BackPatch
-      }
+  override fun wireBytes(`value`: Le32PropertyBag, context: EncodeContext): WireByteCount {
+    var __propertiesBodyBytes = 0L
+    val __propertiesBodyBytesList = value.properties
+    for (__i in 0 until __propertiesBodyBytesList.size) {
+      __propertiesBodyBytes += PropertyEntryCodec.wireBytes(__propertiesBodyBytesList[__i], context).fold(exact = { it }, backPatch = { return WireByteCount.BackPatch })
     }
-    val __propertiesSize = when (val __p = Le32LengthCodec.wireSize(__propertiesBodyBytes.toUInt(), context)) {
-      is WireSize.Exact -> __p.bytes + __propertiesBodyBytes
-      WireSize.BackPatch -> return WireSize.BackPatch
-    }
-    return WireSize.Exact(0 + __propertiesSize)
+    if (__propertiesBodyBytes > Int.MAX_VALUE.toLong()) return WireByteCount.BackPatch
+    val __propertiesSize = Le32LengthCodec.encodedWidth(__propertiesBodyBytes).fold(exact = { it }, backPatch = { Le32LengthCodec.wireBytes(__propertiesBodyBytes.toUInt(), context).fold(exact = { it }, backPatch = { return WireByteCount.BackPatch }) }) + __propertiesBodyBytes
+    return WireByteCount.exact(0L + __propertiesSize)
   }
+
+  @Deprecated(
+    message = "Call wireBytes, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: Le32PropertyBag, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: Le32PropertyBag, context: EncodeContext): Int = 0
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
-    val __propertiesPeekView = stream.peekBuffer(baseOffset + 0, 5) ?: return PeekResult.NeedsMoreData
-    try {
-      val __propertiesPriorPos = __propertiesPeekView.position()
-      val __propertiesLength = try {
-        Le32LengthCodec.decode(__propertiesPeekView, DecodeContext.Empty)
-      } catch (__e: Throwable) {
-        when (__e::class.simpleName) {
-          "BufferUnderflowException", "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException" -> return PeekResult.NeedsMoreData
-          else -> throw __e
-        }
-      }
-      val __propertiesWidth = __propertiesPeekView.position() - __propertiesPriorPos
-      val __total = declaredFrameBytes(0 + __propertiesWidth, __propertiesLength.toLong())
-      return if (stream.available() - baseOffset >= __total) PeekResult.Complete(__total) else PeekResult.NeedsMoreData
-    } finally {
-      (__propertiesPeekView as? PlatformBuffer)?.freeNativeMemory()
-    }
-  }
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = Le32LengthCodec.peekLength(stream, baseOffset + 0).fold(declared = { __lengthWidth, __bodyBytes -> FrameSize.declared(0 + __lengthWidth, __bodyBytes) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

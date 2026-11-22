@@ -8,7 +8,8 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -229,13 +230,13 @@ class Http3FcFrameCodecTest {
             for (i in 0 until wire.size - 1) {
                 appendByte(stream, wire[i])
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    Http3FcFrameCodec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    Http3FcFrameCodec.peekOutcome(stream),
                     "after ${i + 1}/${wire.size} bytes",
                 )
             }
             appendByte(stream, wire.last())
-            assertEquals(PeekResult.Complete(wire.size), Http3FcFrameCodec.peekFrameSize(stream), "fully buffered")
+            assertEquals(PeekOutcome.Complete(wire.size), Http3FcFrameCodec.peekOutcome(stream), "fully buffered")
         } finally {
             stream.release()
             pool.clear()

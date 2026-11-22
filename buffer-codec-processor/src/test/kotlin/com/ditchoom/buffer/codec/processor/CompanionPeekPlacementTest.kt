@@ -11,7 +11,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
- * Guards on companion-side `peekFrameSize` placement (#348), exercised against
+ * Guards on companion-side `frameSize` placement (#348), exercised against
  * hand-built KotlinPoet specs so they pin the rules without paying a KSP compile.
  *
  * Hoisting a peek body onto a companion is sound only because every receiver the
@@ -29,7 +29,7 @@ class CompanionPeekPlacementTest {
             assertFailsWith<IllegalStateException> {
                 genericCodecBuilder()
                     .addCodecCompanion(
-                        peek = peekFun("return payloadCodec.peekFrameSize(stream, baseOffset)"),
+                        peek = peekFun("return payloadCodec.frameSize(stream, baseOffset)"),
                     )
             }
         val message = failure.message.orEmpty()
@@ -61,7 +61,7 @@ class CompanionPeekPlacementTest {
         val failure =
             assertFailsWith<IllegalStateException> {
                 builder.addCodecCompanion(
-                    peek = peekFun("return publishCodec.peekFrameSize(stream, baseOffset)"),
+                    peek = peekFun("return publishCodec.frameSize(stream, baseOffset)"),
                     partial = partialFun(),
                 )
             }
@@ -76,31 +76,31 @@ class CompanionPeekPlacementTest {
                     peek =
                         peekFun(
                             """
-                            |val __headerFrame = VarIntCodec.peekFrameSize(stream, baseOffset)
-                            |val __total = __headerFrame.bytes + 2
-                            |return PeekResult.Complete(__total)
+                            |val __headerWidth = VarIntCodec.frameSize(stream, baseOffset)
+                            |    .fold({ it }, { return FrameSize.NeedsMoreData }, { return FrameSize.Unframed })
+                            |return FrameSize.declared(2, __headerWidth)
                             """.trimMargin(),
                         ),
                 )
         val companion = builder.build().typeSpecs.single()
         assertTrue(companion.isCompanion)
-        assertEquals(listOf("peekFrameSize"), companion.funSpecs.map { it.name })
+        assertEquals(listOf("frameSize", "peekFrameSize"), companion.funSpecs.map { it.name })
     }
 
     /**
      * A constant-`NoFraming` body hoists like any other. Placement follows what
      * the body *can* reach, not whether the shape frames — the same rule an
-     * `object` codec has always followed, where `FooCodec.peekFrameSize(...)`
-     * resolves regardless and `NoFraming` is a runtime answer.
+     * `object` codec has always followed, where `FooCodec.frameSize(...)`
+     * resolves regardless and `Unframed` is a runtime answer.
      */
     @Test
     fun `an unframable shape hoists its constant body too`() {
         val builder =
             genericCodecBuilder()
-                .addCodecCompanion(peek = peekFun("return PeekResult.NoFraming"))
+                .addCodecCompanion(peek = peekFun("return FrameSize.Unframed"))
         val companion = builder.build().typeSpecs.single()
         assertTrue(companion.isCompanion)
-        assertEquals(listOf("peekFrameSize"), companion.funSpecs.map { it.name })
+        assertEquals(listOf("frameSize", "peekFrameSize"), companion.funSpecs.map { it.name })
     }
 
     /**
@@ -116,7 +116,7 @@ class CompanionPeekPlacementTest {
                     peekFun(
                         """
                         |val __payloadCodecWidth = 4
-                        |return PeekResult.Complete(__payloadCodecWidth)
+                        |return FrameSize.declared(__payloadCodecWidth.toLong())
                         """.trimMargin(),
                     ),
             )
@@ -160,7 +160,7 @@ class CompanionPeekPlacementTest {
             assertFailsWith<IllegalArgumentException> {
                 genericCodecBuilder()
                     .addCodecCompanion(
-                        peek = peekFun("return PeekResult.Complete(4)"),
+                        peek = peekFun("return FrameSize.declared(4)"),
                         aggregator = named,
                     )
             }
@@ -172,7 +172,7 @@ class CompanionPeekPlacementTest {
         val builder =
             genericCodecBuilder()
                 .addCodecCompanion(
-                    peek = peekFun("return PeekResult.Complete(4)"),
+                    peek = peekFun("return FrameSize.declared(4)"),
                     aggregator =
                         TypeSpec
                             .companionObjectBuilder()
@@ -181,7 +181,7 @@ class CompanionPeekPlacementTest {
                 )
         val companion = builder.build().typeSpecs.single()
         assertEquals(
-            listOf("decodeAggregating", "peekFrameSize"),
+            listOf("decodeAggregating", "frameSize", "peekFrameSize"),
             companion.funSpecs.map { it.name }.sorted(),
         )
         assertEquals(1, companion.superinterfaces.size, "the companion is a FrameDetector value")
@@ -193,9 +193,9 @@ class CompanionPeekPlacementTest {
      */
     @Test
     fun `the member forwarder qualifies its call with Companion`() {
-        val forwarder = memberPeekFun(peekFun("return PeekResult.Complete(4)"))
+        val forwarder = memberPeekFun(peekFun("return FrameSize.declared(4)"))
         assertTrue(
-            "Companion.peekFrameSize(stream, baseOffset)" in forwarder.body.toString(),
+            "Companion.frameSize(stream, baseOffset)" in forwarder.body.toString(),
             forwarder.body.toString(),
         )
     }
@@ -215,11 +215,11 @@ class CompanionPeekPlacementTest {
 
     private fun peekFun(body: String): FunSpec =
         FunSpec
-            .builder("peekFrameSize")
+            .builder("frameSize")
             .addModifiers(KModifier.OVERRIDE)
             .addParameter("stream", STREAM_PROCESSOR_CN)
             .addParameter("baseOffset", INT)
-            .returns(PEEK_RESULT_CN)
+            .returns(FRAME_SIZE_CN)
             .addStatement("%L", body)
             .build()
 

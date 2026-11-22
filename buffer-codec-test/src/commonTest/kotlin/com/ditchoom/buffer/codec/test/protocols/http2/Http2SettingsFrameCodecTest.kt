@@ -5,8 +5,9 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -229,7 +230,7 @@ class Http2SettingsFrameCodecTest {
                     ),
             )
         // 9 (fixed header bytes) + 12 (length value) = 21
-        assertEquals(WireSize.Exact(21), Http2SettingsFrameCodec.wireSize(msg, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(21), Http2SettingsFrameCodec.wireBytes(msg, EncodeContext.Empty))
     }
 
     @Test
@@ -257,8 +258,8 @@ class Http2SettingsFrameCodecTest {
                 one.resetForRead()
                 stream.append(one)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    Http2SettingsFrameCodec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    Http2SettingsFrameCodec.peekOutcome(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -266,7 +267,7 @@ class Http2SettingsFrameCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), Http2SettingsFrameCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), Http2SettingsFrameCodec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()

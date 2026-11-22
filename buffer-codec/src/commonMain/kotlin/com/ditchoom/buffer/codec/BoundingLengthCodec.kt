@@ -1,6 +1,9 @@
 package com.ditchoom.buffer.codec
 
+import com.ditchoom.buffer.BufferUnderflowException
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.stream.StreamProcessor
 
 /**
  * A length [Codec] that narrows [ReadBuffer.limit] to bound the subsequent
@@ -44,14 +47,89 @@ interface BoundingLengthCodec<T : Any> : Codec<T> {
     )
 
     /**
+     * The length field at [baseOffset] of [stream], read without consuming it:
+     * `FrameSize.declared(headerBytes = <width of the field>, bodyBytes = <declared length>)`,
+     * or [FrameSize.NeedsMoreData] while the field has not fully arrived. Generated peeks
+     * call this.
+     *
+     * Override it with [StreamProcessor.peekByte] reads (or the other fixed-width peeks):
+     * that allocates nothing. The default decodes the field from a peeked view of up to
+     * [maxWireSize] bytes, which allocates the view and boxes the decoded value; it reads a
+     * value of an integer type (`UByte`..`ULong`, `Byte`..`Long`) and answers
+     * [FrameSize.Unframed] for any other `T`.
+     */
+    fun peekLength(
+        stream: StreamProcessor,
+        baseOffset: Int,
+    ): FrameSize = peekLengthByDecoding(stream, baseOffset)
+
+    /**
+     * How many bytes this codec writes for a declared length of [bodyBytes], without
+     * passing the value through the generic `T` (which boxes a `UInt`). Override it with
+     * the exact width.
+     *
+     * The default is [WireByteCount.BackPatch]: the width is not known without encoding, so
+     * callers size the field through [wireBytes] with the length as a `T`, which boxes.
+     */
+    fun encodedWidth(bodyBytes: Long): WireByteCount = WireByteCount.BackPatch
+
+    /**
      * The maximum number of bytes this codec ever writes for a single
      * encoded value. Used by the `@FramedBy` slicing-scheme emitter to
      * size the slack region at the front of the encode buffer so the
      * prefix can be right-flushed against the body without shifting body
      * bytes. For variable-width codecs (e.g. MQTT remaining-length: 1..4
      * bytes), this is the upper bound; for fixed-width codecs it equals
-     * the wire width. Implementations should pick the smallest value
-     * that satisfies `wireSize(maxValueOnWire).asExact == maxWireSize`.
+     * the wire width.
      */
     val maxWireSize: Int
 }
+
+/** [BoundingLengthCodec.peekLength]'s default: decode the field from a peeked view. */
+private fun <T : Any> BoundingLengthCodec<T>.peekLengthByDecoding(
+    stream: StreamProcessor,
+    baseOffset: Int,
+): FrameSize {
+    val view = stream.peekBuffer(baseOffset, maxWireSize) ?: return FrameSize.NeedsMoreData
+    try {
+        return lengthIn(view)
+    } finally {
+        (view as? PlatformBuffer)?.freeNativeMemory()
+    }
+}
+
+/**
+ * The length field decoded from [view]. A view shorter than [BoundingLengthCodec.maxWireSize]
+ * that runs out mid-field holds a field that has not fully arrived. A ByteArray-backed view
+ * reports that read as [IndexOutOfBoundsException], the others as [BufferUnderflowException].
+ */
+@Suppress("TooGenericExceptionCaught")
+private fun <T : Any> BoundingLengthCodec<T>.lengthIn(view: ReadBuffer): FrameSize {
+    val start = view.position()
+    val truncated = view.limit() - start < maxWireSize
+    return try {
+        val value = decode(view, DecodeContext.Empty)
+        integerLength(view.position() - start, value)
+    } catch (shortView: BufferUnderflowException) {
+        if (truncated) FrameSize.NeedsMoreData else throw shortView
+    } catch (shortView: IndexOutOfBoundsException) {
+        if (truncated) FrameSize.NeedsMoreData else throw shortView
+    }
+}
+
+/** A decoded length of an integer type, [width] bytes wide; [FrameSize.Unframed] for any other type. */
+private fun integerLength(
+    width: Int,
+    value: Any,
+): FrameSize =
+    when (value) {
+        is ULong -> FrameSize.declared(width, value)
+        is UInt -> FrameSize.declared(width, value.toLong())
+        is UShort -> FrameSize.declared(width, value.toLong())
+        is UByte -> FrameSize.declared(width, value.toLong())
+        is Long -> FrameSize.declared(width, value)
+        is Int -> FrameSize.declared(width, value.toLong())
+        is Short -> FrameSize.declared(width, value.toLong())
+        is Byte -> FrameSize.declared(width, value.toLong())
+        else -> FrameSize.Unframed
+    }

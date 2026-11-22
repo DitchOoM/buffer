@@ -9,7 +9,8 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameDetector
-import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.payload.TextPayload
 import com.ditchoom.buffer.codec.test.protocols.payload.TextPayloadCodec
 import com.ditchoom.buffer.pool.BufferPool
@@ -24,7 +25,7 @@ import kotlin.test.assertTrue
  * Issue #293 — a deferred payload sized by a sibling `@LengthFrom`.
  *
  * The load-bearing assertion is [peekFrameSizeCompletesOnceTheBodyArrives]:
- * before #293 this exact shape returned `PeekResult.NoFraming`, because the
+ * before #293 this exact shape returned `PeekOutcome.NoFraming`, because the
  * emitter decided framability from the payload field's *decode strategy*
  * (codec-deferred → unframable) rather than from whether a byte count was
  * on the wire. The wire format never changed; only the taxonomy did.
@@ -75,17 +76,17 @@ class SmpFrameCodecTest {
 
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, SmpFrameCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, SmpFrameCodec.peekOutcome(stream))
             for (i in 0 until totalBytes - 1) {
                 stream.append(singleByte(encoded.readByte()))
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    SmpFrameCodec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    SmpFrameCodec.peekOutcome(stream),
                     "after ${i + 1} of $totalBytes bytes",
                 )
             }
             stream.append(singleByte(encoded.readByte()))
-            assertEquals(PeekResult.Complete(totalBytes), SmpFrameCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), SmpFrameCodec.peekOutcome(stream))
 
             val decoded =
                 stream.readBufferScoped(totalBytes) { SmpFrameCodec.decode(this, DecodeContext.Empty) }
@@ -110,13 +111,13 @@ class SmpFrameCodecTest {
                 stream.append(encoded)
             }
             val firstSize = headerBytes + 3
-            assertEquals(PeekResult.Complete(firstSize), SmpFrameCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(firstSize), SmpFrameCodec.peekOutcome(stream))
             assertEquals(
                 first,
                 stream.readBufferScoped(firstSize) { SmpFrameCodec.decode(this, DecodeContext.Empty) },
             )
             val secondSize = headerBytes + 6
-            assertEquals(PeekResult.Complete(secondSize), SmpFrameCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(secondSize), SmpFrameCodec.peekOutcome(stream))
             assertEquals(
                 second,
                 stream.readBufferScoped(secondSize) { SmpFrameCodec.decode(this, DecodeContext.Empty) },
@@ -198,7 +199,7 @@ class SmpFrameCodecTest {
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
             stream.append(encoded)
-            assertEquals(PeekResult.Complete(totalBytes), SmpGenericFrameCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), SmpGenericFrameCodec.peekOutcome(stream))
             val decoded =
                 stream.readBufferScoped(totalBytes) {
                     SmpGenericFrameCodec
@@ -224,7 +225,7 @@ class SmpFrameCodecTest {
             stream.append(encoded)
             // Framing comes from the wire, not from the payload codec — peek
             // never runs it, which is exactly why the shape is framable.
-            assertEquals(PeekResult.Complete(totalBytes), codec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), codec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -255,8 +256,8 @@ class SmpFrameCodecTest {
         val detector: FrameDetector = SmpGenericFrameCodec
         try {
             stream.append(encoded)
-            assertEquals(PeekResult.Complete(totalBytes), SmpGenericFrameCodec.peekFrameSize(stream))
-            assertEquals(PeekResult.Complete(totalBytes), detector.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), SmpGenericFrameCodec.peekOutcome(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), detector.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -281,8 +282,8 @@ class SmpFrameCodecTest {
             stream.append(second)
             val payloads = mutableListOf<String>()
             while (true) {
-                val frame = SmpGenericFrameCodec.peekFrameSize(stream)
-                if (frame !is PeekResult.Complete) break
+                val frame = SmpGenericFrameCodec.peekOutcome(stream)
+                if (frame !is PeekOutcome.Complete) break
                 val decoded =
                     stream.readBufferScoped(frame.bytes) {
                         val partial = SmpGenericFrameCodec.partial<TextPayload>(this, DecodeContext.Empty)
@@ -293,7 +294,7 @@ class SmpFrameCodecTest {
                 payloads += decoded.payload.text
             }
             assertEquals(listOf("abc", "de"), payloads)
-            assertEquals(PeekResult.NeedsMoreData, SmpGenericFrameCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, SmpGenericFrameCodec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -426,7 +427,7 @@ class SmpFrameCodecTest {
             stream.append(encoded)
             // The dispatcher frames by reading the discriminator and delegating to
             // the variant's peek — no payload codec involved.
-            assertEquals(PeekResult.Complete(totalBytes), codec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), codec.peekOutcome(stream))
             val decoded =
                 stream.readBufferScoped(totalBytes) { codec.decode(this, DecodeContext.Empty) }
             assertEquals(original, decoded)

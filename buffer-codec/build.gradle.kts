@@ -11,7 +11,18 @@ plugins {
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
     alias(libs.plugins.dokka)
+    alias(libs.plugins.binary.compatibility.validator)
     signing
+}
+
+// Binary-compatibility validation locks the published public ABI, so a change such as a
+// property's JVM return type (`declaredBytes` ()I -> ()J) shows up in review as an `.api` diff.
+// JVM ABI only, like :buffer-flow and :buffer-crypto: host-independent, and the common public
+// surface is wholly contained in the JVM dump.
+apiValidation {
+    klib {
+        enabled = false
+    }
 }
 
 group = "com.ditchoom"

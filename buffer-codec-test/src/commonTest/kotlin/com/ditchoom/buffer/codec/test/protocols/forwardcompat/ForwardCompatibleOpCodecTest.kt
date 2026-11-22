@@ -8,7 +8,8 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.ForwardCompatibleFactoryKey
-import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.pool.PoolReleasable
@@ -115,7 +116,7 @@ class ForwardCompatibleOpCodecTest {
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
             stream.append(bufferOf(unknownWire))
-            assertEquals(PeekResult.Complete(unknownWire.size), ForwardCompatibleOpCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(unknownWire.size), ForwardCompatibleOpCodec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -129,7 +130,7 @@ class ForwardCompatibleOpCodecTest {
         try {
             // opcode + length prefix present, payload truncated to 1 of 3 bytes.
             stream.append(bufferOf(byteArrayOf(0x99.toByte(), 0x03, 0xAA.toByte())))
-            assertEquals(PeekResult.NeedsMoreData, ForwardCompatibleOpCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, ForwardCompatibleOpCodec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()

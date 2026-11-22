@@ -7,7 +7,7 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.Payload
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.annotations.LengthFrom
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.PacketType
@@ -29,7 +29,7 @@ import com.ditchoom.buffer.codec.test.protocols.payload.TextPayloadCodec
  *
  * Structurally this is `RemoteHeader` with `String` swapped for a
  * codec-decoded `Payload`. That swap used to change the *framing* answer
- * (`peekFrameSize` collapsed to `NoFraming`) even though it changes no
+ * (`frameSize` collapsed to `NoFraming`) even though it changes no
  * wire byte — the bug #293 is about.
  *
  * Wire layout (all multi-byte fields big-endian):
@@ -123,10 +123,10 @@ object ShortReadPayloadCodec : Codec<TextPayload> {
         buffer.writeString(value.text, Charset.UTF8)
     }
 
-    override fun wireSize(
+    override fun wireBytes(
         value: TextPayload,
         context: EncodeContext,
-    ): WireSize = WireSize.BackPatch
+    ): WireByteCount = WireByteCount.BackPatch
 }
 
 /** Carrier for [ShortReadPayloadCodec] — see its docs. */
@@ -145,7 +145,7 @@ data class ShortReadFrame(
  * codec-deferred one.
  *
  * A full-width carrier is the only shape where a wire-supplied length can
- * reach `Int.MAX_VALUE` and overflow `peekFrameSize`'s running offset
+ * reach `Int.MAX_VALUE` and overflow `frameSize`'s running offset
  * (`__offset + payloadBytes`). The `UShort` fixtures above cannot express
  * that value, so without this fixture the overflow guard would exist in
  * the deferred peeks but never execute. Non-adjacent carrier (`flags`

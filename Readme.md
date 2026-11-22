@@ -95,7 +95,7 @@ data class SensorReading(
 )
 ```
 
-The KSP processor generates a full `Codec<SensorReading>` — encode, decode, and wireSize — at compile time:
+The KSP processor generates a full `Codec<SensorReading>` — encode, decode, and wireBytes — at compile time:
 
 ```kotlin
 val buffer = BufferFactory.Default.allocate(64)
@@ -121,7 +121,7 @@ Annotations cover common binary protocol patterns:
 - `@ForwardCompatible(unknown)` + `@UnknownVariant` — skip and preserve unrecognized sealed variants byte-identically (forward-compatible relay/persistence)
 - Value classes wrapping primitives — zero-overhead typed wrappers (e.g., `value class PacketId(val raw: UShort)`)
 
-Generated codecs also provide `peekFrameSize(stream)` for zero-boilerplate stream framing and `CodecContext` for typed runtime configuration through codec chains.
+Generated codecs also provide `frameSize(stream)` (and `readFrame`) for zero-boilerplate stream framing and `CodecContext` for typed runtime configuration through codec chains. `frameSize` and `wireBytes` return value classes that do not box; the boxed `peekFrameSize` and `wireSize` still work, deprecated until the next major release.
 
 Generated codecs implement the same `Codec<T>` interface used for manual codecs, so all patterns (streaming, round-trip testing, composition) work unchanged.
 

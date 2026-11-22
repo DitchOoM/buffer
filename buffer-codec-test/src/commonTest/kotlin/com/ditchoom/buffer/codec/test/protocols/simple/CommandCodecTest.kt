@@ -6,8 +6,9 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -61,8 +62,8 @@ class CommandCodecTest {
         // Per-variant tightness: Ping reports its real fixed size 1 + 8 = 9
         // even though it shares a sealed parent with the variable-length Echo.
         assertEquals(
-            WireSize.Exact(9),
-            CommandCodec.wireSize(Command.Ping(ts = 0L), EncodeContext.Empty),
+            WireByteCount.exact(9),
+            CommandCodec.wireBytes(Command.Ping(ts = 0L), EncodeContext.Empty),
         )
     }
 
@@ -71,8 +72,8 @@ class CommandCodecTest {
         // Echo's terminal is @LengthPrefixed val: String
         // forces BackPatch on that field shape; the dispatcher propagates.
         assertEquals(
-            WireSize.BackPatch,
-            CommandCodec.wireSize(Command.Echo(msg = "anything"), EncodeContext.Empty),
+            WireByteCount.BackPatch,
+            CommandCodec.wireBytes(Command.Echo(msg = "anything"), EncodeContext.Empty),
         )
     }
 
@@ -117,7 +118,7 @@ class CommandCodecTest {
             // reading more bytes, so NoFraming would be a misleading signal.
             val ex =
                 assertFailsWith<DecodeException> {
-                    CommandCodec.peekFrameSize(stream)
+                    CommandCodec.peekOutcome(stream)
                 }
             assertEquals("Command.discriminator", ex.fieldPath)
             assertEquals(0, ex.bufferPosition)
@@ -141,15 +142,15 @@ class CommandCodecTest {
 
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, CommandCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, CommandCodec.peekOutcome(stream))
             for (i in 0 until totalBytes - 1) {
                 val one = BufferFactory.Default.allocate(1)
                 one.writeByte(encoded.readByte())
                 one.resetForRead()
                 stream.append(one)
-                val result = CommandCodec.peekFrameSize(stream)
+                val result = CommandCodec.peekOutcome(stream)
                 assertTrue(
-                    result == PeekResult.NeedsMoreData,
+                    result == PeekOutcome.NeedsMoreData,
                     "after ${i + 1} bytes expected NeedsMoreData, got $result",
                 )
             }
@@ -157,7 +158,7 @@ class CommandCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), CommandCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), CommandCodec.peekOutcome(stream))
 
             val decoded =
                 stream.readBufferScoped(totalBytes) {

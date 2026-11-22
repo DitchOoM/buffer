@@ -6,7 +6,7 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -72,12 +72,12 @@ class QuicPacketHeaderCodecTest {
     @Test
     fun wireSizeIsOneByteForBothVariants() {
         assertEquals(
-            WireSize.Exact(1),
-            QuicPacketHeaderCodec.wireSize(QuicPacketHeader.ShortHeader(), EncodeContext.Empty),
+            WireByteCount.exact(1),
+            QuicPacketHeaderCodec.wireBytes(QuicPacketHeader.ShortHeader(), EncodeContext.Empty),
         )
         assertEquals(
-            WireSize.Exact(1),
-            QuicPacketHeaderCodec.wireSize(QuicPacketHeader.LongHeader(), EncodeContext.Empty),
+            WireByteCount.exact(1),
+            QuicPacketHeaderCodec.wireBytes(QuicPacketHeader.LongHeader(), EncodeContext.Empty),
         )
     }
 

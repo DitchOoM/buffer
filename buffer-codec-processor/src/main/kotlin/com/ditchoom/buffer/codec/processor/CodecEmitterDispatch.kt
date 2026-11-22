@@ -1,6 +1,5 @@
 package com.ditchoom.buffer.codec.processor
 
-import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.CodeBlock
 import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.FunSpec
@@ -368,16 +367,16 @@ internal fun buildDispatchWireSizeFun(shape: DispatchShape): FunSpec {
                 when (val ws = variant.wireSize) {
                     is VariantWireSize.LiteralExact ->
                         body.addStatement(
-                            "is %T -> %T.Exact(%L)",
+                            "is %T -> %T.exact(%LL)",
                             branchType,
-                            WIRE_SIZE_CN,
+                            WIRE_BYTE_COUNT_CN,
                             1 + ws.bytes,
                         )
                     is VariantWireSize.BackPatch ->
                         body.addStatement(
                             "is %T -> %T.BackPatch",
                             branchType,
-                            WIRE_SIZE_CN,
+                            WIRE_BYTE_COUNT_CN,
                         )
                     is VariantWireSize.RuntimeExact -> {
                         // The variant's wireSize is Exact in the common case,
@@ -385,15 +384,14 @@ internal fun buildDispatchWireSizeFun(shape: DispatchShape): FunSpec {
                         // whose elements turn out BackPatch) may degrade —
                         // forward BackPatch instead of casting (a cast threw
                         // ClassCastException on every encode).
-                        body.beginControlFlow("is %T ->", branchType)
-                        body.beginControlFlow(
-                            "when (val inner = %L.wireSize(value, context))",
+                        body.addStatement(
+                            "is %T -> %L.wireBytes(value, context).fold(exact = { %T.exact(1 + it) }, " +
+                                "backPatch = { %T.BackPatch })",
+                            branchType,
                             variant.codecReceiver(),
+                            WIRE_BYTE_COUNT_CN,
+                            WIRE_BYTE_COUNT_CN,
                         )
-                        body.addStatement("is %T.Exact -> %T.Exact(1 + inner.bytes)", WIRE_SIZE_CN, WIRE_SIZE_CN)
-                        body.addStatement("%T.BackPatch -> %T.BackPatch", WIRE_SIZE_CN, WIRE_SIZE_CN)
-                        body.endControlFlow()
-                        body.endControlFlow()
                     }
                     // Delegated is produced only by the @DispatchOn adapter
                     // (ReReadByVariant). ConsumedByDispatcher variants are
@@ -415,14 +413,14 @@ internal fun buildDispatchWireSizeFun(shape: DispatchShape): FunSpec {
                 val branchType = variant.branchTypeName(shape.genericity)
                 if (variant.codecRef is VariantCodecRef.GenericInstance) {
                     body.addStatement(
-                        "is %T -> %L.wireSize(value as %T, context)",
+                        "is %T -> %L.wireBytes(value as %T, context)",
                         branchType,
                         variant.codecReceiver(),
                         variant.typedRef(shape.genericity),
                     )
                 } else {
                     body.addStatement(
-                        "is %T -> %L.wireSize(value, context)",
+                        "is %T -> %L.wireBytes(value, context)",
                         branchType,
                         variant.codecReceiver(),
                     )
@@ -433,11 +431,11 @@ internal fun buildDispatchWireSizeFun(shape: DispatchShape): FunSpec {
     }
 
     return FunSpec
-        .builder("wireSize")
+        .builder("wireBytes")
         .addModifiers(KModifier.OVERRIDE)
         .addParameter("value", parentTypeRef)
         .addParameter("context", ENCODE_CONTEXT_CN)
-        .returns(WIRE_SIZE_CN)
+        .returns(WIRE_BYTE_COUNT_CN)
         .addCode(body.build())
         .build()
 }
@@ -523,12 +521,12 @@ internal fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
     // and return, bypassing discriminator routing.
     shape.customPeek?.let { customPeek ->
         return FunSpec
-            .builder("peekFrameSize")
+            .builder("frameSize")
             .addModifiers(KModifier.OVERRIDE)
             .addParameter("stream", STREAM_PROCESSOR_CN)
             .addParameter("baseOffset", INT)
-            .returns(PEEK_RESULT_CN)
-            .addStatement("return %T.peekFrameSize(stream, baseOffset)", customPeek)
+            .returns(FRAME_SIZE_CN)
+            .addStatement("return %T.frameSize(stream, baseOffset)", customPeek)
             .build()
     }
 
@@ -537,29 +535,25 @@ internal fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
             body.addStatement(
                 "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
                 disc.wireWidth.requireFixed("dispatch peek"),
-                PEEK_RESULT_CN,
+                FRAME_SIZE_CN,
             )
             body.addStatement(
                 "val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF",
             )
             body.beginControlFlow("return when (discriminator)")
             for (variant in shape.variants) {
-                body.beginControlFlow(
-                    "%L ->",
-                    variant.dispatchLabel(shape.discriminator.labelFormat),
-                )
-                body.beginControlFlow(
-                    "when (val inner = %L.peekFrameSize(stream, baseOffset + 1))",
-                    variant.codecReceiver(),
-                )
+                // The variant's body excludes the discriminator byte, so a declared size
+                // grows by that byte; the other states pass through.
                 body.addStatement(
-                    "is %T.Complete -> %T.Complete(1 + inner.bytes)",
-                    PEEK_RESULT_CN,
-                    PEEK_RESULT_CN,
+                    "%L -> %L.frameSize(stream, baseOffset + 1)" +
+                        ".fold(declared = { __h, __b -> %T.declared(1 + __h, __b) }, " +
+                        "needsMoreData = { %T.NeedsMoreData }, unframed = { %T.Unframed })",
+                    variant.dispatchLabel(shape.discriminator.labelFormat),
+                    variant.codecReceiver(),
+                    FRAME_SIZE_CN,
+                    FRAME_SIZE_CN,
+                    FRAME_SIZE_CN,
                 )
-                body.addStatement("else -> inner")
-                body.endControlFlow()
-                body.endControlFlow()
             }
             body.beginControlFlow("else ->")
             body.addStatement(
@@ -576,7 +570,7 @@ internal fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
             body.addStatement(
                 "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
                 disc.wireWidth.requireFixed("dispatch peek"),
-                PEEK_RESULT_CN,
+                FRAME_SIZE_CN,
             )
             // Peek the discriminator's inner-scalar bytes at baseOffset and
             // reconstruct the value class — the same path the value-class
@@ -604,7 +598,7 @@ internal fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
                 // Variant.peek counts the discriminator bytes in its own
                 // header field, so we delegate at baseOffset, not + 1.
                 body.addStatement(
-                    "%L -> %L.peekFrameSize(stream, baseOffset)",
+                    "%L -> %L.frameSize(stream, baseOffset)",
                     variant.dispatchLabel(shape.discriminator.labelFormat),
                     variant.codecReceiver(),
                 )
@@ -623,47 +617,29 @@ internal fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
         is Discriminator.Varint -> {
             // Variable-width discriminator: its byte count isn't known
             // statically, so measure it via the value class codec's own
-            // peekFrameSize (which delegates to the consumer's
+            // frameSize (which delegates to the consumer's
             // VariableLengthCodec). If the prefix is too short to frame the
-            // discriminator, propagate NeedsMoreData / NoFraming unchanged.
-            body.addStatement(
-                "val __discFrame = %T.peekFrameSize(stream, baseOffset)",
-                disc.codecClassName,
+            // discriminator, propagate NeedsMoreData / Unframed unchanged.
+            appendPriorFrameWidth(body, "__discWidth", CodeBlock.of("%T", disc.codecClassName), "0")
+            // Recover the dispatch value through the inner codec's peekInteger (primitive
+            // peeks, no slice), rebuilding the value class from it. A value peekInteger
+            // cannot represent is decoded from a non-consuming view of exactly the measured
+            // width instead. Then PURE-DELEGATE to the variant at baseOffset (the variant
+            // re-reads the self-delimiting discriminator as its first field, so no `1 +`).
+            body.add(
+                "val __dispatchValue = %T.peekInteger(stream, baseOffset).fold(\n",
+                disc.innerCodecClassName,
             )
-            body.beginControlFlow("if (__discFrame !is %T.Complete)", PEEK_RESULT_CN)
-            body.addStatement("return __discFrame")
-            body.endControlFlow()
-            // Decode the discriminator from a non-consuming view of exactly
-            // its measured width to recover the dispatch value, then PURE-
-            // DELEGATE to the variant at baseOffset (the variant re-reads the
-            // self-delimiting discriminator as its first field, so no `1 +`).
-            body.addStatement(
-                "val __discView = stream.peekBuffer(baseOffset, __discFrame.bytes) ?: return %T.NeedsMoreData",
-                PEEK_RESULT_CN,
-            )
-            body.beginControlFlow("val __dispatchValue = try")
-            body.addStatement(
-                "val __discriminator = %T.decode(__discView, %T.Empty)",
-                disc.codecClassName,
-                DECODE_CONTEXT_CN,
-            )
-            body.addStatement(
-                "%L",
-                dispatchValueIntCoercion(
-                    disc.dispatchValueKind,
-                    "__discriminator.${disc.dispatchValueProperty}",
-                ),
-            )
-            body.nextControlFlow("finally")
-            body.addStatement(
-                "(__discView as? %T)?.freeNativeMemory()",
-                PLATFORM_BUFFER_CN,
-            )
-            body.endControlFlow()
+            body.indent()
+            body.add("value = { __raw -> %L },\n", dispatchValueFromPeekedInteger(disc))
+            body.add("needsMoreData = { return %T.NeedsMoreData },\n", FRAME_SIZE_CN)
+            body.add("notRepresentable = {%L},\n", decodeDiscriminatorFromView(disc))
+            body.unindent()
+            body.add(")\n")
             body.beginControlFlow("return when (__dispatchValue)")
             for (variant in shape.variants) {
                 body.addStatement(
-                    "%L -> %L.peekFrameSize(stream, baseOffset)",
+                    "%L -> %L.frameSize(stream, baseOffset)",
                     variant.dispatchLabel(shape.discriminator.labelFormat),
                     variant.codecReceiver(),
                 )
@@ -682,11 +658,11 @@ internal fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
     }
 
     return FunSpec
-        .builder("peekFrameSize")
+        .builder("frameSize")
         .addModifiers(KModifier.OVERRIDE)
         .addParameter("stream", STREAM_PROCESSOR_CN)
         .addParameter("baseOffset", INT)
-        .returns(PEEK_RESULT_CN)
+        .returns(FRAME_SIZE_CN)
         .addCode(body.build())
         .build()
 }
@@ -742,12 +718,12 @@ internal fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
                 builder.addFunction(buildDispatchDecodeFun(shape))
                 if (framed) {
                     builder.addFunction(buildFramedByDispatchOnEncodeFun(shape, parentTypeRef))
-                    builder.addFunction(buildFramedByDispatchOnPeekFun(shape))
+                    builder.addFunctions(withLegacyPeekFrameSize(buildFramedByDispatchOnPeekFun(shape)))
                 } else {
                     builder.addFunction(buildDispatchEncodeFun(shape))
-                    builder.addFunction(buildDispatchWireSizeFun(shape))
+                    builder.addFunctions(withLegacyWireSize(buildDispatchWireSizeFun(shape)))
                     builder.addFunction(buildDispatchSizeHintFun(shape))
-                    builder.addFunction(buildDispatchPeekFun(shape))
+                    builder.addFunctions(withLegacyPeekFrameSize(buildDispatchPeekFun(shape)))
                 }
                 builder.build()
             }
@@ -806,17 +782,18 @@ internal fun buildDispatchFileSpec(shape: DispatchShape): FileSpec {
                     // generic codec's and hoists the same way (#348).
                     val peek = buildFramedByDispatchOnPeekFun(shape)
                     builder.addFunction(memberPeekFun(peek))
+                    builder.addFunction(legacyPeekFrameSizeFun(peek))
                     builder.addCodecCompanion(peek = peek, aggregator = aggregator)
                 } else {
                     builder.addFunction(buildDispatchEncodeFun(shape))
-                    builder.addFunction(buildDispatchWireSizeFun(shape))
+                    builder.addFunctions(withLegacyWireSize(buildDispatchWireSizeFun(shape)))
                     builder.addFunction(buildDispatchSizeHintFun(shape))
                     // The one shape whose peek genuinely cannot hoist: it routes
                     // through per-variant receivers, and a generic variant's is a
                     // constructor-injected instance field. Member-only, and no
                     // `peek` passed below — `requireCodecIndependentPeek` would
                     // reject this body on sight.
-                    builder.addFunction(buildDispatchPeekFun(shape))
+                    builder.addFunctions(withLegacyPeekFrameSize(buildDispatchPeekFun(shape)))
                     builder.addCodecCompanion(aggregator = aggregator)
                 }
                 builder.build()
@@ -904,94 +881,23 @@ internal fun buildFramedByDispatchOnPeekFun(shape: DispatchShape): FunSpec {
             ?: error("buildFramedByDispatchOnPeekFun called on shape without @FramedBy")
     val builder =
         FunSpec
-            .builder("peekFrameSize")
+            .builder("frameSize")
             .addModifiers(KModifier.OVERRIDE)
             .addParameter("stream", STREAM_PROCESSOR_CN)
             .addParameter("baseOffset", INT)
-            .returns(PEEK_RESULT_CN)
+            .returns(FRAME_SIZE_CN)
     val body = CodeBlock.builder()
-    val headerWidthExpr: String
     if (shape.discriminator is Discriminator.Varint) {
-        // Variable-width discriminator: measure its width via the value
-        // class codec's own peek (works for unknown/GREASE types too —
-        // a varint self-delimits regardless of whether the dispatch
-        // value is recognized), then walk the framing prefix at the
-        // measured offset with the framing codec's worst-case budget.
+        // Variable-width discriminator: its codec declares the width (unknown/GREASE types
+        // too — a varint self-delimits), and the framing length follows it.
         val disc = shape.discriminator as Discriminator.Varint
-        body.addStatement(
-            "val __headerFrame = %T.peekFrameSize(stream, baseOffset)",
-            disc.codecClassName,
-        )
-        body.beginControlFlow("if (__headerFrame !is %T.Complete)", PEEK_RESULT_CN)
-        body.addStatement("return __headerFrame")
-        body.endControlFlow()
-        body.addStatement("val __headerWireWidth = __headerFrame.bytes")
-        body.addStatement(
-            "if (stream.available() - baseOffset < __headerWireWidth + 1) return %T.NeedsMoreData",
-            PEEK_RESULT_CN,
-        )
-        body.addStatement(
-            "val __framingPeek = stream.peekBuffer(baseOffset + __headerWireWidth, %T.maxWireSize) " +
-                "?: return %T.NeedsMoreData",
-            framedBy.codecClassName,
-            PEEK_RESULT_CN,
-        )
-        headerWidthExpr = "__headerWireWidth"
+        appendPriorFrameWidth(body, "__headerWidth", CodeBlock.of("%T", disc.codecClassName), "0")
+        body.addStatement("val __headerWireWidth = __headerWidth.toInt()")
+        appendPeekLengthReturn(body, framedBy.codecClassName, "__headerWireWidth")
     } else {
         val headerWireWidth = shape.discriminator.wireWidth.requireFixed("dispatchOnDiscriminator")
-        body.addStatement(
-            "if (stream.available() - baseOffset < %L) return %T.NeedsMoreData",
-            headerWireWidth + 1,
-            PEEK_RESULT_CN,
-        )
-        val peekBudget = 5
-        body.addStatement(
-            "val __framingPeek = stream.peekBuffer(baseOffset + %L, %L) ?: return %T.NeedsMoreData",
-            headerWireWidth,
-            peekBudget,
-            PEEK_RESULT_CN,
-        )
-        headerWidthExpr = headerWireWidth.toString()
+        appendPeekLengthReturn(body, framedBy.codecClassName, headerWireWidth.toString())
     }
-    body.beginControlFlow("try")
-    body.addStatement("val __framingPeekStart = __framingPeek.position()")
-    body.beginControlFlow("val __framingLength = try")
-    body.addStatement(
-        "%T.decode(__framingPeek, %T.Empty)",
-        framedBy.codecClassName,
-        DECODE_CONTEXT_CN,
-    )
-    body.nextControlFlow("catch (__e: %T)", ClassName("kotlin", "Throwable"))
-    body.beginControlFlow("when (__e::class.simpleName)")
-    body.addStatement(
-        "%S, %S, %S -> return %T.NeedsMoreData",
-        "BufferUnderflowException",
-        "IndexOutOfBoundsException",
-        "ArrayIndexOutOfBoundsException",
-        PEEK_RESULT_CN,
-    )
-    body.addStatement("else -> throw __e")
-    body.endControlFlow()
-    body.endControlFlow()
-    body.addStatement(
-        "val __framingPrefixWidth = __framingPeek.position() - __framingPeekStart",
-    )
-    body.addStatement(
-        "val __total = %M(%L + __framingPrefixWidth, __framingLength.toLong())",
-        DECLARED_FRAME_BYTES_MN,
-        headerWidthExpr,
-    )
-    body.addStatement(
-        "return if (stream.available() - baseOffset >= __total) %T.Complete(__total) else %T.NeedsMoreData",
-        PEEK_RESULT_CN,
-        PEEK_RESULT_CN,
-    )
-    body.nextControlFlow("finally")
-    body.addStatement(
-        "(__framingPeek as? %T)?.freeNativeMemory()",
-        PLATFORM_BUFFER_CN,
-    )
-    body.endControlFlow()
     builder.addCode(body.build())
     return builder.build()
 }
@@ -1263,22 +1169,13 @@ internal fun appendForwardCompatibleEncodeArm(
             discriminator.className,
             fc.opcodeFieldName,
         )
-        body.addStatement(
-            "val __fcHeaderSize = %T.wireSize(__fcHeader, context)",
-            discriminator.codecClassName,
-        )
-        body.beginControlFlow("require(__fcHeaderSize is %T.Exact)", WIRE_SIZE_CN)
-        body.addStatement(
-            "%S",
-            "discriminator codec returned a non-Exact wire size for the preserved opcode",
-        )
-        body.endControlFlow()
+        appendFramingHeaderSize(body, "__fcHeaderSize", discriminator.codecClassName, "__fcHeader")
         body.add("%T.encode(\n", FRAMED_ENCODER_CN)
         body.indent()
         body.add("factory = factory,\n")
         body.add("framingCodec = %T,\n", framedBy.codecClassName)
         body.add("context = context,\n")
-        body.add("headerWireWidth = __fcHeaderSize.bytes,\n")
+        body.add("headerWireWidth = __fcHeaderSize,\n")
         body.add(
             "writeHeader = { __fcBuf -> %T.encode(__fcBuf, __fcHeader, context) },\n",
             discriminator.codecClassName,
@@ -1322,8 +1219,8 @@ internal fun PayloadCodecSource.codecReceiver(): CodeBlock =
  */
 internal fun LengthSource.encodeAccessor(): String =
     when (this) {
-        is LengthSource.Sibling -> "value.$siblingName.toInt()"
-        is LengthSource.ValueClassProperty -> "value.$siblingName.$propertyName"
+        is LengthSource.Sibling -> "value.$siblingName.toLong()"
+        is LengthSource.ValueClassProperty -> "value.$siblingName.$propertyName.toLong()"
     }
 
 /**
@@ -1459,4 +1356,53 @@ internal fun appendPeekFixedScalar(
                     "should have rejected this shape.",
             )
     }
+}
+
+/**
+ * The dispatch value decoded through the value class's codec from a non-consuming view of
+ * exactly `__discWidth` bytes: the peek's path for a value `peekInteger` cannot represent.
+ */
+private fun decodeDiscriminatorFromView(disc: Discriminator.Varint): CodeBlock =
+    CodeBlock
+        .builder()
+        .add("\n")
+        .indent()
+        .addStatement(
+            "val __discView = stream.peekBuffer(baseOffset, __discWidth.toInt()) ?: return %T.NeedsMoreData",
+            FRAME_SIZE_CN,
+        ).beginControlFlow("try")
+        .addStatement(
+            "%L",
+            dispatchValueIntCoercion(
+                disc.dispatchValueKind,
+                "%T.decode(__discView, %T.Empty).${disc.dispatchValueProperty}",
+            ).let { CodeBlock.of(it, disc.codecClassName, DECODE_CONTEXT_CN) },
+        ).nextControlFlow("finally")
+        .addStatement("(__discView as? %T)?.freeNativeMemory()", PLATFORM_BUFFER_CN)
+        .endControlFlow()
+        .unindent()
+        .build()
+
+/**
+ * The dispatch value from `__raw`, the non-negative `Long` the inner codec peeked: the value
+ * class rebuilt around it, then its dispatch property. An inner scalar that is not an integer
+ * decodes from the view instead.
+ */
+private fun dispatchValueFromPeekedInteger(disc: Discriminator.Varint): CodeBlock {
+    val raw =
+        when (disc.innerKind) {
+            ScalarKind.Long -> "__raw"
+            ScalarKind.ULong -> "__raw.toULong()"
+            ScalarKind.Int -> "__raw.toInt()"
+            ScalarKind.UInt -> "__raw.toUInt()"
+            ScalarKind.Short -> "__raw.toShort()"
+            ScalarKind.UShort -> "__raw.toUShort()"
+            ScalarKind.Byte -> "__raw.toByte()"
+            ScalarKind.UByte -> "__raw.toUByte()"
+            ScalarKind.Boolean, ScalarKind.Float, ScalarKind.Double -> return decodeDiscriminatorFromView(disc)
+        }
+    return CodeBlock.of(
+        dispatchValueIntCoercion(disc.dispatchValueKind, "%T($raw).${disc.dispatchValueProperty}"),
+        disc.className,
+    )
 }

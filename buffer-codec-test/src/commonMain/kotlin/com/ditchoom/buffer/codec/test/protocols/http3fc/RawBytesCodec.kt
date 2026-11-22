@@ -4,9 +4,9 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.ViewCodec
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.stream.StreamProcessor
 
 /**
@@ -38,13 +38,13 @@ object RawBytesCodec : ViewCodec<ReadBuffer> {
         value.position(savedPosition)
     }
 
-    override fun wireSize(
+    override fun wireBytes(
         value: ReadBuffer,
         context: EncodeContext,
-    ): WireSize = WireSize.Exact(value.remaining())
+    ): WireByteCount = WireByteCount.exact((value.remaining()).toLong())
 
-    override fun peekFrameSize(
+    override fun frameSize(
         stream: StreamProcessor,
         baseOffset: Int,
-    ): PeekResult = PeekResult.NoFraming
+    ): FrameSize = FrameSize.Unframed
 }

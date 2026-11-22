@@ -19,7 +19,7 @@ import kotlinx.coroutines.flow.flow
  *
  * Each [receive] collection drives a private [StreamProcessor]: bytes read from this source are
  * appended, and every complete frame — sized by the codec's generated
- * [peekFrameSize][com.ditchoom.buffer.codec.FrameDetector.peekFrameSize] — is decoded and emitted
+ * [frameSize][com.ditchoom.buffer.codec.FrameDetector.frameSize] — is decoded and emitted
  * before the next transport read. A clean [ReadResult.End] completes the flow; a
  * [ReadResult.Reset] fails it with [ByteStreamResetException]. The processor and its pool are
  * released when collection ends (normally, on error, or on cancellation).

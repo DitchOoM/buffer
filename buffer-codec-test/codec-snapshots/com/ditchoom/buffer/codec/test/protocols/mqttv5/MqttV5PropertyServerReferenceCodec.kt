@@ -7,12 +7,19 @@ import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.toPeekResult
+import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object MqttV5PropertyServerReferenceCodec : Codec<MqttV5Property.ServerReference> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): MqttV5Property.ServerReference {
@@ -50,15 +57,22 @@ public object MqttV5PropertyServerReferenceCodec : Codec<MqttV5Property.ServerRe
     buffer.position(valueEndPosition)
   }
 
-  override fun wireSize(`value`: MqttV5Property.ServerReference, context: EncodeContext): WireSize = WireSize.BackPatch
+  override fun wireBytes(`value`: MqttV5Property.ServerReference, context: EncodeContext): WireByteCount = WireByteCount.BackPatch
+
+  @Deprecated(
+    message = "Call wireBytes, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: MqttV5Property.ServerReference, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: MqttV5Property.ServerReference, context: EncodeContext): Int = 3 + value.value.length
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData
     __offset += 1
-    if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 2) return FrameSize.NeedsMoreData
     val valuePrefixB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
     val valuePrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val valuePrefix = ((valuePrefixB0 shl 8) or valuePrefixB1).toUInt()
@@ -66,6 +80,13 @@ public object MqttV5PropertyServerReferenceCodec : Codec<MqttV5Property.ServerRe
       throw FrameTooLargeException(declaredBytes = __offset.toLong() + 2 + valuePrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 2 + valuePrefix.toInt()
-    return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData
+    return FrameSize.declared(0, __offset.toLong())
   }
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

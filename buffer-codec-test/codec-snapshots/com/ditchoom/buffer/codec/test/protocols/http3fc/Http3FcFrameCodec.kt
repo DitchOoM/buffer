@@ -1,21 +1,24 @@
 package com.ditchoom.buffer.codec.test.protocols.http3fc
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.ForwardCompatibleFactoryKey
 import com.ditchoom.buffer.codec.FrameDetector
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FramedEncoder
+import com.ditchoom.buffer.codec.FramingSizeException
 import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.declaredFrameBytes
+import com.ditchoom.buffer.codec.toPeekResult
 import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
-import kotlin.Throwable
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object Http3FcFrameCodec : FrameDetector {
   public fun decode(buffer: ReadBuffer, context: DecodeContext): Http3FcFrame {
@@ -66,15 +69,12 @@ public object Http3FcFrameCodec : FrameDetector {
     is Http3FcFrame.Extension -> Http3FcFrameExtensionCodec.encode(value, context, factory)
     is Http3FcFrame.Unknown -> {
       val __fcHeader = Http3FcFrameType(value.opcode)
-      val __fcHeaderSize = Http3FcFrameTypeCodec.wireSize(__fcHeader, context)
-      require(__fcHeaderSize is WireSize.Exact) {
-        "discriminator codec returned a non-Exact wire size for the preserved opcode"
-      }
+      val __fcHeaderSize = Http3FcFrameTypeCodec.wireBytes(__fcHeader, context).fold(exact = { if (it > Int.MAX_VALUE) throw FramingSizeException(Http3FcFrameTypeCodec) else it.toInt() }, backPatch = { throw FramingSizeException(Http3FcFrameTypeCodec) })
       FramedEncoder.encode(
         factory = factory,
         framingCodec = Http3FcLengthCodec,
         context = context,
-        headerWireWidth = __fcHeaderSize.bytes,
+        headerWireWidth = __fcHeaderSize,
         writeHeader = { __fcBuf -> Http3FcFrameTypeCodec.encode(__fcBuf, __fcHeader, context) },
       ) { __fcBuf ->
         __fcBuf.write(value.raw.slice())
@@ -82,29 +82,17 @@ public object Http3FcFrameCodec : FrameDetector {
     }
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    val __headerFrame = Http3FcFrameTypeCodec.peekFrameSize(stream, baseOffset)
-    if (__headerFrame !is PeekResult.Complete) {
-      return __headerFrame
-    }
-    val __headerWireWidth = __headerFrame.bytes
-    if (stream.available() - baseOffset < __headerWireWidth + 1) return PeekResult.NeedsMoreData
-    val __framingPeek = stream.peekBuffer(baseOffset + __headerWireWidth, Http3FcLengthCodec.maxWireSize) ?: return PeekResult.NeedsMoreData
-    try {
-      val __framingPeekStart = __framingPeek.position()
-      val __framingLength = try {
-        Http3FcLengthCodec.decode(__framingPeek, DecodeContext.Empty)
-      } catch (__e: Throwable) {
-        when (__e::class.simpleName) {
-          "BufferUnderflowException", "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException" -> return PeekResult.NeedsMoreData
-          else -> throw __e
-        }
-      }
-      val __framingPrefixWidth = __framingPeek.position() - __framingPeekStart
-      val __total = declaredFrameBytes(__headerWireWidth + __framingPrefixWidth, __framingLength.toLong())
-      return if (stream.available() - baseOffset >= __total) PeekResult.Complete(__total) else PeekResult.NeedsMoreData
-    } finally {
-      (__framingPeek as? PlatformBuffer)?.freeNativeMemory()
-    }
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
+    val __headerWidth = Http3FcFrameTypeCodec.frameSize(stream, baseOffset + 0).fold(declared = { __h, __b -> __h + __b }, needsMoreData = { return FrameSize.NeedsMoreData }, unframed = { return FrameSize.Unframed })
+    if (__headerWidth > stream.available() - baseOffset - 0) return FrameSize.NeedsMoreData
+    val __headerWireWidth = __headerWidth.toInt()
+    return Http3FcLengthCodec.peekLength(stream, baseOffset + __headerWireWidth).fold(declared = { __lengthWidth, __bodyBytes -> FrameSize.declared(__headerWireWidth + __lengthWidth, __bodyBytes) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
   }
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

@@ -210,8 +210,8 @@ class RemainingBytesElementTypeValidatorTest {
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
                 import com.ditchoom.buffer.codec.Payload
-                import com.ditchoom.buffer.codec.PeekResult
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.FrameSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.RemainingBytes
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -225,10 +225,10 @@ class RemainingBytesElementTypeValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: TextBody, context: EncodeContext) {
                         buffer.writeString(value.text)
                     }
-                    override fun wireSize(value: TextBody, context: EncodeContext): WireSize =
-                        WireSize.Exact(value.text.length)
-                    override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult =
-                        PeekResult.NoFraming
+                    override fun wireBytes(value: TextBody, context: EncodeContext): WireByteCount =
+                        WireByteCount.exact(value.text.length.toLong())
+                    override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize =
+                        FrameSize.Unframed
                 }
 
                 @ProtocolMessage

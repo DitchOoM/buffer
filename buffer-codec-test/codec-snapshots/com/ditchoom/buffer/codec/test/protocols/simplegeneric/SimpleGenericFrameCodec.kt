@@ -6,11 +6,18 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.toPeekResult
+import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public class SimpleGenericFrameCodec<P : Payload>(
   private val payloadCodec: Codec<P>,
@@ -48,10 +55,17 @@ public class SimpleGenericFrameCodec<P : Payload>(
     }
   }
 
-  override fun wireSize(`value`: SimpleGenericFrame<P>, context: EncodeContext): WireSize = when (value) {
-    is SimpleGenericFrame.Command<*> -> WireSize.BackPatch
-    is SimpleGenericFrame.Status -> WireSize.Exact(2)
+  override fun wireBytes(`value`: SimpleGenericFrame<P>, context: EncodeContext): WireByteCount = when (value) {
+    is SimpleGenericFrame.Command<*> -> WireByteCount.BackPatch
+    is SimpleGenericFrame.Status -> WireByteCount.exact(2L)
   }
+
+  @Deprecated(
+    message = "Call wireBytes, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: SimpleGenericFrame<P>, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: SimpleGenericFrame<P>, context: EncodeContext): Int {
     @Suppress("UNCHECKED_CAST")
@@ -61,25 +75,22 @@ public class SimpleGenericFrameCodec<P : Payload>(
     }
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
+    if (stream.available() - baseOffset < 1) return FrameSize.NeedsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF
     return when (discriminator) {
-      0x0A -> {
-        when (val inner = commandCodec.peekFrameSize(stream, baseOffset + 1)) {
-          is PeekResult.Complete -> PeekResult.Complete(1 + inner.bytes)
-          else -> inner
-        }
-      }
-      0xA0 -> {
-        when (val inner = SimpleGenericFrameStatusCodec.peekFrameSize(stream, baseOffset + 1)) {
-          is PeekResult.Complete -> PeekResult.Complete(1 + inner.bytes)
-          else -> inner
-        }
-      }
+      0x0A -> commandCodec.frameSize(stream, baseOffset + 1).fold(declared = { __h, __b -> FrameSize.declared(1 + __h, __b) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
+      0xA0 -> SimpleGenericFrameStatusCodec.frameSize(stream, baseOffset + 1).fold(declared = { __h, __b -> FrameSize.declared(1 + __h, __b) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
       else -> {
         throw DecodeException(fieldPath = "SimpleGenericFrame.discriminator", bufferPosition = baseOffset, expected = "one of {0x0A, 0xA0}", actual = """0x${discriminator.toString(16).padStart(2, '0').uppercase()}""")
       }
     }
   }
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

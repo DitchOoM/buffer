@@ -5,8 +5,9 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -71,7 +72,7 @@ class RiffChunkHeaderCodecTest {
         val sizes = listOf(0u, 1u, 0x12345678u, 0xFFFFFFFFu)
         for (size in sizes) {
             val v = RiffChunkHeader(fourCC = riffTag, chunkSize = size)
-            assertEquals(WireSize.Exact(8), RiffChunkHeaderCodec.wireSize(v, EncodeContext.Empty))
+            assertEquals(WireByteCount.exact(8), RiffChunkHeaderCodec.wireBytes(v, EncodeContext.Empty))
         }
     }
 
@@ -86,7 +87,7 @@ class RiffChunkHeaderCodecTest {
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
             // 0 bytes: NeedsMoreData
-            assertEquals(PeekResult.NeedsMoreData, RiffChunkHeaderCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, RiffChunkHeaderCodec.peekOutcome(stream))
 
             // Drip-feed 7 bytes one at a time. Each call should still report NeedsMoreData.
             for (i in 0 until 7) {
@@ -95,8 +96,8 @@ class RiffChunkHeaderCodecTest {
                 oneByte.resetForRead()
                 stream.append(oneByte)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    RiffChunkHeaderCodec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    RiffChunkHeaderCodec.peekOutcome(stream),
                     "after $i+1 bytes",
                 )
             }
@@ -106,7 +107,7 @@ class RiffChunkHeaderCodecTest {
             lastByte.writeByte(encoded.readByte())
             lastByte.resetForRead()
             stream.append(lastByte)
-            assertEquals(PeekResult.Complete(8), RiffChunkHeaderCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(8), RiffChunkHeaderCodec.peekOutcome(stream))
 
             // Verify decode through the stream's readBufferScoped matches the round-trip path.
             val decoded =
@@ -133,11 +134,11 @@ class RiffChunkHeaderCodecTest {
             stream.append(twelve)
 
             // baseOffset = 0 → 12 bytes available, Complete(8)
-            assertEquals(PeekResult.Complete(8), RiffChunkHeaderCodec.peekFrameSize(stream, baseOffset = 0))
+            assertEquals(PeekOutcome.Complete(8), RiffChunkHeaderCodec.peekOutcome(stream, baseOffset = 0))
             // baseOffset = 4 → 8 bytes available past offset 4, Complete(8)
-            assertEquals(PeekResult.Complete(8), RiffChunkHeaderCodec.peekFrameSize(stream, baseOffset = 4))
+            assertEquals(PeekOutcome.Complete(8), RiffChunkHeaderCodec.peekOutcome(stream, baseOffset = 4))
             // baseOffset = 5 → only 7 bytes available past offset 5, NeedsMoreData
-            assertEquals(PeekResult.NeedsMoreData, RiffChunkHeaderCodec.peekFrameSize(stream, baseOffset = 5))
+            assertEquals(PeekOutcome.NeedsMoreData, RiffChunkHeaderCodec.peekOutcome(stream, baseOffset = 5))
         } finally {
             stream.release()
             pool.clear()

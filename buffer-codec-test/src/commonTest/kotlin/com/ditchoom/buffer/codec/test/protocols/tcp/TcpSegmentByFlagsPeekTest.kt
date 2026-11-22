@@ -6,7 +6,8 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -36,9 +37,9 @@ class TcpSegmentByFlagsPeekTest {
             assertEquals(1, source.remaining(), "flags dispatch slice is 1 byte")
             val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
             try {
-                assertEquals(PeekResult.NeedsMoreData, TcpSegmentByFlagsCodec.peekFrameSize(stream), "no bytes")
+                assertEquals(PeekOutcome.NeedsMoreData, TcpSegmentByFlagsCodec.peekOutcome(stream), "no bytes")
                 appendByte(stream, source.readByte())
-                assertEquals(PeekResult.Complete(1), TcpSegmentByFlagsCodec.peekFrameSize(stream), "fully buffered")
+                assertEquals(PeekOutcome.Complete(1), TcpSegmentByFlagsCodec.peekOutcome(stream), "fully buffered")
 
                 val decodeBuffer = BufferFactory.Default.allocate(8, ByteOrder.BIG_ENDIAN)
                 TcpSegmentByFlagsCodec.encode(decodeBuffer, frame, EncodeContext.Empty)

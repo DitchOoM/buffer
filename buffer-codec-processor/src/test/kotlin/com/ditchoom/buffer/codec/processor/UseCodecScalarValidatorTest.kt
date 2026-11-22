@@ -34,7 +34,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.Codec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
 
@@ -43,7 +43,7 @@ class UseCodecScalarValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
                     }
-                    override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
                 }
 
                 @ProtocolMessage
@@ -76,7 +76,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.BoundingLengthCodec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.RemainingBytes
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -91,7 +91,9 @@ class UseCodecScalarValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: Len, context: EncodeContext) {
                         buffer.writeInt(value.raw.toInt())
                     }
-                    override fun wireSize(value: Len, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun wireBytes(value: Len, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
+                    override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
+                    override fun encodedWidth(bodyBytes: Long): com.ditchoom.buffer.codec.WireByteCount = com.ditchoom.buffer.codec.WireByteCount.exact(maxWireSize.toLong())
                     override fun applyBound(buffer: ReadBuffer, decodedValue: Len) {
                         buffer.setLimit(buffer.position() + decodedValue.raw.toInt())
                     }
@@ -119,7 +121,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.Codec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
 
@@ -128,7 +130,7 @@ class UseCodecScalarValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: Int, context: EncodeContext) {
                         buffer.writeInt(value)
                     }
-                    override fun wireSize(value: Int, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun wireBytes(value: Int, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
                 }
 
                 @ProtocolMessage
@@ -160,7 +162,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.Codec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
 
@@ -169,7 +171,7 @@ class UseCodecScalarValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
                     }
-                    override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
                 }
 
                 @ProtocolMessage
@@ -203,7 +205,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.BoundingLengthCodec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -214,7 +216,9 @@ class UseCodecScalarValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
                     }
-                    override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
+                    override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
+                    override fun encodedWidth(bodyBytes: Long): com.ditchoom.buffer.codec.WireByteCount = com.ditchoom.buffer.codec.WireByteCount.exact(maxWireSize.toLong())
                     override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
                         buffer.setLimit(buffer.position() + decodedValue.toInt())
                     }
@@ -259,7 +263,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
                 import com.ditchoom.buffer.codec.Payload
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -273,8 +277,8 @@ class UseCodecScalarValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: Timestamp, context: EncodeContext) {
                         buffer.writeLong(value.epochMillis)
                     }
-                    override fun wireSize(value: Timestamp, context: EncodeContext): WireSize =
-                        WireSize.Exact(8)
+                    override fun wireBytes(value: Timestamp, context: EncodeContext): WireByteCount =
+                        WireByteCount.exact(8)
                 }
 
                 @ProtocolMessage
@@ -309,7 +313,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.Codec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -320,8 +324,8 @@ class UseCodecScalarValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: String, context: EncodeContext) {
                         buffer.writeString(value)
                     }
-                    override fun wireSize(value: String, context: EncodeContext): WireSize =
-                        WireSize.Exact(value.length)
+                    override fun wireBytes(value: String, context: EncodeContext): WireByteCount =
+                        WireByteCount.exact(value.length.toLong())
                 }
 
                 @ProtocolMessage
@@ -389,7 +393,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
                 import com.ditchoom.buffer.codec.Payload
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -403,8 +407,8 @@ class UseCodecScalarValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: Blob, context: EncodeContext) {
                         buffer.writeBytes(value.bytes)
                     }
-                    override fun wireSize(value: Blob, context: EncodeContext): WireSize =
-                        WireSize.Exact(value.bytes.size)
+                    override fun wireBytes(value: Blob, context: EncodeContext): WireByteCount =
+                        WireByteCount.exact(value.bytes.size.toLong())
                 }
 
                 @ProtocolMessage
@@ -436,7 +440,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
                 import com.ditchoom.buffer.codec.Payload
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -453,8 +457,8 @@ class UseCodecScalarValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: OtherBlob, context: EncodeContext) {
                         buffer.writeBytes(value.bytes)
                     }
-                    override fun wireSize(value: OtherBlob, context: EncodeContext): WireSize =
-                        WireSize.Exact(value.bytes.size)
+                    override fun wireBytes(value: OtherBlob, context: EncodeContext): WireByteCount =
+                        WireByteCount.exact(value.bytes.size.toLong())
                 }
 
                 @ProtocolMessage
@@ -485,7 +489,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.BoundingLengthCodec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -496,7 +500,9 @@ class UseCodecScalarValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
                     }
-                    override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
+                    override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
+                    override fun encodedWidth(bodyBytes: Long): com.ditchoom.buffer.codec.WireByteCount = com.ditchoom.buffer.codec.WireByteCount.exact(maxWireSize.toLong())
                     override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
                         buffer.setLimit(buffer.position() + decodedValue.toInt())
                     }
@@ -532,7 +538,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.Codec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -542,7 +548,7 @@ class UseCodecScalarValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
                     }
-                    override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
                 }
 
                 @ProtocolMessage
@@ -577,7 +583,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.BoundingLengthCodec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -588,7 +594,9 @@ class UseCodecScalarValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
                     }
-                    override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
+                    override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
+                    override fun encodedWidth(bodyBytes: Long): com.ditchoom.buffer.codec.WireByteCount = com.ditchoom.buffer.codec.WireByteCount.exact(maxWireSize.toLong())
                     override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
                         buffer.setLimit(buffer.position() + decodedValue.toInt())
                     }
@@ -627,7 +635,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.BoundingLengthCodec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.DispatchOn
                 import com.ditchoom.buffer.codec.annotations.DispatchValue
                 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
@@ -641,7 +649,9 @@ class UseCodecScalarValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
                     }
-                    override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
+                    override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
+                    override fun encodedWidth(bodyBytes: Long): com.ditchoom.buffer.codec.WireByteCount = com.ditchoom.buffer.codec.WireByteCount.exact(maxWireSize.toLong())
                     override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
                         buffer.setLimit(buffer.position() + decodedValue.toInt())
                     }
@@ -696,7 +706,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
                 import com.ditchoom.buffer.codec.Payload
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.DispatchOn
                 import com.ditchoom.buffer.codec.annotations.DispatchValue
                 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
@@ -711,7 +721,9 @@ class UseCodecScalarValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
                     }
-                    override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
+                    override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
+                    override fun encodedWidth(bodyBytes: Long): com.ditchoom.buffer.codec.WireByteCount = com.ditchoom.buffer.codec.WireByteCount.exact(maxWireSize.toLong())
                     override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
                         buffer.setLimit(buffer.position() + decodedValue.toInt())
                     }
@@ -761,7 +773,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.Codec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.LengthFrom
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -771,7 +783,7 @@ class UseCodecScalarValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
                     }
-                    override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
                 }
 
                 @ProtocolMessage
@@ -803,7 +815,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.Codec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.RemainingBytes
                 import com.ditchoom.buffer.codec.annotations.UseCodec
@@ -813,7 +825,7 @@ class UseCodecScalarValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                         buffer.writeInt(value.toInt())
                     }
-                    override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
                 }
 
                 @ProtocolMessage
@@ -843,7 +855,7 @@ class UseCodecScalarValidatorTest {
                 import com.ditchoom.buffer.codec.Codec
                 import com.ditchoom.buffer.codec.DecodeContext
                 import com.ditchoom.buffer.codec.EncodeContext
-                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.WireByteCount
                 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
                 import com.ditchoom.buffer.codec.annotations.UseCodec
 
@@ -856,8 +868,8 @@ class UseCodecScalarValidatorTest {
                     override fun encode(buffer: WriteBuffer, value: FrameLength, context: EncodeContext) {
                         buffer.writeInt(value.raw.toInt())
                     }
-                    override fun wireSize(value: FrameLength, context: EncodeContext): WireSize =
-                        WireSize.Exact(4)
+                    override fun wireBytes(value: FrameLength, context: EncodeContext): WireByteCount =
+                        WireByteCount.exact(4)
                 }
 
                 @ProtocolMessage

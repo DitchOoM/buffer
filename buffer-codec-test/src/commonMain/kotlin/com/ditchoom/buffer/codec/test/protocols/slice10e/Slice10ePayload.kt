@@ -7,7 +7,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.OwnedBytesHandle
 import com.ditchoom.buffer.codec.Payload
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.annotations.Endianness
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
@@ -141,10 +141,10 @@ internal object RemoteCommandPayloadCodecImpl : Codec<RemoteCommandPayload> {
         buffer.write(value.data.asReadBuffer())
     }
 
-    override fun wireSize(
+    override fun wireBytes(
         value: RemoteCommandPayload,
         context: EncodeContext,
-    ): WireSize = WireSize.Exact(4 + value.data.byteSize())
+    ): WireByteCount = WireByteCount.exact((4 + value.data.byteSize()).toLong())
 }
 
 /**

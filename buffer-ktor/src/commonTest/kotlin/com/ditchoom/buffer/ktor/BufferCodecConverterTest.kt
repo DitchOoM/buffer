@@ -54,7 +54,7 @@ internal class FreeCountingBuffer(
     }
 }
 
-/** Delegates encode/wireSize/peekFrameSize to [delegate] but always throws from [decode]. */
+/** Delegates encode/wireBytes/frameSize to [delegate] but always throws from [decode]. */
 private class ThrowingDecodeCodec<T>(
     private val delegate: Codec<T>,
 ) : Codec<T> by delegate {

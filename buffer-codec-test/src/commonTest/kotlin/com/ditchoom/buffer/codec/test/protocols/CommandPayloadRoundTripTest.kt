@@ -4,7 +4,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
@@ -55,12 +55,12 @@ class CommandPayloadRoundTripTest {
     fun singletonVariantWireSizeIsDiscriminatorOnly() {
         // 1-byte discriminator, zero body bytes.
         assertEquals(
-            WireSize.Exact(1),
-            CommandPayloadCodec.wireSize(CommandPayload.GetRgbState, EncodeContext.Empty),
+            WireByteCount.exact(1),
+            CommandPayloadCodec.wireBytes(CommandPayload.GetRgbState, EncodeContext.Empty),
         )
         assertEquals(
-            WireSize.Exact(1),
-            CommandPayloadCodec.wireSize(CommandPayload.ResetDevice, EncodeContext.Empty),
+            WireByteCount.exact(1),
+            CommandPayloadCodec.wireBytes(CommandPayload.ResetDevice, EncodeContext.Empty),
         )
     }
 

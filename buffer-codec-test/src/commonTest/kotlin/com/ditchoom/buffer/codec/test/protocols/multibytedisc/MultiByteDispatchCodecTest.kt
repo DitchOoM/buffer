@@ -7,8 +7,9 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -63,14 +64,14 @@ class MultiByteDispatchCodecTest {
         // 2 (discriminator) + 4 (payload Int) = 6; dispatcher does NOT add the
         // discriminator a second time (ReReadByVariant ownership).
         assertEquals(
-            WireSize.Exact(6),
-            SignedOpcodeFrameCodec.wireSize(SignedOpcodeFrame.Positive(payload = 0), EncodeContext.Empty),
+            WireByteCount.exact(6),
+            SignedOpcodeFrameCodec.wireBytes(SignedOpcodeFrame.Positive(payload = 0), EncodeContext.Empty),
         )
     }
 
     @Test
     fun shortDiscriminatorPeekFrameSize() =
-        peekDripFeed({ SignedOpcodeFrameCodec.peekFrameSize(it) }) {
+        peekDripFeed({ SignedOpcodeFrameCodec.peekOutcome(it) }) {
             SignedOpcodeFrameCodec.encode(it, SignedOpcodeFrame.Negative(payload = 1), EncodeContext.Empty)
         }
 
@@ -101,7 +102,7 @@ class MultiByteDispatchCodecTest {
 
     @Test
     fun intDiscriminatorPeekFrameSize() =
-        peekDripFeed({ SignedTagFrameCodec.peekFrameSize(it) }) {
+        peekDripFeed({ SignedTagFrameCodec.peekOutcome(it) }) {
             SignedTagFrameCodec.encode(it, SignedTagFrame.Alpha(value = 9), EncodeContext.Empty)
         }
 
@@ -125,14 +126,14 @@ class MultiByteDispatchCodecTest {
     fun longDiscriminatorWireSizeDelegates() {
         // 8 (discriminator Long) + 4 (payload Int) = 12, no dispatcher `1 +`.
         assertEquals(
-            WireSize.Exact(12),
-            SignedSelectorFrameCodec.wireSize(SignedSelectorFrame.Two(payload = 0), EncodeContext.Empty),
+            WireByteCount.exact(12),
+            SignedSelectorFrameCodec.wireBytes(SignedSelectorFrame.Two(payload = 0), EncodeContext.Empty),
         )
     }
 
     @Test
     fun longDiscriminatorPeekFrameSize() =
-        peekDripFeed({ SignedSelectorFrameCodec.peekFrameSize(it) }) {
+        peekDripFeed({ SignedSelectorFrameCodec.peekOutcome(it) }) {
             SignedSelectorFrameCodec.encode(it, SignedSelectorFrame.Two(payload = 1), EncodeContext.Empty)
         }
 
@@ -161,7 +162,7 @@ class MultiByteDispatchCodecTest {
 
     @Test
     fun uLongDiscriminatorPeekFrameSize() =
-        peekDripFeed({ UnsignedMagicFrameCodec.peekFrameSize(it) }) {
+        peekDripFeed({ UnsignedMagicFrameCodec.peekOutcome(it) }) {
             UnsignedMagicFrameCodec.encode(it, UnsignedMagicFrame.Second(payload = 5), EncodeContext.Empty)
         }
 
@@ -197,7 +198,7 @@ class MultiByteDispatchCodecTest {
      * discriminator reconstruction never reads past the available stream.
      */
     private fun peekDripFeed(
-        peek: (StreamProcessor) -> PeekResult,
+        peek: (StreamProcessor) -> PeekOutcome,
         encodeBlock: (PlatformBuffer) -> Unit,
     ) {
         val pool = BufferPool()
@@ -213,7 +214,7 @@ class MultiByteDispatchCodecTest {
                 one.resetForRead()
                 stream.append(one)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
+                    PeekOutcome.NeedsMoreData,
                     peek(stream),
                     "after ${i + 1}/$total bytes",
                 )
@@ -222,7 +223,7 @@ class MultiByteDispatchCodecTest {
             last.writeByte(source.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(total), peek(stream), "fully buffered")
+            assertEquals(PeekOutcome.Complete(total), peek(stream), "fully buffered")
         } finally {
             stream.release()
             pool.clear()

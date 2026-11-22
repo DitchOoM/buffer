@@ -419,6 +419,7 @@ class CodecSchemaDescriptorTest {
                 dispatchValueKind = ScalarKind.Int,
                 innerPropertyName = "raw",
                 innerKind = ScalarKind.Long,
+                innerCodecClassName = codec,
             ),
         )
 

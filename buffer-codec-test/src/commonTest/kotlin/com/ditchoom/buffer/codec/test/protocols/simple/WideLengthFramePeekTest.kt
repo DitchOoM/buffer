@@ -7,10 +7,12 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.MaxFrameBytesKey
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.readFrame
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -58,7 +60,7 @@ class WideLengthFramePeekTest {
         // negative, and a negative `Complete` reaches `readBufferScoped`.
         val stream = streamOf(frameBytes(0x7FFFFFFFu))
         try {
-            assertFailsWith<DecodeException> { WideLengthFrameCodec.peekFrameSize(stream) }
+            assertFailsWith<DecodeException> { WideLengthFrameCodec.peekOutcome(stream) }
         } finally {
             stream.release()
         }
@@ -69,23 +71,32 @@ class WideLengthFramePeekTest {
         val payload = "hi".encodeToByteArray()
         val stream = streamOf(frameBytes(payload.size.toUInt(), payload))
         try {
-            assertEquals(PeekResult.Complete(5 + payload.size), WideLengthFrameCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(5 + payload.size), WideLengthFrameCodec.peekOutcome(stream))
         } finally {
             stream.release()
         }
     }
 
     @Test
-    fun readFrameDoesNotYetBoundPreArrivalAccumulation() {
-        // Known gap, tracked in issue #308. The peek walk computes 8 MiB and then
-        // discards it — `NeedsMoreData` cannot say "known, but unsatisfied" — so
-        // `readFrame` never sees a `Complete` to check the ceiling against and
-        // returns null. A caller looping on that null keeps appending transport
-        // bytes for a frame the peer never intends to send. Closing this needs
-        // `PeekResult.Incomplete(requiredBytes)`, a v7 change.
+    fun readFrameRejectsAnOversizedDeclarationBeforeTheFrameArrives() {
+        // The peek walk declares 8 MiB + header before the body arrives, so `readFrame`
+        // checks the ceiling now instead of returning null while a caller keeps
+        // appending bytes the peer never intends to send.
         val stream = streamOf(frameBytes(8u * 1024u * 1024u))
         try {
-            assertNull(WideLengthFrameCodec.readFrame(stream))
+            val thrown = assertFailsWith<FrameTooLargeException> { WideLengthFrameCodec.readFrame(stream) }
+            assertEquals(8 * 1024 * 1024 + 5, thrown.declaredBytes)
+        } finally {
+            stream.release()
+        }
+    }
+
+    @Test
+    fun frameSizeDeclaresTheSizeOfAnIncompleteFrame() {
+        val stream = streamOf(frameBytes(64u))
+        try {
+            assertEquals(FrameSize.declared(0, 5L + 64), WideLengthFrameCodec.frameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, WideLengthFrameCodec.peekOutcome(stream))
         } finally {
             stream.release()
         }

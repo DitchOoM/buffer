@@ -5,14 +5,14 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.UseCodec
 
 /*
  * Adversarial fixtures for the declared-size verification guard: a user
- * codec whose `wireSize` DISAGREES with what its `encode` writes. Since the
+ * codec whose `wireBytes` DISAGREES with what its `encode` writes. Since the
  * @UseCodec Exact promotion, a nested message's wireSize probes user codecs
  * and parents write `@LengthPrefixed` prefixes from the declared size — a
  * misdeclaring codec must produce a loud `EncodeException`, never a frame
@@ -34,10 +34,10 @@ object MisdeclaredSizeCodec : Codec<UInt> {
         buffer.writeUInt(value)
     }
 
-    override fun wireSize(
+    override fun wireBytes(
         value: UInt,
         context: EncodeContext,
-    ): WireSize = WireSize.Exact(3)
+    ): WireByteCount = WireByteCount.exact(3)
 }
 
 /** Honest twin: declares 4 bytes, encode writes 4. */
@@ -55,10 +55,10 @@ object HonestSizeCodec : Codec<UInt> {
         buffer.writeUInt(value)
     }
 
-    override fun wireSize(
+    override fun wireBytes(
         value: UInt,
         context: EncodeContext,
-    ): WireSize = WireSize.Exact(4)
+    ): WireByteCount = WireByteCount.exact(4)
 }
 
 @ProtocolMessage

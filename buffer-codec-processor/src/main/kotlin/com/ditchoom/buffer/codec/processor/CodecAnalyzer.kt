@@ -3249,6 +3249,13 @@ internal fun analyzeDispatchOnSealedDispatcher(symbol: KSClassDeclaration): Disp
             val varintInnerKind =
                 SUPPORTED_SCALARS[innerType.declaration.qualifiedName?.asString()]
                     ?: return DispatchAnalysisResult.NotApplicable
+            val varintInnerCodec =
+                innerParam.annotations
+                    .firstOrNull { it.shortName.asString() == "UseCodec" }
+                    ?.arguments
+                    ?.firstOrNull { it.name?.asString() == "codec" }
+                    ?.let { (it.value as? KSType)?.declaration as? KSClassDeclaration }
+                    ?: return DispatchAnalysisResult.NotApplicable
             Discriminator.Varint(
                 className = classNameOf(discriminatorDecl),
                 codecClassName = discriminatorCodecClassName,
@@ -3256,6 +3263,7 @@ internal fun analyzeDispatchOnSealedDispatcher(symbol: KSClassDeclaration): Disp
                 dispatchValueKind = dispatchValueKind,
                 innerPropertyName = varintInnerName,
                 innerKind = varintInnerKind,
+                innerCodecClassName = classNameOf(varintInnerCodec),
             )
         } else {
             val innerKind =

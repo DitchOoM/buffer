@@ -6,11 +6,18 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.UnsignedVarIntCodec
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.toPeekResult
+import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object StyleCodec : Codec<Style> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): Style {
@@ -32,13 +39,27 @@ public object StyleCodec : Codec<Style> {
     buffer.writeUByte(value.weight)
   }
 
-  override fun wireSize(`value`: Style, context: EncodeContext): WireSize {
-    val __colorSize = (UnsignedVarIntCodec.wireSize(value.color.ordinal.toUInt(), context) as WireSize.Exact).bytes
-    val __prioritySize = (UnsignedVarIntCodec.wireSize(value.priority.ordinal.toUInt(), context) as WireSize.Exact).bytes
-    return WireSize.Exact(1 + __colorSize + __prioritySize)
+  override fun wireBytes(`value`: Style, context: EncodeContext): WireByteCount {
+    val __colorSize = UnsignedVarIntCodec.encodedLength(value.color.ordinal.toUInt()).toLong()
+    val __prioritySize = UnsignedVarIntCodec.encodedLength(value.priority.ordinal.toUInt()).toLong()
+    return WireByteCount.exact(1L + __colorSize + __prioritySize)
   }
+
+  @Deprecated(
+    message = "Call wireBytes, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: Style, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: Style, context: EncodeContext): Int = 3
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = PeekResult.NoFraming
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize = FrameSize.Unframed
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

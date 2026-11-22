@@ -7,9 +7,10 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.UnsignedVarIntCodec
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -39,8 +40,8 @@ class StyleCodecTest {
     fun wireSizeIsRuntimeExact() {
         // Every ordinal is < 128 → 1-byte varint each: color(1) + priority(1) + weight(1) = 3.
         assertEquals(
-            WireSize.Exact(3),
-            StyleCodec.wireSize(Style(Color.Blue, Priority.High, 1u), EncodeContext.Empty),
+            WireByteCount.exact(3),
+            StyleCodec.wireBytes(Style(Color.Blue, Priority.High, 1u), EncodeContext.Empty),
             "wireSize sums the two varint ordinals + the fixed weight byte",
         )
     }
@@ -76,10 +77,10 @@ class StyleCodecTest {
         try {
             for (i in 0 until total - 1) {
                 appendByte(stream, src.readByte())
-                assertEquals(PeekResult.NeedsMoreData, TaggedCodec.peekFrameSize(stream), "after ${i + 1}/$total bytes")
+                assertEquals(PeekOutcome.NeedsMoreData, TaggedCodec.peekOutcome(stream), "after ${i + 1}/$total bytes")
             }
             appendByte(stream, src.readByte())
-            assertEquals(PeekResult.Complete(total), TaggedCodec.peekFrameSize(stream), "fully buffered")
+            assertEquals(PeekOutcome.Complete(total), TaggedCodec.peekOutcome(stream), "fully buffered")
         } finally {
             stream.release()
             pool.clear()

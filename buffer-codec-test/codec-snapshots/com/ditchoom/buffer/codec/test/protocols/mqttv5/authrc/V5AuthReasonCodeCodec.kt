@@ -6,10 +6,17 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.toPeekResult
+import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object V5AuthReasonCodeCodec : Codec<V5AuthReasonCode> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): V5AuthReasonCode {
@@ -39,11 +46,18 @@ public object V5AuthReasonCodeCodec : Codec<V5AuthReasonCode> {
     }
   }
 
-  override fun wireSize(`value`: V5AuthReasonCode, context: EncodeContext): WireSize = when (value) {
-    is V5AuthReasonCode.Success -> V5AuthReasonCodeSuccessCodec.wireSize(value, context)
-    is V5AuthReasonCode.ContinueAuthentication -> V5AuthReasonCodeContinueAuthenticationCodec.wireSize(value, context)
-    is V5AuthReasonCode.ReAuthenticate -> V5AuthReasonCodeReAuthenticateCodec.wireSize(value, context)
+  override fun wireBytes(`value`: V5AuthReasonCode, context: EncodeContext): WireByteCount = when (value) {
+    is V5AuthReasonCode.Success -> V5AuthReasonCodeSuccessCodec.wireBytes(value, context)
+    is V5AuthReasonCode.ContinueAuthentication -> V5AuthReasonCodeContinueAuthenticationCodec.wireBytes(value, context)
+    is V5AuthReasonCode.ReAuthenticate -> V5AuthReasonCodeReAuthenticateCodec.wireBytes(value, context)
   }
+
+  @Deprecated(
+    message = "Call wireBytes, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: V5AuthReasonCode, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: V5AuthReasonCode, context: EncodeContext): Int = when (value) {
     is V5AuthReasonCode.Success -> V5AuthReasonCodeSuccessCodec.sizeHint(value, context)
@@ -51,18 +65,25 @@ public object V5AuthReasonCodeCodec : Codec<V5AuthReasonCode> {
     is V5AuthReasonCode.ReAuthenticate -> V5AuthReasonCodeReAuthenticateCodec.sizeHint(value, context)
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
+    if (stream.available() - baseOffset < 1) return FrameSize.NeedsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()
     val __discriminator = V5AuthReasonCodeRaw(__discRaw)
     val __dispatchValue = __discriminator.id
     return when (__dispatchValue) {
-      0 -> V5AuthReasonCodeSuccessCodec.peekFrameSize(stream, baseOffset)
-      24 -> V5AuthReasonCodeContinueAuthenticationCodec.peekFrameSize(stream, baseOffset)
-      25 -> V5AuthReasonCodeReAuthenticateCodec.peekFrameSize(stream, baseOffset)
+      0 -> V5AuthReasonCodeSuccessCodec.frameSize(stream, baseOffset)
+      24 -> V5AuthReasonCodeContinueAuthenticationCodec.frameSize(stream, baseOffset)
+      25 -> V5AuthReasonCodeReAuthenticateCodec.frameSize(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "V5AuthReasonCode.discriminator", bufferPosition = baseOffset, expected = "one of {0, 24, 25}", actual = """${__dispatchValue}""")
       }
     }
   }
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

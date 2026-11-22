@@ -7,8 +7,9 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameDetector
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.ownedBytesFrom
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import com.ditchoom.buffer.pool.BufferPool
@@ -81,12 +82,12 @@ class WsFramePeekCodecTest {
                 val frame = binaryFrame(size, masked)
                 val total = decodeConsumption(frame)
                 assertEquals(
-                    PeekResult.Complete(total),
+                    PeekOutcome.Complete(total),
                     fullyBufferedPeek(frame),
                     "peek total == decode consumption (size=$size, masked=$masked)",
                 )
                 assertEquals(
-                    PeekResult.NeedsMoreData,
+                    PeekOutcome.NeedsMoreData,
                     prefixPeek(frame, total - 1),
                     "one byte short → NeedsMoreData (size=$size, masked=$masked)",
                 )
@@ -122,10 +123,10 @@ class WsFramePeekCodecTest {
         try {
             stream.append(encodeToBuffer(binaryFrame(5, masked = false)))
             // No instance, no payload codec — and the same answer the instance gives.
-            assertEquals(PeekResult.NoFraming, WsFrameBinaryCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NoFraming, WsFrameBinaryCodec.peekOutcome(stream))
             assertEquals(
-                PeekResult.NoFraming,
-                WsFrameBinaryCodec(BinaryDataCodec).peekFrameSize(stream),
+                PeekOutcome.NoFraming,
+                WsFrameBinaryCodec(BinaryDataCodec).peekOutcome(stream),
             )
         } finally {
             stream.release()
@@ -141,20 +142,20 @@ class WsFramePeekCodecTest {
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
             stream.append(encodeToBuffer(binaryFrame(5, masked = false)))
-            assertEquals(PeekResult.NoFraming, detector.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NoFraming, detector.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()
         }
     }
 
-    private fun fullyBufferedPeek(frame: WsFrame.Binary<BinaryData>): PeekResult {
+    private fun fullyBufferedPeek(frame: WsFrame.Binary<BinaryData>): PeekOutcome {
         val source = encodeToBuffer(frame)
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
             stream.append(source)
-            return codec.peekFrameSize(stream)
+            return codec.peekOutcome(stream)
         } finally {
             stream.release()
             pool.clear()
@@ -164,13 +165,13 @@ class WsFramePeekCodecTest {
     private fun prefixPeek(
         frame: WsFrame.Binary<BinaryData>,
         prefixLen: Int,
-    ): PeekResult {
+    ): PeekOutcome {
         val source = encodeToBuffer(frame)
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
             for (i in 0 until prefixLen) appendByte(stream, source.readByte())
-            return codec.peekFrameSize(stream)
+            return codec.peekOutcome(stream)
         } finally {
             stream.release()
             pool.clear()
@@ -186,15 +187,15 @@ class WsFramePeekCodecTest {
             for (i in 0 until total - 1) {
                 appendByte(stream, source.readByte())
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    codec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    codec.peekOutcome(stream),
                     "after ${i + 1}/$total bytes (masked=${frame.byte2.masked})",
                 )
             }
             appendByte(stream, source.readByte())
             assertEquals(
-                PeekResult.Complete(total),
-                codec.peekFrameSize(stream),
+                PeekOutcome.Complete(total),
+                codec.peekOutcome(stream),
                 "fully buffered (masked=${frame.byte2.masked})",
             )
         } finally {

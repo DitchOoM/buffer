@@ -6,12 +6,19 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
+import com.ditchoom.buffer.codec.toPeekResult
+import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object GrpcLengthPrefixedMessageCodec : Codec<GrpcLengthPrefixedMessage> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): GrpcLengthPrefixedMessage {
@@ -64,21 +71,26 @@ public object GrpcLengthPrefixedMessageCodec : Codec<GrpcLengthPrefixedMessage> 
     buffer.position(messageEndPosition)
   }
 
-  override fun wireSize(`value`: GrpcLengthPrefixedMessage, context: EncodeContext): WireSize {
-    val __messageSize = when (val __s = BinaryDataCodec.wireSize(value.message, context)) {
-      is WireSize.Exact -> 4 + __s.bytes
-      WireSize.BackPatch -> return WireSize.BackPatch
-    }
-    return WireSize.Exact(1 + __messageSize)
+  override fun wireBytes(`value`: GrpcLengthPrefixedMessage, context: EncodeContext): WireByteCount {
+    val __messageBodyBytes = BinaryDataCodec.wireBytes(value.message, context).fold(exact = { it }, backPatch = { return WireByteCount.BackPatch })
+    val __messageSize = 4 + __messageBodyBytes
+    return WireByteCount.exact(1L + __messageSize)
   }
+
+  @Deprecated(
+    message = "Call wireBytes, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: GrpcLengthPrefixedMessage, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: GrpcLengthPrefixedMessage, context: EncodeContext): Int = 5
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData
     __offset += 1
-    if (stream.available() - baseOffset < __offset + 4) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 4) return FrameSize.NeedsMoreData
     val messagePrefixB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
     val messagePrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val messagePrefixB2 = stream.peekByte(baseOffset + __offset + 2).toInt() and 0xFF
@@ -88,6 +100,13 @@ public object GrpcLengthPrefixedMessageCodec : Codec<GrpcLengthPrefixedMessage> 
       throw FrameTooLargeException(declaredBytes = __offset.toLong() + 4 + messagePrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 4 + messagePrefix.toInt()
-    return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData
+    return FrameSize.declared(0, __offset.toLong())
   }
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

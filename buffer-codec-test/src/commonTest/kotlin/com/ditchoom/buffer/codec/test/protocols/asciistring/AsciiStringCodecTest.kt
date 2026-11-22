@@ -6,7 +6,7 @@ import com.ditchoom.buffer.codec.AsciiStringCodec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -48,9 +48,9 @@ class AsciiStringCodecTest {
 
     @Test
     fun wireSizeIsOneBytePerCharacter() {
-        assertEquals(WireSize.Exact(0), AsciiStringCodec.wireSize("", EncodeContext.Empty))
-        assertEquals(WireSize.Exact(5), AsciiStringCodec.wireSize("hello", EncodeContext.Empty))
-        assertEquals(WireSize.Exact(13), AsciiStringCodec.wireSize("hello, world!", EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(0), AsciiStringCodec.wireBytes("", EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(5), AsciiStringCodec.wireBytes("hello", EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(13), AsciiStringCodec.wireBytes("hello, world!", EncodeContext.Empty))
     }
 
     @Test
@@ -108,12 +108,12 @@ class AsciiStringCodecTest {
         // encodeToPlatformBuffer allocates exactly once instead of walking
         // the 64-byte-doubling BackPatch loop.
         assertEquals(
-            WireSize.Exact(2 + 7),
-            AsciiGreetingCodec.wireSize(AsciiGreeting(command = "CONNECT"), EncodeContext.Empty),
+            WireByteCount.exact((2 + 7).toLong()),
+            AsciiGreetingCodec.wireBytes(AsciiGreeting(command = "CONNECT"), EncodeContext.Empty),
         )
         assertEquals(
-            WireSize.Exact(2),
-            AsciiGreetingCodec.wireSize(AsciiGreeting(command = ""), EncodeContext.Empty),
+            WireByteCount.exact(2),
+            AsciiGreetingCodec.wireBytes(AsciiGreeting(command = ""), EncodeContext.Empty),
         )
     }
 

@@ -6,7 +6,7 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -102,8 +102,8 @@ class ValueClassStringIdsCodecTest {
     @Test
     fun lengthPrefixedValueClassWireSizeIsBackPatch() {
         assertEquals(
-            WireSize.BackPatch,
-            LpValueClassIdCodec.wireSize(LpValueClassId(UserId("x")), EncodeContext.Empty),
+            WireByteCount.BackPatch,
+            LpValueClassIdCodec.wireBytes(LpValueClassId(UserId("x")), EncodeContext.Empty),
         )
     }
 

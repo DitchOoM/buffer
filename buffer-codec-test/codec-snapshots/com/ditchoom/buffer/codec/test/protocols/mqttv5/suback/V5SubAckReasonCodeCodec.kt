@@ -6,10 +6,17 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.toPeekResult
+import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object V5SubAckReasonCodeCodec : Codec<V5SubAckReasonCode> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): V5SubAckReasonCode {
@@ -57,20 +64,27 @@ public object V5SubAckReasonCodeCodec : Codec<V5SubAckReasonCode> {
     }
   }
 
-  override fun wireSize(`value`: V5SubAckReasonCode, context: EncodeContext): WireSize = when (value) {
-    is V5SubAckReasonCode.GrantedQoS0 -> V5SubAckReasonCodeGrantedQoS0Codec.wireSize(value, context)
-    is V5SubAckReasonCode.GrantedQoS1 -> V5SubAckReasonCodeGrantedQoS1Codec.wireSize(value, context)
-    is V5SubAckReasonCode.GrantedQoS2 -> V5SubAckReasonCodeGrantedQoS2Codec.wireSize(value, context)
-    is V5SubAckReasonCode.UnspecifiedError -> V5SubAckReasonCodeUnspecifiedErrorCodec.wireSize(value, context)
-    is V5SubAckReasonCode.ImplementationSpecificError -> V5SubAckReasonCodeImplementationSpecificErrorCodec.wireSize(value, context)
-    is V5SubAckReasonCode.NotAuthorized -> V5SubAckReasonCodeNotAuthorizedCodec.wireSize(value, context)
-    is V5SubAckReasonCode.TopicFilterInvalid -> V5SubAckReasonCodeTopicFilterInvalidCodec.wireSize(value, context)
-    is V5SubAckReasonCode.PacketIdentifierInUse -> V5SubAckReasonCodePacketIdentifierInUseCodec.wireSize(value, context)
-    is V5SubAckReasonCode.QuotaExceeded -> V5SubAckReasonCodeQuotaExceededCodec.wireSize(value, context)
-    is V5SubAckReasonCode.SharedSubscriptionsNotSupported -> V5SubAckReasonCodeSharedSubscriptionsNotSupportedCodec.wireSize(value, context)
-    is V5SubAckReasonCode.SubscriptionIdentifiersNotSupported -> V5SubAckReasonCodeSubscriptionIdentifiersNotSupportedCodec.wireSize(value, context)
-    is V5SubAckReasonCode.WildcardSubscriptionsNotSupported -> V5SubAckReasonCodeWildcardSubscriptionsNotSupportedCodec.wireSize(value, context)
+  override fun wireBytes(`value`: V5SubAckReasonCode, context: EncodeContext): WireByteCount = when (value) {
+    is V5SubAckReasonCode.GrantedQoS0 -> V5SubAckReasonCodeGrantedQoS0Codec.wireBytes(value, context)
+    is V5SubAckReasonCode.GrantedQoS1 -> V5SubAckReasonCodeGrantedQoS1Codec.wireBytes(value, context)
+    is V5SubAckReasonCode.GrantedQoS2 -> V5SubAckReasonCodeGrantedQoS2Codec.wireBytes(value, context)
+    is V5SubAckReasonCode.UnspecifiedError -> V5SubAckReasonCodeUnspecifiedErrorCodec.wireBytes(value, context)
+    is V5SubAckReasonCode.ImplementationSpecificError -> V5SubAckReasonCodeImplementationSpecificErrorCodec.wireBytes(value, context)
+    is V5SubAckReasonCode.NotAuthorized -> V5SubAckReasonCodeNotAuthorizedCodec.wireBytes(value, context)
+    is V5SubAckReasonCode.TopicFilterInvalid -> V5SubAckReasonCodeTopicFilterInvalidCodec.wireBytes(value, context)
+    is V5SubAckReasonCode.PacketIdentifierInUse -> V5SubAckReasonCodePacketIdentifierInUseCodec.wireBytes(value, context)
+    is V5SubAckReasonCode.QuotaExceeded -> V5SubAckReasonCodeQuotaExceededCodec.wireBytes(value, context)
+    is V5SubAckReasonCode.SharedSubscriptionsNotSupported -> V5SubAckReasonCodeSharedSubscriptionsNotSupportedCodec.wireBytes(value, context)
+    is V5SubAckReasonCode.SubscriptionIdentifiersNotSupported -> V5SubAckReasonCodeSubscriptionIdentifiersNotSupportedCodec.wireBytes(value, context)
+    is V5SubAckReasonCode.WildcardSubscriptionsNotSupported -> V5SubAckReasonCodeWildcardSubscriptionsNotSupportedCodec.wireBytes(value, context)
   }
+
+  @Deprecated(
+    message = "Call wireBytes, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: V5SubAckReasonCode, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: V5SubAckReasonCode, context: EncodeContext): Int = when (value) {
     is V5SubAckReasonCode.GrantedQoS0 -> V5SubAckReasonCodeGrantedQoS0Codec.sizeHint(value, context)
@@ -87,27 +101,34 @@ public object V5SubAckReasonCodeCodec : Codec<V5SubAckReasonCode> {
     is V5SubAckReasonCode.WildcardSubscriptionsNotSupported -> V5SubAckReasonCodeWildcardSubscriptionsNotSupportedCodec.sizeHint(value, context)
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
+    if (stream.available() - baseOffset < 1) return FrameSize.NeedsMoreData
     val __discRaw = stream.peekByte(baseOffset + 0).toUByte()
     val __discriminator = V5SubAckReasonCodeRaw(__discRaw)
     val __dispatchValue = __discriminator.id
     return when (__dispatchValue) {
-      0 -> V5SubAckReasonCodeGrantedQoS0Codec.peekFrameSize(stream, baseOffset)
-      1 -> V5SubAckReasonCodeGrantedQoS1Codec.peekFrameSize(stream, baseOffset)
-      2 -> V5SubAckReasonCodeGrantedQoS2Codec.peekFrameSize(stream, baseOffset)
-      128 -> V5SubAckReasonCodeUnspecifiedErrorCodec.peekFrameSize(stream, baseOffset)
-      131 -> V5SubAckReasonCodeImplementationSpecificErrorCodec.peekFrameSize(stream, baseOffset)
-      135 -> V5SubAckReasonCodeNotAuthorizedCodec.peekFrameSize(stream, baseOffset)
-      143 -> V5SubAckReasonCodeTopicFilterInvalidCodec.peekFrameSize(stream, baseOffset)
-      145 -> V5SubAckReasonCodePacketIdentifierInUseCodec.peekFrameSize(stream, baseOffset)
-      151 -> V5SubAckReasonCodeQuotaExceededCodec.peekFrameSize(stream, baseOffset)
-      158 -> V5SubAckReasonCodeSharedSubscriptionsNotSupportedCodec.peekFrameSize(stream, baseOffset)
-      161 -> V5SubAckReasonCodeSubscriptionIdentifiersNotSupportedCodec.peekFrameSize(stream, baseOffset)
-      162 -> V5SubAckReasonCodeWildcardSubscriptionsNotSupportedCodec.peekFrameSize(stream, baseOffset)
+      0 -> V5SubAckReasonCodeGrantedQoS0Codec.frameSize(stream, baseOffset)
+      1 -> V5SubAckReasonCodeGrantedQoS1Codec.frameSize(stream, baseOffset)
+      2 -> V5SubAckReasonCodeGrantedQoS2Codec.frameSize(stream, baseOffset)
+      128 -> V5SubAckReasonCodeUnspecifiedErrorCodec.frameSize(stream, baseOffset)
+      131 -> V5SubAckReasonCodeImplementationSpecificErrorCodec.frameSize(stream, baseOffset)
+      135 -> V5SubAckReasonCodeNotAuthorizedCodec.frameSize(stream, baseOffset)
+      143 -> V5SubAckReasonCodeTopicFilterInvalidCodec.frameSize(stream, baseOffset)
+      145 -> V5SubAckReasonCodePacketIdentifierInUseCodec.frameSize(stream, baseOffset)
+      151 -> V5SubAckReasonCodeQuotaExceededCodec.frameSize(stream, baseOffset)
+      158 -> V5SubAckReasonCodeSharedSubscriptionsNotSupportedCodec.frameSize(stream, baseOffset)
+      161 -> V5SubAckReasonCodeSubscriptionIdentifiersNotSupportedCodec.frameSize(stream, baseOffset)
+      162 -> V5SubAckReasonCodeWildcardSubscriptionsNotSupportedCodec.frameSize(stream, baseOffset)
       else -> {
         throw DecodeException(fieldPath = "V5SubAckReasonCode.discriminator", bufferPosition = baseOffset, expected = "one of {0, 1, 2, 128, 131, 135, 143, 145, 151, 158, 161, 162}", actual = """${__dispatchValue}""")
       }
     }
   }
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

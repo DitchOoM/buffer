@@ -4,8 +4,9 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -111,15 +112,15 @@ class LengthPrefixedUseCodecListCodecTest {
         // prefix codec sizes the byte count: empty list = varint(0) alone;
         // three 5-byte entries = varint(15) + 15.
         assertEquals(
-            WireSize.Exact(1),
-            PropertyBagFrameCodec.wireSize(
+            WireByteCount.exact(1),
+            PropertyBagFrameCodec.wireBytes(
                 PropertyBagFrame(properties = emptyList()),
                 EncodeContext.Empty,
             ),
         )
         assertEquals(
-            WireSize.Exact(1 + 15),
-            PropertyBagFrameCodec.wireSize(
+            WireByteCount.exact((1 + 15).toLong()),
+            PropertyBagFrameCodec.wireBytes(
                 PropertyBagFrame(
                     properties =
                         listOf(
@@ -152,8 +153,8 @@ class LengthPrefixedUseCodecListCodecTest {
             PropertyBagFrameCodec.encode(buffer, frame, EncodeContext.Empty)
             buffer.resetForRead()
             processor.append(buffer)
-            val peek = PropertyBagFrameCodec.peekFrameSize(processor)
-            assertTrue(peek is PeekResult.Complete, "expected Complete, got $peek")
+            val peek = PropertyBagFrameCodec.peekOutcome(processor)
+            assertTrue(peek is PeekOutcome.Complete, "expected Complete, got $peek")
             assertEquals(16, peek.bytes)
         } finally {
             processor.release()
@@ -183,9 +184,9 @@ class LengthPrefixedUseCodecListCodecTest {
                 chunk.writeByte(full.readByte())
                 chunk.resetForRead()
                 processor.append(chunk)
-                val peek = PropertyBagFrameCodec.peekFrameSize(processor)
+                val peek = PropertyBagFrameCodec.peekOutcome(processor)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
+                    PeekOutcome.NeedsMoreData,
                     peek,
                     "after $i of $totalBytes bytes, expected NeedsMoreData but got $peek",
                 )
@@ -194,8 +195,8 @@ class LengthPrefixedUseCodecListCodecTest {
             last.writeByte(full.readByte())
             last.resetForRead()
             processor.append(last)
-            val peek = PropertyBagFrameCodec.peekFrameSize(processor)
-            assertTrue(peek is PeekResult.Complete, "expected Complete, got $peek")
+            val peek = PropertyBagFrameCodec.peekOutcome(processor)
+            assertTrue(peek is PeekOutcome.Complete, "expected Complete, got $peek")
             assertEquals(totalBytes, peek.bytes)
         } finally {
             processor.release()
@@ -217,8 +218,8 @@ class LengthPrefixedUseCodecListCodecTest {
             val availableBefore = processor.available()
             assertEquals(6, availableBefore)
             repeat(5) {
-                val peek = PropertyBagFrameCodec.peekFrameSize(processor)
-                assertTrue(peek is PeekResult.Complete)
+                val peek = PropertyBagFrameCodec.peekOutcome(processor)
+                assertTrue(peek is PeekOutcome.Complete)
                 assertEquals(6, peek.bytes)
                 assertEquals(availableBefore, processor.available(), "peek must be non-consuming")
             }
@@ -263,8 +264,8 @@ class LengthPrefixedUseCodecListCodecTest {
             TaggedPropertyBagCodec.encode(buffer, frame, EncodeContext.Empty)
             buffer.resetForRead()
             processor.append(buffer)
-            val peek = TaggedPropertyBagCodec.peekFrameSize(processor)
-            assertTrue(peek is PeekResult.Complete, "expected Complete, got $peek")
+            val peek = TaggedPropertyBagCodec.peekOutcome(processor)
+            assertTrue(peek is PeekOutcome.Complete, "expected Complete, got $peek")
             assertEquals(7, peek.bytes) // 1 + 1 + 5
         } finally {
             processor.release()
@@ -284,8 +285,8 @@ class LengthPrefixedUseCodecListCodecTest {
             chunk.writeByte(0xAA.toByte())
             chunk.resetForRead()
             processor.append(chunk)
-            val peek = TaggedPropertyBagCodec.peekFrameSize(processor)
-            assertEquals(PeekResult.NeedsMoreData, peek)
+            val peek = TaggedPropertyBagCodec.peekOutcome(processor)
+            assertEquals(PeekOutcome.NeedsMoreData, peek)
         } finally {
             processor.release()
             pool.clear()

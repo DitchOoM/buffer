@@ -6,10 +6,17 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.toPeekResult
+import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object CommandPayloadCodec : Codec<CommandPayload> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): CommandPayload {
@@ -46,11 +53,18 @@ public object CommandPayloadCodec : Codec<CommandPayload> {
     }
   }
 
-  override fun wireSize(`value`: CommandPayload, context: EncodeContext): WireSize = when (value) {
-    is CommandPayload.SetRgbState -> WireSize.Exact(4)
-    is CommandPayload.GetRgbState -> WireSize.Exact(1)
-    is CommandPayload.ResetDevice -> WireSize.Exact(1)
+  override fun wireBytes(`value`: CommandPayload, context: EncodeContext): WireByteCount = when (value) {
+    is CommandPayload.SetRgbState -> WireByteCount.exact(4L)
+    is CommandPayload.GetRgbState -> WireByteCount.exact(1L)
+    is CommandPayload.ResetDevice -> WireByteCount.exact(1L)
   }
+
+  @Deprecated(
+    message = "Call wireBytes, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: CommandPayload, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: CommandPayload, context: EncodeContext): Int = 1 + when (value) {
     is CommandPayload.SetRgbState -> CommandPayloadSetRgbStateCodec.sizeHint(value, context)
@@ -58,31 +72,23 @@ public object CommandPayloadCodec : Codec<CommandPayload> {
     is CommandPayload.ResetDevice -> CommandPayloadResetDeviceCodec.sizeHint(value, context)
   }
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
-    if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
+    if (stream.available() - baseOffset < 1) return FrameSize.NeedsMoreData
     val discriminator = stream.peekByte(baseOffset).toInt() and 0xFF
     return when (discriminator) {
-      0x22 -> {
-        when (val inner = CommandPayloadSetRgbStateCodec.peekFrameSize(stream, baseOffset + 1)) {
-          is PeekResult.Complete -> PeekResult.Complete(1 + inner.bytes)
-          else -> inner
-        }
-      }
-      0x23 -> {
-        when (val inner = CommandPayloadGetRgbStateCodec.peekFrameSize(stream, baseOffset + 1)) {
-          is PeekResult.Complete -> PeekResult.Complete(1 + inner.bytes)
-          else -> inner
-        }
-      }
-      0x24 -> {
-        when (val inner = CommandPayloadResetDeviceCodec.peekFrameSize(stream, baseOffset + 1)) {
-          is PeekResult.Complete -> PeekResult.Complete(1 + inner.bytes)
-          else -> inner
-        }
-      }
+      0x22 -> CommandPayloadSetRgbStateCodec.frameSize(stream, baseOffset + 1).fold(declared = { __h, __b -> FrameSize.declared(1 + __h, __b) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
+      0x23 -> CommandPayloadGetRgbStateCodec.frameSize(stream, baseOffset + 1).fold(declared = { __h, __b -> FrameSize.declared(1 + __h, __b) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
+      0x24 -> CommandPayloadResetDeviceCodec.frameSize(stream, baseOffset + 1).fold(declared = { __h, __b -> FrameSize.declared(1 + __h, __b) }, needsMoreData = { FrameSize.NeedsMoreData }, unframed = { FrameSize.Unframed })
       else -> {
         throw DecodeException(fieldPath = "CommandPayload.discriminator", bufferPosition = baseOffset, expected = "one of {0x22, 0x23, 0x24}", actual = """0x${discriminator.toString(16).padStart(2, '0').uppercase()}""")
       }
     }
   }
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

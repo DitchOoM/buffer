@@ -6,8 +6,9 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -80,7 +81,7 @@ class WavFmtChunkCodecTest {
         // Locks the impossible-state-class fix: `chunkSize` is no longer a
         // constructor parameter — the body's bound is expressed by
         // `@LengthPrefixed` on the body field, not by an independent
-        // length carrier that could disagree with `body.wireSize()`. Slice
+        // length carrier that could disagree with `body.wireBytes()`. Slice
         // 4 redesign-2 ( R3 widening) requires arity == 2.
         //
         // Compile-time lock: pinning `::WavFmtChunk` to a 2-parameter
@@ -198,15 +199,15 @@ class WavFmtChunkCodecTest {
     @Test
     fun wireSizeIsExactSumOfHeaderAndBody() {
         assertEquals(
-            WireSize.Exact(8 + pcmBodyWireSize),
-            WavFmtChunkCodec.wireSize(makeChunk(), EncodeContext.Empty),
+            WireByteCount.exact((8 + pcmBodyWireSize).toLong()),
+            WavFmtChunkCodec.wireBytes(makeChunk(), EncodeContext.Empty),
             "wireSize is Exact(8 + 16) for a PCM fmt chunk",
         )
         // Lock #3 — body codec independently reports Exact, parent
         // sums to Exact, framework takes the pool.withBuffer fast path.
         assertEquals(
-            WireSize.Exact(pcmBodyWireSize),
-            WavFmtBodyCodec.wireSize(pcmBody, EncodeContext.Empty),
+            WireByteCount.exact(pcmBodyWireSize.toLong()),
+            WavFmtBodyCodec.wireBytes(pcmBody, EncodeContext.Empty),
             "body wireSize is Exact(16)",
         )
     }
@@ -223,7 +224,7 @@ class WavFmtChunkCodecTest {
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
             // 0 bytes: NeedsMoreData (header not even partially present)
-            assertEquals(PeekResult.NeedsMoreData, WavFmtChunkCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, WavFmtChunkCodec.peekOutcome(stream))
 
             // Drip-feed bytes one at a time; every state below totalSize should
             // be NeedsMoreData (header reads at 8, body completes at 8+16).
@@ -233,8 +234,8 @@ class WavFmtChunkCodecTest {
                 oneByte.resetForRead()
                 stream.append(oneByte)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    WavFmtChunkCodec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    WavFmtChunkCodec.peekOutcome(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -244,7 +245,7 @@ class WavFmtChunkCodecTest {
             lastByte.writeByte(encoded.readByte())
             lastByte.resetForRead()
             stream.append(lastByte)
-            assertEquals(PeekResult.Complete(totalSize), WavFmtChunkCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalSize), WavFmtChunkCodec.peekOutcome(stream))
 
             // Drain via readBufferScoped, exercising the streaming-loop path.
             val decoded =
@@ -276,13 +277,13 @@ class WavFmtChunkCodecTest {
             stream.append(twoChunks)
 
             assertEquals(
-                PeekResult.Complete(frameSize),
-                WavFmtChunkCodec.peekFrameSize(stream, baseOffset = 0),
+                PeekOutcome.Complete(frameSize),
+                WavFmtChunkCodec.peekOutcome(stream, baseOffset = 0),
                 "baseOffset=0 lands on first chunk header",
             )
             assertEquals(
-                PeekResult.Complete(frameSize),
-                WavFmtChunkCodec.peekFrameSize(stream, baseOffset = frameSize),
+                PeekOutcome.Complete(frameSize),
+                WavFmtChunkCodec.peekOutcome(stream, baseOffset = frameSize),
                 "baseOffset=$frameSize lands on second chunk header",
             )
         } finally {
@@ -312,13 +313,13 @@ class WavFmtChunkCodecTest {
             stream.append(truncated)
 
             assertEquals(
-                PeekResult.Complete(frameSize),
-                WavFmtChunkCodec.peekFrameSize(stream, baseOffset = 0),
+                PeekOutcome.Complete(frameSize),
+                WavFmtChunkCodec.peekOutcome(stream, baseOffset = 0),
                 "first chunk still fully framed",
             )
             assertEquals(
-                PeekResult.NeedsMoreData,
-                WavFmtChunkCodec.peekFrameSize(stream, baseOffset = frameSize),
+                PeekOutcome.NeedsMoreData,
+                WavFmtChunkCodec.peekOutcome(stream, baseOffset = frameSize),
                 "second chunk header readable but body 1 byte short",
             )
         } finally {
@@ -368,7 +369,7 @@ class WavFmtChunkCodecTest {
             stream.append(header)
 
             assertFailsWith<DecodeException> {
-                WavFmtChunkCodec.peekFrameSize(stream)
+                WavFmtChunkCodec.peekOutcome(stream)
             }
         } finally {
             stream.release()

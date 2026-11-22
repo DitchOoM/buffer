@@ -5,7 +5,7 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -92,7 +92,7 @@ class PngChunkRoundTripTest {
                 data = BinaryData(byteArrayOf(0, 1, 2, 3)),
                 crc = 0xCAFEBABEu,
             )
-        assertEquals(WireSize.BackPatch, PngChunkCodec.wireSize(chunk, EncodeContext.Empty))
+        assertEquals(WireByteCount.BackPatch, PngChunkCodec.wireBytes(chunk, EncodeContext.Empty))
     }
 
     private fun roundTripPngChunk(

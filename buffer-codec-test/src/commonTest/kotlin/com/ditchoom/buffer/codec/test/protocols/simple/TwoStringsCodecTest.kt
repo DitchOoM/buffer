@@ -5,8 +5,9 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -17,7 +18,7 @@ import kotlin.test.assertEquals
  * walk and non-terminal `@LengthPrefixed val: String` support: two
  * consecutive LPS String fields round-trip correctly, encode
  * BackPatches both prefixes in sequence, decode reads both
- * sequentially, `WireSize.BackPatch` per
+ * sequentially, `WireByteCount.BackPatch` per
  * (any LPS String → BackPatch), and `peekFrameSize` walks both
  * variable-length bodies via the running offset.
  */
@@ -59,12 +60,12 @@ class TwoStringsCodecTest {
     fun wireSizeIsBackPatch() {
         // Any @LengthPrefixed val: String collapses to BackPatch.
         assertEquals(
-            WireSize.BackPatch,
-            TwoStringsCodec.wireSize(TwoStrings("hi", "yo"), EncodeContext.Empty),
+            WireByteCount.BackPatch,
+            TwoStringsCodec.wireBytes(TwoStrings("hi", "yo"), EncodeContext.Empty),
         )
         assertEquals(
-            WireSize.BackPatch,
-            TwoStringsCodec.wireSize(TwoStrings("", ""), EncodeContext.Empty),
+            WireByteCount.BackPatch,
+            TwoStringsCodec.wireBytes(TwoStrings("", ""), EncodeContext.Empty),
         )
     }
 
@@ -73,7 +74,7 @@ class TwoStringsCodecTest {
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, TwoStringsCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, TwoStringsCodec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()
@@ -90,7 +91,7 @@ class TwoStringsCodecTest {
 
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, TwoStringsCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, TwoStringsCodec.peekOutcome(stream))
 
             for (i in 0 until totalBytes - 1) {
                 val one = BufferFactory.Default.allocate(1)
@@ -98,8 +99,8 @@ class TwoStringsCodecTest {
                 one.resetForRead()
                 stream.append(one)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    TwoStringsCodec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    TwoStringsCodec.peekOutcome(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -107,7 +108,7 @@ class TwoStringsCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), TwoStringsCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), TwoStringsCodec.peekOutcome(stream))
 
             val decoded =
                 stream.readBufferScoped(totalBytes) {

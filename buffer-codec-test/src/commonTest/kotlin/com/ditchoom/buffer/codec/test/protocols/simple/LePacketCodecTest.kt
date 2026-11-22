@@ -5,7 +5,8 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -87,8 +88,8 @@ class LePacketCodecTest {
                 one.resetForRead()
                 stream.append(one)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    LePacketCodec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    LePacketCodec.peekOutcome(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -96,7 +97,7 @@ class LePacketCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), LePacketCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), LePacketCodec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()

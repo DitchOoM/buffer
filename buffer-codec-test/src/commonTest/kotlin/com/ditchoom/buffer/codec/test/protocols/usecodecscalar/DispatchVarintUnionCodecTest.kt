@@ -4,7 +4,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -20,20 +20,20 @@ class DispatchVarintUnionCodecTest {
     fun variableLengthUseCodecVariantsReportExactUnionWireSize() {
         // Sole VL @UseCodec field: Exact(discriminator + runtime varint width).
         assertEquals(
-            WireSize.Exact(1 + QuicVarintCodec.encodedLength(5uL)),
-            DispatchVarintUnionCodec.wireSize(DispatchVarintUnion.Single(5uL), EncodeContext.Empty),
+            WireByteCount.exact((1 + QuicVarintCodec.encodedLength(5uL)).toLong()),
+            DispatchVarintUnionCodec.wireBytes(DispatchVarintUnion.Single(5uL), EncodeContext.Empty),
         )
         // A 16384 value forces a wider QUIC varint, proving the size is the runtime width (not a
         // compile-time constant), and that the VL field in a non-terminal slot + a trailing fixed
         // Boolean is summed (1 disc + varint + 1 bool) rather than crashing the FixedSize-only path.
         assertEquals(
-            WireSize.Exact(1 + QuicVarintCodec.encodedLength(16384uL) + 1),
-            DispatchVarintUnionCodec.wireSize(DispatchVarintUnion.Mixed(16384uL, true), EncodeContext.Empty),
+            WireByteCount.exact((1 + QuicVarintCodec.encodedLength(16384uL) + 1).toLong()),
+            DispatchVarintUnionCodec.wireBytes(DispatchVarintUnion.Mixed(16384uL, true), EncodeContext.Empty),
         )
         // Zero-field data object → discriminator only.
         assertEquals(
-            WireSize.Exact(1),
-            DispatchVarintUnionCodec.wireSize(DispatchVarintUnion.Marker, EncodeContext.Empty),
+            WireByteCount.exact(1),
+            DispatchVarintUnionCodec.wireBytes(DispatchVarintUnion.Marker, EncodeContext.Empty),
         )
     }
 
@@ -43,8 +43,8 @@ class DispatchVarintUnionCodecTest {
         // variant codec and composes 1 (discriminator) + 4 (body). Before the
         // @UseCodec promotion this collapsed to BackPatch at analyze time.
         assertEquals(
-            WireSize.Exact(5),
-            DispatchVarintUnionCodec.wireSize(DispatchVarintUnion.Plain(1u), EncodeContext.Empty),
+            WireByteCount.exact(5),
+            DispatchVarintUnionCodec.wireBytes(DispatchVarintUnion.Plain(1u), EncodeContext.Empty),
         )
     }
 

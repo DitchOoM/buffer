@@ -5,8 +5,9 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -101,9 +102,9 @@ class CountPrefixedListCodecTest {
                 id = 1u,
                 points = listOf(CountPoint(0u, 0u), CountPoint(1u, 1u), CountPoint(2u, 2u)),
             )
-        assertEquals(WireSize.Exact(1 + 1 + 9), CountFixedListCodec.wireSize(three, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(1L + 1 + 9), CountFixedListCodec.wireBytes(three, EncodeContext.Empty))
         val empty = CountFixedList(id = 1u, points = emptyList())
-        assertEquals(WireSize.Exact(2), CountFixedListCodec.wireSize(empty, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(2), CountFixedListCodec.wireBytes(empty, EncodeContext.Empty))
     }
 
     @Test
@@ -175,7 +176,7 @@ class CountPrefixedListCodecTest {
         // collapses the containing message to BackPatch (the encode path uses a
         // growable buffer and reports the actual byte count after the body).
         val msg = CountVariableList(names = listOf(CountNamed("hi"), CountNamed("abc")))
-        assertEquals(WireSize.BackPatch, CountVariableListCodec.wireSize(msg, EncodeContext.Empty))
+        assertEquals(WireByteCount.BackPatch, CountVariableListCodec.wireBytes(msg, EncodeContext.Empty))
     }
 
     // ---- non-terminal @Count + trailer -----------------------------------
@@ -227,7 +228,7 @@ class CountPrefixedListCodecTest {
                 trailer = 0u,
             )
         // varint(2) + 3 × 2 + 4 (trailer) = 1 + 6 + 4.
-        assertEquals(WireSize.Exact(1 + 6 + 4), CountThenTrailerCodec.wireSize(msg, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(1L + 6 + 4), CountThenTrailerCodec.wireBytes(msg, EncodeContext.Empty))
     }
 
     // ---- peek -------------------------------------------------------------
@@ -240,7 +241,7 @@ class CountPrefixedListCodecTest {
         val pool = BufferPool()
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NoFraming, CountFixedListCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NoFraming, CountFixedListCodec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()

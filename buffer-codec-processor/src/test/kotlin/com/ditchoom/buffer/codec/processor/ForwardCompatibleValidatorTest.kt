@@ -35,7 +35,7 @@ class ForwardCompatibleValidatorTest {
         import com.ditchoom.buffer.codec.BoundingLengthCodec
         import com.ditchoom.buffer.codec.DecodeContext
         import com.ditchoom.buffer.codec.EncodeContext
-        import com.ditchoom.buffer.codec.WireSize
+        import com.ditchoom.buffer.codec.WireByteCount
         import com.ditchoom.buffer.codec.annotations.DispatchOn
         import com.ditchoom.buffer.codec.annotations.DispatchValue
         import com.ditchoom.buffer.codec.annotations.ForwardCompatible
@@ -50,7 +50,9 @@ class ForwardCompatibleValidatorTest {
             override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                 buffer.writeUByte(value.toUByte())
             }
-            override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(1)
+            override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(1)
+            override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
+            override fun encodedWidth(bodyBytes: Long): com.ditchoom.buffer.codec.WireByteCount = com.ditchoom.buffer.codec.WireByteCount.exact(maxWireSize.toLong())
             override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
                 buffer.setLimit(buffer.position() + decodedValue.toInt())
             }

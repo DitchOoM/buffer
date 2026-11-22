@@ -13,7 +13,6 @@
     <ID>LongMethod:V5PropertyBag.kt:V5PropertyBagCodec$override fun decode: V5PropertyBag</ID>
     <ID>LongMethod:V5PropertyBag.kt:fun List&lt;MqttV5Property>.toV5PropertyBag: V5PropertyBag</ID>
     <ID>LongMethod:V5PropertyBagCodecTest.kt:V5PropertyBagCodecTest$@Test fun roundTripsBagWithEveryUniqueVariantPopulated</ID>
-    <ID>ReturnCount:QuicVarintCodec.kt:QuicVarintCodec$override fun peekValue: VarLenPeek&lt;ULong></ID>
-    <ID>ReturnCount:WsFrame.kt:WsFrame.Companion$override fun peekFrameSize: PeekResult</ID>
+    <ID>ReturnCount:WsFrame.kt:WsFrame.Companion$override fun frameSize: FrameSize</ID>
   </CurrentIssues>
 </SmellBaseline>

@@ -13,7 +13,7 @@ import kotlin.test.assertFailsWith
 /**
  * Round-trip + framing + robustness for the shipped unsigned LEB128 codec. The (value, byteWidth)
  * table covers every length class up to the UInt ceiling, so encode size, decode value, `wireSize`
- * (runtime-Exact), and `peekValue` framing are all pinned against the same vectors.
+ * (runtime-Exact), and `frameSize` framing are all pinned against the same vectors.
  */
 class UnsignedVarIntCodecTest {
     private val vectors =
@@ -38,9 +38,9 @@ class UnsignedVarIntCodecTest {
             UnsignedVarIntCodec.encode(buf, value, EncodeContext.Empty)
             assertEquals(width, buf.position(), "encoded byte count for $value")
             assertEquals(
-                WireSize.Exact(width),
-                UnsignedVarIntCodec.wireSize(value, EncodeContext.Empty),
-                "wireSize($value)",
+                WireByteCount.exact(width.toLong()),
+                UnsignedVarIntCodec.wireBytes(value, EncodeContext.Empty),
+                "wireBytes($value)",
             )
             buf.resetForRead()
             assertEquals(value, UnsignedVarIntCodec.decode(buf, DecodeContext.Empty), "round-trip $value")
@@ -59,17 +59,19 @@ class UnsignedVarIntCodecTest {
                 for (i in 0 until width - 1) {
                     appendByte(stream, src.readByte())
                     assertEquals(
-                        VarLenPeek.NeedsMoreData,
-                        UnsignedVarIntCodec.peekValue(stream),
+                        FrameSize.NeedsMoreData,
+                        UnsignedVarIntCodec.frameSize(stream),
                         "value $value after ${i + 1} bytes",
                     )
+                    assertEquals(PeekedInteger.NeedsMoreData, UnsignedVarIntCodec.peekInteger(stream, 0))
                 }
                 appendByte(stream, src.readByte())
                 assertEquals(
-                    VarLenPeek.Decoded(value, width),
-                    UnsignedVarIntCodec.peekValue(stream),
+                    FrameSize.declared(0, width.toLong()),
+                    UnsignedVarIntCodec.frameSize(stream),
                     "value $value complete",
                 )
+                assertEquals(PeekedInteger.of(value.toLong()), UnsignedVarIntCodec.peekInteger(stream, 0))
             } finally {
                 stream.release()
                 pool.clear()
@@ -108,7 +110,7 @@ class UnsignedVarIntCodecTest {
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
             repeat(5) { appendByte(stream, src.readByte()) }
-            assertFailsWith<DecodeException> { UnsignedVarIntCodec.peekValue(stream) }
+            assertFailsWith<DecodeException> { UnsignedVarIntCodec.frameSize(stream) }
         } finally {
             stream.release()
             pool.clear()

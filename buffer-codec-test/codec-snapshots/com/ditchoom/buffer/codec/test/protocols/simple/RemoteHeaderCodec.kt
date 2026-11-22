@@ -6,12 +6,19 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.toPeekResult
+import com.ditchoom.buffer.codec.toWireSize
 import com.ditchoom.buffer.stream.StreamProcessor
+import kotlin.Deprecated
 import kotlin.Int
+import kotlin.ReplaceWith
+import kotlin.Suppress
 
 public object RemoteHeaderCodec : Codec<RemoteHeader> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): RemoteHeader {
@@ -33,27 +40,40 @@ public object RemoteHeaderCodec : Codec<RemoteHeader> {
     buffer.writeText(value.payload, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
   }
 
-  override fun wireSize(`value`: RemoteHeader, context: EncodeContext): WireSize = WireSize.Exact(7 + value.payloadLength.toInt())
+  override fun wireBytes(`value`: RemoteHeader, context: EncodeContext): WireByteCount = WireByteCount.exact(7L + value.payloadLength.toLong())
+
+  @Deprecated(
+    message = "Call wireBytes, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("wireBytes(value, context)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun wireSize(`value`: RemoteHeader, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
 
   override fun sizeHint(`value`: RemoteHeader, context: EncodeContext): Int = 7 + value.payload.length
 
-  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult {
+  override fun frameSize(stream: StreamProcessor, baseOffset: Int): FrameSize {
     var __offset = 0
-    if (stream.available() - baseOffset < __offset + 2) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 2) return FrameSize.NeedsMoreData
     val payloadLengthB0 = stream.peekByte(baseOffset + __offset).toInt() and 0xFF
     val payloadLengthB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val payloadLength = ((payloadLengthB0 shl 8) or payloadLengthB1).toUInt().toUShort()
     __offset += 2
-    if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData
     __offset += 1
-    if (stream.available() - baseOffset < __offset + 4) return PeekResult.NeedsMoreData
+    if (stream.available() - baseOffset < __offset + 4) return FrameSize.NeedsMoreData
     __offset += 4
     val payloadBytes = payloadLength.toInt()
     if (payloadBytes < 0 || payloadBytes > Int.MAX_VALUE - __offset) {
       throw FrameTooLargeException(declaredBytes = if (payloadBytes < 0) payloadBytes.toLong() else __offset.toLong() + payloadBytes, maxBytes = Int.MAX_VALUE)
     }
-    if (stream.available() - baseOffset < __offset + payloadBytes) return PeekResult.NeedsMoreData
     __offset += payloadBytes
-    return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData
+    return FrameSize.declared(0, __offset.toLong())
   }
+
+  @Deprecated(
+    message = "Call frameSize, which does not box. Removed in the next major release.",
+    replaceWith = ReplaceWith("frameSize(stream, baseOffset)"),
+  )
+  @Suppress("DEPRECATION")
+  override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult = frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
 }

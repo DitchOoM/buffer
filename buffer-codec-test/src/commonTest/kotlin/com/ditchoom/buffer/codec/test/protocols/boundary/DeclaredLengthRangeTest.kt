@@ -7,7 +7,10 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.Decoder
 import com.ditchoom.buffer.codec.FrameDetector
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.FrameTooLargeException
+import com.ditchoom.buffer.codec.readFrame
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.count.CountFixedListCodec
 import com.ditchoom.buffer.codec.test.protocols.simple.IntPrefixedStringCodec
 import com.ditchoom.buffer.codec.test.protocols.simple.SignedLengthFromFrameCodec
@@ -49,7 +52,7 @@ class DeclaredLengthRangeTest {
         val stream = StreamProcessor.create(BufferPool(), ByteOrder.BIG_ENDIAN)
         stream.append(bufferOf(data))
         try {
-            val thrown = assertFailsWith<FrameTooLargeException> { detector.peekFrameSize(stream) }
+            val thrown = assertFailsWith<FrameTooLargeException> { detector.peekOutcome(stream) }
             assertEquals(data.size, stream.available(), "a rejecting peek consumes nothing")
             return thrown
         } finally {
@@ -66,7 +69,16 @@ class DeclaredLengthRangeTest {
     fun aU64LengthAtOrPast2To63IsRejectedNotWrappedNegative() {
         for (length in listOf(Long.MIN_VALUE, -1L)) { // 2^63 and 2^64-1 as raw bits
             val frame = bytes(0x00, 0x01) + be(length, 8) + ByteArray(3)
-            assertEquals(Long.MAX_VALUE, rejectedByPeek(U64BoundedFrameCodec, frame).declaredBytes)
+            // The peek declares it with the body saturated (never wrapped); a reader's cap rejects it.
+            val stream = StreamProcessor.create(BufferPool(), ByteOrder.BIG_ENDIAN)
+            stream.append(bufferOf(frame))
+            try {
+                assertEquals(FrameSize.declared(10, FrameSize.MAX_BODY_BYTES), U64BoundedFrameCodec.frameSize(stream))
+                assertFailsWith<FrameTooLargeException> { U64BoundedFrameCodec.readFrame(stream) }
+                assertEquals(frame.size, stream.available(), "a rejection consumes nothing")
+            } finally {
+                stream.release()
+            }
             assertEquals(Long.MAX_VALUE, rejectedByDecode(U64BoundedFrameCodec, frame).declaredBytes)
         }
     }

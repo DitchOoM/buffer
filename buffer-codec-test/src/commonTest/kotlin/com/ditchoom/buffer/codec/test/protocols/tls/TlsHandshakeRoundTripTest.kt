@@ -5,7 +5,7 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -74,8 +74,8 @@ class TlsHandshakeRoundTripTest {
             TlsHandshake(msgType = 0x01u, length = bodyBytes.toUInt(), body = body)
         // Header = 1 (msgType) + 3 (length) = 4; body = 2 (legacyVersion) + 3 (random)
         assertEquals(
-            WireSize.Exact(4 + bodyBytes),
-            TlsHandshakeCodec.wireSize(handshake, EncodeContext.Empty),
+            WireByteCount.exact((4 + bodyBytes).toLong()),
+            TlsHandshakeCodec.wireBytes(handshake, EncodeContext.Empty),
         )
     }
 

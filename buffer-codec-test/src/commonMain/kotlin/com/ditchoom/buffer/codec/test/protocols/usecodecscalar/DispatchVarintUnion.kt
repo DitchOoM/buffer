@@ -12,7 +12,7 @@ import com.ditchoom.buffer.codec.test.protocols.quic.QuicVarintCodec
  * variant to `BackPatch`, so a sealed union of such variants reported `BackPatch` and could not be
  * embedded inside a measure-based / two-pass encoder. Now a `VariableLengthCodec` `@UseCodec`
  * field (here [QuicVarintCodec], which reports `Exact(encodedLength)`) classifies as `RuntimeExact`,
- * so the generated union's `wireSize` forwards to the variant codec and reports `Exact(1 + body)`.
+ * so the generated union's `wireBytes` forwards to the variant codec and reports `Exact(1 + body)`.
  *
  * Variants pin the three relevant shapes plus the unchanged BackPatch contract:
  *  - [Single]  — sole field is a `VariableLengthCodec` `@UseCodec` scalar → runtime-Exact.

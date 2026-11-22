@@ -10,9 +10,9 @@ import com.ditchoom.buffer.codec.annotations.ProtocolMessage
  * UTF-8 byte count.
  *
  * Validates simultaneously: signed-scalar widening ('s emitter
- * accepted only unsigned scalars), `WireSize.BackPatch` emission for
+ * accepted only unsigned scalars), `WireByteCount.BackPatch` emission for
  * the terminal String (the first stage to actually produce
- * `BackPatch`), and the prefix-peek `peekFrameSize` walk through a
+ * `BackPatch`), and the prefix-peek `frameSize` walk through a
  * variable-length terminal.
  */
 @ProtocolMessage

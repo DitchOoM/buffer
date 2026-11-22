@@ -6,7 +6,9 @@ import com.ditchoom.buffer.codec.BoundingLengthCodec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.stream.StreamProcessor
 
 /**
  * Reference user codec for MQTT v3.1.1 §2.2.3
@@ -67,16 +69,47 @@ object MqttRemainingLengthCodec : BoundingLengthCodec<UInt> {
         } while (remaining > 0u)
     }
 
-    override fun wireSize(
+    override fun wireBytes(
         value: UInt,
         context: EncodeContext,
-    ): WireSize =
-        WireSize.Exact(
+    ): WireByteCount =
+        WireByteCount.exact(
             when {
                 value < 128u -> 1
                 value < 16_384u -> 2
                 value < 2_097_152u -> 3
                 else -> 4
+            }.toLong(),
+        )
+
+    override fun peekLength(
+        stream: StreamProcessor,
+        baseOffset: Int,
+    ): FrameSize {
+        var value = 0L
+        var multiplier = 1L
+        for (i in 0 until 4) {
+            if (stream.available() - baseOffset <= i) return FrameSize.NeedsMoreData
+            val encoded = stream.peekByte(baseOffset + i).toInt() and 0xFF
+            value += (encoded and 0x7F) * multiplier
+            if (encoded and 0x80 == 0) return FrameSize.declared(i + 1, value)
+            multiplier *= 128
+        }
+        throw DecodeException(
+            fieldPath = "MqttRemainingLength",
+            bufferPosition = baseOffset + 4,
+            expected = "continuation bit clear within 4 bytes",
+            actual = "5th continuation byte (malformed per MQTT v3.1.1 §2.2.3)",
+        )
+    }
+
+    override fun encodedWidth(bodyBytes: Long): WireByteCount =
+        WireByteCount.exact(
+            when {
+                bodyBytes < 128 -> 1L
+                bodyBytes < 16_384 -> 2L
+                bodyBytes < 2_097_152 -> 3L
+                else -> 4L
             },
         )
 

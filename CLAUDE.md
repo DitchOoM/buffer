@@ -470,17 +470,20 @@ Key rules: `@DispatchValue` must return `Int`. `wire` values are validated at co
 
 For protocols that mix byte orders within a single message, use `@WireOrder(Endianness.Big)` or `@WireOrder(Endianness.Little)` on individual fields. This overrides the message-level `@ProtocolMessage(wireOrder = ...)`. It composes with `@WireBytes` when a custom-width field's byte order also differs from the message default.
 
-### `peekFrameSize` — Generated Stream Framing
+### `frameSize` — Generated Stream Framing
 
-Every codec automatically generates `peekFrameSize(stream: StreamProcessor, baseOffset: Int = 0): Int?` when the frame size is determinable from the wire format. This peeks at a stream to determine the total bytes needed for decode, without consuming data. Eliminates manual peek offset math in streaming loops:
+Every codec generates `frameSize(stream: StreamProcessor, baseOffset: Int = 0): FrameSize`, a value class (no allocation on the JVM) that is the frame's declared size (framing header bytes + body bytes), `NeedsMoreData`, or `Unframed`. A declared size is reported as soon as the length field arrives, before the frame does. `readFrame` does the loop and rejects a declaration over `MaxFrameBytesKey` immediately:
 
 ```kotlin
-while (stream.available() >= PacketCodec.MIN_HEADER_BYTES) {
-    val frameSize = PacketCodec.peekFrameSize(stream) ?: break
-    if (stream.available() < frameSize) break
-    val msg = stream.readBufferScoped(frameSize) { PacketCodec.decode(this) }
+while (true) {
+    val msg = PacketCodec.readFrame(stream) ?: break // null: append more bytes and retry
+    handle(msg)
 }
 ```
+
+The sender side is `wireBytes(value, context): WireByteCount` (exact bytes or `BackPatch`). A hand-written `BoundingLengthCodec` should override `peekLength` (the length field read with `peekByte`) and `encodedWidth`; a `VariableLengthCodec` should override `frameSize` (a width-only scan) and `peekInteger` (the value as a `PeekedInteger`, which a varint `@DispatchOn` dispatcher reads instead of slicing).
+
+The boxed `peekFrameSize`/`PeekResult`, `wireSize`/`WireSize` and `VariableLengthCodec.peekValue`/`VarLenPeek` remain as deprecated adapters, removed in the next major release. `frameSize`/`wireBytes` default to asking the old method, so old-style codecs keep working; the old methods do not ask the new ones, so a hand-written codec overriding only the new method also needs the one-line forwarder (`frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)` / `wireBytes(value, context).toWireSize()`) while anything calls the old method. Generated codecs carry both.
 
 Handles `@LengthPrefixed`, `@LengthFrom`, `@WhenTrue` (including value class property conditions), `@WireBytes`, sealed dispatch, `@DispatchOn` (value class and data class discriminators), nested messages, and multiple variable-length fields.
 

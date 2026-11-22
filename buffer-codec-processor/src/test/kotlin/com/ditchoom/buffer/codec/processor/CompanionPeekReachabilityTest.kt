@@ -38,7 +38,7 @@ class CompanionPeekReachabilityTest {
         val result = compile(unframedGenericDispatcher(consumer = COMPANION_PEEK))
         assertEquals(KotlinCompilation.ExitCode.COMPILATION_ERROR, result.exitCode, result.messages)
         assertTrue(
-            "peekFrameSize" in result.messages,
+            "frameSize" in result.messages,
             "the failure must be about the missing entry point, not the fixture: ${result.messages}",
         )
     }
@@ -176,7 +176,7 @@ class CompanionPeekReachabilityTest {
             """
             import com.ditchoom.buffer.codec.FrameDetector
             import com.ditchoom.buffer.codec.Payload
-            import com.ditchoom.buffer.codec.PeekResult
+            import com.ditchoom.buffer.codec.FrameSize
             import com.ditchoom.buffer.codec.annotations.ProtocolMessage
             import com.ditchoom.buffer.stream.StreamProcessor
             """.trimIndent()
@@ -188,7 +188,7 @@ class CompanionPeekReachabilityTest {
             import com.ditchoom.buffer.codec.BoundingLengthCodec
             import com.ditchoom.buffer.codec.DecodeContext
             import com.ditchoom.buffer.codec.EncodeContext
-            import com.ditchoom.buffer.codec.WireSize
+            import com.ditchoom.buffer.codec.WireByteCount
 
             object MyLengthCodec : BoundingLengthCodec<UInt> {
                 override val maxWireSize: Int = 4
@@ -197,7 +197,9 @@ class CompanionPeekReachabilityTest {
                 override fun encode(buffer: WriteBuffer, value: UInt, context: EncodeContext) {
                     buffer.writeInt(value.toInt())
                 }
-                override fun wireSize(value: UInt, context: EncodeContext): WireSize = WireSize.Exact(4)
+                override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount = WireByteCount.exact(4)
+                override fun peekLength(stream: com.ditchoom.buffer.stream.StreamProcessor, baseOffset: Int): com.ditchoom.buffer.codec.FrameSize = com.ditchoom.buffer.codec.FrameSize.NeedsMoreData
+                override fun encodedWidth(bodyBytes: Long): com.ditchoom.buffer.codec.WireByteCount = com.ditchoom.buffer.codec.WireByteCount.exact(maxWireSize.toLong())
                 override fun applyBound(buffer: ReadBuffer, decodedValue: UInt) {
                     buffer.setLimit(buffer.position() + decodedValue.toInt())
                 }
@@ -222,25 +224,25 @@ class CompanionPeekReachabilityTest {
                     buffer.writeByte(value.raw.toByte())
                 }
 
-                override fun wireSize(
+                override fun wireBytes(
                     value: MyPayload,
                     context: com.ditchoom.buffer.codec.EncodeContext,
-                ): com.ditchoom.buffer.codec.WireSize = com.ditchoom.buffer.codec.WireSize.Exact(1)
+                ): com.ditchoom.buffer.codec.WireByteCount = com.ditchoom.buffer.codec.WireByteCount.exact(1)
             }
             """.trimIndent()
 
         /** Reaches peek through a constructed codec — always available. */
         val INSTANCE_PEEK =
             """
-            fun peekViaInstance(stream: StreamProcessor, payloadCodec: MyPayloadCodec): PeekResult =
-                $CODEC(payloadCodec).peekFrameSize(stream)
+            fun peekViaInstance(stream: StreamProcessor, payloadCodec: MyPayloadCodec): FrameSize =
+                $CODEC(payloadCodec).frameSize(stream)
             $PAYLOAD_CODEC
             """.trimIndent()
 
         /** Reaches peek with no instance in the expression — only where the peek is hoisted. */
         val COMPANION_PEEK =
             """
-            fun peekViaCompanion(stream: StreamProcessor): PeekResult = $CODEC.peekFrameSize(stream)
+            fun peekViaCompanion(stream: StreamProcessor): FrameSize = $CODEC.frameSize(stream)
             """.trimIndent()
 
         /** Binds the companion as a value, not merely a name carrying a same-shaped function. */

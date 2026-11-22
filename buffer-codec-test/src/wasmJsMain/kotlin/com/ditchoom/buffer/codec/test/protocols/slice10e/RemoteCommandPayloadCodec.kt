@@ -5,7 +5,7 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 
 /** wasmJs `actual` — delegates to the shared impl. See JVM peer for rationale. */
 actual object RemoteCommandPayloadCodec : Codec<RemoteCommandPayload> {
@@ -20,8 +20,8 @@ actual object RemoteCommandPayloadCodec : Codec<RemoteCommandPayload> {
         context: EncodeContext,
     ) = RemoteCommandPayloadCodecImpl.encode(buffer, value, context)
 
-    override fun wireSize(
+    override fun wireBytes(
         value: RemoteCommandPayload,
         context: EncodeContext,
-    ): WireSize = RemoteCommandPayloadCodecImpl.wireSize(value, context)
+    ): WireByteCount = RemoteCommandPayloadCodecImpl.wireBytes(value, context)
 }

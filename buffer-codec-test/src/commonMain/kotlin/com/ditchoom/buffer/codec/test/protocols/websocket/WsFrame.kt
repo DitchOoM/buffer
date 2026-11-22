@@ -1,8 +1,8 @@
 package com.ditchoom.buffer.codec.test.protocols.websocket
 
 import com.ditchoom.buffer.codec.FrameDetector
+import com.ditchoom.buffer.codec.FrameSize
 import com.ditchoom.buffer.codec.Payload
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.annotations.DispatchOn
 import com.ditchoom.buffer.codec.annotations.DispatchValue
 import com.ditchoom.buffer.codec.annotations.Endianness
@@ -352,12 +352,12 @@ sealed interface WsFrame<out P : Payload> {
      * across header fields (`byte2.lengthIndicator`, escaping to a 16- or 64-bit
      * extended length at 126/127), and a masking key folds **between** the length
      * and the payload — neither a `@LengthPrefixed`/`@LengthFrom` nor a bounding
-     * codec can express that, so `WsFrameCodec.peekFrameSize` would otherwise fall
+     * codec can express that, so `WsFrameCodec.frameSize` would otherwise fall
      * back to `NoFraming` (and the websocket repo hand-writes this in
      * `WebSocketCodec.readNextFrame`).
      *
      * Because this companion implements [FrameDetector], the processor makes the
-     * generated `WsFrameCodec.peekFrameSize` delegate here instead. The companion
+     * generated `WsFrameCodec.frameSize` delegate here instead. The companion
      * owns ONLY framing (the total byte count); field decode/encode stay
      * generated. The load-bearing contract — `peek.bytes == decode consumption`
      * for any fully-buffered frame, `NeedsMoreData` for every shorter prefix — is
@@ -370,12 +370,12 @@ sealed interface WsFrame<out P : Payload> {
      * fits a non-negative `Long`.
      */
     companion object : FrameDetector {
-        override fun peekFrameSize(
+        override fun frameSize(
             stream: StreamProcessor,
             baseOffset: Int,
-        ): PeekResult {
+        ): FrameSize {
             // byte1 + byte2 are needed before the length shape is known.
-            if (stream.available() - baseOffset < 2) return PeekResult.NeedsMoreData
+            if (stream.available() - baseOffset < 2) return FrameSize.NeedsMoreData
             val byte2 = stream.peekByte(baseOffset + 1).toInt() and 0xFF
             val masked = (byte2 and 0x80) != 0
             val indicator = byte2 and 0x7F
@@ -383,14 +383,14 @@ sealed interface WsFrame<out P : Payload> {
             val payloadLength: Long =
                 when (indicator) {
                     126 -> {
-                        if (stream.available() - baseOffset < offset + 2) return PeekResult.NeedsMoreData
+                        if (stream.available() - baseOffset < offset + 2) return FrameSize.NeedsMoreData
                         val hi = stream.peekByte(baseOffset + offset).toInt() and 0xFF
                         val lo = stream.peekByte(baseOffset + offset + 1).toInt() and 0xFF
                         offset += 2
                         ((hi shl 8) or lo).toLong()
                     }
                     127 -> {
-                        if (stream.available() - baseOffset < offset + 8) return PeekResult.NeedsMoreData
+                        if (stream.available() - baseOffset < offset + 8) return FrameSize.NeedsMoreData
                         var v = 0L
                         for (i in 0 until 8) {
                             v = (v shl 8) or (stream.peekByte(baseOffset + offset + i).toLong() and 0xFF)
@@ -403,9 +403,9 @@ sealed interface WsFrame<out P : Payload> {
             if (masked) offset += 4
             val total = offset + payloadLength.toInt()
             return if (stream.available() - baseOffset >= total) {
-                PeekResult.Complete(total)
+                FrameSize.declared(0, total.toLong())
             } else {
-                PeekResult.NeedsMoreData
+                FrameSize.NeedsMoreData
             }
         }
     }

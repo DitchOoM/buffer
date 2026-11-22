@@ -83,13 +83,23 @@ object AsciiStringCodec : Codec<String> {
         buffer.writeString(value, Charset.UTF8)
     }
 
+    override fun wireBytes(
+        value: String,
+        context: EncodeContext,
+    ): WireByteCount = WireByteCount.exact(value.length.toLong())
+
+    @Suppress("DEPRECATION")
+    @Deprecated(
+        "Call wireBytes, which does not box. Removed in the next major release.",
+        ReplaceWith("wireBytes(value, context)"),
+    )
     override fun wireSize(
         value: String,
         context: EncodeContext,
-    ): WireSize = WireSize.Exact(value.length)
+    ): WireSize = wireBytes(value, context).toWireSize()
 
-    override fun peekFrameSize(
+    override fun frameSize(
         stream: StreamProcessor,
         baseOffset: Int,
-    ): PeekResult = PeekResult.NoFraming
+    ): FrameSize = FrameSize.Unframed
 }

@@ -6,8 +6,9 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.ownedBytesFrom
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -63,15 +64,15 @@ class TlsHandshakePeekTest {
             for (i in 0 until total - 1) {
                 appendByte(stream, source.readByte())
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    TlsHandshakeCodec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    TlsHandshakeCodec.peekOutcome(stream),
                     "after ${i + 1}/$total bytes",
                 )
             }
             appendByte(stream, source.readByte())
             assertEquals(
-                PeekResult.Complete(total),
-                TlsHandshakeCodec.peekFrameSize(stream),
+                PeekOutcome.Complete(total),
+                TlsHandshakeCodec.peekOutcome(stream),
                 "fully buffered",
             )
             // The peeked frame size must equal what decode actually consumes.

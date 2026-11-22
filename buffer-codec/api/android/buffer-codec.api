@@ -1,0 +1,535 @@
+public final class com/ditchoom/buffer/codec/AsciiStringCodec : com/ditchoom/buffer/codec/Codec {
+	public static final field INSTANCE Lcom/ditchoom/buffer/codec/AsciiStringCodec;
+	public synthetic fun decode (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/codec/DecodeContext;)Ljava/lang/Object;
+	public fun decode (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/codec/DecodeContext;)Ljava/lang/String;
+	public synthetic fun encode (Lcom/ditchoom/buffer/WriteBuffer;Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)V
+	public fun encode (Lcom/ditchoom/buffer/WriteBuffer;Ljava/lang/String;Lcom/ditchoom/buffer/codec/EncodeContext;)V
+	public fun frameSize-OQSauW0 (Lcom/ditchoom/buffer/stream/StreamProcessor;I)J
+	public fun peekFrameSize (Lcom/ditchoom/buffer/stream/StreamProcessor;I)Lcom/ditchoom/buffer/codec/PeekResult;
+	public synthetic fun sizeHint (Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)I
+	public fun sizeHint (Ljava/lang/String;Lcom/ditchoom/buffer/codec/EncodeContext;)I
+	public synthetic fun wireBytes-4eoE1cY (Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)J
+	public fun wireBytes-4eoE1cY (Ljava/lang/String;Lcom/ditchoom/buffer/codec/EncodeContext;)J
+	public synthetic fun wireSize (Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)Lcom/ditchoom/buffer/codec/WireSize;
+	public fun wireSize (Ljava/lang/String;Lcom/ditchoom/buffer/codec/EncodeContext;)Lcom/ditchoom/buffer/codec/WireSize;
+}
+
+public abstract interface class com/ditchoom/buffer/codec/BoundingLengthCodec : com/ditchoom/buffer/codec/Codec {
+	public abstract fun applyBound (Lcom/ditchoom/buffer/ReadBuffer;Ljava/lang/Object;)V
+	public fun encodedWidth-Mxi56Z0 (J)J
+	public abstract fun getMaxWireSize ()I
+	public fun peekLength-OQSauW0 (Lcom/ditchoom/buffer/stream/StreamProcessor;I)J
+}
+
+public final class com/ditchoom/buffer/codec/BoundingLengthCodec$DefaultImpls {
+	public static fun encodedWidth-Mxi56Z0 (Lcom/ditchoom/buffer/codec/BoundingLengthCodec;J)J
+	public static fun frameSize-OQSauW0 (Lcom/ditchoom/buffer/codec/BoundingLengthCodec;Lcom/ditchoom/buffer/stream/StreamProcessor;I)J
+	public static fun peekFrameSize (Lcom/ditchoom/buffer/codec/BoundingLengthCodec;Lcom/ditchoom/buffer/stream/StreamProcessor;I)Lcom/ditchoom/buffer/codec/PeekResult;
+	public static fun peekLength-OQSauW0 (Lcom/ditchoom/buffer/codec/BoundingLengthCodec;Lcom/ditchoom/buffer/stream/StreamProcessor;I)J
+	public static fun sizeHint (Lcom/ditchoom/buffer/codec/BoundingLengthCodec;Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)I
+	public static fun wireBytes-4eoE1cY (Lcom/ditchoom/buffer/codec/BoundingLengthCodec;Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)J
+	public static fun wireSize (Lcom/ditchoom/buffer/codec/BoundingLengthCodec;Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)Lcom/ditchoom/buffer/codec/WireSize;
+}
+
+public final class com/ditchoom/buffer/codec/BufferFactoryKey : com/ditchoom/buffer/codec/CodecKey {
+	public static final field INSTANCE Lcom/ditchoom/buffer/codec/BufferFactoryKey;
+}
+
+public abstract interface class com/ditchoom/buffer/codec/Codec : com/ditchoom/buffer/codec/Decoder, com/ditchoom/buffer/codec/Encoder, com/ditchoom/buffer/codec/FrameDetector {
+}
+
+public final class com/ditchoom/buffer/codec/Codec$DefaultImpls {
+	public static fun frameSize-OQSauW0 (Lcom/ditchoom/buffer/codec/Codec;Lcom/ditchoom/buffer/stream/StreamProcessor;I)J
+	public static fun peekFrameSize (Lcom/ditchoom/buffer/codec/Codec;Lcom/ditchoom/buffer/stream/StreamProcessor;I)Lcom/ditchoom/buffer/codec/PeekResult;
+	public static fun sizeHint (Lcom/ditchoom/buffer/codec/Codec;Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)I
+	public static fun wireBytes-4eoE1cY (Lcom/ditchoom/buffer/codec/Codec;Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)J
+	public static fun wireSize (Lcom/ditchoom/buffer/codec/Codec;Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)Lcom/ditchoom/buffer/codec/WireSize;
+}
+
+public abstract interface class com/ditchoom/buffer/codec/CodecContext {
+}
+
+public abstract interface class com/ditchoom/buffer/codec/CodecKey : com/ditchoom/buffer/codec/DecodeKey, com/ditchoom/buffer/codec/EncodeKey {
+}
+
+public abstract interface class com/ditchoom/buffer/codec/DecodeContext : com/ditchoom/buffer/codec/CodecContext {
+	public static final field Companion Lcom/ditchoom/buffer/codec/DecodeContext$Companion;
+	public abstract fun get (Lcom/ditchoom/buffer/codec/DecodeKey;)Ljava/lang/Object;
+	public abstract fun with (Lcom/ditchoom/buffer/codec/DecodeKey;Ljava/lang/Object;)Lcom/ditchoom/buffer/codec/DecodeContext;
+}
+
+public final class com/ditchoom/buffer/codec/DecodeContext$Companion {
+	public final fun getEmpty ()Lcom/ditchoom/buffer/codec/DecodeContext;
+}
+
+public class com/ditchoom/buffer/codec/DecodeException : java/lang/IllegalStateException {
+	public fun <init> (Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getActual ()Ljava/lang/String;
+	public final fun getBufferPosition ()I
+	public final fun getExpected ()Ljava/lang/String;
+	public final fun getFieldPath ()Ljava/lang/String;
+}
+
+public abstract interface class com/ditchoom/buffer/codec/DecodeKey {
+}
+
+public abstract interface class com/ditchoom/buffer/codec/Decoder {
+	public abstract fun decode (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/codec/DecodeContext;)Ljava/lang/Object;
+}
+
+public final class com/ditchoom/buffer/codec/DeprecatedSizeApiKt {
+	public static final fun from (Lcom/ditchoom/buffer/codec/FrameSize$Companion;Lcom/ditchoom/buffer/codec/PeekResult;)J
+	public static final fun from (Lcom/ditchoom/buffer/codec/WireByteCount$Companion;Lcom/ditchoom/buffer/codec/WireSize;)J
+	public static final fun toPeekResult-INYzmKE (JI)Lcom/ditchoom/buffer/codec/PeekResult;
+	public static final fun toWireSize-rSaP7Ns (J)Lcom/ditchoom/buffer/codec/WireSize;
+}
+
+public abstract interface class com/ditchoom/buffer/codec/EncodeContext : com/ditchoom/buffer/codec/CodecContext {
+	public static final field Companion Lcom/ditchoom/buffer/codec/EncodeContext$Companion;
+	public abstract fun get (Lcom/ditchoom/buffer/codec/EncodeKey;)Ljava/lang/Object;
+	public abstract fun with (Lcom/ditchoom/buffer/codec/EncodeKey;Ljava/lang/Object;)Lcom/ditchoom/buffer/codec/EncodeContext;
+}
+
+public final class com/ditchoom/buffer/codec/EncodeContext$Companion {
+	public final fun getEmpty ()Lcom/ditchoom/buffer/codec/EncodeContext;
+}
+
+public class com/ditchoom/buffer/codec/EncodeException : java/lang/IllegalStateException {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getFieldPath ()Ljava/lang/String;
+	public final fun getReason ()Ljava/lang/String;
+}
+
+public abstract interface class com/ditchoom/buffer/codec/EncodeKey {
+}
+
+public abstract interface class com/ditchoom/buffer/codec/Encoder {
+	public static final field Companion Lcom/ditchoom/buffer/codec/Encoder$Companion;
+	public static final field DEFAULT_SIZE_HINT I
+	public abstract fun encode (Lcom/ditchoom/buffer/WriteBuffer;Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)V
+	public fun sizeHint (Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)I
+	public fun wireBytes-4eoE1cY (Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)J
+	public fun wireSize (Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)Lcom/ditchoom/buffer/codec/WireSize;
+}
+
+public final class com/ditchoom/buffer/codec/Encoder$Companion {
+	public static final field DEFAULT_SIZE_HINT I
+}
+
+public final class com/ditchoom/buffer/codec/Encoder$DefaultImpls {
+	public static fun sizeHint (Lcom/ditchoom/buffer/codec/Encoder;Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)I
+	public static fun wireBytes-4eoE1cY (Lcom/ditchoom/buffer/codec/Encoder;Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)J
+	public static fun wireSize (Lcom/ditchoom/buffer/codec/Encoder;Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)Lcom/ditchoom/buffer/codec/WireSize;
+}
+
+public final class com/ditchoom/buffer/codec/ForwardCompatibleFactoryKey : com/ditchoom/buffer/codec/DecodeKey {
+	public static final field INSTANCE Lcom/ditchoom/buffer/codec/ForwardCompatibleFactoryKey;
+}
+
+public abstract interface class com/ditchoom/buffer/codec/FrameDetector {
+	public fun frameSize-OQSauW0 (Lcom/ditchoom/buffer/stream/StreamProcessor;I)J
+	public static synthetic fun frameSize-OQSauW0$default (Lcom/ditchoom/buffer/codec/FrameDetector;Lcom/ditchoom/buffer/stream/StreamProcessor;IILjava/lang/Object;)J
+	public fun peekFrameSize (Lcom/ditchoom/buffer/stream/StreamProcessor;I)Lcom/ditchoom/buffer/codec/PeekResult;
+	public static synthetic fun peekFrameSize$default (Lcom/ditchoom/buffer/codec/FrameDetector;Lcom/ditchoom/buffer/stream/StreamProcessor;IILjava/lang/Object;)Lcom/ditchoom/buffer/codec/PeekResult;
+}
+
+public final class com/ditchoom/buffer/codec/FrameDetector$DefaultImpls {
+	public static fun frameSize-OQSauW0 (Lcom/ditchoom/buffer/codec/FrameDetector;Lcom/ditchoom/buffer/stream/StreamProcessor;I)J
+	public static synthetic fun frameSize-OQSauW0$default (Lcom/ditchoom/buffer/codec/FrameDetector;Lcom/ditchoom/buffer/stream/StreamProcessor;IILjava/lang/Object;)J
+	public static fun peekFrameSize (Lcom/ditchoom/buffer/codec/FrameDetector;Lcom/ditchoom/buffer/stream/StreamProcessor;I)Lcom/ditchoom/buffer/codec/PeekResult;
+	public static synthetic fun peekFrameSize$default (Lcom/ditchoom/buffer/codec/FrameDetector;Lcom/ditchoom/buffer/stream/StreamProcessor;IILjava/lang/Object;)Lcom/ditchoom/buffer/codec/PeekResult;
+}
+
+public final class com/ditchoom/buffer/codec/FrameLimitsKt {
+	public static final field DEFAULT_MAX_FRAME_BYTES I
+	public static final fun declaredFrameBytes (IJ)I
+	public static final fun declaredFrameBytes-2TYgG_w (IJ)I
+}
+
+public final class com/ditchoom/buffer/codec/FrameSize {
+	public static final field BODY_MASK J
+	public static final field Companion Lcom/ditchoom/buffer/codec/FrameSize$Companion;
+	public static final field HEADER_SHIFT I
+	public static final field MAX_BODY_BYTES J
+	public static final field MAX_HEADER_BYTES I
+	public static final field NEEDS_MORE_DATA_BITS J
+	public static final field UNFRAMED_BITS J
+	public static final synthetic fun box-impl (J)Lcom/ditchoom/buffer/codec/FrameSize;
+	public static fun constructor-impl (J)J
+	public fun equals (Ljava/lang/Object;)Z
+	public static fun equals-impl (JLjava/lang/Object;)Z
+	public static final fun equals-impl0 (JJ)Z
+	public static final fun fold-impl (JLkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
+	public static final fun foldTotal-impl (JLkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
+	public fun hashCode ()I
+	public static fun hashCode-impl (J)I
+	public fun toString ()Ljava/lang/String;
+	public static fun toString-impl (J)Ljava/lang/String;
+	public final synthetic fun unbox-impl ()J
+}
+
+public final class com/ditchoom/buffer/codec/FrameSize$Companion {
+	public final fun declared-4P6pzBM (IJ)J
+	public final fun declared-OQSauW0 (IJ)J
+	public final fun getNeedsMoreData-oX6wZ7M ()J
+	public final fun getUnframed-oX6wZ7M ()J
+}
+
+public final class com/ditchoom/buffer/codec/FrameStreamingKt {
+	public static final fun encodeToPlatformBuffer (Lcom/ditchoom/buffer/codec/Encoder;Ljava/lang/Object;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/EncodeContext;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public static synthetic fun encodeToPlatformBuffer$default (Lcom/ditchoom/buffer/codec/Encoder;Ljava/lang/Object;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/EncodeContext;ILjava/lang/Object;)Lcom/ditchoom/buffer/PlatformBuffer;
+	public static final fun readFrame (Lcom/ditchoom/buffer/codec/Codec;Lcom/ditchoom/buffer/stream/StreamProcessor;Lcom/ditchoom/buffer/codec/DecodeContext;)Ljava/lang/Object;
+	public static synthetic fun readFrame$default (Lcom/ditchoom/buffer/codec/Codec;Lcom/ditchoom/buffer/stream/StreamProcessor;Lcom/ditchoom/buffer/codec/DecodeContext;ILjava/lang/Object;)Ljava/lang/Object;
+}
+
+public final class com/ditchoom/buffer/codec/FrameTooLargeException : com/ditchoom/buffer/codec/DecodeException {
+	public fun <init> (II)V
+	public fun <init> (JI)V
+	public final fun getDeclaredBytes ()J
+	public final fun getMaxBytes ()I
+}
+
+public final class com/ditchoom/buffer/codec/FramedEncoder {
+	public static final field INSTANCE Lcom/ditchoom/buffer/codec/FramedEncoder;
+	public final fun encode (Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/BoundingLengthCodec;Lcom/ditchoom/buffer/codec/EncodeContext;ILkotlin/jvm/functions/Function1;ILkotlin/jvm/functions/Function1;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static synthetic fun encode$default (Lcom/ditchoom/buffer/codec/FramedEncoder;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/BoundingLengthCodec;Lcom/ditchoom/buffer/codec/EncodeContext;ILkotlin/jvm/functions/Function1;ILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lcom/ditchoom/buffer/ReadBuffer;
+}
+
+public final class com/ditchoom/buffer/codec/FramingSizeException : com/ditchoom/buffer/codec/EncodeException {
+	public fun <init> (Lcom/ditchoom/buffer/codec/Encoder;)V
+	public final fun getEncoder ()Lcom/ditchoom/buffer/codec/Encoder;
+}
+
+public final class com/ditchoom/buffer/codec/LengthPrefixedListEncoder {
+	public static final field INSTANCE Lcom/ditchoom/buffer/codec/LengthPrefixedListEncoder;
+	public final fun encode (Lcom/ditchoom/buffer/WriteBuffer;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/Encoder;Ljava/lang/Iterable;Lcom/ditchoom/buffer/codec/Encoder;Lcom/ditchoom/buffer/codec/EncodeContext;I)V
+	public static synthetic fun encode$default (Lcom/ditchoom/buffer/codec/LengthPrefixedListEncoder;Lcom/ditchoom/buffer/WriteBuffer;Lcom/ditchoom/buffer/BufferFactory;Lcom/ditchoom/buffer/codec/Encoder;Ljava/lang/Iterable;Lcom/ditchoom/buffer/codec/Encoder;Lcom/ditchoom/buffer/codec/EncodeContext;IILjava/lang/Object;)V
+}
+
+public final class com/ditchoom/buffer/codec/MaxFrameBytesKey : com/ditchoom/buffer/codec/DecodeKey {
+	public static final field INSTANCE Lcom/ditchoom/buffer/codec/MaxFrameBytesKey;
+}
+
+public final class com/ditchoom/buffer/codec/NegativeWireByteCountException : com/ditchoom/buffer/codec/EncodeException {
+	public fun <init> (J)V
+	public final fun getBytes ()J
+}
+
+public final class com/ditchoom/buffer/codec/OwnedBytesHandle {
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+}
+
+public final class com/ditchoom/buffer/codec/OwnedBytesHandleCodec : com/ditchoom/buffer/codec/Codec {
+	public static final field INSTANCE Lcom/ditchoom/buffer/codec/OwnedBytesHandleCodec;
+	public fun decode (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/codec/DecodeContext;)Lcom/ditchoom/buffer/codec/OwnedBytesHandle;
+	public synthetic fun decode (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/codec/DecodeContext;)Ljava/lang/Object;
+	public fun encode (Lcom/ditchoom/buffer/WriteBuffer;Lcom/ditchoom/buffer/codec/OwnedBytesHandle;Lcom/ditchoom/buffer/codec/EncodeContext;)V
+	public synthetic fun encode (Lcom/ditchoom/buffer/WriteBuffer;Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)V
+	public fun frameSize-OQSauW0 (Lcom/ditchoom/buffer/stream/StreamProcessor;I)J
+	public fun peekFrameSize (Lcom/ditchoom/buffer/stream/StreamProcessor;I)Lcom/ditchoom/buffer/codec/PeekResult;
+	public fun sizeHint (Lcom/ditchoom/buffer/codec/OwnedBytesHandle;Lcom/ditchoom/buffer/codec/EncodeContext;)I
+	public synthetic fun sizeHint (Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)I
+	public fun wireBytes-4eoE1cY (Lcom/ditchoom/buffer/codec/OwnedBytesHandle;Lcom/ditchoom/buffer/codec/EncodeContext;)J
+	public synthetic fun wireBytes-4eoE1cY (Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)J
+	public fun wireSize (Lcom/ditchoom/buffer/codec/OwnedBytesHandle;Lcom/ditchoom/buffer/codec/EncodeContext;)Lcom/ditchoom/buffer/codec/WireSize;
+	public synthetic fun wireSize (Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)Lcom/ditchoom/buffer/codec/WireSize;
+}
+
+public final class com/ditchoom/buffer/codec/OwnedBytesHandleKt {
+	public static final fun ownedBytesFallbackFactory ()Lcom/ditchoom/buffer/BufferFactory;
+}
+
+public final class com/ditchoom/buffer/codec/OwnedBytesHandle_jvmCommonKt {
+	public static final fun asReadBuffer (Lcom/ditchoom/buffer/codec/OwnedBytesHandle;)Lcom/ditchoom/buffer/ReadBuffer;
+	public static final fun byteSize (Lcom/ditchoom/buffer/codec/OwnedBytesHandle;)I
+	public static final fun handleEquals (Lcom/ditchoom/buffer/codec/OwnedBytesHandle;Lcom/ditchoom/buffer/codec/OwnedBytesHandle;)Z
+	public static final fun handleHashCode (Lcom/ditchoom/buffer/codec/OwnedBytesHandle;)I
+	public static final fun ownedBytesFrom (Lcom/ditchoom/buffer/PlatformBuffer;)Lcom/ditchoom/buffer/codec/OwnedBytesHandle;
+}
+
+public abstract interface class com/ditchoom/buffer/codec/Payload {
+}
+
+public abstract interface class com/ditchoom/buffer/codec/PeekResult {
+}
+
+public final class com/ditchoom/buffer/codec/PeekResult$Complete : com/ditchoom/buffer/codec/PeekResult {
+	public static final synthetic fun box-impl (I)Lcom/ditchoom/buffer/codec/PeekResult$Complete;
+	public static fun constructor-impl (I)I
+	public fun equals (Ljava/lang/Object;)Z
+	public static fun equals-impl (ILjava/lang/Object;)Z
+	public static final fun equals-impl0 (II)Z
+	public final fun getBytes ()I
+	public fun hashCode ()I
+	public static fun hashCode-impl (I)I
+	public fun toString ()Ljava/lang/String;
+	public static fun toString-impl (I)Ljava/lang/String;
+	public final synthetic fun unbox-impl ()I
+}
+
+public final class com/ditchoom/buffer/codec/PeekResult$NeedsMoreData : com/ditchoom/buffer/codec/PeekResult {
+	public static final field INSTANCE Lcom/ditchoom/buffer/codec/PeekResult$NeedsMoreData;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/codec/PeekResult$NoFraming : com/ditchoom/buffer/codec/PeekResult {
+	public static final field INSTANCE Lcom/ditchoom/buffer/codec/PeekResult$NoFraming;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/codec/PeekedInteger {
+	public static final field Companion Lcom/ditchoom/buffer/codec/PeekedInteger$Companion;
+	public static final field NEEDS_MORE_DATA_BITS J
+	public static final field NOT_REPRESENTABLE_BITS J
+	public static final synthetic fun box-impl (J)Lcom/ditchoom/buffer/codec/PeekedInteger;
+	public static fun constructor-impl (J)J
+	public fun equals (Ljava/lang/Object;)Z
+	public static fun equals-impl (JLjava/lang/Object;)Z
+	public static final fun equals-impl0 (JJ)Z
+	public static final fun fold-impl (JLkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
+	public fun hashCode ()I
+	public static fun hashCode-impl (J)I
+	public fun toString ()Ljava/lang/String;
+	public static fun toString-impl (J)Ljava/lang/String;
+	public final synthetic fun unbox-impl ()J
+}
+
+public final class com/ditchoom/buffer/codec/PeekedInteger$Companion {
+	public final fun getNeedsMoreData-sc5n7S4 ()J
+	public final fun getNotRepresentable-sc5n7S4 ()J
+	public final fun of-YgJrOHA (J)J
+	public final fun of-grq-HG0 (J)J
+}
+
+public abstract interface class com/ditchoom/buffer/codec/SuspendingDecoder {
+	public abstract fun decode (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/codec/DecodeContext;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class com/ditchoom/buffer/codec/TextPolicyKey : com/ditchoom/buffer/codec/CodecKey {
+	public static final field INSTANCE Lcom/ditchoom/buffer/codec/TextPolicyKey;
+}
+
+public final class com/ditchoom/buffer/codec/TextPolicyKeyKt {
+	public static final fun getDEFAULT_TEXT_POLICY ()Lcom/ditchoom/buffer/FluentTextPolicy;
+}
+
+public abstract interface class com/ditchoom/buffer/codec/TextPolicyProvider {
+	public abstract fun getPolicy ()Lcom/ditchoom/buffer/FluentTextPolicy;
+}
+
+public final class com/ditchoom/buffer/codec/UnframedCodecException : java/lang/IllegalStateException {
+	public fun <init> (Lcom/ditchoom/buffer/codec/FrameDetector;)V
+	public final fun getDetector ()Lcom/ditchoom/buffer/codec/FrameDetector;
+}
+
+public final class com/ditchoom/buffer/codec/UnsignedVarIntCodec : com/ditchoom/buffer/codec/VariableLengthCodec {
+	public static final field INSTANCE Lcom/ditchoom/buffer/codec/UnsignedVarIntCodec;
+	public static final field MAX_BYTES I
+	public synthetic fun decode (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/codec/DecodeContext;)Ljava/lang/Object;
+	public fun decode-xfHcF5w (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/codec/DecodeContext;)I
+	public synthetic fun encode (Lcom/ditchoom/buffer/WriteBuffer;Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)V
+	public fun encode-OsBMiQA (Lcom/ditchoom/buffer/WriteBuffer;ILcom/ditchoom/buffer/codec/EncodeContext;)V
+	public synthetic fun encodedLength (Ljava/lang/Object;)I
+	public fun encodedLength-WZ4Q5Ns (I)I
+	public fun frameSize-OQSauW0 (Lcom/ditchoom/buffer/stream/StreamProcessor;I)J
+	public fun peekFrameSize (Lcom/ditchoom/buffer/stream/StreamProcessor;I)Lcom/ditchoom/buffer/codec/PeekResult;
+	public fun peekInteger-SNBr1lU (Lcom/ditchoom/buffer/stream/StreamProcessor;I)J
+	public fun peekValue (Lcom/ditchoom/buffer/stream/StreamProcessor;I)Lcom/ditchoom/buffer/codec/VarLenPeek;
+	public synthetic fun sizeHint (Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)I
+	public fun sizeHint-qim9Vi0 (ILcom/ditchoom/buffer/codec/EncodeContext;)I
+	public synthetic fun wireBytes-4eoE1cY (Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)J
+	public fun wireBytes-Gjm0rFE (ILcom/ditchoom/buffer/codec/EncodeContext;)J
+	public synthetic fun wireSize (Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)Lcom/ditchoom/buffer/codec/WireSize;
+	public fun wireSize-qim9Vi0 (ILcom/ditchoom/buffer/codec/EncodeContext;)Lcom/ditchoom/buffer/codec/WireSize;
+}
+
+public abstract interface class com/ditchoom/buffer/codec/VarLenPeek {
+}
+
+public final class com/ditchoom/buffer/codec/VarLenPeek$Decoded : com/ditchoom/buffer/codec/VarLenPeek {
+	public fun <init> (Ljava/lang/Object;I)V
+	public final fun component1 ()Ljava/lang/Object;
+	public final fun component2 ()I
+	public final fun copy (Ljava/lang/Object;I)Lcom/ditchoom/buffer/codec/VarLenPeek$Decoded;
+	public static synthetic fun copy$default (Lcom/ditchoom/buffer/codec/VarLenPeek$Decoded;Ljava/lang/Object;IILjava/lang/Object;)Lcom/ditchoom/buffer/codec/VarLenPeek$Decoded;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getByteCount ()I
+	public final fun getValue ()Ljava/lang/Object;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/codec/VarLenPeek$NeedsMoreData : com/ditchoom/buffer/codec/VarLenPeek {
+	public static final field INSTANCE Lcom/ditchoom/buffer/codec/VarLenPeek$NeedsMoreData;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/ditchoom/buffer/codec/VariableLengthCodec : com/ditchoom/buffer/codec/Codec {
+	public abstract fun encodedLength (Ljava/lang/Object;)I
+	public fun frameSize-OQSauW0 (Lcom/ditchoom/buffer/stream/StreamProcessor;I)J
+	public fun peekFrameSize (Lcom/ditchoom/buffer/stream/StreamProcessor;I)Lcom/ditchoom/buffer/codec/PeekResult;
+	public fun peekInteger-SNBr1lU (Lcom/ditchoom/buffer/stream/StreamProcessor;I)J
+	public abstract fun peekValue (Lcom/ditchoom/buffer/stream/StreamProcessor;I)Lcom/ditchoom/buffer/codec/VarLenPeek;
+	public static synthetic fun peekValue$default (Lcom/ditchoom/buffer/codec/VariableLengthCodec;Lcom/ditchoom/buffer/stream/StreamProcessor;IILjava/lang/Object;)Lcom/ditchoom/buffer/codec/VarLenPeek;
+	public fun wireBytes-4eoE1cY (Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)J
+	public fun wireSize (Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)Lcom/ditchoom/buffer/codec/WireSize;
+}
+
+public final class com/ditchoom/buffer/codec/VariableLengthCodec$DefaultImpls {
+	public static fun frameSize-OQSauW0 (Lcom/ditchoom/buffer/codec/VariableLengthCodec;Lcom/ditchoom/buffer/stream/StreamProcessor;I)J
+	public static fun peekFrameSize (Lcom/ditchoom/buffer/codec/VariableLengthCodec;Lcom/ditchoom/buffer/stream/StreamProcessor;I)Lcom/ditchoom/buffer/codec/PeekResult;
+	public static fun peekInteger-SNBr1lU (Lcom/ditchoom/buffer/codec/VariableLengthCodec;Lcom/ditchoom/buffer/stream/StreamProcessor;I)J
+	public static synthetic fun peekValue$default (Lcom/ditchoom/buffer/codec/VariableLengthCodec;Lcom/ditchoom/buffer/stream/StreamProcessor;IILjava/lang/Object;)Lcom/ditchoom/buffer/codec/VarLenPeek;
+	public static fun sizeHint (Lcom/ditchoom/buffer/codec/VariableLengthCodec;Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)I
+	public static fun wireBytes-4eoE1cY (Lcom/ditchoom/buffer/codec/VariableLengthCodec;Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)J
+	public static fun wireSize (Lcom/ditchoom/buffer/codec/VariableLengthCodec;Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)Lcom/ditchoom/buffer/codec/WireSize;
+}
+
+public abstract interface class com/ditchoom/buffer/codec/ViewCodec : com/ditchoom/buffer/codec/Codec {
+}
+
+public final class com/ditchoom/buffer/codec/ViewCodec$DefaultImpls {
+	public static fun frameSize-OQSauW0 (Lcom/ditchoom/buffer/codec/ViewCodec;Lcom/ditchoom/buffer/stream/StreamProcessor;I)J
+	public static fun peekFrameSize (Lcom/ditchoom/buffer/codec/ViewCodec;Lcom/ditchoom/buffer/stream/StreamProcessor;I)Lcom/ditchoom/buffer/codec/PeekResult;
+	public static fun sizeHint (Lcom/ditchoom/buffer/codec/ViewCodec;Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)I
+	public static fun wireBytes-4eoE1cY (Lcom/ditchoom/buffer/codec/ViewCodec;Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)J
+	public static fun wireSize (Lcom/ditchoom/buffer/codec/ViewCodec;Ljava/lang/Object;Lcom/ditchoom/buffer/codec/EncodeContext;)Lcom/ditchoom/buffer/codec/WireSize;
+}
+
+public final class com/ditchoom/buffer/codec/WireByteCount {
+	public static final field BACK_PATCH_BITS J
+	public static final field Companion Lcom/ditchoom/buffer/codec/WireByteCount$Companion;
+	public static final synthetic fun box-impl (J)Lcom/ditchoom/buffer/codec/WireByteCount;
+	public static fun constructor-impl (J)J
+	public fun equals (Ljava/lang/Object;)Z
+	public static fun equals-impl (JLjava/lang/Object;)Z
+	public static final fun equals-impl0 (JJ)Z
+	public static final fun fold-impl (JLkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
+	public fun hashCode ()I
+	public static fun hashCode-impl (J)I
+	public fun toString ()Ljava/lang/String;
+	public static fun toString-impl (J)Ljava/lang/String;
+	public final synthetic fun unbox-impl ()J
+}
+
+public final class com/ditchoom/buffer/codec/WireByteCount$Companion {
+	public final fun exact-Mxi56Z0 (J)J
+	public final fun getBackPatch-whsdSQM ()J
+}
+
+public abstract interface class com/ditchoom/buffer/codec/WireSize {
+}
+
+public final class com/ditchoom/buffer/codec/WireSize$BackPatch : com/ditchoom/buffer/codec/WireSize {
+	public static final field INSTANCE Lcom/ditchoom/buffer/codec/WireSize$BackPatch;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/codec/WireSize$Exact : com/ditchoom/buffer/codec/WireSize {
+	public static final synthetic fun box-impl (I)Lcom/ditchoom/buffer/codec/WireSize$Exact;
+	public static fun constructor-impl (I)I
+	public fun equals (Ljava/lang/Object;)Z
+	public static fun equals-impl (ILjava/lang/Object;)Z
+	public static final fun equals-impl0 (II)Z
+	public final fun getBytes ()I
+	public fun hashCode ()I
+	public static fun hashCode-impl (I)I
+	public fun toString ()Ljava/lang/String;
+	public static fun toString-impl (I)Ljava/lang/String;
+	public final synthetic fun unbox-impl ()I
+}
+
+public abstract interface annotation class com/ditchoom/buffer/codec/annotations/Count : java/lang/annotation/Annotation {
+}
+
+public abstract interface annotation class com/ditchoom/buffer/codec/annotations/DispatchOn : java/lang/annotation/Annotation {
+	public abstract fun type ()Ljava/lang/Class;
+}
+
+public abstract interface annotation class com/ditchoom/buffer/codec/annotations/DispatchValue : java/lang/annotation/Annotation {
+}
+
+public final class com/ditchoom/buffer/codec/annotations/Endianness : java/lang/Enum {
+	public static final field Big Lcom/ditchoom/buffer/codec/annotations/Endianness;
+	public static final field Default Lcom/ditchoom/buffer/codec/annotations/Endianness;
+	public static final field Little Lcom/ditchoom/buffer/codec/annotations/Endianness;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/ditchoom/buffer/codec/annotations/Endianness;
+	public static fun values ()[Lcom/ditchoom/buffer/codec/annotations/Endianness;
+}
+
+public abstract interface annotation class com/ditchoom/buffer/codec/annotations/EnumDefault : java/lang/annotation/Annotation {
+}
+
+public abstract interface annotation class com/ditchoom/buffer/codec/annotations/ForwardCompatible : java/lang/annotation/Annotation {
+	public abstract fun unknown ()Ljava/lang/Class;
+}
+
+public abstract interface annotation class com/ditchoom/buffer/codec/annotations/FramedBy : java/lang/annotation/Annotation {
+	public abstract fun after ()Ljava/lang/String;
+	public abstract fun codec ()Ljava/lang/Class;
+}
+
+public abstract interface annotation class com/ditchoom/buffer/codec/annotations/LengthFrom : java/lang/annotation/Annotation {
+	public abstract fun field ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/codec/annotations/LengthPrefix : java/lang/Enum {
+	public static final field Byte Lcom/ditchoom/buffer/codec/annotations/LengthPrefix;
+	public static final field Int Lcom/ditchoom/buffer/codec/annotations/LengthPrefix;
+	public static final field Short Lcom/ditchoom/buffer/codec/annotations/LengthPrefix;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/ditchoom/buffer/codec/annotations/LengthPrefix;
+	public static fun values ()[Lcom/ditchoom/buffer/codec/annotations/LengthPrefix;
+}
+
+public abstract interface annotation class com/ditchoom/buffer/codec/annotations/LengthPrefixed : java/lang/annotation/Annotation {
+	public abstract fun prefix ()Lcom/ditchoom/buffer/codec/annotations/LengthPrefix;
+}
+
+public abstract interface annotation class com/ditchoom/buffer/codec/annotations/PacketType : java/lang/annotation/Annotation {
+	public abstract fun value ()I
+	public abstract fun wire ()I
+}
+
+public abstract interface annotation class com/ditchoom/buffer/codec/annotations/ProtocolMessage : java/lang/annotation/Annotation {
+	public abstract fun wireOrder ()Lcom/ditchoom/buffer/codec/annotations/Endianness;
+}
+
+public abstract interface annotation class com/ditchoom/buffer/codec/annotations/RemainingBytes : java/lang/annotation/Annotation {
+}
+
+public abstract interface annotation class com/ditchoom/buffer/codec/annotations/UnknownVariant : java/lang/annotation/Annotation {
+}
+
+public abstract interface annotation class com/ditchoom/buffer/codec/annotations/UseCodec : java/lang/annotation/Annotation {
+	public abstract fun codec ()Ljava/lang/Class;
+}
+
+public abstract interface annotation class com/ditchoom/buffer/codec/annotations/UseTextPolicy : java/lang/annotation/Annotation {
+	public abstract fun policy ()Ljava/lang/Class;
+}
+
+public abstract interface annotation class com/ditchoom/buffer/codec/annotations/When : java/lang/annotation/Annotation {
+	public abstract fun predicate ()Ljava/lang/String;
+}
+
+public abstract interface annotation class com/ditchoom/buffer/codec/annotations/WireBytes : java/lang/annotation/Annotation {
+	public abstract fun value ()I
+}
+
+public abstract interface annotation class com/ditchoom/buffer/codec/annotations/WireOrder : java/lang/annotation/Annotation {
+	public abstract fun order ()Lcom/ditchoom/buffer/codec/annotations/Endianness;
+}
+

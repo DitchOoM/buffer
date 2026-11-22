@@ -6,7 +6,7 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -76,7 +76,7 @@ class EthernetFrameByEtherTypeCodecTest {
             EthernetFrameByEtherType.VlanTag(),
             EthernetFrameByEtherType.Ipv6(),
         )) {
-            assertEquals(WireSize.Exact(2), EthernetFrameByEtherTypeCodec.wireSize(v, EncodeContext.Empty))
+            assertEquals(WireByteCount.exact(2), EthernetFrameByEtherTypeCodec.wireBytes(v, EncodeContext.Empty))
         }
     }
 

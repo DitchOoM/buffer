@@ -9,12 +9,12 @@ import kotlin.jvm.JvmInline
 
 /*
  * Multi-byte `@DispatchOn` discriminator vectors covering the four inner
- * scalar kinds whose `peekFrameSize` byte-reconstruction was the last
+ * scalar kinds whose `frameSize` byte-reconstruction was the last
  * missing piece: signed `Short` / `Int` / `Long` and unsigned `ULong`.
  *
  * Decode and encode already worked for these inners (the discriminator's
  * own value-class codec reads/writes the scalar, and the variant re-reads
- * it as its first field). The only gap was the dispatcher's `peekFrameSize`,
+ * it as its first field). The only gap was the dispatcher's `frameSize`,
  * which reconstructs the discriminator value class from raw peeked bytes
  * without consuming the stream — it previously supported only 1/2/4-byte
  * unsigned kinds and rejected everything here via the stage-9

@@ -5,7 +5,8 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImage
 import com.ditchoom.buffer.codec.test.protocols.payload.JpegImageCodec
@@ -270,7 +271,7 @@ class MqttV5PublishCodecTest {
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
             stream.append(buf)
-            assertEquals(PeekResult.Complete(totalBytes), codec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), codec.peekOutcome(stream))
         } finally {
             stream.release()
             pool.clear()

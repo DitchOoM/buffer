@@ -8,7 +8,8 @@
 #   linux-arm64-tests.sh check <root>   Exit 1 unless <root> holds a test binary for exactly the
 #                                       modules in MODULES: a missing one fails, and so does an
 #                                       extra one (a new module whose tests nobody would run).
-#   linux-arm64-tests.sh run <root>     Run `check`, then run every binary, even after one fails.
+#   linux-arm64-tests.sh run <root>     Run `check`, then run every binary, even after one fails,
+#                                       and the release allocation binary.
 #                                       Exit 1 if any binary exits non-zero or prints no
 #                                       `[  PASSED  ] N tests.` line. Write a per-module table to
 #                                       $GITHUB_STEP_SUMMARY when that is set.
@@ -31,6 +32,11 @@ buffer-sqldelight
 "
 
 KEXE_SUFFIX="build/bin/linuxArm64/debugTest/test.kexe"
+
+# The allocation tests measure allocation, so they run from a release binary of their own
+# (see buffer-codec-test/build.gradle.kts) and are excluded from the debug binaries.
+NATIVE_ALLOCATION_TESTS="*NativeAllocation*"
+ALLOCATION_KEXE="buffer-codec-test/build/bin/linuxArm64/allocationReleaseTest/allocation.kexe"
 
 usage() {
   echo "usage: $0 check|run <root>" >&2
@@ -67,6 +73,10 @@ check() {
   done <<EOF
 $(cd "$root" && find . -path "*/$KEXE_SUFFIX" -type f | sed 's|^\./||' | sort)
 EOF
+  if [ ! -f "$root/$ALLOCATION_KEXE" ]; then
+    echo "::error::Missing linuxArm64 allocation test binary: $root/$ALLOCATION_KEXE"
+    problems=$((problems + 1))
+  fi
   if [ "$problems" -ne 0 ]; then
     echo "::error::linuxArm64 test binary set is wrong ($problems problem(s))."
     return 1
@@ -74,41 +84,49 @@ EOF
   echo "All $(printf '%s' "$MODULES" | wc -w | tr -d ' ') linuxArm64 test binaries present, and no unlisted ones."
 }
 
+# run_one <label> <kexe> <ktest_filter>: runs one binary and appends its row to $summary.
+run_one() {
+  local label="$1" kexe="$2" filter="$3" rc passed
+  # upload-artifact does not keep the execute bit.
+  chmod +x "$kexe"
+  echo "::group::$label"
+  set +e
+  "$kexe" "--ktest_filter=$filter" 2>&1 | tee "$log"
+  rc="${PIPESTATUS[0]}"
+  set -e
+  echo "::endgroup::"
+  passed="$(sed -n 's/^\[  PASSED  \] \([0-9][0-9]*\) tests\{0,1\}\.$/\1/p' "$log" | tail -n 1)"
+  if [ "$rc" -ne 0 ]; then
+    echo "::error::$label linuxArm64 tests failed (exit $rc)"
+    grep -E '^\[  FAILED  \]' "$log" || true
+    failed="$failed $label"
+    summary="$summary
+| $label | FAILED (exit $rc) | ${passed:-?} |"
+  elif [ -z "$passed" ]; then
+    echo "::error::$label exited 0 but printed no '[  PASSED  ] N tests.' line"
+    failed="$failed $label"
+    summary="$summary
+| $label | NO RESULT LINE | ? |"
+  else
+    echo "$label: $passed tests passed"
+    total=$((total + passed))
+    summary="$summary
+| $label | passed | $passed |"
+  fi
+}
+
 run() {
   check
-  local failed="" module kexe log rc passed total=0
-  local summary="| Module | Result | Tests passed |
+  local module
+  failed=""
+  total=0
+  summary="| Module | Result | Tests passed |
 |---|---|---|"
   log="$(mktemp)"
   for module in $MODULES; do
-    kexe="$root/$module/$KEXE_SUFFIX"
-    # upload-artifact does not keep the execute bit.
-    chmod +x "$kexe"
-    echo "::group::$module"
-    set +e
-    "$kexe" 2>&1 | tee "$log"
-    rc="${PIPESTATUS[0]}"
-    set -e
-    echo "::endgroup::"
-    passed="$(sed -n 's/^\[  PASSED  \] \([0-9][0-9]*\) tests\{0,1\}\.$/\1/p' "$log" | tail -n 1)"
-    if [ "$rc" -ne 0 ]; then
-      echo "::error::$module linuxArm64 tests failed (exit $rc)"
-      grep -E '^\[  FAILED  \]' "$log" || true
-      failed="$failed $module"
-      summary="$summary
-| $module | FAILED (exit $rc) | ${passed:-?} |"
-    elif [ -z "$passed" ]; then
-      echo "::error::$module exited 0 but printed no '[  PASSED  ] N tests.' line"
-      failed="$failed $module"
-      summary="$summary
-| $module | NO RESULT LINE | ? |"
-    else
-      echo "$module: $passed tests passed"
-      total=$((total + passed))
-      summary="$summary
-| $module | passed | $passed |"
-    fi
+    run_one "$module" "$root/$module/$KEXE_SUFFIX" "*-$NATIVE_ALLOCATION_TESTS"
   done
+  run_one "buffer-codec-test (allocation, release)" "$root/$ALLOCATION_KEXE" "$NATIVE_ALLOCATION_TESTS"
   rm -f "$log"
   summary="$summary
 | **total** | | **$total** |"

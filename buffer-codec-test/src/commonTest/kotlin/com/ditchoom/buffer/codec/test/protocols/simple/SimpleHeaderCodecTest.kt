@@ -5,8 +5,9 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
-import com.ditchoom.buffer.codec.PeekResult
-import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.WireByteCount
+import com.ditchoom.buffer.codec.test.PeekOutcome
+import com.ditchoom.buffer.codec.test.peekOutcome
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
@@ -54,8 +55,8 @@ class SimpleHeaderCodecTest {
     fun wireSizeIsBackPatch() {
         // Locked decision row 15: `@LengthPrefixed val: String` defaults to BackPatch.
         assertEquals(
-            WireSize.BackPatch,
-            SimpleHeaderCodec.wireSize(SimpleHeader(id = 1, name = "anything"), EncodeContext.Empty),
+            WireByteCount.BackPatch,
+            SimpleHeaderCodec.wireBytes(SimpleHeader(id = 1, name = "anything"), EncodeContext.Empty),
         )
     }
 
@@ -69,7 +70,7 @@ class SimpleHeaderCodecTest {
 
         val stream = StreamProcessor.create(pool, ByteOrder.BIG_ENDIAN)
         try {
-            assertEquals(PeekResult.NeedsMoreData, SimpleHeaderCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.NeedsMoreData, SimpleHeaderCodec.peekOutcome(stream))
 
             // Drip-feed everything but the last byte. Each call must report NeedsMoreData.
             for (i in 0 until totalBytes - 1) {
@@ -78,8 +79,8 @@ class SimpleHeaderCodecTest {
                 one.resetForRead()
                 stream.append(one)
                 assertEquals(
-                    PeekResult.NeedsMoreData,
-                    SimpleHeaderCodec.peekFrameSize(stream),
+                    PeekOutcome.NeedsMoreData,
+                    SimpleHeaderCodec.peekOutcome(stream),
                     "after ${i + 1} bytes",
                 )
             }
@@ -88,7 +89,7 @@ class SimpleHeaderCodecTest {
             last.writeByte(encoded.readByte())
             last.resetForRead()
             stream.append(last)
-            assertEquals(PeekResult.Complete(totalBytes), SimpleHeaderCodec.peekFrameSize(stream))
+            assertEquals(PeekOutcome.Complete(totalBytes), SimpleHeaderCodec.peekOutcome(stream))
 
             val decoded =
                 stream.readBufferScoped(totalBytes) {
