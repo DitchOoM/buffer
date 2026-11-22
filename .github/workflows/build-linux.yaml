@@ -245,8 +245,10 @@ jobs:
       # links every module that has linuxArm64 tests; the check below then fails if that set
       # differs from the list in linux-arm64-tests.sh, so a new module cannot be linked here
       # and silently never run.
+      # The second task links buffer-codec-test's release allocation-test binary; the arm64
+      # job runs it with the debug binaries.
       - name: Link ARM64 test binaries
-        run: ./gradlew linkDebugTestLinuxArm64 ${{ inputs.gradle-args }}
+        run: ./gradlew linkDebugTestLinuxArm64 :buffer-codec-test:linkAllocationReleaseTestLinuxArm64 ${{ inputs.gradle-args }}
 
       - name: Check ARM64 test binaries
         run: bash .github/scripts/linux-arm64-tests.sh check .
@@ -258,7 +260,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: linux-arm64-test-binaries
-          path: '*/build/bin/linuxArm64/debugTest/test.kexe'
+          path: |
+            */build/bin/linuxArm64/debugTest/test.kexe
+            buffer-codec-test/build/bin/linuxArm64/allocationReleaseTest/allocation.kexe
           if-no-files-found: error
           retention-days: 1
 

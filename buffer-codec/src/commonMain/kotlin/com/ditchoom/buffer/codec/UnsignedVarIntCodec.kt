@@ -108,7 +108,10 @@ object UnsignedVarIntCodec : VariableLengthCodec<UInt> {
         return result
     }
 
-    /** The varint's width, scanned byte by byte: nothing to allocate. Rejects the same over-long sequences as [decode]. */
+    /**
+     * The varint's width, scanned byte by byte: nothing to allocate. Rejects the same
+     * over-long sequences as [decode].
+     */
     override fun frameSize(
         stream: StreamProcessor,
         baseOffset: Int,

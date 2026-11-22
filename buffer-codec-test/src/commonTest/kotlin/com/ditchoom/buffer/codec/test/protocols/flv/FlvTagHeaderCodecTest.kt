@@ -86,7 +86,8 @@ class FlvTagHeaderCodecTest {
 
     @Test
     fun wireSizeIsAlwaysExact11() {
-        assertEquals(WireByteCount.exact(frameSize.toLong()), FlvTagHeaderCodec.wireBytes(sampleHeader, EncodeContext.Empty))
+        val expected = WireByteCount.exact(frameSize.toLong())
+        assertEquals(expected, FlvTagHeaderCodec.wireBytes(sampleHeader, EncodeContext.Empty))
     }
 
     @Test

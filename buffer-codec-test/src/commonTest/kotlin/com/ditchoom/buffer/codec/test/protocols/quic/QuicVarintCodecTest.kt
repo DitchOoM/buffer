@@ -79,8 +79,10 @@ class QuicVarintCodecTest {
         for ((value, bytes) in vectors) {
             withStream(bytes) { stream ->
                 val before = stream.available()
-                assertEquals(FrameSize.declared(0, bytes.size.toLong()), QuicVarintCodec.frameSize(stream), "frameSize($value)")
-                assertEquals(FrameSize.declared(bytes.size, value), QuicVarintCodec.peekAsLength(stream, 0), "peekAsLength($value)")
+                val width = FrameSize.declared(0, bytes.size.toLong())
+                assertEquals(width, QuicVarintCodec.frameSize(stream), "frameSize($value)")
+                val asLength = FrameSize.declared(bytes.size, value)
+                assertEquals(asLength, QuicVarintCodec.peekAsLength(stream, 0), "peekAsLength($value)")
                 assertEquals(before, stream.available(), "a peek must not consume")
             }
         }

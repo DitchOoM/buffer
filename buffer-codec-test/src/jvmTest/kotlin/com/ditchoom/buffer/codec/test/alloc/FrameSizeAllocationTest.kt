@@ -174,8 +174,13 @@ class FrameSizeAllocationTest {
     @Test
     fun senderWireBytesAllocatesNothingAcrossCodecClasses() {
         val encoders: Array<Encoder<Any?>> =
-            arrayOf<Encoder<*>>(WideLengthFrameCodec, TaggedCodec, VarintLengthFrameCodec, PropertyEntryCodec, PropertyBagFrameCodec)
-                .map { it as Encoder<Any?> }
+            arrayOf<Encoder<*>>(
+                WideLengthFrameCodec,
+                TaggedCodec,
+                VarintLengthFrameCodec,
+                PropertyEntryCodec,
+                PropertyBagFrameCodec,
+            ).map { it as Encoder<Any?> }
                 .toTypedArray()
         val values: Array<Any?> =
             arrayOf(

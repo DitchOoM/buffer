@@ -149,7 +149,10 @@ object OwnedBytesHandleCodec : Codec<OwnedBytesHandle> {
     ): WireByteCount = WireByteCount.exact(value.byteSize().toLong())
 
     @Suppress("DEPRECATION")
-    @Deprecated("Call wireBytes, which does not box. Removed in the next major release.", ReplaceWith("wireBytes(value, context)"))
+    @Deprecated(
+        "Call wireBytes, which does not box. Removed in the next major release.",
+        ReplaceWith("wireBytes(value, context)"),
+    )
     override fun wireSize(
         value: OwnedBytesHandle,
         context: EncodeContext,

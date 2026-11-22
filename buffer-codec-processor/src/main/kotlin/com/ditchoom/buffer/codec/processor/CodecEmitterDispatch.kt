@@ -545,7 +545,8 @@ internal fun buildDispatchPeekFun(shape: DispatchShape): FunSpec {
                 // The variant's body excludes the discriminator byte, so a declared size
                 // grows by that byte; the other states pass through.
                 body.addStatement(
-                    "%L -> %L.frameSize(stream, baseOffset + 1).fold(declared = { __h, __b -> %T.declared(1 + __h, __b) }, " +
+                    "%L -> %L.frameSize(stream, baseOffset + 1)" +
+                        ".fold(declared = { __h, __b -> %T.declared(1 + __h, __b) }, " +
                         "needsMoreData = { %T.NeedsMoreData }, unframed = { %T.Unframed })",
                     variant.dispatchLabel(shape.discriminator.labelFormat),
                     variant.codecReceiver(),

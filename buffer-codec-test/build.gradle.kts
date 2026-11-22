@@ -2,6 +2,10 @@
 
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTargetWithHostTests
+import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
+import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest
 import org.jetbrains.kotlin.konan.target.HostManager
 
 plugins {
@@ -225,6 +229,31 @@ val jvmTestNoEscapeAnalysis by tasks.registering(Test::class) {
     filter { includeTestsMatching("com.ditchoom.buffer.codec.test.alloc.FrameSizeAllocationTest") }
 }
 tasks.named<Test>("jvmTest") { finalizedBy(jvmTestNoEscapeAnalysis) }
+
+// FrameSizeNativeAllocationTest measures allocation, which only a release binary shows: a
+// debug binary allocates a wrapper per CPointer element read. It runs from its own release
+// test binary (`<target>AllocationTest`, after `<target>Test`) and is excluded from every
+// debug test task. linuxArm64 links that binary here; CI runs it on the arm64 runner
+// (.github/scripts/linux-arm64-tests.sh).
+val allocationTestTargets = setOf("macosArm64", "linuxX64", "linuxArm64")
+val nativeAllocationTests = "*NativeAllocation*"
+kotlin.targets
+    .withType<KotlinNativeTarget>()
+    .matching { it.name in allocationTestTargets }
+    .configureEach {
+        binaries.test("allocation", listOf(NativeBuildType.RELEASE))
+        if (this is KotlinNativeTargetWithHostTests) {
+            val target = this
+            testRuns.create("allocation") {
+                setExecutionSourceFrom(target.binaries.getTest("allocation", NativeBuildType.RELEASE))
+                filter { includeTestsMatching(nativeAllocationTests) }
+            }
+            tasks.named("${target.name}Test") { finalizedBy("${target.name}AllocationTest") }
+        }
+    }
+tasks.withType<KotlinNativeTest>().configureEach {
+    if (!name.endsWith("AllocationTest")) filter.excludeTestsMatching(nativeAllocationTests)
+}
 
 tasks.named<Test>("jvmTest") {
     jvmArgs("-XX:-UseTLAB")

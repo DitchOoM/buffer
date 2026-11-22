@@ -32,11 +32,17 @@ public value class WireByteCount
             /**
              * The value encodes to exactly [bytes] bytes.
              *
-             * @throws EncodeException when [bytes] is negative: the encoder reporting it is broken.
+             * @throws NegativeWireByteCountException when [bytes] is negative: the encoder
+             *   reporting it is broken.
              */
             public fun exact(bytes: Long): WireByteCount {
-                if (bytes < 0L) throw EncodeException(fieldPath = "<wireBytes>", reason = "exact size $bytes is negative")
+                if (bytes < 0L) throw NegativeWireByteCountException(bytes)
                 return WireByteCount(bytes)
             }
         }
     }
+
+/** An encoder reported a negative exact size, [bytes]: no value encodes to that. */
+public class NegativeWireByteCountException(
+    public val bytes: Long,
+) : EncodeException(fieldPath = "<wireBytes>", reason = "exact size $bytes is negative")

@@ -90,33 +90,46 @@ private fun <T : Any> BoundingLengthCodec<T>.peekLengthByDecoding(
     stream: StreamProcessor,
     baseOffset: Int,
 ): FrameSize {
-    val budget = maxWireSize
-    val view = stream.peekBuffer(baseOffset, budget) ?: return FrameSize.NeedsMoreData
+    val view = stream.peekBuffer(baseOffset, maxWireSize) ?: return FrameSize.NeedsMoreData
     try {
-        val start = view.position()
-        val value =
-            try {
-                decode(view, DecodeContext.Empty)
-            } catch (shortView: BufferUnderflowException) {
-                if (view.limit() - start < budget) return FrameSize.NeedsMoreData
-                throw shortView
-            } catch (shortView: IndexOutOfBoundsException) {
-                if (view.limit() - start < budget) return FrameSize.NeedsMoreData
-                throw shortView
-            }
-        val width = view.position() - start
-        return when (value) {
-            is ULong -> FrameSize.declared(width, value)
-            is UInt -> FrameSize.declared(width, value.toLong())
-            is UShort -> FrameSize.declared(width, value.toLong())
-            is UByte -> FrameSize.declared(width, value.toLong())
-            is Long -> FrameSize.declared(width, value)
-            is Int -> FrameSize.declared(width, value.toLong())
-            is Short -> FrameSize.declared(width, value.toLong())
-            is Byte -> FrameSize.declared(width, value.toLong())
-            else -> FrameSize.Unframed
-        }
+        return lengthIn(view)
     } finally {
         (view as? PlatformBuffer)?.freeNativeMemory()
     }
 }
+
+/**
+ * The length field decoded from [view]. A view shorter than [BoundingLengthCodec.maxWireSize]
+ * that runs out mid-field holds a field that has not fully arrived. A ByteArray-backed view
+ * reports that read as [IndexOutOfBoundsException], the others as [BufferUnderflowException].
+ */
+@Suppress("TooGenericExceptionCaught")
+private fun <T : Any> BoundingLengthCodec<T>.lengthIn(view: ReadBuffer): FrameSize {
+    val start = view.position()
+    val truncated = view.limit() - start < maxWireSize
+    return try {
+        val value = decode(view, DecodeContext.Empty)
+        integerLength(view.position() - start, value)
+    } catch (shortView: BufferUnderflowException) {
+        if (truncated) FrameSize.NeedsMoreData else throw shortView
+    } catch (shortView: IndexOutOfBoundsException) {
+        if (truncated) FrameSize.NeedsMoreData else throw shortView
+    }
+}
+
+/** A decoded length of an integer type, [width] bytes wide; [FrameSize.Unframed] for any other type. */
+private fun integerLength(
+    width: Int,
+    value: Any,
+): FrameSize =
+    when (value) {
+        is ULong -> FrameSize.declared(width, value)
+        is UInt -> FrameSize.declared(width, value.toLong())
+        is UShort -> FrameSize.declared(width, value.toLong())
+        is UByte -> FrameSize.declared(width, value.toLong())
+        is Long -> FrameSize.declared(width, value)
+        is Int -> FrameSize.declared(width, value.toLong())
+        is Short -> FrameSize.declared(width, value.toLong())
+        is Byte -> FrameSize.declared(width, value.toLong())
+        else -> FrameSize.Unframed
+    }

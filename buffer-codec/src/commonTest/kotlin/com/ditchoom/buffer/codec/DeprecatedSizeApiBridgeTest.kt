@@ -26,7 +26,9 @@ class DeprecatedSizeApiBridgeTest {
         val buf = BufferFactory.Default.allocate(maxOf(bytes.size, 1), ByteOrder.BIG_ENDIAN)
         for (b in bytes) buf.writeByte(b.toByte())
         buf.resetForRead()
-        return StreamProcessor.create(BufferPool(), ByteOrder.BIG_ENDIAN).also { if (bytes.isNotEmpty()) it.append(buf) }
+        val stream = StreamProcessor.create(BufferPool(), ByteOrder.BIG_ENDIAN)
+        if (bytes.isNotEmpty()) stream.append(buf)
+        return stream
     }
 
     private inline fun <R> withStream(
@@ -70,7 +72,11 @@ class DeprecatedSizeApiBridgeTest {
         ): PeekResult {
             if (stream.available() - baseOffset < 1) return PeekResult.NeedsMoreData
             val total = 1 + (stream.peekByte(baseOffset).toInt() and 0xFF)
-            return if (stream.available() - baseOffset >= total) PeekResult.Complete(total) else PeekResult.NeedsMoreData
+            return if (stream.available() - baseOffset >= total) {
+                PeekResult.Complete(total)
+            } else {
+                PeekResult.NeedsMoreData
+            }
         }
     }
 
@@ -213,7 +219,8 @@ class DeprecatedSizeApiBridgeTest {
         assertEquals(PeekResult.Complete(5), FrameSize.declared(2, 3L).toPeekResult(available = 5))
         assertEquals(PeekResult.NeedsMoreData, FrameSize.declared(2, 3L).toPeekResult(available = 4))
         assertEquals(PeekResult.NoFraming, FrameSize.Unframed.toPeekResult(available = 4))
-        val wide = assertFailsWith<FrameTooLargeException> { FrameSize.declared(1, Int.MAX_VALUE.toLong()).toPeekResult(0) }
+        val pastIntRange = FrameSize.declared(1, Int.MAX_VALUE.toLong())
+        val wide = assertFailsWith<FrameTooLargeException> { pastIntRange.toPeekResult(0) }
         assertEquals(Int.MAX_VALUE + 1L, wide.declaredBytes)
 
         assertEquals(WireByteCount.exact(9), WireByteCount.from(WireSize.Exact(9)))
@@ -257,9 +264,14 @@ class DeprecatedSizeApiBridgeTest {
         ): VarLenPeek<Int> {
             if (stream.available() - baseOffset < 1) return VarLenPeek.NeedsMoreData
             val first = stream.peekByte(baseOffset).toInt() and 0xFF
-            if (first < 0x80) return VarLenPeek.Decoded(first, 1)
-            if (stream.available() - baseOffset < 2) return VarLenPeek.NeedsMoreData
-            return VarLenPeek.Decoded(((first and 0x7F) shl 8) or (stream.peekByte(baseOffset + 1).toInt() and 0xFF), 2)
+            return when {
+                first < 0x80 -> VarLenPeek.Decoded(first, 1)
+                stream.available() - baseOffset < 2 -> VarLenPeek.NeedsMoreData
+                else -> {
+                    val second = stream.peekByte(baseOffset + 1).toInt() and 0xFF
+                    VarLenPeek.Decoded(((first and 0x7F) shl 8) or second, 2)
+                }
+            }
         }
     }
 
@@ -274,7 +286,11 @@ class DeprecatedSizeApiBridgeTest {
         ): FrameSize {
             if (stream.available() - baseOffset < 1) return FrameSize.NeedsMoreData
             val width = if (stream.peekByte(baseOffset).toInt() and 0x80 == 0) 1 else 2
-            return if (stream.available() - baseOffset < width) FrameSize.NeedsMoreData else FrameSize.declared(0, width.toLong())
+            return if (stream.available() - baseOffset < width) {
+                FrameSize.NeedsMoreData
+            } else {
+                FrameSize.declared(0, width.toLong())
+            }
         }
     }
 
@@ -359,7 +375,9 @@ class DeprecatedSizeApiBridgeTest {
             if (stream.available() - baseOffset < 2) {
                 FrameSize.NeedsMoreData
             } else {
-                FrameSize.declared(2, (stream.peekByte(baseOffset).toLong() and 0xFF shl 8) or (stream.peekByte(baseOffset + 1).toLong() and 0xFF))
+                val hi = stream.peekByte(baseOffset).toLong() and 0xFF
+                val lo = stream.peekByte(baseOffset + 1).toLong() and 0xFF
+                FrameSize.declared(2, (hi shl 8) or lo)
             }
 
         override fun encodedWidth(bodyBytes: Long): WireByteCount = WireByteCount.exact(2)
@@ -398,6 +416,8 @@ class DeprecatedSizeApiBridgeTest {
     @Test
     fun aNewStyleLengthCodecAnswersThroughTheOldApi() {
         assertEquals(WireSize.Exact(2), NewStyleLength.wireSize(9u, EncodeContext.Empty))
-        withStream(0x00, 0x03) { stream -> assertEquals(FrameSize.declared(2, 3L), NewStyleLength.peekLength(stream, 0)) }
+        withStream(0x00, 0x03) { stream ->
+            assertEquals(FrameSize.declared(2, 3L), NewStyleLength.peekLength(stream, 0))
+        }
     }
 }

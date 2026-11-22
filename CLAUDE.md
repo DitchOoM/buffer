@@ -481,7 +481,9 @@ while (true) {
 }
 ```
 
-The sender side is `wireBytes(value, context): WireByteCount` (exact bytes or `BackPatch`). A hand-written `BoundingLengthCodec` also implements `peekLength` (the length field read with `peekByte`) and `encodedWidth`; a `VariableLengthCodec` implements `frameSize` as a width-only scan.
+The sender side is `wireBytes(value, context): WireByteCount` (exact bytes or `BackPatch`). A hand-written `BoundingLengthCodec` should override `peekLength` (the length field read with `peekByte`) and `encodedWidth`; a `VariableLengthCodec` should override `frameSize` with a width-only scan.
+
+The boxed `peekFrameSize`/`PeekResult`, `wireSize`/`WireSize` and `VariableLengthCodec.peekValue`/`VarLenPeek` remain as deprecated adapters, removed in the next major release. `frameSize`/`wireBytes` default to asking the old method, so old-style codecs keep working; the old methods do not ask the new ones, so a hand-written codec overriding only the new method also needs the one-line forwarder (`frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)` / `wireBytes(value, context).toWireSize()`) while anything calls the old method. Generated codecs carry both.
 
 Handles `@LengthPrefixed`, `@LengthFrom`, `@WhenTrue` (including value class property conditions), `@WireBytes`, sealed dispatch, `@DispatchOn` (value class and data class discriminators), nested messages, and multiple variable-length fields.
 

@@ -24,7 +24,11 @@ fun FrameDetector.peekOutcome(
 ): PeekOutcome =
     frameSize(stream, baseOffset).foldTotal(
         declared = { total ->
-            if (total <= stream.available() - baseOffset) PeekOutcome.Complete(total.toInt()) else PeekOutcome.NeedsMoreData
+            if (total <= stream.available() - baseOffset) {
+                PeekOutcome.Complete(total.toInt())
+            } else {
+                PeekOutcome.NeedsMoreData
+            }
         },
         needsMoreData = { PeekOutcome.NeedsMoreData },
         unframed = { PeekOutcome.NoFraming },

@@ -47,32 +47,5 @@ class FrameSizeWorkload {
         return sink
     }
 
-    /** Runs [calls] peeks on detector [index] only. */
-    fun runOne(
-        index: Int,
-        calls: Int,
-    ): Long {
-        var sink = 0L
-        val detector = detectors[index]
-        val stream = streams[index]
-        for (i in 0 until calls) {
-            sink += detector.frameSize(stream, 0).foldTotal({ it }, { -1 }, { -2 })
-        }
-        return sink
-    }
-
-    /** Runs [calls] `peekByte` reads on stream [index], for a baseline. */
-    fun runPeekByte(
-        index: Int,
-        calls: Int,
-    ): Long {
-        var sink = 0L
-        val stream = streams[index]
-        for (i in 0 until calls) sink += stream.peekByte(0)
-        return sink
-    }
-
-    val size: Int get() = detectors.size
-
     fun release() = streams.forEach { it.release() }
 }

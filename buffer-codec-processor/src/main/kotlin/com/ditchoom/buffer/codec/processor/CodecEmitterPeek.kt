@@ -1104,7 +1104,8 @@ internal fun appendFrameWidth(
 ) {
     body.addStatement(
         "val %L = %L.frameSize(stream, baseOffset + %L).fold(" +
-            "declared = { __h, __b -> __h + __b }, needsMoreData = { return %T.NeedsMoreData }, unframed = { return %T.Unframed })",
+            "declared = { __h, __b -> __h + __b }, needsMoreData = { return %T.NeedsMoreData }, " +
+            "unframed = { return %T.Unframed })",
         widthVar,
         codec,
         offsetExpr,

@@ -4,6 +4,7 @@ import com.ditchoom.buffer.WriteBuffer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 
 class WireByteCountTest {
     private fun describe(size: WireByteCount): String = size.fold(exact = { "exact:$it" }, backPatch = { "backPatch" })
@@ -19,7 +20,9 @@ class WireByteCountTest {
 
     @Test
     fun aNegativeExactSizeIsAnEncodeFailure() {
-        assertFailsWith<EncodeException> { WireByteCount.exact(-1) }
+        val failure = assertFailsWith<NegativeWireByteCountException> { WireByteCount.exact(-1) }
+        assertEquals(-1L, failure.bytes)
+        assertIs<EncodeException>(failure)
     }
 
     private object ExactEncoder : Encoder<Int> {

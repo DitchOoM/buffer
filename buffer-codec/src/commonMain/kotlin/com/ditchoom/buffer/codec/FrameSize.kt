@@ -21,7 +21,9 @@ import kotlin.jvm.JvmInline
  *
  * ```kotlin
  * codec.frameSize(stream).fold(
- *     declared = { header, body -> if (header + body > cap) skip(header, body) else decodeWhenComplete(header + body) },
+ *     declared = { header, body ->
+ *         if (header + body > cap) skip(header, body) else decodeWhenComplete(header + body)
+ *     },
  *     needsMoreData = { readMore() },
  *     unframed = { frameItExplicitly() },
  * )

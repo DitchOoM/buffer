@@ -104,7 +104,7 @@ class RemoteHeaderCodecTest {
     fun wireSizeIsExactBasedOnPayloadLength() {
         // WireSize.Exact = headerBytes + value.payloadLength.toInt.
         val msg = RemoteHeader(payloadLength = 5u, flags = 0u, correlationId = 0u, payload = "12345")
-        assertEquals(WireByteCount.exact((2 + 1 + 4 + 5).toLong()), RemoteHeaderCodec.wireBytes(msg, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(2L + 1 + 4 + 5), RemoteHeaderCodec.wireBytes(msg, EncodeContext.Empty))
     }
 
     @Test

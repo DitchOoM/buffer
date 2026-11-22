@@ -1052,7 +1052,10 @@ freely.
 ```kotlin
 interface Encoder<in T> {
     fun encode(buffer: WriteBuffer, value: T, context: EncodeContext)
-    fun wireBytes(value: T, context: EncodeContext): WireByteCount = WireByteCount.BackPatch
+    fun wireBytes(value: T, context: EncodeContext): WireByteCount   // default: asks wireSize
+
+    @Deprecated("Call wireBytes, which does not box. Removed in the next major release.")
+    fun wireSize(value: T, context: EncodeContext): WireSize = WireSize.BackPatch
 }
 
 interface Decoder<out T> {
@@ -1060,11 +1063,45 @@ interface Decoder<out T> {
 }
 
 interface FrameDetector {
-    fun frameSize(stream: StreamProcessor, baseOffset: Int = 0): FrameSize = FrameSize.Unframed
+    fun frameSize(stream: StreamProcessor, baseOffset: Int = 0): FrameSize   // default: asks peekFrameSize
+
+    @Deprecated("Call frameSize, which does not box. Removed in the next major release.")
+    fun peekFrameSize(stream: StreamProcessor, baseOffset: Int = 0): PeekResult = PeekResult.NoFraming
 }
 
 interface Codec<T> : Encoder<T>, Decoder<T>, FrameDetector
 ```
+
+Each size question has two methods. `frameSize` / `wireBytes` return value
+classes and are what generated code and `readFrame` call. `peekFrameSize` /
+`wireSize` return the boxed `PeekResult` / `WireSize`; they are deprecated and
+removed in the next major release. The new method's default asks the old one,
+so a codec written against the old API works unchanged through both.
+
+The old method's default does not ask the new one. A hand-written codec that
+overrides only `frameSize` / `wireBytes` answers `NoFraming` / `BackPatch` to
+code still calling `peekFrameSize` / `wireSize`. While such callers exist, add
+the one-line forwarders (generated codecs carry them):
+
+```kotlin
+@Deprecated("Call frameSize.", ReplaceWith("frameSize(stream, baseOffset)"))
+override fun peekFrameSize(stream: StreamProcessor, baseOffset: Int): PeekResult =
+    frameSize(stream, baseOffset).toPeekResult(stream.available() - baseOffset)
+
+@Deprecated("Call wireBytes.", ReplaceWith("wireBytes(value, context)"))
+override fun wireSize(value: T, context: EncodeContext): WireSize = wireBytes(value, context).toWireSize()
+```
+
+| Deprecated | Replacement |
+|---|---|
+| `FrameDetector.peekFrameSize` → `PeekResult` | `frameSize` → `FrameSize` |
+| `Encoder.wireSize` → `WireSize` | `wireBytes` → `WireByteCount` |
+| `VariableLengthCodec.peekValue` → `VarLenPeek` | `frameSize` for the width, `decode` for the value |
+
+A `VariableLengthCodec` still implements `peekValue`: it stays abstract until the
+next major release, so overriding it draws a deprecation warning. Its
+`frameSize` default derives the width from `peekValue` and allocates the result;
+override `frameSize` with a width-only scan.
 
 `wireBytes` reports the on-wire byte count so the framework can pre-allocate.
 `WireByteCount` is a value class over one `Long`, read with
@@ -1223,14 +1260,18 @@ interface BoundingLengthCodec<T : Any> : Codec<T> {
     val maxWireSize: Int                                  // widest the prefix can be
     fun applyBound(buffer: ReadBuffer, decodedValue: T)   // narrow limit() by the decoded length
     fun peekLength(stream: StreamProcessor, baseOffset: Int): FrameSize // the field, peeked: (width, length)
-    fun encodedWidth(bodyBytes: Long): Int                // prefix width for a length, without boxing T
+    fun encodedWidth(bodyBytes: Long): WireByteCount      // prefix width for a length, without boxing T
 }
 ```
 
-`peekLength` is what generated peeks call; read the field with
-`StreamProcessor.peekByte` (no slice, no decode, no allocation) and report
+`maxWireSize` and `applyBound` are required. `peekLength` is what generated
+peeks call. Its default decodes the field from a peeked view, which allocates;
+override it to read the field with `StreamProcessor.peekByte` (no slice, no
+decode, no allocation) and report
 `FrameSize.declared(headerBytes = <field width>, bodyBytes = <length>)`, or
-`FrameSize.NeedsMoreData` until the field has arrived.
+`FrameSize.NeedsMoreData` until the field has arrived. `encodedWidth` defaults
+to `BackPatch`, which sizes the prefix through `wireBytes` with a boxed `T`;
+override it with the exact width.
 
 An MQTT remaining-length codec (variable-byte integer, 1–4 bytes) implements it like this:
 
@@ -1265,16 +1306,18 @@ object MqttRemainingLengthCodec : BoundingLengthCodec<UInt> {
         } while (remaining > 0u)
     }
 
-    override fun encodedWidth(bodyBytes: Long): Int =
-        when {
-            bodyBytes < 128 -> 1
-            bodyBytes < 16_384 -> 2
-            bodyBytes < 2_097_152 -> 3
-            else -> 4
-        }
+    override fun encodedWidth(bodyBytes: Long): WireByteCount =
+        WireByteCount.exact(
+            when {
+                bodyBytes < 128 -> 1L
+                bodyBytes < 16_384 -> 2L
+                bodyBytes < 2_097_152 -> 3L
+                else -> 4L
+            },
+        )
 
     override fun wireBytes(value: UInt, context: EncodeContext): WireByteCount =
-        WireByteCount.exact(encodedWidth(value.toLong()).toLong())
+        encodedWidth(value.toLong())
 
     override fun peekLength(stream: StreamProcessor, baseOffset: Int): FrameSize {
         var value = 0L

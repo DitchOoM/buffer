@@ -212,6 +212,11 @@ public final class com/ditchoom/buffer/codec/MaxFrameBytesKey : com/ditchoom/buf
 	public static final field INSTANCE Lcom/ditchoom/buffer/codec/MaxFrameBytesKey;
 }
 
+public final class com/ditchoom/buffer/codec/NegativeWireByteCountException : com/ditchoom/buffer/codec/EncodeException {
+	public fun <init> (J)V
+	public final fun getBytes ()J
+}
+
 public final class com/ditchoom/buffer/codec/OwnedBytesHandle {
 	public fun equals (Ljava/lang/Object;)Z
 	public fun hashCode ()I

@@ -35,8 +35,10 @@ class FrameSizeTest {
     fun headerAndBodySurviveAtTheEdgesOfTheirRanges() {
         val max = FrameSize.declared(FrameSize.MAX_HEADER_BYTES, FrameSize.MAX_BODY_BYTES)
         assertEquals("declared:${FrameSize.MAX_HEADER_BYTES}+${FrameSize.MAX_BODY_BYTES}", describe(max))
-        assertEquals("declared:${FrameSize.MAX_HEADER_BYTES}+0", describe(FrameSize.declared(FrameSize.MAX_HEADER_BYTES, 0L)))
-        assertEquals("declared:0+${FrameSize.MAX_BODY_BYTES}", describe(FrameSize.declared(0, FrameSize.MAX_BODY_BYTES)))
+        val maxHeader = FrameSize.declared(FrameSize.MAX_HEADER_BYTES, 0L)
+        val maxBody = FrameSize.declared(0, FrameSize.MAX_BODY_BYTES)
+        assertEquals("declared:${FrameSize.MAX_HEADER_BYTES}+0", describe(maxHeader))
+        assertEquals("declared:0+${FrameSize.MAX_BODY_BYTES}", describe(maxBody))
         // The largest declared size is still neither sentinel.
         assertEquals(FrameSize.MAX_HEADER_BYTES + FrameSize.MAX_BODY_BYTES, max.foldTotal({ it }, { -1 }, { -2 }))
     }
@@ -115,7 +117,8 @@ class FrameSizeTest {
             val lowered = DecodeContext.Empty.with(MaxFrameBytesKey, 16)
             assertFailsWith<FrameTooLargeException> { StubCodec(FrameSize.declared(2, 15L)).readFrame(stream, lowered) }
             val huge = StubCodec(FrameSize.declared(9, (1L shl 32) + 3))
-            assertEquals((1L shl 32) + 12, assertFailsWith<FrameTooLargeException> { huge.readFrame(stream) }.declaredBytes)
+            val hugeFailure = assertFailsWith<FrameTooLargeException> { huge.readFrame(stream) }
+            assertEquals((1L shl 32) + 12, hugeFailure.declaredBytes)
             assertEquals(2, stream.available(), "rejection consumes nothing")
         } finally {
             stream.release()

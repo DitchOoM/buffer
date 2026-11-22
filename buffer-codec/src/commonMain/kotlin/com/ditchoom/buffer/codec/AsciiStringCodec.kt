@@ -89,7 +89,10 @@ object AsciiStringCodec : Codec<String> {
     ): WireByteCount = WireByteCount.exact(value.length.toLong())
 
     @Suppress("DEPRECATION")
-    @Deprecated("Call wireBytes, which does not box. Removed in the next major release.", ReplaceWith("wireBytes(value, context)"))
+    @Deprecated(
+        "Call wireBytes, which does not box. Removed in the next major release.",
+        ReplaceWith("wireBytes(value, context)"),
+    )
     override fun wireSize(
         value: String,
         context: EncodeContext,

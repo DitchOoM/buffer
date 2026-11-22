@@ -186,7 +186,8 @@ internal fun buildWireSizeFun(
                     // wireBytes.
                     builder.addStatement(
                         "val %L = %T.encodedWidth(%L).fold(exact = { it }, backPatch = { " +
-                            "%T.wireBytes(%L.toUInt(), context).fold(exact = { it }, backPatch = { return %T.BackPatch }) " +
+                            "%T.wireBytes(%L.toUInt(), context)" +
+                            ".fold(exact = { it }, backPatch = { return %T.BackPatch }) " +
                             "}) + %L",
                         "__${f.name}Size",
                         f.spec.codecType,

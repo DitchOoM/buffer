@@ -102,7 +102,7 @@ class CountPrefixedListCodecTest {
                 id = 1u,
                 points = listOf(CountPoint(0u, 0u), CountPoint(1u, 1u), CountPoint(2u, 2u)),
             )
-        assertEquals(WireByteCount.exact((1 + 1 + 9).toLong()), CountFixedListCodec.wireBytes(three, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(1L + 1 + 9), CountFixedListCodec.wireBytes(three, EncodeContext.Empty))
         val empty = CountFixedList(id = 1u, points = emptyList())
         assertEquals(WireByteCount.exact(2), CountFixedListCodec.wireBytes(empty, EncodeContext.Empty))
     }
@@ -228,7 +228,7 @@ class CountPrefixedListCodecTest {
                 trailer = 0u,
             )
         // varint(2) + 3 × 2 + 4 (trailer) = 1 + 6 + 4.
-        assertEquals(WireByteCount.exact((1 + 6 + 4).toLong()), CountThenTrailerCodec.wireBytes(msg, EncodeContext.Empty))
+        assertEquals(WireByteCount.exact(1L + 6 + 4), CountThenTrailerCodec.wireBytes(msg, EncodeContext.Empty))
     }
 
     // ---- peek -------------------------------------------------------------

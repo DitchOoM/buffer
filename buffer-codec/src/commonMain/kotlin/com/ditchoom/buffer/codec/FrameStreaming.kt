@@ -113,8 +113,7 @@ public fun <T> Codec<T>.readFrame(
     )
 
 /**
- * [detector] reports [FrameSize.Unframed], so a stream of its frames cannot be split. Extends
- * [IllegalStateException], which `readFrame` threw for this case before.
+ * [detector] reports [FrameSize.Unframed], so a stream of its frames cannot be split.
  */
 public class UnframedCodecException(
     public val detector: FrameDetector,
