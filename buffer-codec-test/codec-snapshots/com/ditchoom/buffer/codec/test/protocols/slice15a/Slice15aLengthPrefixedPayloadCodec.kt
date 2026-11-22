@@ -8,6 +8,7 @@ import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
@@ -24,7 +25,7 @@ public object Slice15aLengthPrefixedPayloadCodec : Codec<Slice15aLengthPrefixedP
     val dataPrefixB1 = buffer.readUByte().toUInt()
     val dataPrefix = ((dataPrefixB0 shl 8) or dataPrefixB1)
     if (dataPrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "Slice15aLengthPrefixedPayload.data", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = dataPrefix.toString())
+      throw FrameTooLargeException(declaredBytes = dataPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val dataLength = dataPrefix.toInt()
     if (dataLength > buffer.remaining()) {
@@ -88,7 +89,7 @@ public object Slice15aLengthPrefixedPayloadCodec : Codec<Slice15aLengthPrefixedP
     val dataPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val dataPrefix = ((dataPrefixB0 shl 8) or dataPrefixB1).toUInt()
     if (dataPrefix > (Int.MAX_VALUE - __offset - 2).toUInt()) {
-      throw DecodeException(fieldPath = "Slice15aLengthPrefixedPayload.data", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + dataPrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 2 + dataPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 2 + dataPrefix.toInt()
     return FrameSize.declared(__offset.toLong())

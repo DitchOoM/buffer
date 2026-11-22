@@ -10,6 +10,7 @@ import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.UnsignedVarIntCodec
 import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Deprecated
 import kotlin.Int
@@ -18,7 +19,7 @@ import kotlin.Suppress
 
 public object CountNestedEntryListCodec : Codec<CountNestedEntryList> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): CountNestedEntryList {
-    val __entriesCount = UnsignedVarIntCodec.decode(buffer, context).toInt()
+    val __entriesCount = declaredFrameBytes(0, UnsignedVarIntCodec.decode(buffer, context).toLong())
     val entries = ArrayList<CountNestedEntry>(__entriesCount.coerceIn(0, 1_024))
     repeat(__entriesCount) {
       entries += CountNestedEntryCodec.decode(buffer, context)

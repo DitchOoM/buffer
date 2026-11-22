@@ -5,10 +5,10 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
-import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireByteCount
@@ -25,7 +25,7 @@ public object CountNamedCodec : Codec<CountNamed> {
     val namePrefixB1 = buffer.readUByte().toUInt()
     val namePrefix = ((namePrefixB0 shl 8) or namePrefixB1)
     if (namePrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "CountNamed.name", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = namePrefix.toString())
+      throw FrameTooLargeException(declaredBytes = namePrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val nameLength = namePrefix.toInt()
     val name = buffer.readText(nameLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -71,7 +71,7 @@ public object CountNamedCodec : Codec<CountNamed> {
     val namePrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val namePrefix = ((namePrefixB0 shl 8) or namePrefixB1).toUInt()
     if (namePrefix > (Int.MAX_VALUE - __offset - 2).toUInt()) {
-      throw DecodeException(fieldPath = "CountNamed.name", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + namePrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 2 + namePrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 2 + namePrefix.toInt()
     return FrameSize.declared(__offset.toLong())

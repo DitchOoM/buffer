@@ -6,10 +6,10 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
-import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireByteCount
@@ -26,7 +26,7 @@ public object TextPolicyMessageCodec : Codec<TextPolicyMessage> {
     val topicPrefixB1 = buffer.readUByte().toUInt()
     val topicPrefix = ((topicPrefixB0 shl 8) or topicPrefixB1)
     if (topicPrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "TextPolicyMessage.topic", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = topicPrefix.toString())
+      throw FrameTooLargeException(declaredBytes = topicPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val topicLength = topicPrefix.toInt()
     val topic = buffer.readText(topicLength, Utf8.Strict)
@@ -34,7 +34,7 @@ public object TextPolicyMessageCodec : Codec<TextPolicyMessage> {
     val notePrefixB1 = buffer.readUByte().toUInt()
     val notePrefix = ((notePrefixB0 shl 8) or notePrefixB1)
     if (notePrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "TextPolicyMessage.note", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = notePrefix.toString())
+      throw FrameTooLargeException(declaredBytes = notePrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val noteLength = notePrefix.toInt()
     val note = buffer.readText(noteLength, LenientHolder.policy)
@@ -42,7 +42,7 @@ public object TextPolicyMessageCodec : Codec<TextPolicyMessage> {
     val payloadPrefixB1 = buffer.readUByte().toUInt()
     val payloadPrefix = ((payloadPrefixB0 shl 8) or payloadPrefixB1)
     if (payloadPrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "TextPolicyMessage.payload", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = payloadPrefix.toString())
+      throw FrameTooLargeException(declaredBytes = payloadPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val payloadLength = payloadPrefix.toInt()
     val payload = buffer.readText(payloadLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -116,7 +116,7 @@ public object TextPolicyMessageCodec : Codec<TextPolicyMessage> {
     val topicPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val topicPrefix = ((topicPrefixB0 shl 8) or topicPrefixB1).toUInt()
     if (topicPrefix > (Int.MAX_VALUE - __offset - 2).toUInt()) {
-      throw DecodeException(fieldPath = "TextPolicyMessage.topic", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + topicPrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 2 + topicPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 2 + topicPrefix.toInt()
     if (stream.available() - baseOffset < __offset + 2) return FrameSize.NeedsMoreData
@@ -124,7 +124,7 @@ public object TextPolicyMessageCodec : Codec<TextPolicyMessage> {
     val notePrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val notePrefix = ((notePrefixB0 shl 8) or notePrefixB1).toUInt()
     if (notePrefix > (Int.MAX_VALUE - __offset - 2).toUInt()) {
-      throw DecodeException(fieldPath = "TextPolicyMessage.note", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + notePrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 2 + notePrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 2 + notePrefix.toInt()
     if (stream.available() - baseOffset < __offset + 2) return FrameSize.NeedsMoreData
@@ -132,7 +132,7 @@ public object TextPolicyMessageCodec : Codec<TextPolicyMessage> {
     val payloadPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val payloadPrefix = ((payloadPrefixB0 shl 8) or payloadPrefixB1).toUInt()
     if (payloadPrefix > (Int.MAX_VALUE - __offset - 2).toUInt()) {
-      throw DecodeException(fieldPath = "TextPolicyMessage.payload", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + payloadPrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 2 + payloadPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 2 + payloadPrefix.toInt()
     return FrameSize.declared(__offset.toLong())

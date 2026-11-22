@@ -9,6 +9,7 @@ import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireByteCount
@@ -55,7 +56,7 @@ public object SmpFrameWithTrailerCodec : Codec<SmpFrameWithTrailer> {
     val notePrefixB1 = buffer.readUByte().toUInt()
     val notePrefix = ((notePrefixB0 shl 8) or notePrefixB1)
     if (notePrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "SmpFrameWithTrailer.note", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = notePrefix.toString())
+      throw FrameTooLargeException(declaredBytes = notePrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val noteLength = notePrefix.toInt()
     val note = buffer.readText(noteLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -106,7 +107,7 @@ public object SmpFrameWithTrailerCodec : Codec<SmpFrameWithTrailer> {
     __offset += 2
     val payloadBytes = payloadLength.toInt()
     if (payloadBytes < 0 || payloadBytes > Int.MAX_VALUE - __offset) {
-      throw DecodeException(fieldPath = "SmpFrameWithTrailer.payload", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + payloadBytes.toLong()}""")
+      throw FrameTooLargeException(declaredBytes = if (payloadBytes < 0) payloadBytes.toLong() else __offset.toLong() + payloadBytes, maxBytes = Int.MAX_VALUE)
     }
     if (stream.available() - baseOffset < __offset + payloadBytes) return FrameSize.NeedsMoreData
     __offset += payloadBytes
@@ -117,7 +118,7 @@ public object SmpFrameWithTrailerCodec : Codec<SmpFrameWithTrailer> {
     val notePrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val notePrefix = ((notePrefixB0 shl 8) or notePrefixB1).toUInt()
     if (notePrefix > (Int.MAX_VALUE - __offset - 2).toUInt()) {
-      throw DecodeException(fieldPath = "SmpFrameWithTrailer.note", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + notePrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 2 + notePrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 2 + notePrefix.toInt()
     return FrameSize.declared(__offset.toLong())
@@ -148,7 +149,7 @@ public object SmpFrameWithTrailerCodec : Codec<SmpFrameWithTrailer> {
     val notePrefixB1 = buffer.readUByte().toUInt()
     val notePrefix = ((notePrefixB0 shl 8) or notePrefixB1)
     if (notePrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "SmpFrameWithTrailer.note", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = notePrefix.toString())
+      throw FrameTooLargeException(declaredBytes = notePrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val noteLength = notePrefix.toInt()
     val note = buffer.readText(noteLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))

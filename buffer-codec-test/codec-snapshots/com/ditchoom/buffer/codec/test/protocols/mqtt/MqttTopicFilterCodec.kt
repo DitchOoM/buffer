@@ -5,10 +5,10 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
-import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireByteCount
@@ -25,7 +25,7 @@ public object MqttTopicFilterCodec : Codec<MqttTopicFilter> {
     val filterPrefixB1 = buffer.readUByte().toUInt()
     val filterPrefix = ((filterPrefixB0 shl 8) or filterPrefixB1)
     if (filterPrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "MqttTopicFilter.filter", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = filterPrefix.toString())
+      throw FrameTooLargeException(declaredBytes = filterPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val filterLength = filterPrefix.toInt()
     val filter = buffer.readText(filterLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -73,7 +73,7 @@ public object MqttTopicFilterCodec : Codec<MqttTopicFilter> {
     val filterPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val filterPrefix = ((filterPrefixB0 shl 8) or filterPrefixB1).toUInt()
     if (filterPrefix > (Int.MAX_VALUE - __offset - 2).toUInt()) {
-      throw DecodeException(fieldPath = "MqttTopicFilter.filter", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + filterPrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 2 + filterPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 2 + filterPrefix.toInt()
     if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData

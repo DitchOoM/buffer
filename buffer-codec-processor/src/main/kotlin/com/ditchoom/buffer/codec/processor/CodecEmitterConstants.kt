@@ -109,6 +109,8 @@ internal val DECODE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "Decod
  * allocated with. Rejects a declaration past `Int` range with
  * `FrameTooLargeException` instead of wrapping it.
  */
+internal val FRAME_TOO_LARGE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "FrameTooLargeException")
+
 internal val DECLARED_FRAME_BYTES_MN = MemberName("com.ditchoom.buffer.codec", "declaredFrameBytes")
 
 /**

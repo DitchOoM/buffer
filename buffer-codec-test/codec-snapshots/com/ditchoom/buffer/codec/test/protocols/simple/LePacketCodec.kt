@@ -6,9 +6,9 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
-import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireByteCount
@@ -59,7 +59,7 @@ public object LePacketCodec : Codec<LePacket> {
     __offset += 2
     val payloadBytes = header.length
     if (payloadBytes < 0 || payloadBytes > Int.MAX_VALUE - __offset) {
-      throw DecodeException(fieldPath = "LePacket.payload", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + payloadBytes.toLong()}""")
+      throw FrameTooLargeException(declaredBytes = if (payloadBytes < 0) payloadBytes.toLong() else __offset.toLong() + payloadBytes, maxBytes = Int.MAX_VALUE)
     }
     __offset += payloadBytes
     return FrameSize.declared(__offset.toLong())

@@ -7,6 +7,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
@@ -26,7 +27,7 @@ public object GrpcLengthPrefixedMessageCodec : Codec<GrpcLengthPrefixedMessage> 
     val messagePrefixB3 = buffer.readUByte().toUInt()
     val messagePrefix = ((messagePrefixB0 shl 24) or (messagePrefixB1 shl 16) or (messagePrefixB2 shl 8) or messagePrefixB3)
     if (messagePrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "GrpcLengthPrefixedMessage.message", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = messagePrefix.toString())
+      throw FrameTooLargeException(declaredBytes = messagePrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val messageLength = messagePrefix.toInt()
     if (messageLength > buffer.remaining()) {
@@ -94,7 +95,7 @@ public object GrpcLengthPrefixedMessageCodec : Codec<GrpcLengthPrefixedMessage> 
     val messagePrefixB3 = stream.peekByte(baseOffset + __offset + 3).toInt() and 0xFF
     val messagePrefix = ((messagePrefixB0 shl 24) or (messagePrefixB1 shl 16) or (messagePrefixB2 shl 8) or messagePrefixB3).toUInt()
     if (messagePrefix > (Int.MAX_VALUE - __offset - 4).toUInt()) {
-      throw DecodeException(fieldPath = "GrpcLengthPrefixedMessage.message", bufferPosition = baseOffset + __offset, expected = "__offset + 4 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 4 + messagePrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 4 + messagePrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 4 + messagePrefix.toInt()
     return FrameSize.declared(__offset.toLong())

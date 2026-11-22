@@ -7,6 +7,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
@@ -24,7 +25,7 @@ public object WideLengthDeferredFrameCodec : Codec<WideLengthDeferredFrame> {
     val payloadLength = buffer.readUInt()
     val flags = buffer.readUByte()
     if (payloadLength > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "WideLengthDeferredFrame.payload", bufferPosition = -1, expected = "@LengthFrom source <= ${'$'}{Int.MAX_VALUE}", actual = payloadLength.toString())
+      throw FrameTooLargeException(declaredBytes = payloadLength.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val payloadBytes = payloadLength.toInt()
     if (payloadBytes > buffer.remaining()) {
@@ -87,11 +88,11 @@ public object WideLengthDeferredFrameCodec : Codec<WideLengthDeferredFrame> {
     if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData
     __offset += 1
     if (payloadLength > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "WideLengthDeferredFrame.payload", bufferPosition = -1, expected = "@LengthFrom source <= ${'$'}{Int.MAX_VALUE}", actual = payloadLength.toString())
+      throw FrameTooLargeException(declaredBytes = payloadLength.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val payloadBytes = payloadLength.toInt()
     if (payloadBytes < 0 || payloadBytes > Int.MAX_VALUE - __offset) {
-      throw DecodeException(fieldPath = "WideLengthDeferredFrame.payload", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + payloadBytes.toLong()}""")
+      throw FrameTooLargeException(declaredBytes = if (payloadBytes < 0) payloadBytes.toLong() else __offset.toLong() + payloadBytes, maxBytes = Int.MAX_VALUE)
     }
     __offset += payloadBytes
     return FrameSize.declared(__offset.toLong())
@@ -109,7 +110,7 @@ public object WideLengthDeferredFrameCodec : Codec<WideLengthDeferredFrame> {
     val flags = buffer.readUByte()
     val __payloadStart = buffer.position()
     if (payloadLength > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "WideLengthDeferredFrame.payload", bufferPosition = -1, expected = "@LengthFrom source <= ${'$'}{Int.MAX_VALUE}", actual = payloadLength.toString())
+      throw FrameTooLargeException(declaredBytes = payloadLength.toLong(), maxBytes = Int.MAX_VALUE)
     }
     if (payloadLength.toInt() > buffer.remaining()) {
       throw DecodeException(

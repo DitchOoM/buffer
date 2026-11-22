@@ -8,6 +8,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
@@ -87,7 +88,7 @@ public object Http2FrameSettingsCodec : Codec<Http2Frame.Settings> {
     __offset += 4
     val entriesBytes = header.length
     if (entriesBytes < 0 || entriesBytes > Int.MAX_VALUE - __offset) {
-      throw DecodeException(fieldPath = "Settings.entries", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + entriesBytes.toLong()}""")
+      throw FrameTooLargeException(declaredBytes = if (entriesBytes < 0) entriesBytes.toLong() else __offset.toLong() + entriesBytes, maxBytes = Int.MAX_VALUE)
     }
     __offset += entriesBytes
     return FrameSize.declared(__offset.toLong())

@@ -10,6 +10,7 @@ import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.UnsignedVarIntCodec
 import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Deprecated
 import kotlin.Int
@@ -18,7 +19,7 @@ import kotlin.Suppress
 
 public object CountVariableListCodec : Codec<CountVariableList> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): CountVariableList {
-    val __namesCount = UnsignedVarIntCodec.decode(buffer, context).toInt()
+    val __namesCount = declaredFrameBytes(0, UnsignedVarIntCodec.decode(buffer, context).toLong())
     val names = ArrayList<CountNamed>(__namesCount.coerceIn(0, 1_024))
     repeat(__namesCount) {
       names += CountNamedCodec.decode(buffer, context)

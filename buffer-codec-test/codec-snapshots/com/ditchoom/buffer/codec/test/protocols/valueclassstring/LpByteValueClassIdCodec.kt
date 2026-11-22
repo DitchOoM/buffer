@@ -5,10 +5,10 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
-import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireByteCount
@@ -23,7 +23,7 @@ public object LpByteValueClassIdCodec : Codec<LpByteValueClassId> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): LpByteValueClassId {
     val idPrefix = buffer.readUByte().toUInt()
     if (idPrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "LpByteValueClassId.id", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = idPrefix.toString())
+      throw FrameTooLargeException(declaredBytes = idPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val idLength = idPrefix.toInt()
     val id = UserId(buffer.readText(idLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY)))
@@ -66,7 +66,7 @@ public object LpByteValueClassIdCodec : Codec<LpByteValueClassId> {
     if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData
     val idPrefix = (stream.peekByte(baseOffset + __offset).toInt() and 0xFF).toUInt()
     if (idPrefix > (Int.MAX_VALUE - __offset - 1).toUInt()) {
-      throw DecodeException(fieldPath = "LpByteValueClassId.id", bufferPosition = baseOffset + __offset, expected = "__offset + 1 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 1 + idPrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 1 + idPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 1 + idPrefix.toInt()
     return FrameSize.declared(__offset.toLong())

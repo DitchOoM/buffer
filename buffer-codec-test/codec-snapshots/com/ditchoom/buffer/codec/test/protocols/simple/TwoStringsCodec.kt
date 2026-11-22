@@ -5,10 +5,10 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
-import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireByteCount
@@ -25,7 +25,7 @@ public object TwoStringsCodec : Codec<TwoStrings> {
     val firstPrefixB1 = buffer.readUByte().toUInt()
     val firstPrefix = ((firstPrefixB0 shl 8) or firstPrefixB1)
     if (firstPrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "TwoStrings.first", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = firstPrefix.toString())
+      throw FrameTooLargeException(declaredBytes = firstPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val firstLength = firstPrefix.toInt()
     val first = buffer.readText(firstLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -33,7 +33,7 @@ public object TwoStringsCodec : Codec<TwoStrings> {
     val secondPrefixB1 = buffer.readUByte().toUInt()
     val secondPrefix = ((secondPrefixB0 shl 8) or secondPrefixB1)
     if (secondPrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "TwoStrings.second", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = secondPrefix.toString())
+      throw FrameTooLargeException(declaredBytes = secondPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val secondLength = secondPrefix.toInt()
     val second = buffer.readText(secondLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -93,7 +93,7 @@ public object TwoStringsCodec : Codec<TwoStrings> {
     val firstPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val firstPrefix = ((firstPrefixB0 shl 8) or firstPrefixB1).toUInt()
     if (firstPrefix > (Int.MAX_VALUE - __offset - 2).toUInt()) {
-      throw DecodeException(fieldPath = "TwoStrings.first", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + firstPrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 2 + firstPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 2 + firstPrefix.toInt()
     if (stream.available() - baseOffset < __offset + 2) return FrameSize.NeedsMoreData
@@ -101,7 +101,7 @@ public object TwoStringsCodec : Codec<TwoStrings> {
     val secondPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val secondPrefix = ((secondPrefixB0 shl 8) or secondPrefixB1).toUInt()
     if (secondPrefix > (Int.MAX_VALUE - __offset - 2).toUInt()) {
-      throw DecodeException(fieldPath = "TwoStrings.second", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + secondPrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 2 + secondPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 2 + secondPrefix.toInt()
     return FrameSize.declared(__offset.toLong())

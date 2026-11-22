@@ -5,12 +5,12 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
-import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.Decoder
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
@@ -33,7 +33,7 @@ public class MqttPublishV3Codec<P : Payload>(
     val topicPrefixB1 = buffer.readUByte().toUInt()
     val topicPrefix = ((topicPrefixB0 shl 8) or topicPrefixB1)
     if (topicPrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "MqttPublishV3.topic", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = topicPrefix.toString())
+      throw FrameTooLargeException(declaredBytes = topicPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val topicLength = topicPrefix.toInt()
     val topic = buffer.readText(topicLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -115,7 +115,7 @@ public class MqttPublishV3Codec<P : Payload>(
       val topicPrefixB1 = buffer.readUByte().toUInt()
       val topicPrefix = ((topicPrefixB0 shl 8) or topicPrefixB1)
       if (topicPrefix > Int.MAX_VALUE.toUInt()) {
-        throw DecodeException(fieldPath = "MqttPublishV3.topic", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = topicPrefix.toString())
+        throw FrameTooLargeException(declaredBytes = topicPrefix.toLong(), maxBytes = Int.MAX_VALUE)
       }
       val topicLength = topicPrefix.toInt()
       val topic = buffer.readText(topicLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))

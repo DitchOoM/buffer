@@ -5,10 +5,10 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
-import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireByteCount
@@ -25,7 +25,7 @@ public object WithVidCodec : Codec<WithVid> {
     val padPrefixB1 = buffer.readUByte().toUInt()
     val padPrefix = ((padPrefixB0 shl 8) or padPrefixB1)
     if (padPrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "WithVid.pad", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = padPrefix.toString())
+      throw FrameTooLargeException(declaredBytes = padPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val padLength = padPrefix.toInt()
     val pad = buffer.readText(padLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -33,7 +33,7 @@ public object WithVidCodec : Codec<WithVid> {
     val idPrefixB1 = buffer.readUByte().toUInt()
     val idPrefix = ((idPrefixB0 shl 8) or idPrefixB1)
     if (idPrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "WithVid.id", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = idPrefix.toString())
+      throw FrameTooLargeException(declaredBytes = idPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val idLength = idPrefix.toInt()
     val id = BoundaryVid(buffer.readText(idLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY)))
@@ -93,7 +93,7 @@ public object WithVidCodec : Codec<WithVid> {
     val padPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val padPrefix = ((padPrefixB0 shl 8) or padPrefixB1).toUInt()
     if (padPrefix > (Int.MAX_VALUE - __offset - 2).toUInt()) {
-      throw DecodeException(fieldPath = "WithVid.pad", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + padPrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 2 + padPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 2 + padPrefix.toInt()
     if (stream.available() - baseOffset < __offset + 2) return FrameSize.NeedsMoreData
@@ -101,7 +101,7 @@ public object WithVidCodec : Codec<WithVid> {
     val idPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val idPrefix = ((idPrefixB0 shl 8) or idPrefixB1).toUInt()
     if (idPrefix > (Int.MAX_VALUE - __offset - 2).toUInt()) {
-      throw DecodeException(fieldPath = "WithVid.id", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + idPrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 2 + idPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 2 + idPrefix.toInt()
     return FrameSize.declared(__offset.toLong())

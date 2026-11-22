@@ -5,9 +5,9 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
-import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireByteCount
@@ -26,7 +26,7 @@ public object LpIntValueClassIdCodec : Codec<LpIntValueClassId> {
     val idPrefixB3 = buffer.readUByte().toUInt()
     val idPrefix = ((idPrefixB0 shl 24) or (idPrefixB1 shl 16) or (idPrefixB2 shl 8) or idPrefixB3)
     if (idPrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "LpIntValueClassId.id", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = idPrefix.toString())
+      throw FrameTooLargeException(declaredBytes = idPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val idLength = idPrefix.toInt()
     val id = TraceId(buffer.readText(idLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY)))
@@ -73,7 +73,7 @@ public object LpIntValueClassIdCodec : Codec<LpIntValueClassId> {
     val idPrefixB3 = stream.peekByte(baseOffset + __offset + 3).toInt() and 0xFF
     val idPrefix = ((idPrefixB0 shl 24) or (idPrefixB1 shl 16) or (idPrefixB2 shl 8) or idPrefixB3).toUInt()
     if (idPrefix > (Int.MAX_VALUE - __offset - 4).toUInt()) {
-      throw DecodeException(fieldPath = "LpIntValueClassId.id", bufferPosition = baseOffset + __offset, expected = "__offset + 4 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 4 + idPrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 4 + idPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 4 + idPrefix.toInt()
     return FrameSize.declared(__offset.toLong())

@@ -6,9 +6,9 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
-import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireByteCount
@@ -26,7 +26,7 @@ public object WideLengthFrameCodec : Codec<WideLengthFrame> {
     val length = (if (buffer.byteOrder == ByteOrder.BIG_ENDIAN) lengthRaw else swapBytes(lengthRaw)).toUInt()
     val flags = buffer.readUByte()
     if (length > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "WideLengthFrame.payload", bufferPosition = -1, expected = "@LengthFrom source <= ${'$'}{Int.MAX_VALUE}", actual = length.toString())
+      throw FrameTooLargeException(declaredBytes = length.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val payload = buffer.readText(length.toInt(), (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
     return WideLengthFrame(length = length, flags = flags, payload = payload)
@@ -66,11 +66,11 @@ public object WideLengthFrameCodec : Codec<WideLengthFrame> {
     if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData
     __offset += 1
     if (length > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "WideLengthFrame.payload", bufferPosition = -1, expected = "@LengthFrom source <= ${'$'}{Int.MAX_VALUE}", actual = length.toString())
+      throw FrameTooLargeException(declaredBytes = length.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val payloadBytes = length.toInt()
     if (payloadBytes < 0 || payloadBytes > Int.MAX_VALUE - __offset) {
-      throw DecodeException(fieldPath = "WideLengthFrame.payload", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + payloadBytes.toLong()}""")
+      throw FrameTooLargeException(declaredBytes = if (payloadBytes < 0) payloadBytes.toLong() else __offset.toLong() + payloadBytes, maxBytes = Int.MAX_VALUE)
     }
     __offset += payloadBytes
     return FrameSize.declared(__offset.toLong())

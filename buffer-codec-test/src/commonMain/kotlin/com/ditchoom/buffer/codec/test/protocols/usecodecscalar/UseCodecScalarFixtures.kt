@@ -151,3 +151,79 @@ data class BoundedFrame(
     @UseCodec(Le32LengthCodec::class) val length: UInt,
     @RemainingBytes @UseCodec(BinaryDataCodec::class) val payload: BinaryData,
 )
+
+/** `BoundingLengthCodec<ULong>` over a raw 8-byte big-endian length: reaches the full u64 range. */
+object Be64LengthCodec : BoundingLengthCodec<ULong> {
+    override val maxWireSize: Int = 8
+
+    override fun decode(
+        buffer: ReadBuffer,
+        context: DecodeContext,
+    ): ULong = buffer.readLong().toULong()
+
+    override fun encode(
+        buffer: WriteBuffer,
+        value: ULong,
+        context: EncodeContext,
+    ) {
+        buffer.writeLong(value.toLong())
+    }
+
+    override fun wireSize(
+        value: ULong,
+        context: EncodeContext,
+    ): WireSize = WireSize.Exact(8)
+
+    override fun applyBound(
+        buffer: ReadBuffer,
+        decodedValue: ULong,
+    ) {
+        buffer.setLimit(buffer.position() + decodedValue.toInt())
+    }
+}
+
+/** `BoundingLengthCodec<Int>` over a signed 4-byte big-endian length: can declare a negative. */
+object SignedBe32LengthCodec : BoundingLengthCodec<Int> {
+    override val maxWireSize: Int = 4
+
+    override fun decode(
+        buffer: ReadBuffer,
+        context: DecodeContext,
+    ): Int = buffer.readInt()
+
+    override fun encode(
+        buffer: WriteBuffer,
+        value: Int,
+        context: EncodeContext,
+    ) {
+        buffer.writeInt(value)
+    }
+
+    override fun wireSize(
+        value: Int,
+        context: EncodeContext,
+    ): WireSize = WireSize.Exact(4)
+
+    override fun applyBound(
+        buffer: ReadBuffer,
+        decodedValue: Int,
+    ) {
+        buffer.setLimit(buffer.position() + decodedValue)
+    }
+}
+
+/** Wire layout `[tag BE Short | length 8-byte BE u64 | payload]`. */
+@ProtocolMessage
+data class U64BoundedFrame(
+    val tag: Short,
+    @UseCodec(Be64LengthCodec::class) val length: ULong,
+    @RemainingBytes @UseCodec(BinaryDataCodec::class) val payload: BinaryData,
+)
+
+/** Wire layout `[tag BE Short | length signed 4-byte BE | payload]`. */
+@ProtocolMessage
+data class SignedBoundedFrame(
+    val tag: Short,
+    @UseCodec(SignedBe32LengthCodec::class) val length: Int,
+    @RemainingBytes @UseCodec(BinaryDataCodec::class) val payload: BinaryData,
+)

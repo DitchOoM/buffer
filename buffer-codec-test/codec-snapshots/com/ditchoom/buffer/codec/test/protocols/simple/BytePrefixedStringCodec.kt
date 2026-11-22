@@ -5,10 +5,10 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
-import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireByteCount
@@ -23,7 +23,7 @@ public object BytePrefixedStringCodec : Codec<BytePrefixedString> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): BytePrefixedString {
     val namePrefix = buffer.readUByte().toUInt()
     if (namePrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "BytePrefixedString.name", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = namePrefix.toString())
+      throw FrameTooLargeException(declaredBytes = namePrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val nameLength = namePrefix.toInt()
     val name = buffer.readText(nameLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -66,7 +66,7 @@ public object BytePrefixedStringCodec : Codec<BytePrefixedString> {
     if (stream.available() - baseOffset < __offset + 1) return FrameSize.NeedsMoreData
     val namePrefix = (stream.peekByte(baseOffset + __offset).toInt() and 0xFF).toUInt()
     if (namePrefix > (Int.MAX_VALUE - __offset - 1).toUInt()) {
-      throw DecodeException(fieldPath = "BytePrefixedString.name", bufferPosition = baseOffset + __offset, expected = "__offset + 1 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 1 + namePrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 1 + namePrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 1 + namePrefix.toInt()
     return FrameSize.declared(__offset.toLong())

@@ -518,7 +518,6 @@ internal fun appendDecodeConditional(
                 appendLengthPrefixedStringPrefixDecode(
                     body = body,
                     name = field.name,
-                    ownerSimpleName = field.ownerSimpleName,
                     prefixWidth = inner.prefixWidth,
                     prefixWireOrder = inner.prefixWireOrder,
                 )
@@ -599,7 +598,6 @@ internal fun appendDecodeConditional(
                 appendLengthPrefixedStringPrefixDecode(
                     body = body,
                     name = field.name,
-                    ownerSimpleName = field.ownerSimpleName,
                     prefixWidth = inner.prefixWidth,
                     prefixWireOrder = inner.prefixWireOrder,
                 )
@@ -1046,10 +1044,8 @@ internal fun appendDecodeLengthPrefixed(
     appendBufferPrefixDecode(body, prefixVar, field.prefixWidth, field.prefixWireOrder)
     body.beginControlFlow("if (%L > Int.MAX_VALUE.toUInt())", prefixVar)
     body.addStatement(
-        "throw %T(fieldPath = %S, bufferPosition = -1, expected = %S, actual = %L.toString())",
-        DECODE_EXCEPTION_CN,
-        "${field.ownerSimpleName}.${field.name}",
-        "length prefix <= \${Int.MAX_VALUE}",
+        "throw %T(declaredBytes = %L.toLong(), maxBytes = Int.MAX_VALUE)",
+        FRAME_TOO_LARGE_EXCEPTION_CN,
         prefixVar,
     )
     body.endControlFlow()
@@ -1235,7 +1231,6 @@ internal fun appendDecodeLengthPrefixedString(
         appendLengthPrefixedStringPrefixDecode(
             body = body,
             name = field.name,
-            ownerSimpleName = field.ownerSimpleName,
             prefixWidth = field.prefixWidth,
             prefixWireOrder = field.prefixWireOrder,
         )
@@ -1259,7 +1254,6 @@ internal fun appendDecodeLengthPrefixedString(
 internal fun appendLengthPrefixedStringPrefixDecode(
     body: CodeBlock.Builder,
     name: String,
-    ownerSimpleName: String,
     prefixWidth: Int,
     prefixWireOrder: Endianness,
 ): String {
@@ -1267,10 +1261,8 @@ internal fun appendLengthPrefixedStringPrefixDecode(
     appendBufferPrefixDecode(body, prefixVar, prefixWidth, prefixWireOrder)
     body.beginControlFlow("if (%L > Int.MAX_VALUE.toUInt())", prefixVar)
     body.addStatement(
-        "throw %T(fieldPath = %S, bufferPosition = -1, expected = %S, actual = %L.toString())",
-        DECODE_EXCEPTION_CN,
-        "$ownerSimpleName.$name",
-        "length prefix <= \${Int.MAX_VALUE}",
+        "throw %T(declaredBytes = %L.toLong(), maxBytes = Int.MAX_VALUE)",
+        FRAME_TOO_LARGE_EXCEPTION_CN,
         prefixVar,
     )
     body.endControlFlow()
@@ -1400,8 +1392,6 @@ internal fun appendDecodeLengthFromString(
             body = body,
             siblingAccessor = field.source.siblingName,
             siblingKind = field.source.siblingKind,
-            ownerSimpleName = field.ownerSimpleName,
-            fieldName = field.name,
         )
     }
     // Inline the sibling/property accessor rather than binding
@@ -1477,8 +1467,6 @@ internal fun appendDecodeLengthFromList(
             body = body,
             siblingAccessor = field.source.siblingName,
             siblingKind = field.source.siblingKind,
-            ownerSimpleName = field.ownerSimpleName,
-            fieldName = field.name,
         )
     }
     val bytesVar = "${field.name}Bytes"
@@ -1544,8 +1532,6 @@ internal fun appendDecodeLengthFromMessage(
             body = body,
             siblingAccessor = field.source.siblingName,
             siblingKind = field.source.siblingKind,
-            ownerSimpleName = field.ownerSimpleName,
-            fieldName = field.name,
         )
     }
     val bytesVar = "${field.name}Bytes"
@@ -1675,8 +1661,6 @@ private fun appendDecodeDeferredPayloadSibling(
             body = body,
             siblingAccessor = extent.source.siblingName,
             siblingKind = extent.source.siblingKind,
-            ownerSimpleName = field.ownerSimpleName,
-            fieldName = field.name,
         )
     }
     val bytesVar = "${field.name}Bytes"
@@ -1862,7 +1846,7 @@ internal fun appendEncodeRemainingBytesProtocolMessageList(
  *
  * Generated shape:
  * ```
- * val __<name>Count = UnsignedVarIntCodec.decode(buffer, context).toInt()
+ * val __<name>Count = declaredFrameBytes(0, UnsignedVarIntCodec.decode(buffer, context).toLong())
  * val <name> = ArrayList<ElementType>(__<name>Count.coerceAtMost(<CAP>))
  * repeat(__<name>Count) {
  *     <name> += ElementCodec.decode(buffer, context)
@@ -1874,7 +1858,13 @@ internal fun appendDecodeCountPrefixedProtocolMessageList(
     field: FieldSpec.CountPrefixedProtocolMessageList,
 ) {
     val countVar = "__${field.name}Count"
-    body.addStatement("val %L = %T.decode(buffer, context).toInt()", countVar, UNSIGNED_VARINT_CODEC_CN)
+    // A count past Int range cannot be looped over; reject it instead of wrapping negative.
+    body.addStatement(
+        "val %L = %M(0, %T.decode(buffer, context).toLong())",
+        countVar,
+        DECLARED_FRAME_BYTES_MN,
+        UNSIGNED_VARINT_CODEC_CN,
+    )
     // Pre-size the list to the count, capped so a hostile varint can't
     // request a multi-gigabyte allocation up front; the element decodes
     // still fail fast on a truncated buffer well before the list grows.
@@ -1925,14 +1915,17 @@ internal fun appendDecodeUseCodecScalar(
         body.addStatement("val __%LOuterLimit = buffer.limit()", field.name)
     }
     body.addStatement("val %L = %T.decode(buffer, context)", field.name, field.codecType)
-    if (field.isBounding) {
-        // The declared body must be representable and buffered before user code narrows with it.
+    // An integer length must be representable and buffered before user code narrows with it.
+    // A non-integer length (a value class) has no numeric reading here; its codec bounds it.
+    if (field.isBounding && peekBudgetFor(field.fieldType) != null) {
         appendFramedBodyTruncationGuard(
             body,
             field.name,
             "${field.ownerSimpleName}.${field.name}",
             declaredLengthArg(field.name, field.fieldType),
         )
+    }
+    if (field.isBounding) {
         body.addStatement("%T.applyBound(buffer, %L)", field.codecType, field.name)
         appendApplyBoundWidenGuard(
             body,
@@ -2086,7 +2079,6 @@ internal fun appendDecodeLengthPrefixedUseCodecPayload(
         appendLengthPrefixedStringPrefixDecode(
             body = body,
             name = field.name,
-            ownerSimpleName = field.ownerSimpleName,
             prefixWidth = field.prefixWidth,
             prefixWireOrder = field.prefixWireOrder,
         )

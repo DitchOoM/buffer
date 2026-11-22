@@ -9,6 +9,7 @@ import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
@@ -29,7 +30,7 @@ public object WavFmtChunkCodec : Codec<WavFmtChunk> {
     val bodyPrefixB3 = buffer.readUByte().toUInt()
     val bodyPrefix = (bodyPrefixB0 or (bodyPrefixB1 shl 8) or (bodyPrefixB2 shl 16) or (bodyPrefixB3 shl 24))
     if (bodyPrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "WavFmtChunk.body", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = bodyPrefix.toString())
+      throw FrameTooLargeException(declaredBytes = bodyPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val bodyLength = bodyPrefix.toInt()
     if (bodyLength > buffer.remaining()) {
@@ -117,7 +118,7 @@ public object WavFmtChunkCodec : Codec<WavFmtChunk> {
     val bodyPrefixB3 = stream.peekByte(baseOffset + __offset + 3).toInt() and 0xFF
     val bodyPrefix = (bodyPrefixB0 or (bodyPrefixB1 shl 8) or (bodyPrefixB2 shl 16) or (bodyPrefixB3 shl 24)).toUInt()
     if (bodyPrefix > (Int.MAX_VALUE - __offset - 4).toUInt()) {
-      throw DecodeException(fieldPath = "WavFmtChunk.body", bufferPosition = baseOffset + __offset, expected = "__offset + 4 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 4 + bodyPrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 4 + bodyPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 4 + bodyPrefix.toInt()
     return FrameSize.declared(__offset.toLong())

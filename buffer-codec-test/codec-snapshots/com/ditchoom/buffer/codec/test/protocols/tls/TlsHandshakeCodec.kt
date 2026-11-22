@@ -8,6 +8,7 @@ import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
 import com.ditchoom.buffer.codec.WireSize
@@ -25,7 +26,7 @@ public object TlsHandshakeCodec : Codec<TlsHandshake> {
     val lengthB2 = buffer.readUByte().toUInt()
     val length = ((lengthB0 shl 16) or (lengthB1 shl 8) or lengthB2)
     if (length > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "TlsHandshake.body", bufferPosition = -1, expected = "@LengthFrom source <= ${'$'}{Int.MAX_VALUE}", actual = length.toString())
+      throw FrameTooLargeException(declaredBytes = length.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val bodyBytes = length.toInt()
     if (bodyBytes > buffer.remaining()) {
@@ -83,11 +84,11 @@ public object TlsHandshakeCodec : Codec<TlsHandshake> {
     val length = ((lengthB0 shl 16) or (lengthB1 shl 8) or lengthB2).toUInt()
     __offset += 3
     if (length > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "TlsHandshake.body", bufferPosition = -1, expected = "@LengthFrom source <= ${'$'}{Int.MAX_VALUE}", actual = length.toString())
+      throw FrameTooLargeException(declaredBytes = length.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val bodyBytes = length.toInt()
     if (bodyBytes < 0 || bodyBytes > Int.MAX_VALUE - __offset) {
-      throw DecodeException(fieldPath = "TlsHandshake.body", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + bodyBytes.toLong()}""")
+      throw FrameTooLargeException(declaredBytes = if (bodyBytes < 0) bodyBytes.toLong() else __offset.toLong() + bodyBytes, maxBytes = Int.MAX_VALUE)
     }
     __offset += bodyBytes
     return FrameSize.declared(__offset.toLong())

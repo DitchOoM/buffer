@@ -10,6 +10,7 @@ import com.ditchoom.buffer.codec.Decoder
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.FrameSize
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireByteCount
@@ -140,7 +141,7 @@ public class DeferredDispatchFrameCommandCodec<P : Payload>(
       __offset += 2
       val payloadBytes = payloadLength.toInt()
       if (payloadBytes < 0 || payloadBytes > Int.MAX_VALUE - __offset) {
-        throw DecodeException(fieldPath = "Command.payload", bufferPosition = baseOffset + __offset, expected = "__offset + @LengthFrom source in 0..${'$'}{Int.MAX_VALUE}", actual = """${__offset.toLong() + payloadBytes.toLong()}""")
+        throw FrameTooLargeException(declaredBytes = if (payloadBytes < 0) payloadBytes.toLong() else __offset.toLong() + payloadBytes, maxBytes = Int.MAX_VALUE)
       }
       if (stream.available() - baseOffset < __offset + payloadBytes) return FrameSize.NeedsMoreData
       __offset += payloadBytes
