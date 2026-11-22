@@ -10,6 +10,7 @@ import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
@@ -21,6 +22,14 @@ public object Http3FrameExtensionCodec : Codec<Http3Frame.Extension> {
     val frameType = Http3FrameTypeCodec.decode(buffer, context)
     val __lengthOuterLimit = buffer.limit()
     val length = Http3LengthCodec.decode(buffer, context)
+    if (declaredFrameBytes(0, length) > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "Extension.length",
+            bufferPosition = buffer.position(),
+            expected = "a fully-buffered " + length + "-byte framed body",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     Http3LengthCodec.applyBound(buffer, length)
     if (buffer.limit() > __lengthOuterLimit) {
       val __widenedLimit = buffer.limit()
@@ -74,7 +83,7 @@ public object Http3FrameExtensionCodec : Codec<Http3Frame.Extension> {
         }
       }
       val __lengthWidth = __lengthPeekView.position() - __lengthPriorPos
-      val __total = __priorBytes + __lengthWidth + length.toInt()
+      val __total = declaredFrameBytes(__priorBytes + __lengthWidth, length)
       return FramePeek.forDeclaredSize(__total, stream.available() - baseOffset)
     } finally {
       (__lengthPeekView as? PlatformBuffer)?.freeNativeMemory()
@@ -87,6 +96,14 @@ public object Http3FrameExtensionCodec : Codec<Http3Frame.Extension> {
     val frameType = Http3FrameTypeCodec.decode(buffer, context)
     val __lengthOuterLimit = buffer.limit()
     val length = Http3LengthCodec.decode(buffer, context)
+    if (declaredFrameBytes(0, length) > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "Extension.length",
+            bufferPosition = buffer.position(),
+            expected = "a fully-buffered " + length + "-byte framed body",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     Http3LengthCodec.applyBound(buffer, length)
     if (buffer.limit() > __lengthOuterLimit) {
       val __widenedLimit = buffer.limit()

@@ -11,6 +11,7 @@ import com.ditchoom.buffer.codec.FrameDetector
 import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
+import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
 import kotlin.Throwable
@@ -119,7 +120,7 @@ public class MqttPacketCodec<P : Payload>(
           }
         }
         val __framingPrefixWidth = __framingPeek.position() - __framingPeekStart
-        val __total = 1 + __framingPrefixWidth + __framingLength.toInt()
+        val __total = declaredFrameBytes(1 + __framingPrefixWidth, __framingLength.toLong())
         return FramePeek.forDeclaredSize(__total, stream.available() - baseOffset)
       } finally {
         (__framingPeek as? PlatformBuffer)?.freeNativeMemory()

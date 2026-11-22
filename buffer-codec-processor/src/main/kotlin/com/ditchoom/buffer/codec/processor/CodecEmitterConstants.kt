@@ -2,6 +2,8 @@ package com.ditchoom.buffer.codec.processor
 
 import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.MemberName
+import com.squareup.kotlinpoet.TypeName
+import com.squareup.kotlinpoet.U_LONG
 
 /*
  * Shared compile-time constants for [CodecEmitter] — qualified names, KotlinPoet
@@ -98,6 +100,25 @@ internal val FRAME_PEEK_CN = ClassName("com.ditchoom.buffer.codec", "FramePeek")
 internal val FRAME_DETECTOR_CN = ClassName("com.ditchoom.buffer.codec", "FrameDetector")
 internal val STREAM_PROCESSOR_CN = ClassName("com.ditchoom.buffer.stream", "StreamProcessor")
 internal val DECODE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "DecodeException")
+
+/**
+ * `declaredFrameBytes(header, declared)`: the Long-safe frame total every
+ * wire-supplied bounding length goes through before it is added, sliced or
+ * allocated with. Rejects a declaration past `Int` range with
+ * `FrameTooLargeException` instead of wrapping it.
+ */
+internal val DECLARED_FRAME_BYTES_MN = MemberName("com.ditchoom.buffer.codec", "declaredFrameBytes")
+
+/**
+ * The `declaredFrameBytes` argument for a bounding length local of [type]:
+ * `ULong` has its own overload; every other integer kind widens exactly
+ * through `toLong()`.
+ */
+internal fun declaredLengthArg(
+    valueExpr: String,
+    type: TypeName,
+): String = if (type == U_LONG) valueExpr else "$valueExpr.toLong()"
+
 internal val ENCODE_EXCEPTION_CN = ClassName("com.ditchoom.buffer.codec", "EncodeException")
 internal val FRAMED_ENCODER_CN = ClassName("com.ditchoom.buffer.codec", "FramedEncoder")
 internal val LENGTH_PREFIXED_LIST_ENCODER_CN =

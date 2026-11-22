@@ -13,6 +13,7 @@ import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.LengthPrefixedListEncoder
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
@@ -22,6 +23,14 @@ public object StringTaggedPropertyBagCodec : Codec<StringTaggedPropertyBag> {
   override fun decode(buffer: ReadBuffer, context: DecodeContext): StringTaggedPropertyBag {
     val __propertiesOuterLimit = buffer.limit()
     val __propertiesLength = MqttRemainingLengthCodec.decode(buffer, context)
+    if (declaredFrameBytes(0, __propertiesLength.toLong()) > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "StringTaggedPropertyBag.properties",
+            bufferPosition = buffer.position(),
+            expected = "a fully-buffered " + __propertiesLength + "-byte framed body",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     MqttRemainingLengthCodec.applyBound(buffer, __propertiesLength)
     if (buffer.limit() > __propertiesOuterLimit) {
       val __widenedLimit = buffer.limit()
@@ -70,7 +79,7 @@ public object StringTaggedPropertyBagCodec : Codec<StringTaggedPropertyBag> {
         }
       }
       val __propertiesWidth = __propertiesPeekView.position() - __propertiesPriorPos
-      val __total = 0 + __propertiesWidth + __propertiesLength.toInt()
+      val __total = declaredFrameBytes(0 + __propertiesWidth, __propertiesLength.toLong())
       return FramePeek.forDeclaredSize(__total, stream.available() - baseOffset)
     } finally {
       (__propertiesPeekView as? PlatformBuffer)?.freeNativeMemory()

@@ -14,6 +14,7 @@ import com.ditchoom.buffer.codec.FramePeek
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
+import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -26,7 +27,7 @@ public object MqttPacketConnectCodec : FrameDetector {
     val header = MqttFixedHeader(buffer.readUByte())
     val __framingOuterLimit = buffer.limit()
     val __framingLength = MqttRemainingLengthCodec.decode(buffer, context)
-    if (__framingLength.toInt() > buffer.remaining()) {
+    if (declaredFrameBytes(0, __framingLength.toLong()) > buffer.remaining()) {
       throw DecodeException(
             fieldPath = "Connect.@FramedBy",
             bufferPosition = buffer.position(),
@@ -287,7 +288,7 @@ public object MqttPacketConnectCodec : FrameDetector {
         }
       }
       val __framingPrefixWidth = __framingPeek.position() - __framingPeekStart
-      val __total = 1 + __framingPrefixWidth + __framingLength.toInt()
+      val __total = declaredFrameBytes(1 + __framingPrefixWidth, __framingLength.toLong())
       return FramePeek.forDeclaredSize(__total, stream.available() - baseOffset)
     } finally {
       (__framingPeek as? PlatformBuffer)?.freeNativeMemory()

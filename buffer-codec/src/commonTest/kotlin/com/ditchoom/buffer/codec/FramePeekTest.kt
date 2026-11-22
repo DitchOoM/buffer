@@ -154,7 +154,7 @@ class FramePeekTest {
         try {
             val codec = StubCodec(FramePeek.declaredIncomplete(DEFAULT_MAX_FRAME_BYTES + 1))
             val thrown = assertFailsWith<FrameTooLargeException> { codec.readFrame(stream) }
-            assertEquals(DEFAULT_MAX_FRAME_BYTES + 1, thrown.declaredBytes)
+            assertEquals(DEFAULT_MAX_FRAME_BYTES + 1L, thrown.declaredBytes)
             val lowered = DecodeContext.Empty.with(MaxFrameBytesKey, 16)
             assertFailsWith<FrameTooLargeException> { StubCodec(FramePeek.declaredIncomplete(17)).readFrame(stream, lowered) }
         } finally {
