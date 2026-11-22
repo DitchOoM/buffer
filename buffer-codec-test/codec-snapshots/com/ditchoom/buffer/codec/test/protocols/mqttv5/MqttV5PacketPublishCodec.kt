@@ -11,10 +11,12 @@ import com.ditchoom.buffer.codec.Decoder
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameDetector
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
+import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttFixedHeader
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
 import com.ditchoom.buffer.codec.test.protocols.payload.PacketId
@@ -30,7 +32,7 @@ public class MqttV5PacketPublishCodec<P : Payload>(
     val header = MqttFixedHeader(buffer.readUByte())
     val __framingOuterLimit = buffer.limit()
     val __framingLength = MqttRemainingLengthCodec.decode(buffer, context)
-    if (__framingLength.toInt() > buffer.remaining()) {
+    if (declaredFrameBytes(0, __framingLength.toLong()) > buffer.remaining()) {
       throw DecodeException(
             fieldPath = "Publish.@FramedBy",
             bufferPosition = buffer.position(),
@@ -46,7 +48,7 @@ public class MqttV5PacketPublishCodec<P : Payload>(
       val topicPrefixB1 = buffer.readUByte().toUInt()
       val topicPrefix = ((topicPrefixB0 shl 8) or topicPrefixB1)
       if (topicPrefix > Int.MAX_VALUE.toUInt()) {
-        throw DecodeException(fieldPath = "Publish.topic", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = topicPrefix.toString())
+        throw FrameTooLargeException(declaredBytes = topicPrefix.toLong(), maxBytes = Int.MAX_VALUE)
       }
       val topicLength = topicPrefix.toInt()
       val topic = buffer.readText(topicLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -136,7 +138,7 @@ public class MqttV5PacketPublishCodec<P : Payload>(
           }
         }
         val __framingPrefixWidth = __framingPeek.position() - __framingPeekStart
-        val __total = 1 + __framingPrefixWidth + __framingLength.toInt()
+        val __total = declaredFrameBytes(1 + __framingPrefixWidth, __framingLength.toLong())
         return if (stream.available() - baseOffset >= __total) PeekResult.Complete(__total) else PeekResult.NeedsMoreData
       } finally {
         (__framingPeek as? PlatformBuffer)?.freeNativeMemory()
@@ -147,7 +149,7 @@ public class MqttV5PacketPublishCodec<P : Payload>(
       val header = MqttFixedHeader(buffer.readUByte())
       val __framingOuterLimit = buffer.limit()
       val __framingLength = MqttRemainingLengthCodec.decode(buffer, context)
-      if (__framingLength.toInt() > buffer.remaining()) {
+      if (declaredFrameBytes(0, __framingLength.toLong()) > buffer.remaining()) {
         throw DecodeException(
               fieldPath = "Publish.@FramedBy",
               bufferPosition = buffer.position(),
@@ -160,7 +162,7 @@ public class MqttV5PacketPublishCodec<P : Payload>(
       val topicPrefixB1 = buffer.readUByte().toUInt()
       val topicPrefix = ((topicPrefixB0 shl 8) or topicPrefixB1)
       if (topicPrefix > Int.MAX_VALUE.toUInt()) {
-        throw DecodeException(fieldPath = "Publish.topic", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = topicPrefix.toString())
+        throw FrameTooLargeException(declaredBytes = topicPrefix.toLong(), maxBytes = Int.MAX_VALUE)
       }
       val topicLength = topicPrefix.toInt()
       val topic = buffer.readText(topicLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))

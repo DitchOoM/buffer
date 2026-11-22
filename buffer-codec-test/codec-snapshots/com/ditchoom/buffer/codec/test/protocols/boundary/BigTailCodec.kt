@@ -5,9 +5,9 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
-import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
@@ -20,7 +20,7 @@ public object BigTailCodec : Codec<BigTail> {
     val aPrefixB1 = buffer.readUByte().toUInt()
     val aPrefix = ((aPrefixB0 shl 8) or aPrefixB1)
     if (aPrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "BigTail.a", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = aPrefix.toString())
+      throw FrameTooLargeException(declaredBytes = aPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val aLength = aPrefix.toInt()
     val a = buffer.readText(aLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -30,7 +30,7 @@ public object BigTailCodec : Codec<BigTail> {
     val bPrefixB3 = buffer.readUByte().toUInt()
     val bPrefix = ((bPrefixB0 shl 24) or (bPrefixB1 shl 16) or (bPrefixB2 shl 8) or bPrefixB3)
     if (bPrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "BigTail.b", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = bPrefix.toString())
+      throw FrameTooLargeException(declaredBytes = bPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val bLength = bPrefix.toInt()
     val b = buffer.readText(bLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -82,7 +82,7 @@ public object BigTailCodec : Codec<BigTail> {
     val aPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val aPrefix = ((aPrefixB0 shl 8) or aPrefixB1).toUInt()
     if (aPrefix > (Int.MAX_VALUE - __offset - 2).toUInt()) {
-      throw DecodeException(fieldPath = "BigTail.a", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + aPrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 2 + aPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 2 + aPrefix.toInt()
     if (stream.available() - baseOffset < __offset + 4) return PeekResult.NeedsMoreData
@@ -92,7 +92,7 @@ public object BigTailCodec : Codec<BigTail> {
     val bPrefixB3 = stream.peekByte(baseOffset + __offset + 3).toInt() and 0xFF
     val bPrefix = ((bPrefixB0 shl 24) or (bPrefixB1 shl 16) or (bPrefixB2 shl 8) or bPrefixB3).toUInt()
     if (bPrefix > (Int.MAX_VALUE - __offset - 4).toUInt()) {
-      throw DecodeException(fieldPath = "BigTail.b", bufferPosition = baseOffset + __offset, expected = "__offset + 4 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 4 + bPrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 4 + bPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 4 + bPrefix.toInt()
     return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData

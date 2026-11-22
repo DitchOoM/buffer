@@ -7,6 +7,7 @@ import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -19,7 +20,7 @@ public object MisdeclaredHostCodec : Codec<MisdeclaredHost> {
     val innerPrefixB1 = buffer.readUByte().toUInt()
     val innerPrefix = ((innerPrefixB0 shl 8) or innerPrefixB1)
     if (innerPrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "MisdeclaredHost.inner", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = innerPrefix.toString())
+      throw FrameTooLargeException(declaredBytes = innerPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val innerLength = innerPrefix.toInt()
     if (innerLength > buffer.remaining()) {
@@ -96,7 +97,7 @@ public object MisdeclaredHostCodec : Codec<MisdeclaredHost> {
     val innerPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val innerPrefix = ((innerPrefixB0 shl 8) or innerPrefixB1).toUInt()
     if (innerPrefix > (Int.MAX_VALUE - __offset - 2).toUInt()) {
-      throw DecodeException(fieldPath = "MisdeclaredHost.inner", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + innerPrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 2 + innerPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 2 + innerPrefix.toInt()
     return if (stream.available() - baseOffset >= __offset) PeekResult.Complete(__offset) else PeekResult.NeedsMoreData

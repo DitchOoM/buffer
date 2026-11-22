@@ -59,6 +59,54 @@ class UseCodecScalarValidatorTest {
         )
     }
 
+    /**
+     * A bounding length need not be an integer: a value class over one compiles. The
+     * generated decode's declared-length guard reads the value as a number, so it is
+     * emitted only for integer lengths; this shape keeps its codec's own bound.
+     */
+    @Test
+    fun aValueClassBoundingLengthCompiles() {
+        val result =
+            compile(
+                """
+                package test
+
+                import com.ditchoom.buffer.ReadBuffer
+                import com.ditchoom.buffer.WriteBuffer
+                import com.ditchoom.buffer.codec.BoundingLengthCodec
+                import com.ditchoom.buffer.codec.DecodeContext
+                import com.ditchoom.buffer.codec.EncodeContext
+                import com.ditchoom.buffer.codec.WireSize
+                import com.ditchoom.buffer.codec.annotations.ProtocolMessage
+                import com.ditchoom.buffer.codec.annotations.RemainingBytes
+                import com.ditchoom.buffer.codec.annotations.UseCodec
+                import kotlin.jvm.JvmInline
+
+                @JvmInline
+                value class Len(val raw: UInt)
+
+                object LenCodec : BoundingLengthCodec<Len> {
+                    override val maxWireSize: Int = 4
+                    override fun decode(buffer: ReadBuffer, context: DecodeContext): Len = Len(buffer.readInt().toUInt())
+                    override fun encode(buffer: WriteBuffer, value: Len, context: EncodeContext) {
+                        buffer.writeInt(value.raw.toInt())
+                    }
+                    override fun wireSize(value: Len, context: EncodeContext): WireSize = WireSize.Exact(4)
+                    override fun applyBound(buffer: ReadBuffer, decodedValue: Len) {
+                        buffer.setLimit(buffer.position() + decodedValue.raw.toInt())
+                    }
+                }
+
+                @ProtocolMessage
+                data class LenBounded(
+                    @UseCodec(LenCodec::class) val length: Len,
+                    @RemainingBytes val body: String,
+                )
+                """.trimIndent(),
+            )
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
+    }
+
     @Test
     fun rejectsBareUseCodecOnScalarWithMismatchedCodecType() {
         val result =

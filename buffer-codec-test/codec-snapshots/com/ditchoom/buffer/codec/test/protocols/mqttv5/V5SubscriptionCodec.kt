@@ -5,9 +5,9 @@ import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DEFAULT_TEXT_POLICY
 import com.ditchoom.buffer.codec.DecodeContext
-import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
 import com.ditchoom.buffer.codec.WireSize
@@ -20,7 +20,7 @@ public object V5SubscriptionCodec : Codec<V5Subscription> {
     val topicFilterPrefixB1 = buffer.readUByte().toUInt()
     val topicFilterPrefix = ((topicFilterPrefixB0 shl 8) or topicFilterPrefixB1)
     if (topicFilterPrefix > Int.MAX_VALUE.toUInt()) {
-      throw DecodeException(fieldPath = "V5Subscription.topicFilter", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = topicFilterPrefix.toString())
+      throw FrameTooLargeException(declaredBytes = topicFilterPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     val topicFilterLength = topicFilterPrefix.toInt()
     val topicFilter = buffer.readText(topicFilterLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -61,7 +61,7 @@ public object V5SubscriptionCodec : Codec<V5Subscription> {
     val topicFilterPrefixB1 = stream.peekByte(baseOffset + __offset + 1).toInt() and 0xFF
     val topicFilterPrefix = ((topicFilterPrefixB0 shl 8) or topicFilterPrefixB1).toUInt()
     if (topicFilterPrefix > (Int.MAX_VALUE - __offset - 2).toUInt()) {
-      throw DecodeException(fieldPath = "V5Subscription.topicFilter", bufferPosition = baseOffset + __offset, expected = "__offset + 2 + length prefix <= ${'$'}{Int.MAX_VALUE}", actual = """${__offset + 2 + topicFilterPrefix.toInt()}""")
+      throw FrameTooLargeException(declaredBytes = __offset.toLong() + 2 + topicFilterPrefix.toLong(), maxBytes = Int.MAX_VALUE)
     }
     __offset += 2 + topicFilterPrefix.toInt()
     if (stream.available() - baseOffset < __offset + 1) return PeekResult.NeedsMoreData

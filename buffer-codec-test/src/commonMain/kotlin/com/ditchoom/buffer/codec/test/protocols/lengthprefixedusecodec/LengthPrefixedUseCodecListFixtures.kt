@@ -4,6 +4,7 @@ import com.ditchoom.buffer.codec.annotations.LengthPrefixed
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.UseCodec
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
+import com.ditchoom.buffer.codec.test.protocols.usecodecscalar.Le32LengthCodec
 
 /**
  * Doctrine vector — exercises `@LengthPrefixed
@@ -39,6 +40,15 @@ data class PropertyEntry(
 @ProtocolMessage
 data class PropertyBagFrame(
     @LengthPrefixed @UseCodec(MqttRemainingLengthCodec::class) val properties: List<PropertyEntry>,
+)
+
+/**
+ * Wire layout `[4-byte LE length | properties]`. A full-width `UInt` length,
+ * so a declaration past `Int` range reaches the list's peek and decode.
+ */
+@ProtocolMessage
+data class Le32PropertyBag(
+    @LengthPrefixed @UseCodec(Le32LengthCodec::class) val properties: List<PropertyEntry>,
 )
 
 /**

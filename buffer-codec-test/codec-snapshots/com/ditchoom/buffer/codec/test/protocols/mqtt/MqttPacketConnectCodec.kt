@@ -10,9 +10,11 @@ import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameDetector
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
+import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryData
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -25,7 +27,7 @@ public object MqttPacketConnectCodec : FrameDetector {
     val header = MqttFixedHeader(buffer.readUByte())
     val __framingOuterLimit = buffer.limit()
     val __framingLength = MqttRemainingLengthCodec.decode(buffer, context)
-    if (__framingLength.toInt() > buffer.remaining()) {
+    if (declaredFrameBytes(0, __framingLength.toLong()) > buffer.remaining()) {
       throw DecodeException(
             fieldPath = "Connect.@FramedBy",
             bufferPosition = buffer.position(),
@@ -41,7 +43,7 @@ public object MqttPacketConnectCodec : FrameDetector {
       val protocolNamePrefixB1 = buffer.readUByte().toUInt()
       val protocolNamePrefix = ((protocolNamePrefixB0 shl 8) or protocolNamePrefixB1)
       if (protocolNamePrefix > Int.MAX_VALUE.toUInt()) {
-        throw DecodeException(fieldPath = "Connect.protocolName", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = protocolNamePrefix.toString())
+        throw FrameTooLargeException(declaredBytes = protocolNamePrefix.toLong(), maxBytes = Int.MAX_VALUE)
       }
       val protocolNameLength = protocolNamePrefix.toInt()
       val protocolName = buffer.readText(protocolNameLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -62,7 +64,7 @@ public object MqttPacketConnectCodec : FrameDetector {
       val clientIdPrefixB1 = buffer.readUByte().toUInt()
       val clientIdPrefix = ((clientIdPrefixB0 shl 8) or clientIdPrefixB1)
       if (clientIdPrefix > Int.MAX_VALUE.toUInt()) {
-        throw DecodeException(fieldPath = "Connect.clientId", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = clientIdPrefix.toString())
+        throw FrameTooLargeException(declaredBytes = clientIdPrefix.toLong(), maxBytes = Int.MAX_VALUE)
       }
       val clientIdLength = clientIdPrefix.toInt()
       val clientId = buffer.readText(clientIdLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -71,7 +73,7 @@ public object MqttPacketConnectCodec : FrameDetector {
         val willTopicPrefixB1 = buffer.readUByte().toUInt()
         val willTopicPrefix = ((willTopicPrefixB0 shl 8) or willTopicPrefixB1)
         if (willTopicPrefix > Int.MAX_VALUE.toUInt()) {
-          throw DecodeException(fieldPath = "Connect.willTopic", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = willTopicPrefix.toString())
+          throw FrameTooLargeException(declaredBytes = willTopicPrefix.toLong(), maxBytes = Int.MAX_VALUE)
         }
         val willTopicLength = willTopicPrefix.toInt()
         buffer.readText(willTopicLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -83,7 +85,7 @@ public object MqttPacketConnectCodec : FrameDetector {
         val willPayloadPrefixB1 = buffer.readUByte().toUInt()
         val willPayloadPrefix = ((willPayloadPrefixB0 shl 8) or willPayloadPrefixB1)
         if (willPayloadPrefix > Int.MAX_VALUE.toUInt()) {
-          throw DecodeException(fieldPath = "Connect.willPayload", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = willPayloadPrefix.toString())
+          throw FrameTooLargeException(declaredBytes = willPayloadPrefix.toLong(), maxBytes = Int.MAX_VALUE)
         }
         val willPayloadLength = willPayloadPrefix.toInt()
         if (willPayloadLength > buffer.remaining()) {
@@ -109,7 +111,7 @@ public object MqttPacketConnectCodec : FrameDetector {
         val usernamePrefixB1 = buffer.readUByte().toUInt()
         val usernamePrefix = ((usernamePrefixB0 shl 8) or usernamePrefixB1)
         if (usernamePrefix > Int.MAX_VALUE.toUInt()) {
-          throw DecodeException(fieldPath = "Connect.username", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = usernamePrefix.toString())
+          throw FrameTooLargeException(declaredBytes = usernamePrefix.toLong(), maxBytes = Int.MAX_VALUE)
         }
         val usernameLength = usernamePrefix.toInt()
         buffer.readText(usernameLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -121,7 +123,7 @@ public object MqttPacketConnectCodec : FrameDetector {
         val passwordPrefixB1 = buffer.readUByte().toUInt()
         val passwordPrefix = ((passwordPrefixB0 shl 8) or passwordPrefixB1)
         if (passwordPrefix > Int.MAX_VALUE.toUInt()) {
-          throw DecodeException(fieldPath = "Connect.password", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = passwordPrefix.toString())
+          throw FrameTooLargeException(declaredBytes = passwordPrefix.toLong(), maxBytes = Int.MAX_VALUE)
         }
         val passwordLength = passwordPrefix.toInt()
         if (passwordLength > buffer.remaining()) {
@@ -286,7 +288,7 @@ public object MqttPacketConnectCodec : FrameDetector {
         }
       }
       val __framingPrefixWidth = __framingPeek.position() - __framingPeekStart
-      val __total = 1 + __framingPrefixWidth + __framingLength.toInt()
+      val __total = declaredFrameBytes(1 + __framingPrefixWidth, __framingLength.toLong())
       return if (stream.available() - baseOffset >= __total) PeekResult.Complete(__total) else PeekResult.NeedsMoreData
     } finally {
       (__framingPeek as? PlatformBuffer)?.freeNativeMemory()

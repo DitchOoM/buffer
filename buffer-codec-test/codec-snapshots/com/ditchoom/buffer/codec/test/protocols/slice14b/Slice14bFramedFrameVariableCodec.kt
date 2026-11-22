@@ -9,9 +9,11 @@ import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.EncodeException
 import com.ditchoom.buffer.codec.FrameDetector
+import com.ditchoom.buffer.codec.FrameTooLargeException
 import com.ditchoom.buffer.codec.FramedEncoder
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.TextPolicyKey
+import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.codec.test.protocols.mqtt.MqttRemainingLengthCodec
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
@@ -21,7 +23,7 @@ public object Slice14bFramedFrameVariableCodec : FrameDetector {
   public fun decode(buffer: ReadBuffer, context: DecodeContext): Slice14bFramedFrameVariable {
     val __framingOuterLimit = buffer.limit()
     val __framingLength = MqttRemainingLengthCodec.decode(buffer, context)
-    if (__framingLength.toInt() > buffer.remaining()) {
+    if (declaredFrameBytes(0, __framingLength.toLong()) > buffer.remaining()) {
       throw DecodeException(
             fieldPath = "Slice14bFramedFrameVariable.@FramedBy",
             bufferPosition = buffer.position(),
@@ -37,7 +39,7 @@ public object Slice14bFramedFrameVariableCodec : FrameDetector {
       val messagePrefixB1 = buffer.readUByte().toUInt()
       val messagePrefix = ((messagePrefixB0 shl 8) or messagePrefixB1)
       if (messagePrefix > Int.MAX_VALUE.toUInt()) {
-        throw DecodeException(fieldPath = "Slice14bFramedFrameVariable.message", bufferPosition = -1, expected = "length prefix <= ${'$'}{Int.MAX_VALUE}", actual = messagePrefix.toString())
+        throw FrameTooLargeException(declaredBytes = messagePrefix.toLong(), maxBytes = Int.MAX_VALUE)
       }
       val messageLength = messagePrefix.toInt()
       val message = buffer.readText(messageLength, (context[TextPolicyKey] ?: DEFAULT_TEXT_POLICY))
@@ -94,7 +96,7 @@ public object Slice14bFramedFrameVariableCodec : FrameDetector {
         }
       }
       val __framingPrefixWidth = __framingPeek.position() - __framingPeekStart
-      val __total = 0 + __framingPrefixWidth + __framingLength.toInt()
+      val __total = declaredFrameBytes(0 + __framingPrefixWidth, __framingLength.toLong())
       return if (stream.available() - baseOffset >= __total) PeekResult.Complete(__total) else PeekResult.NeedsMoreData
     } finally {
       (__framingPeek as? PlatformBuffer)?.freeNativeMemory()

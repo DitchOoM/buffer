@@ -9,6 +9,7 @@ import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.codec.WireSize
+import com.ditchoom.buffer.codec.declaredFrameBytes
 import com.ditchoom.buffer.codec.test.protocols.payload.BinaryDataCodec
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.Int
@@ -21,6 +22,14 @@ public object BoundedFrameCodec : Codec<BoundedFrame> {
     val tag = buffer.readShort()
     val __lengthOuterLimit = buffer.limit()
     val length = Le32LengthCodec.decode(buffer, context)
+    if (declaredFrameBytes(0, length.toLong()) > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "BoundedFrame.length",
+            bufferPosition = buffer.position(),
+            expected = "a fully-buffered " + length + "-byte framed body",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     Le32LengthCodec.applyBound(buffer, length)
     if (buffer.limit() > __lengthOuterLimit) {
       val __widenedLimit = buffer.limit()
@@ -68,7 +77,7 @@ public object BoundedFrameCodec : Codec<BoundedFrame> {
         }
       }
       val __lengthWidth = __lengthPeekView.position() - __lengthPriorPos
-      val __total = 2 + __lengthWidth + length.toInt()
+      val __total = declaredFrameBytes(2 + __lengthWidth, length.toLong())
       return if (stream.available() - baseOffset >= __total) PeekResult.Complete(__total) else PeekResult.NeedsMoreData
     } finally {
       (__lengthPeekView as? PlatformBuffer)?.freeNativeMemory()
@@ -79,6 +88,14 @@ public object BoundedFrameCodec : Codec<BoundedFrame> {
     val tag = buffer.readShort()
     val __lengthOuterLimit = buffer.limit()
     val length = Le32LengthCodec.decode(buffer, context)
+    if (declaredFrameBytes(0, length.toLong()) > buffer.remaining()) {
+      throw DecodeException(
+            fieldPath = "BoundedFrame.length",
+            bufferPosition = buffer.position(),
+            expected = "a fully-buffered " + length + "-byte framed body",
+            actual = buffer.remaining().toString() + " bytes available",
+          )
+    }
     Le32LengthCodec.applyBound(buffer, length)
     if (buffer.limit() > __lengthOuterLimit) {
       val __widenedLimit = buffer.limit()
