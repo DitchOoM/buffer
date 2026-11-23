@@ -86,7 +86,14 @@ internal class WebCryptoHkdfKeyStore(
         requireValidAlias(alias)
         requireHkdfKeySize(ikm.remaining())
         val token = webCryptoImportHkdf(ikm.toHexString()).toInt()
-        if (!webCryptoIdbAdd(dbName, alias, token, "$KIND_HKDF:${ikm.remaining()}:")) {
+        val stored =
+            try {
+                webCryptoIdbAdd(dbName, alias, token, "$KIND_HKDF:${ikm.remaining()}:")
+            } catch (failure: Throwable) {
+                webCryptoReleaseHandle(token)
+                throw failure
+            }
+        if (!stored) {
             webCryptoReleaseHandle(token)
             throw KeyStoreException.AliasOccupied(alias)
         }
