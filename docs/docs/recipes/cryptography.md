@@ -133,6 +133,25 @@ The output is bare `ciphertext ‖ tag`; the receiver reconstructs the same `non
 The self-framing ops make `(key, nonce)` reuse impossible by construction; the explicit-nonce ops hand that guarantee to you. **Reusing a `(key, nonce)` pair with AES-GCM or ChaCha20-Poly1305 is catastrophic** — it leaks the XOR of the two plaintexts, and for GCM leaks the authentication key, enabling forgery. Use these ops only with a derivation that provably yields a fresh nonce for every message under a given key (a monotonic counter that never rewinds, a ratchet, etc.). If you're unsure, use the self-framing `seal` / `open` — or, for a managed per-message counter, an [HPKE context](#hpke-rfc-9180), which derives `base_nonce XOR seq` for you and advances it only on success.
 :::
 
+### Key hierarchies from a key you cannot read back (`HkdfKey`)
+
+`Hkdf.derive` takes its input keying material as bytes. When the root of a key hierarchy should not stay readable, hold it as an `HkdfKey` and derive from the key instead. Every derivation is HKDF-SHA256 with the key as input keying material, byte-for-byte what `Hkdf.derive` gives from the same bytes, so a peer holding the raw material agrees.
+
+```kotlin
+val store = CryptoCapabilities.hkdfKeyStore(KeyStoreConfig(name = "my-app-roots"))
+val root = store.load("root") ?: store.importKey("root", rootBytes) // then wipe rootBytes
+
+val child = root.deriveHkdfKey(Salt.None, Info.Of(childLabel))      // a key again, same custody
+val aead = child.deriveAesGcmKey(Salt.None, Info.Of(aeadLabel))     // AES-256-GCM, explicit nonce
+val nonce = child.deriveBytes(Salt.None, Info.Of(nonceLabel), 12)   // bytes, returned to you
+
+val ctTag = aead.sealWithNonce(nonce, plaintext, Aad.Of(aad))
+```
+
+On js/wasmJs the stored key is a non-extractable WebCrypto `CryptoKey` in IndexedDB (`KeyCustody.NonExportable.Software`). Any window or worker of the origin that opens a store of the same name reopens it — a page and its service worker share one root — and Kotlin/JS and Kotlin/Wasm read each other's entries. Children and AES keys stay non-extractable; only `deriveBytes` hands bytes back. WebCrypto cannot derive an HKDF key directly, so a child's bits are derived and re-imported inside the engine and the staged copy is zeroed there. Elsewhere the store is software (`ExportableSoftware`) over the platform's file medium or your `KeyStoreConfig.storage`, and `CryptoCapabilities.importHkdfKey` gives an unpersisted key with the same custody split.
+
+`importKey` never replaces an entry: an occupied alias throws `KeyStoreException.AliasOccupied`, and on the web the check and the write are one IndexedDB request, so of two contexts importing at once exactly one wins. The nonce-uniqueness warning above applies to `DerivedAesGcmKey.sealWithNonce` unchanged.
+
 ## Single-block AES (ECB)
 
 :::danger ECB is not a general-purpose cipher

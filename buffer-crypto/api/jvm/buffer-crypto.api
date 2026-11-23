@@ -536,6 +536,20 @@ public final class com/ditchoom/buffer/crypto/CustodyTier : java/lang/Enum {
 	public static fun values ()[Lcom/ditchoom/buffer/crypto/CustodyTier;
 }
 
+public abstract interface class com/ditchoom/buffer/crypto/DerivedAesGcmKey : java/lang/AutoCloseable {
+	public abstract fun getCustody ()Lcom/ditchoom/buffer/crypto/KeyCustody;
+	public abstract fun getSizeBits ()I
+	public abstract fun openWithNonce (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun openWithNonce$default (Lcom/ditchoom/buffer/crypto/DerivedAesGcmKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun sealWithNonce (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun sealWithNonce$default (Lcom/ditchoom/buffer/crypto/DerivedAesGcmKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+}
+
+public final class com/ditchoom/buffer/crypto/DerivedAesGcmKey$DefaultImpls {
+	public static synthetic fun openWithNonce$default (Lcom/ditchoom/buffer/crypto/DerivedAesGcmKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun sealWithNonce$default (Lcom/ditchoom/buffer/crypto/DerivedAesGcmKey;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Aad;Lcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+}
+
 public final class com/ditchoom/buffer/crypto/DeviceCredentialAvailability : java/lang/Enum {
 	public static final field Available Lcom/ditchoom/buffer/crypto/DeviceCredentialAvailability;
 	public static final field NotSet Lcom/ditchoom/buffer/crypto/DeviceCredentialAvailability;
@@ -682,6 +696,48 @@ public final class com/ditchoom/buffer/crypto/Hkdf {
 	public final fun deriveInto (Lcom/ditchoom/buffer/crypto/Salt;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Info;ILcom/ditchoom/buffer/WriteBuffer;)V
 	public final fun expandInto (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/crypto/Info;ILcom/ditchoom/buffer/WriteBuffer;)V
 	public final fun extractInto (Lcom/ditchoom/buffer/crypto/Salt;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/WriteBuffer;)V
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/HkdfKey : java/lang/AutoCloseable {
+	public static final field Companion Lcom/ditchoom/buffer/crypto/HkdfKey$Companion;
+	public abstract fun deriveAesGcmKey (Lcom/ditchoom/buffer/crypto/Salt;Lcom/ditchoom/buffer/crypto/Info;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun deriveAesGcmKey$default (Lcom/ditchoom/buffer/crypto/HkdfKey;Lcom/ditchoom/buffer/crypto/Salt;Lcom/ditchoom/buffer/crypto/Info;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun deriveBytes (Lcom/ditchoom/buffer/crypto/Salt;Lcom/ditchoom/buffer/crypto/Info;ILcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun deriveBytes$default (Lcom/ditchoom/buffer/crypto/HkdfKey;Lcom/ditchoom/buffer/crypto/Salt;Lcom/ditchoom/buffer/crypto/Info;ILcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun deriveHkdfKey (Lcom/ditchoom/buffer/crypto/Salt;Lcom/ditchoom/buffer/crypto/Info;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun deriveHkdfKey$default (Lcom/ditchoom/buffer/crypto/HkdfKey;Lcom/ditchoom/buffer/crypto/Salt;Lcom/ditchoom/buffer/crypto/Info;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getCustody ()Lcom/ditchoom/buffer/crypto/KeyCustody;
+	public abstract fun getSizeBytes ()I
+}
+
+public final class com/ditchoom/buffer/crypto/HkdfKey$Companion {
+	public final fun of (Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;)Lcom/ditchoom/buffer/crypto/HkdfKey;
+	public static synthetic fun of$default (Lcom/ditchoom/buffer/crypto/HkdfKey$Companion;Lcom/ditchoom/buffer/ReadBuffer;Lcom/ditchoom/buffer/BufferFactory;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/HkdfKey;
+}
+
+public final class com/ditchoom/buffer/crypto/HkdfKey$DefaultImpls {
+	public static synthetic fun deriveAesGcmKey$default (Lcom/ditchoom/buffer/crypto/HkdfKey;Lcom/ditchoom/buffer/crypto/Salt;Lcom/ditchoom/buffer/crypto/Info;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun deriveBytes$default (Lcom/ditchoom/buffer/crypto/HkdfKey;Lcom/ditchoom/buffer/crypto/Salt;Lcom/ditchoom/buffer/crypto/Info;ILcom/ditchoom/buffer/BufferFactory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun deriveHkdfKey$default (Lcom/ditchoom/buffer/crypto/HkdfKey;Lcom/ditchoom/buffer/crypto/Salt;Lcom/ditchoom/buffer/crypto/Info;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+}
+
+public final class com/ditchoom/buffer/crypto/HkdfKeyKt {
+	public static final field DEFAULT_HKDF_KEY_STORE_NAME Ljava/lang/String;
+	public static final field HKDF_KEY_DEFAULT_BYTES I
+	public static final field HKDF_KEY_MIN_BYTES I
+	public static final field HKDF_SHA256_MAX_OUTPUT_BYTES I
+	public static final fun hkdfKeyStore (Lcom/ditchoom/buffer/crypto/CryptoCapabilities;Lcom/ditchoom/buffer/crypto/KeyStoreConfig;)Lcom/ditchoom/buffer/crypto/HkdfKeyStore;
+	public static synthetic fun hkdfKeyStore$default (Lcom/ditchoom/buffer/crypto/CryptoCapabilities;Lcom/ditchoom/buffer/crypto/KeyStoreConfig;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/HkdfKeyStore;
+	public static final fun importHkdfKey (Lcom/ditchoom/buffer/crypto/CryptoCapabilities;Lcom/ditchoom/buffer/ReadBuffer;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/HkdfKeyStore : java/lang/AutoCloseable {
+	public abstract fun aliases (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun contains (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun delete (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getCustody ()Lcom/ditchoom/buffer/crypto/KeyCustody;
+	public abstract fun importKey (Ljava/lang/String;Lcom/ditchoom/buffer/ReadBuffer;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun load (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
 public final class com/ditchoom/buffer/crypto/HkdfSha384 {
@@ -1399,6 +1455,10 @@ public final class com/ditchoom/buffer/crypto/KeyStoreException$AliasMismatch : 
 	public final fun getAlias ()Ljava/lang/String;
 	public final fun getRequested ()Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
 	public final fun getStored ()Lcom/ditchoom/buffer/crypto/ProtectedKeyAlgorithm;
+}
+
+public final class com/ditchoom/buffer/crypto/KeyStoreException$AliasOccupied : com/ditchoom/buffer/crypto/KeyStoreException {
+	public final fun getAlias ()Ljava/lang/String;
 }
 
 public final class com/ditchoom/buffer/crypto/KeyStoreException$CorruptEntry : com/ditchoom/buffer/crypto/KeyStoreException {

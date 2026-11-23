@@ -48,6 +48,13 @@ internal actual suspend fun webCryptoIdbContains(
 
 internal actual suspend fun webCryptoIdbAliases(dbName: String): String = jsIdbAliases(dbName).await()
 
+internal actual suspend fun webCryptoIdbAdd(
+    dbName: String,
+    alias: String,
+    token: Int,
+    meta: String,
+): Boolean = jsIdbAdd(dbName, alias, token, meta).await()
+
 // --- raw JS helpers ----------------------------------------------------------
 
 @Suppress("UnusedParameter") // referenced inside the js(...) template
@@ -154,6 +161,36 @@ private fun jsIdbAliases(dbName: String): Promise<String> =
               var q=tx.objectStore('k').getAllKeys();
               q.onsuccess=function(){ db.close(); res(q.result.join('\n')); };
               q.onerror=function(){ db.close(); rej(q.error); };
+            });
+          });
+        })()
+        """,
+    )
+
+// `add` fails with ConstraintError on an occupied alias; preventDefault keeps that from aborting the
+// transaction, so "taken" is an answer rather than an error.
+@Suppress("UnusedParameter") // referenced inside the js(...) template
+private fun jsIdbAdd(
+    dbName: String,
+    alias: String,
+    token: Int,
+    meta: String,
+): Promise<Boolean> =
+    js(
+        """
+        (function(){
+          $REG $OPENDB
+          return od(dbName).then(function(db){
+            return new Promise(function(res,rej){
+              var taken=false;
+              var tx=db.transaction('k','readwrite');
+              var rq=tx.objectStore('k').add({ meta: meta, key: reg.m.get(token) }, alias);
+              rq.onerror=function(ev){
+                if(rq.error && rq.error.name==='ConstraintError'){ taken=true; ev.preventDefault(); ev.stopPropagation(); }
+              };
+              tx.oncomplete=function(){ db.close(); res(!taken); };
+              tx.onerror=function(){ if(!taken){ db.close(); rej(tx.error); } };
+              tx.onabort=function(){ db.close(); rej(tx.error); };
             });
           });
         })()

@@ -66,6 +66,29 @@ internal actual fun webCryptoReleaseHandle(token: Int) {
     jsReleaseHandle(token)
 }
 
+internal actual suspend fun webCryptoImportHkdf(ikmHex: String): String = jsImportHkdf(ikmHex.toJsString()).await<JsString>().toString()
+
+internal actual suspend fun webCryptoHkdfDeriveBits(
+    token: Int,
+    saltHex: String,
+    infoHex: String,
+    bits: Int,
+): String = jsHkdfDeriveBits(token, saltHex.toJsString(), infoHex.toJsString(), bits).await<JsString>().toString()
+
+internal actual suspend fun webCryptoHkdfDeriveHkdf(
+    token: Int,
+    saltHex: String,
+    infoHex: String,
+    bits: Int,
+): String = jsHkdfDeriveHkdf(token, saltHex.toJsString(), infoHex.toJsString(), bits).await<JsString>().toString()
+
+internal actual suspend fun webCryptoHkdfDeriveAesGcm(
+    token: Int,
+    saltHex: String,
+    infoHex: String,
+    lengthBits: Int,
+): String = jsHkdfDeriveAesGcm(token, saltHex.toJsString(), infoHex.toJsString(), lengthBits).await<JsString>().toString()
+
 // --- externals ---------------------------------------------------------------
 
 @JsFun(
@@ -206,3 +229,73 @@ private external fun jsEcdhDeriveBits(
     """(token) => { var g = globalThis; if (g.__bcNE) { g.__bcNE.m.delete(token); } }""",
 )
 private external fun jsReleaseHandle(token: Int)
+
+@JsFun(
+    """(ikmHex) => (async () => {
+      var g = globalThis; if (!g.__bcNE) { g.__bcNE = { m: new Map(), n: 1 }; } var reg = g.__bcNE;
+      function h2b(h) { var a = new Uint8Array(h.length / 2); for (var i = 0; i < a.length; i++) { a[i] = parseInt(h.substr(i * 2, 2), 16); } return a; }
+      var raw = h2b(ikmHex);
+      try {
+        var k = await globalThis.crypto.subtle.importKey('raw', raw, { name: 'HKDF' }, false, ['deriveBits', 'deriveKey']);
+        var t = reg.n++; reg.m.set(t, k);
+        return String(t);
+      } finally { raw.fill(0); }
+    })()""",
+)
+private external fun jsImportHkdf(ikmHex: JsString): Promise<JsString>
+
+@JsFun(
+    """(token, saltHex, infoHex, bits) => (async () => {
+      var g = globalThis; if (!g.__bcNE) { g.__bcNE = { m: new Map(), n: 1 }; } var reg = g.__bcNE;
+      function h2b(h) { var a = new Uint8Array(h.length / 2); for (var i = 0; i < a.length; i++) { a[i] = parseInt(h.substr(i * 2, 2), 16); } return a; }
+      function hx(b) { var a = new Uint8Array(b); var s = ''; for (var i = 0; i < a.length; i++) { s += a[i].toString(16).padStart(2, '0'); } return s; }
+      var p = { name: 'HKDF', hash: 'SHA-256', salt: h2b(saltHex), info: h2b(infoHex) };
+      var b = await globalThis.crypto.subtle.deriveBits(p, reg.m.get(token), bits);
+      var s = hx(b); new Uint8Array(b).fill(0);
+      return s;
+    })()""",
+)
+private external fun jsHkdfDeriveBits(
+    token: Int,
+    saltHex: JsString,
+    infoHex: JsString,
+    bits: Int,
+): Promise<JsString>
+
+@JsFun(
+    """(token, saltHex, infoHex, bits) => (async () => {
+      var g = globalThis; if (!g.__bcNE) { g.__bcNE = { m: new Map(), n: 1 }; } var reg = g.__bcNE;
+      function h2b(h) { var a = new Uint8Array(h.length / 2); for (var i = 0; i < a.length; i++) { a[i] = parseInt(h.substr(i * 2, 2), 16); } return a; }
+      var subtle = globalThis.crypto.subtle;
+      var p = { name: 'HKDF', hash: 'SHA-256', salt: h2b(saltHex), info: h2b(infoHex) };
+      var staged = new Uint8Array(await subtle.deriveBits(p, reg.m.get(token), bits));
+      try {
+        var c = await subtle.importKey('raw', staged, { name: 'HKDF' }, false, ['deriveBits', 'deriveKey']);
+        var t = reg.n++; reg.m.set(t, c);
+        return String(t);
+      } finally { staged.fill(0); }
+    })()""",
+)
+private external fun jsHkdfDeriveHkdf(
+    token: Int,
+    saltHex: JsString,
+    infoHex: JsString,
+    bits: Int,
+): Promise<JsString>
+
+@JsFun(
+    """(token, saltHex, infoHex, lengthBits) => (async () => {
+      var g = globalThis; if (!g.__bcNE) { g.__bcNE = { m: new Map(), n: 1 }; } var reg = g.__bcNE;
+      function h2b(h) { var a = new Uint8Array(h.length / 2); for (var i = 0; i < a.length; i++) { a[i] = parseInt(h.substr(i * 2, 2), 16); } return a; }
+      var p = { name: 'HKDF', hash: 'SHA-256', salt: h2b(saltHex), info: h2b(infoHex) };
+      var a = await globalThis.crypto.subtle.deriveKey(p, reg.m.get(token), { name: 'AES-GCM', length: lengthBits }, false, ['encrypt', 'decrypt']);
+      var t = reg.n++; reg.m.set(t, a);
+      return String(t);
+    })()""",
+)
+private external fun jsHkdfDeriveAesGcm(
+    token: Int,
+    saltHex: JsString,
+    infoHex: JsString,
+    lengthBits: Int,
+): Promise<JsString>
