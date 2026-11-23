@@ -12,10 +12,12 @@ import kotlin.test.assertEquals
  * pins the custody a caller relies on.
  */
 class WebCryptoHkdfKeyTest {
+    private val rootHex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+
     @Test
     fun anImportedKeyAndItsDescendantsAreNonExportable() =
         runTest {
-            val root = CryptoCapabilities.importHkdfKey(hexBuffer("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"))
+            val root = CryptoCapabilities.importHkdfKey(hexBuffer(rootHex))
             assertEquals(KeyCustody.NonExportable.Software, root.custody)
             val child = root.deriveHkdfKey(Salt.None, Info.Of(ascii("child")))
             assertEquals(KeyCustody.NonExportable.Software, child.custody)

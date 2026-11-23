@@ -42,7 +42,11 @@ class HkdfKeyTest {
         runTest {
             for (key in bothKinds(rfcIkm)) {
                 val okm =
-                    key.deriveBytes(Salt.Of(hexBuffer("000102030405060708090a0b0c")), Info.Of(hexBuffer("f0f1f2f3f4f5f6f7f8f9")), 42)
+                    key.deriveBytes(
+                        Salt.Of(hexBuffer("000102030405060708090a0b0c")),
+                        Info.Of(hexBuffer("f0f1f2f3f4f5f6f7f8f9")),
+                        42,
+                    )
                 assertEquals(
                     "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865",
                     okm.toHex(),
@@ -70,13 +74,16 @@ class HkdfKeyTest {
         runTest {
             val first = lengthPrefixed("level", "one")
             val second = lengthPrefixed("level", "two")
-            val childBytes = Hkdf.derive(Salt.None, hexBuffer(rootHex), Info.Of(first.slice()), 32, BufferFactory.Default)
-            val expected = Hkdf.derive(Salt.None, childBytes, Info.Of(second.slice()), 32, BufferFactory.Default).toHex()
+            val childBytes =
+                Hkdf.derive(Salt.None, hexBuffer(rootHex), Info.Of(first.slice()), 32, BufferFactory.Default)
+            val expected =
+                Hkdf.derive(Salt.None, childBytes, Info.Of(second.slice()), 32, BufferFactory.Default).toHex()
             for (root in bothKinds(rootHex)) {
                 val child = root.deriveHkdfKey(Salt.None, Info.Of(first))
                 assertEquals(root.custody, child.custody, "a child keeps its parent's custody")
                 assertEquals(32, child.sizeBytes)
-                assertEquals(expected, child.deriveBytes(Salt.None, Info.Of(second), 32).toHex(), "custody ${root.custody}")
+                val derived = child.deriveBytes(Salt.None, Info.Of(second), 32).toHex()
+                assertEquals(expected, derived, "custody ${root.custody}")
                 child.close()
                 root.close()
             }
@@ -86,11 +93,15 @@ class HkdfKeyTest {
     fun aDerivedAesKeySealsExactlyAsTheRawKeyUnderTheSameNonce() =
         runTest {
             val info = lengthPrefixed("aead")
-            val raw = AesGcmKey.of(Hkdf.derive(Salt.None, hexBuffer(rootHex), Info.Of(info.slice()), 32, BufferFactory.Default))
+            val raw =
+                AesGcmKey.of(
+                    Hkdf.derive(Salt.None, hexBuffer(rootHex), Info.Of(info.slice()), 32, BufferFactory.Default),
+                )
             val nonce = hexBuffer("0102030405060708090a0b0c")
             val aad = hexBuffer("aabbccdd")
             val plaintext = ascii("a derived key seals like the raw key")
-            val expected = aesGcmAsyncOps().sealWithNonce(raw, nonce.slice(), plaintext.slice(), Aad.Of(aad.slice())).toHex()
+            val expected =
+                aesGcmAsyncOps().sealWithNonce(raw, nonce.slice(), plaintext.slice(), Aad.Of(aad.slice())).toHex()
             for (root in bothKinds(rootHex)) {
                 val aes = root.deriveAesGcmKey(Salt.None, Info.Of(info))
                 assertEquals(256, aes.sizeBits)
@@ -116,8 +127,12 @@ class HkdfKeyTest {
                 tampered.write(sealed.slice())
                 tampered.set(0, (tampered.get(0).toInt() xor 1).toByte())
                 tampered.resetForRead()
-                assertFailsWith<VerificationFailed> { aes.openWithNonce(nonce.slice(), tampered, Aad.Of(ascii("bound"))) }
-                assertFailsWith<VerificationFailed> { aes.openWithNonce(nonce.slice(), sealed.slice(), Aad.Of(ascii("other"))) }
+                assertFailsWith<VerificationFailed> {
+                    aes.openWithNonce(nonce.slice(), tampered, Aad.Of(ascii("bound")))
+                }
+                assertFailsWith<VerificationFailed> {
+                    aes.openWithNonce(nonce.slice(), sealed.slice(), Aad.Of(ascii("other")))
+                }
                 aes.close()
                 root.close()
             }
@@ -128,7 +143,8 @@ class HkdfKeyTest {
         runTest {
             val nonce = hexBuffer("0102030405060708090a0b0c")
             for (root in bothKinds(rootHex)) {
-                val sealed = root.deriveAesGcmKey(Salt.None, Info.Of(ascii("a"))).sealWithNonce(nonce.slice(), ascii("x"))
+                val aes = root.deriveAesGcmKey(Salt.None, Info.Of(ascii("a")))
+                val sealed = aes.sealWithNonce(nonce.slice(), ascii("x"))
                 val other = root.deriveAesGcmKey(Salt.None, Info.Of(ascii("b")))
                 assertFailsWith<VerificationFailed> { other.openWithNonce(nonce.slice(), sealed) }
                 root.close()
@@ -154,15 +170,23 @@ class HkdfKeyTest {
     fun sizesOutsideTheContractAreRejected() =
         runTest {
             assertFailsWith<IllegalArgumentException> { HkdfKey.of(repeatedByte(1, HKDF_KEY_MIN_BYTES - 1)) }
-            assertFailsWith<IllegalArgumentException> { CryptoCapabilities.importHkdfKey(repeatedByte(1, HKDF_KEY_MIN_BYTES - 1)) }
+            assertFailsWith<IllegalArgumentException> {
+                CryptoCapabilities.importHkdfKey(repeatedByte(1, HKDF_KEY_MIN_BYTES - 1))
+            }
             for (root in bothKinds(rootHex)) {
                 assertFailsWith<IllegalArgumentException> { root.deriveBytes(Salt.None, Info.None, 0) }
-                assertFailsWith<IllegalArgumentException> { root.deriveBytes(Salt.None, Info.None, HKDF_SHA256_MAX_OUTPUT_BYTES + 1) }
-                assertFailsWith<IllegalArgumentException> { root.deriveHkdfKey(Salt.None, Info.None, HKDF_KEY_MIN_BYTES - 1) }
+                assertFailsWith<IllegalArgumentException> {
+                    root.deriveBytes(Salt.None, Info.None, HKDF_SHA256_MAX_OUTPUT_BYTES + 1)
+                }
+                assertFailsWith<IllegalArgumentException> {
+                    root.deriveHkdfKey(Salt.None, Info.None, HKDF_KEY_MIN_BYTES - 1)
+                }
                 assertFailsWith<IllegalArgumentException> { root.deriveAesGcmKey(Salt.None, Info.None, 192) }
                 val aes = root.deriveAesGcmKey(Salt.None, Info.None, 128)
                 assertEquals(128, aes.sizeBits)
-                assertFailsWith<IllegalArgumentException> { aes.sealWithNonce(hexBuffer("0102030405060708090a0b"), ascii("x")) }
+                assertFailsWith<IllegalArgumentException> {
+                    aes.sealWithNonce(hexBuffer("0102030405060708090a0b"), ascii("x"))
+                }
                 aes.close()
                 root.close()
             }

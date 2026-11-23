@@ -13,8 +13,8 @@ import kotlin.js.Promise
 
 // Registry accessor + an inline IndexedDB open helper, inlined into each literal (a shared js()
 // function cannot be referenced by name from another js() template). Store name is 'k'.
-private const val REG = "var g=globalThis; if(!g.__bcNE){ g.__bcNE={m:new Map(),n:1}; } var reg=g.__bcNE;"
-private const val OPENDB =
+internal const val IDB_REG = "var g=globalThis; if(!g.__bcNE){ g.__bcNE={m:new Map(),n:1}; } var reg=g.__bcNE;"
+internal const val IDB_OPENDB =
     "function od(n){ return new Promise(function(res,rej){ var r=globalThis.indexedDB.open(n,1); " +
         "r.onupgradeneeded=function(){ r.result.createObjectStore('k'); }; " +
         "r.onsuccess=function(){ res(r.result); }; r.onerror=function(){ rej(r.error); }; }); }"
@@ -48,13 +48,6 @@ internal actual suspend fun webCryptoIdbContains(
 
 internal actual suspend fun webCryptoIdbAliases(dbName: String): String = jsIdbAliases(dbName).await()
 
-internal actual suspend fun webCryptoIdbAdd(
-    dbName: String,
-    alias: String,
-    token: Int,
-    meta: String,
-): Boolean = jsIdbAdd(dbName, alias, token, meta).await()
-
 // --- raw JS helpers ----------------------------------------------------------
 
 @Suppress("UnusedParameter") // referenced inside the js(...) template
@@ -67,7 +60,7 @@ private fun jsIdbPut(
     js(
         """
         (function(){
-          $REG $OPENDB
+          $IDB_REG $IDB_OPENDB
           return od(dbName).then(function(db){
             return new Promise(function(res,rej){
               var tx=db.transaction('k','readwrite');
@@ -89,7 +82,7 @@ private fun jsIdbLoad(
     js(
         """
         (function(){
-          $REG $OPENDB
+          $IDB_REG $IDB_OPENDB
           return od(dbName).then(function(db){
             return new Promise(function(res,rej){
               var tx=db.transaction('k','readonly');
@@ -112,7 +105,7 @@ private fun jsIdbDelete(
     js(
         """
         (function(){
-          $OPENDB
+          $IDB_OPENDB
           return od(dbName).then(function(db){
             return new Promise(function(res,rej){
               var existed=false;
@@ -136,7 +129,7 @@ private fun jsIdbContains(
     js(
         """
         (function(){
-          $OPENDB
+          $IDB_OPENDB
           return od(dbName).then(function(db){
             return new Promise(function(res,rej){
               var tx=db.transaction('k','readonly');
@@ -154,43 +147,13 @@ private fun jsIdbAliases(dbName: String): Promise<String> =
     js(
         """
         (function(){
-          $OPENDB
+          $IDB_OPENDB
           return od(dbName).then(function(db){
             return new Promise(function(res,rej){
               var tx=db.transaction('k','readonly');
               var q=tx.objectStore('k').getAllKeys();
               q.onsuccess=function(){ db.close(); res(q.result.join('\n')); };
               q.onerror=function(){ db.close(); rej(q.error); };
-            });
-          });
-        })()
-        """,
-    )
-
-// `add` fails with ConstraintError on an occupied alias; preventDefault keeps that from aborting the
-// transaction, so "taken" is an answer rather than an error.
-@Suppress("UnusedParameter") // referenced inside the js(...) template
-private fun jsIdbAdd(
-    dbName: String,
-    alias: String,
-    token: Int,
-    meta: String,
-): Promise<Boolean> =
-    js(
-        """
-        (function(){
-          $REG $OPENDB
-          return od(dbName).then(function(db){
-            return new Promise(function(res,rej){
-              var taken=false;
-              var tx=db.transaction('k','readwrite');
-              var rq=tx.objectStore('k').add({ meta: meta, key: reg.m.get(token) }, alias);
-              rq.onerror=function(ev){
-                if(rq.error && rq.error.name==='ConstraintError'){ taken=true; ev.preventDefault(); ev.stopPropagation(); }
-              };
-              tx.oncomplete=function(){ db.close(); res(!taken); };
-              tx.onerror=function(){ if(!taken){ db.close(); rej(tx.error); } };
-              tx.onabort=function(){ db.close(); rej(tx.error); };
             });
           });
         })()

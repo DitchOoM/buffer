@@ -176,8 +176,9 @@ interface HkdfKeyStore : AutoCloseable {
 const val DEFAULT_HKDF_KEY_STORE_NAME: String = "buffer-crypto-hkdf"
 
 /** The device-persistent [HkdfKeyStore] for this platform. See [HkdfKeyStore] for the custody per target. */
-fun CryptoCapabilities.hkdfKeyStore(config: KeyStoreConfig = KeyStoreConfig(name = DEFAULT_HKDF_KEY_STORE_NAME)): HkdfKeyStore =
-    platformHkdfKeyStore(config)
+fun CryptoCapabilities.hkdfKeyStore(config: KeyStoreConfig = DEFAULT_HKDF): HkdfKeyStore = platformHkdfKeyStore(config)
+
+private val DEFAULT_HKDF = KeyStoreConfig(name = DEFAULT_HKDF_KEY_STORE_NAME)
 
 /**
  * Imports [ikm]'s remaining bytes as a key that is not persisted: a non-extractable WebCrypto key on
@@ -205,7 +206,8 @@ internal fun requireHkdfOutputLength(length: Int) =
 
 internal fun requireAesKeySizeBits(sizeBits: Int) =
     require(sizeBits == AES_128_KEY_BYTES * Byte.SIZE_BITS || sizeBits == AES_256_KEY_BYTES * Byte.SIZE_BITS) {
-        "AES-GCM key must be ${AES_128_KEY_BYTES * Byte.SIZE_BITS} or ${AES_256_KEY_BYTES * Byte.SIZE_BITS} bits, was $sizeBits"
+        "AES-GCM key must be ${AES_128_KEY_BYTES * Byte.SIZE_BITS} or " +
+            "${AES_256_KEY_BYTES * Byte.SIZE_BITS} bits, was $sizeBits"
     }
 
 // =============================================================================
@@ -306,7 +308,8 @@ internal class InMemoryDerivedAesGcmKey(
 internal class ProtectedHkdfKey(
     override val sizeBytes: Int,
     override val custody: KeyCustody.NonExportable,
-    private val gatedDeriveBytes: suspend (salt: Salt, info: Info, length: Int, factory: BufferFactory) -> PlatformBuffer,
+    private val gatedDeriveBytes:
+        suspend (salt: Salt, info: Info, length: Int, factory: BufferFactory) -> PlatformBuffer,
     private val gatedDeriveHkdfKey: suspend (salt: Salt, info: Info, sizeBytes: Int) -> HkdfKey,
     private val gatedDeriveAesGcmKey: suspend (salt: Salt, info: Info, sizeBits: Int) -> DerivedAesGcmKey,
     private val onClose: () -> Unit,
@@ -346,8 +349,10 @@ internal class ProtectedHkdfKey(
 internal class ProtectedDerivedAesGcmKey(
     override val sizeBits: Int,
     override val custody: KeyCustody.NonExportable,
-    private val gatedSeal: suspend (nonce: ReadBuffer, plaintext: ReadBuffer, aad: Aad, factory: BufferFactory) -> PlatformBuffer,
-    private val gatedOpen: suspend (nonce: ReadBuffer, ciphertextAndTag: ReadBuffer, aad: Aad, factory: BufferFactory) -> PlatformBuffer,
+    private val gatedSeal:
+        suspend (nonce: ReadBuffer, plaintext: ReadBuffer, aad: Aad, factory: BufferFactory) -> PlatformBuffer,
+    private val gatedOpen:
+        suspend (nonce: ReadBuffer, ciphertextAndTag: ReadBuffer, aad: Aad, factory: BufferFactory) -> PlatformBuffer,
     private val onClose: () -> Unit,
 ) : DerivedAesGcmKey {
     override suspend fun sealWithNonce(
@@ -416,9 +421,12 @@ internal class SoftwareHkdfKeyStore(
 
     override suspend fun load(alias: String): HkdfKey? {
         requireValidAlias(alias)
-        val decoded = storage.get(alias)?.let { decodeBlob(it) } ?: return null
-        if (decoded.kind != KIND_HKDF) return null
-        return InMemoryHkdfKey(copyBuffer(decoded.privateEncoded, secureScratch))
+        val decoded = storage.get(alias)?.let { decodeBlob(it) }
+        return if (decoded != null && decoded.kind == KIND_HKDF) {
+            InMemoryHkdfKey(copyBuffer(decoded.privateEncoded, secureScratch))
+        } else {
+            null
+        }
     }
 
     override suspend fun contains(alias: String): Boolean {

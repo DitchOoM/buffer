@@ -9,6 +9,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 
+private const val DERIVED_BYTES = 32
+
 /**
  * wasmJs: the [HkdfKeyStore]'s own IndexedDB glue (`@JsFun` externals). Node has no IndexedDB, so these
  * run only under the browser test task; under Node they return without asserting.
@@ -25,13 +27,13 @@ class WasmHkdfKeyStoreTest {
             val s = store("wasm-hkdf")
             s.delete("root")
             val imported = s.importKey("root", hexBuffer(rootHex))
-            val expected = imported.deriveBytes(Salt.None, Info.Of(ascii("x")), 32).toHex()
+            val expected = imported.deriveBytes(Salt.None, Info.Of(ascii("x")), DERIVED_BYTES).toHex()
             imported.close()
             assertFailsWith<KeyStoreException.AliasOccupied> { s.importKey("root", hexBuffer(rootHex)) }
 
             val reopened = assertNotNull(store("wasm-hkdf").load("root"))
             assertEquals(KeyCustody.NonExportable.Software, reopened.custody)
-            assertEquals(expected, reopened.deriveBytes(Salt.None, Info.Of(ascii("x")), 32).toHex())
+            assertEquals(expected, reopened.deriveBytes(Salt.None, Info.Of(ascii("x")), DERIVED_BYTES).toHex())
             reopened.close()
             s.delete("root")
         }

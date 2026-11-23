@@ -42,7 +42,8 @@ class WebCryptoHkdfKeyStoreTest {
             val nonce = hexBuffer("0102030405060708090a0b0c")
             val imported = store("hkdf-reopen").importKey("root", hexBuffer(rootHex))
             assertEquals(KeyCustody.NonExportable.Software, imported.custody)
-            val sealed = imported.deriveAesGcmKey(Salt.None, Info.Of(ascii("scope"))).sealWithNonce(nonce.slice(), ascii("kept"))
+            val sealingKey = imported.deriveAesGcmKey(Salt.None, Info.Of(ascii("scope")))
+            val sealed = sealingKey.sealWithNonce(nonce.slice(), ascii("kept"))
             val derived = imported.deriveBytes(Salt.None, Info.Of(ascii("bytes")), 32).toHex()
             imported.close()
 
@@ -50,7 +51,8 @@ class WebCryptoHkdfKeyStoreTest {
             assertEquals(KeyCustody.NonExportable.Software, reopened.custody)
             assertEquals(32, reopened.sizeBytes)
             assertEquals(derived, reopened.deriveBytes(Salt.None, Info.Of(ascii("bytes")), 32).toHex())
-            val opened = reopened.deriveAesGcmKey(Salt.None, Info.Of(ascii("scope"))).openWithNonce(nonce.slice(), sealed)
+            val openingKey = reopened.deriveAesGcmKey(Salt.None, Info.Of(ascii("scope")))
+            val opened = openingKey.openWithNonce(nonce.slice(), sealed)
             assertEquals(ascii("kept").toHex(), opened.toHex())
             reopened.close()
         }

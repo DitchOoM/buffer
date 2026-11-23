@@ -66,7 +66,10 @@ internal actual fun webCryptoReleaseHandle(token: Int) {
     jsReleaseHandle(token)
 }
 
-internal actual suspend fun webCryptoImportHkdf(ikmHex: String): String = jsImportHkdf(ikmHex.toJsString()).await<JsString>().toString()
+internal actual suspend fun webCryptoImportHkdf(ikmHex: String): String {
+    val token = jsImportHkdf(ikmHex.toJsString()).await<JsString>()
+    return token.toString()
+}
 
 internal actual suspend fun webCryptoHkdfDeriveBits(
     token: Int,
@@ -87,7 +90,10 @@ internal actual suspend fun webCryptoHkdfDeriveAesGcm(
     saltHex: String,
     infoHex: String,
     lengthBits: Int,
-): String = jsHkdfDeriveAesGcm(token, saltHex.toJsString(), infoHex.toJsString(), lengthBits).await<JsString>().toString()
+): String {
+    val child = jsHkdfDeriveAesGcm(token, saltHex.toJsString(), infoHex.toJsString(), lengthBits).await<JsString>()
+    return child.toString()
+}
 
 // --- externals ---------------------------------------------------------------
 

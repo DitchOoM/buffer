@@ -45,7 +45,8 @@ internal fun buildWebCryptoHkdfKey(
             buildWebCryptoHkdfKey(child, childBytes)
         },
         gatedDeriveAesGcmKey = { salt, info, sizeBits ->
-            buildWebCryptoDerivedAesGcmKey(webCryptoHkdfDeriveAesGcm(token, salt.hex(), info.hex(), sizeBits).toInt(), sizeBits)
+            val child = webCryptoHkdfDeriveAesGcm(token, salt.hex(), info.hex(), sizeBits).toInt()
+            buildWebCryptoDerivedAesGcmKey(child, sizeBits)
         },
         onClose = { webCryptoReleaseHandle(token) },
     )
@@ -59,7 +60,9 @@ internal fun buildWebCryptoDerivedAesGcmKey(
         sizeBits = sizeBits,
         custody = KeyCustody.NonExportable.Software,
         gatedSeal = { nonce, plaintext, aad, factory ->
-            factory.fromHexString(webCryptoAesGcmSealHandle(token, nonce.toHexString(), aad.hex(), plaintext.toHexString()))
+            factory.fromHexString(
+                webCryptoAesGcmSealHandle(token, nonce.toHexString(), aad.hex(), plaintext.toHexString()),
+            )
         },
         gatedOpen = { nonce, ciphertextAndTag, aad, factory ->
             val ptHex =
@@ -86,32 +89,26 @@ internal class WebCryptoHkdfKeyStore(
         requireValidAlias(alias)
         requireHkdfKeySize(ikm.remaining())
         val token = webCryptoImportHkdf(ikm.toHexString()).toInt()
-        val stored =
-            try {
-                webCryptoIdbAdd(dbName, alias, token, "$KIND_HKDF:${ikm.remaining()}:")
-            } catch (failure: Throwable) {
-                webCryptoReleaseHandle(token)
-                throw failure
-            }
-        if (!stored) {
-            webCryptoReleaseHandle(token)
-            throw KeyStoreException.AliasOccupied(alias)
+        var stored = false
+        try {
+            stored = webCryptoIdbAdd(dbName, alias, token, "$KIND_HKDF:${ikm.remaining()}:")
+        } finally {
+            if (!stored) webCryptoReleaseHandle(token)
         }
+        if (!stored) throw KeyStoreException.AliasOccupied(alias)
         return buildWebCryptoHkdfKey(token, ikm.remaining())
     }
 
     override suspend fun load(alias: String): HkdfKey? {
         requireValidAlias(alias)
         val marshalled = webCryptoIdbLoad(dbName, alias) ?: return null
-        // "<token>:<kind>:<tag>:<pubHex>"; for an HKDF entry the tag is the key size and pubHex is empty.
-        val parts = marshalled.split(':', limit = 4)
-        val token = parts[0].toInt()
-        if (parts.size < 3 || parts[1].toIntOrNull() != KIND_HKDF) {
-            webCryptoReleaseHandle(token)
-            return null
+        return when (val entry = parseStoredHkdfEntry(marshalled)) {
+            is StoredHkdfEntry.Hkdf -> buildWebCryptoHkdfKey(entry.token, entry.sizeBytes)
+            is StoredHkdfEntry.OtherKind -> {
+                webCryptoReleaseHandle(entry.token)
+                null
+            }
         }
-        val sizeBytes = parts[2].toIntOrNull() ?: throw KeyStoreException.CorruptEntry()
-        return buildWebCryptoHkdfKey(token, sizeBytes)
     }
 
     override suspend fun contains(alias: String): Boolean {
@@ -119,7 +116,10 @@ internal class WebCryptoHkdfKeyStore(
         return webCryptoIdbContains(dbName, alias)
     }
 
-    override suspend fun aliases(): Set<String> = webCryptoIdbAliases(dbName).split('\n').filterTo(mutableSetOf()) { it.isNotEmpty() }
+    override suspend fun aliases(): Set<String> {
+        val names = webCryptoIdbAliases(dbName)
+        return names.split('\n').filterTo(mutableSetOf()) { it.isNotEmpty() }
+    }
 
     override suspend fun delete(alias: String): Boolean {
         requireValidAlias(alias)
@@ -128,24 +128,6 @@ internal class WebCryptoHkdfKeyStore(
 
     override fun close() = Unit
 }
-
-private fun Salt.hex(): String =
-    when (this) {
-        Salt.None -> ""
-        is Salt.Of -> bytes.toHexString()
-    }
-
-private fun Info.hex(): String =
-    when (this) {
-        Info.None -> ""
-        is Info.Of -> bytes.toHexString()
-    }
-
-private fun Aad.hex(): String =
-    when (this) {
-        Aad.None -> ""
-        is Aad.Of -> bytes.toHexString()
-    }
 
 // =============================================================================
 // Per-target WebCrypto seam for HKDF keys (dynamic on JS, @JsFun externals on wasmJs)
@@ -176,7 +158,10 @@ internal expect suspend fun webCryptoHkdfDeriveHkdf(
     bits: Int,
 ): String
 
-/** `deriveKey` from the registered HKDF key [token] to a non-extractable AES-GCM key of [lengthBits]; returns its token. */
+/**
+ * `deriveKey` from the registered HKDF key [token] to a non-extractable AES-GCM key of [lengthBits];
+ * returns its token.
+ */
 internal expect suspend fun webCryptoHkdfDeriveAesGcm(
     token: Int,
     saltHex: String,
