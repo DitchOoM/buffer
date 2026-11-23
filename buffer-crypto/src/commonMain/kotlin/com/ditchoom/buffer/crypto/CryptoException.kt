@@ -169,6 +169,14 @@ sealed class KeyStoreException protected constructor(
         val retryable: Boolean,
     ) : KeyStoreException("key store backend unavailable")
 
+    /**
+     * An import named an [alias] that already holds an entry. An import never replaces a stored key;
+     * delete the alias first to replace it deliberately.
+     */
+    class AliasOccupied internal constructor(
+        val alias: String,
+    ) : KeyStoreException("alias '$alias' already holds a key")
+
     /** A stored entry could not be decoded — its bytes are truncated, corrupt, or a newer format. */
     class CorruptEntry internal constructor() : KeyStoreException("stored key entry is corrupt or unreadable")
 }

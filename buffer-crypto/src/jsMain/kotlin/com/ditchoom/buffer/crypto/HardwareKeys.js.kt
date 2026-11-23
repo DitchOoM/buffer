@@ -52,6 +52,29 @@ internal actual fun webCryptoReleaseHandle(token: Int) {
     jsReleaseHandle(token)
 }
 
+internal actual suspend fun webCryptoImportHkdf(ikmHex: String): String = jsImportHkdf(ikmHex).await()
+
+internal actual suspend fun webCryptoHkdfDeriveBits(
+    token: Int,
+    saltHex: String,
+    infoHex: String,
+    bits: Int,
+): String = jsHkdfDeriveBits(token, saltHex, infoHex, bits).await()
+
+internal actual suspend fun webCryptoHkdfDeriveHkdf(
+    token: Int,
+    saltHex: String,
+    infoHex: String,
+    bits: Int,
+): String = jsHkdfDeriveHkdf(token, saltHex, infoHex, bits).await()
+
+internal actual suspend fun webCryptoHkdfDeriveAesGcm(
+    token: Int,
+    saltHex: String,
+    infoHex: String,
+    lengthBits: Int,
+): String = jsHkdfDeriveAesGcm(token, saltHex, infoHex, lengthBits).await()
+
 // --- raw JS helpers ----------------------------------------------------------
 
 private fun jsSubtleGenerateKeyAvailable(): Boolean =
@@ -210,3 +233,86 @@ private fun jsReleaseHandle(token: Int) {
         """,
     )
 }
+
+@Suppress("UnusedParameter") // referenced inside the js(...) template
+private fun jsImportHkdf(ikmHex: String): Promise<String> =
+    js(
+        """
+        (function(){
+          $REG $H2B
+          var subtle = globalThis.crypto.subtle;
+          var raw = h2b(ikmHex);
+          return subtle.importKey('raw', raw, { name:'HKDF' }, false, ['deriveBits','deriveKey']).then(function(k){
+            raw.fill(0);
+            var t = reg.n++; reg.m.set(t, k);
+            return String(t);
+          }, function(e){ raw.fill(0); throw e; });
+        })()
+        """,
+    )
+
+@Suppress("UnusedParameter") // referenced inside the js(...) template
+private fun jsHkdfDeriveBits(
+    token: Int,
+    saltHex: String,
+    infoHex: String,
+    bits: Int,
+): Promise<String> =
+    js(
+        """
+        (function(){
+          $REG $HX $H2B
+          var subtle = globalThis.crypto.subtle;
+          var p = { name:'HKDF', hash:'SHA-256', salt: h2b(saltHex), info: h2b(infoHex) };
+          return subtle.deriveBits(p, reg.m.get(token), bits).then(function(b){
+            var s = hx(b); new Uint8Array(b).fill(0); return s;
+          });
+        })()
+        """,
+    )
+
+@Suppress("UnusedParameter") // referenced inside the js(...) template
+private fun jsHkdfDeriveHkdf(
+    token: Int,
+    saltHex: String,
+    infoHex: String,
+    bits: Int,
+): Promise<String> =
+    js(
+        """
+        (function(){
+          $REG $H2B
+          var subtle = globalThis.crypto.subtle;
+          var p = { name:'HKDF', hash:'SHA-256', salt: h2b(saltHex), info: h2b(infoHex) };
+          return subtle.deriveBits(p, reg.m.get(token), bits).then(function(b){
+            var staged = new Uint8Array(b);
+            return subtle.importKey('raw', staged, { name:'HKDF' }, false, ['deriveBits','deriveKey']).then(function(c){
+              staged.fill(0);
+              var t = reg.n++; reg.m.set(t, c);
+              return String(t);
+            }, function(e){ staged.fill(0); throw e; });
+          });
+        })()
+        """,
+    )
+
+@Suppress("UnusedParameter") // referenced inside the js(...) template
+private fun jsHkdfDeriveAesGcm(
+    token: Int,
+    saltHex: String,
+    infoHex: String,
+    lengthBits: Int,
+): Promise<String> =
+    js(
+        """
+        (function(){
+          $REG $H2B
+          var subtle = globalThis.crypto.subtle;
+          var p = { name:'HKDF', hash:'SHA-256', salt: h2b(saltHex), info: h2b(infoHex) };
+          return subtle.deriveKey(p, reg.m.get(token), { name:'AES-GCM', length: lengthBits }, false, ['encrypt','decrypt']).then(function(a){
+            var t = reg.n++; reg.m.set(t, a);
+            return String(t);
+          });
+        })()
+        """,
+    )

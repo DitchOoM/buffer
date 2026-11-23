@@ -202,6 +202,9 @@ internal fun requireValidKeyStoreName(name: String) =
 internal const val KIND_SIGNING = 0
 internal const val KIND_AES_GCM = 1
 internal const val KIND_AGREEMENT = 2
+
+// An HkdfKeyStore entry. Never produced by a KeyStore, whose loads treat it as another kind's alias.
+internal const val KIND_HKDF = 3
 private const val BLOB_VERSION = 1
 
 internal fun signingTag(scheme: SignatureScheme): Int =
@@ -251,7 +254,7 @@ internal fun storedAlgorithm(
     }
 
 /** A decoded blob header plus the two length-delimited body fields (read-ready slices). */
-private class DecodedBlob(
+internal class DecodedBlob(
     val kind: Int,
     val tag: Int,
     val privateEncoded: ReadBuffer,
@@ -263,7 +266,7 @@ private class DecodedBlob(
  * pass a wipe-on-free secure factory because the blob carries raw private-key material, so
  * [SoftwareKeyStore.persist]'s `freeNativeMemory()` actually zeroes it rather than merely releasing it.
  */
-private fun encodeBlob(
+internal fun encodeBlob(
     kind: Int,
     tag: Int,
     privateEncoded: ReadBuffer,
@@ -294,7 +297,7 @@ private fun PlatformBuffer.writePreservingPosition(src: ReadBuffer) {
 
 private const val BLOB_HEADER_BYTES = 3 + 2 + 2 // version+kind+tag + two u16 length prefixes
 
-private fun decodeBlob(blob: ReadBuffer): DecodedBlob {
+internal fun decodeBlob(blob: ReadBuffer): DecodedBlob {
     if (blob.readByte().toInt() != BLOB_VERSION) throw KeyStoreException.CorruptEntry()
     val kind = blob.readByte().toInt()
     val tag = blob.readByte().toInt()
