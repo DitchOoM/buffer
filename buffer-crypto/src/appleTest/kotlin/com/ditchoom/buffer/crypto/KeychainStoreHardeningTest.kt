@@ -103,10 +103,18 @@ class KeychainStoreHardeningTest {
 
     @Test
     fun aPutNeverReplacesTheRecordAlreadyUnderAnAlias() {
-        // Runs on every host: the add-only write is what lets a racing get-or-generate keep the first key.
+        // The add-only write is what lets a racing get-or-generate keep the first key. A test executable on an iOS, tvOS
+        // or watchOS simulator is not an app and carries no keychain entitlement, so the data protection keychain
+        // refuses it with errSecMissingEntitlement; the macOS file keychain asks for none. There the refusal itself is
+        // checked: every write is refused alike and nothing is stored.
         val service = "bcks-put-${kotlin.random.Random.nextInt(Int.MAX_VALUE)}"
         try {
-            assertEquals(BCKS_OK, putByte(service, FIRST))
+            val first = putByte(service, FIRST)
+            if (first == BCKS_ERR_DENIED) {
+                assertEquals(BCKS_ERR_DENIED, putByte(service, SECOND), "a keychain this host cannot reach refuses every write")
+                return
+            }
+            assertEquals(BCKS_OK, first)
             assertEquals(BCKS_ERR_DUPLICATE, putByte(service, SECOND))
             assertEquals(FIRST, readByte(service))
         } finally {
