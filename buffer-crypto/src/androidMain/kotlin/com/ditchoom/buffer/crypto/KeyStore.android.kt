@@ -69,7 +69,8 @@ internal class AndroidKeystoreKeyStore(
         val ns = namespaced(alias)
         return when (val stored = provider.entryAlgorithm(ns)) {
             null -> provider.generatePersistentSigning(ns, spec)
-            ProtectedKeyAlgorithm.EcdsaP256 -> requireNotNull(provider.reattachSigning(ns, spec))
+            ProtectedKeyAlgorithm.EcdsaP256 ->
+                provider.reattachSigning(ns, spec).orRetry()
             else -> throw KeyStoreException.AliasMismatch(alias, stored, scheme.toProtectedKeyAlgorithm())
         }
     }
@@ -82,7 +83,8 @@ internal class AndroidKeystoreKeyStore(
         val ns = namespaced(alias)
         return when (val stored = provider.entryAlgorithm(ns)) {
             null -> provider.generatePersistentAesGcm(ns, spec)
-            ProtectedKeyAlgorithm.AesGcm -> requireNotNull(provider.reattachAesGcm(ns, spec))
+            ProtectedKeyAlgorithm.AesGcm ->
+                provider.reattachAesGcm(ns, spec).orRetry()
             else -> throw KeyStoreException.AliasMismatch(alias, stored, ProtectedKeyAlgorithm.AesGcm)
         }
     }
@@ -101,7 +103,8 @@ internal class AndroidKeystoreKeyStore(
         val ns = namespaced(alias)
         return when (val stored = provider.entryAlgorithm(ns)) {
             null -> provider.generatePersistentKeyAgreement(ns, spec)
-            ProtectedKeyAlgorithm.EcdhP256 -> requireNotNull(provider.reattachKeyAgreement(ns, spec))
+            ProtectedKeyAlgorithm.EcdhP256 ->
+                provider.reattachKeyAgreement(ns, spec).orRetry()
             else -> throw KeyStoreException.AliasMismatch(alias, stored, curve.toProtectedKeyAlgorithm())
         }
     }
@@ -157,3 +160,6 @@ internal fun openAndroidKeystoreStore(name: String): PlatformStoreOpening =
         is ProtectedKeyResolution.Refused, ProtectedKeyResolution.None ->
             PlatformStoreOpening.Refused(KeyStoreException.StorageFailure(retryable = true))
     }
+
+/** A key the lookup just found that the reattach then could not read: the keystore failed between the two calls. */
+private fun <K : Any> K?.orRetry(): K = this ?: throw KeyStoreException.StorageFailure(retryable = true)

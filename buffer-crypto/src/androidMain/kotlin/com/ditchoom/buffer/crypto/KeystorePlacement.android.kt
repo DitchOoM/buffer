@@ -205,3 +205,54 @@ internal fun androidKeystoreProviderRegistered(): Boolean = Security.getProvider
 /** The Android Keystore backend refused for [finding]. */
 internal fun keystoreRefused(finding: CapabilityFinding.Keystore): ProtectedKeyResolution =
     ProtectedKeyResolution.Refused(ProtectedKeyBackend.AndroidKeystore, finding)
+
+/** What `KeyStore.getKey` said about an alias. */
+internal sealed interface EntryLookup {
+    /** `null`: the keystore reports `KEY_NOT_FOUND`. */
+    data object Absent : EntryLookup
+
+    data class Private(
+        val algorithm: ProtectedKeyAlgorithm,
+    ) : EntryLookup
+
+    data object Secret : EntryLookup
+
+    /** A key of a type this store never writes. */
+    data object OtherType : EntryLookup
+
+    /**
+     * `UnrecoverableKeyException`. With a keystore exception as its cause the keystore failed to answer; without one it
+     * could not load the key (android-36 drops the cause when rethrowing `KeyPermanentlyInvalidatedException`).
+     */
+    data class Unloadable(
+        val keystoreFailed: Boolean,
+    ) : EntryLookup
+}
+
+internal sealed interface EntryVerdict {
+    /** No key: a get-or-generate may make one. */
+    data object Empty : EntryVerdict
+
+    data class Holds(
+        val algorithm: ProtectedKeyAlgorithm,
+    ) : EntryVerdict
+
+    /** Something is there or may be: never generate over it. */
+    data class Refuse(
+        val failure: KeyStoreException,
+    ) : EntryVerdict
+}
+
+internal fun entryVerdict(lookup: EntryLookup): EntryVerdict =
+    when (lookup) {
+        EntryLookup.Absent -> EntryVerdict.Empty
+        is EntryLookup.Private -> EntryVerdict.Holds(lookup.algorithm)
+        EntryLookup.Secret -> EntryVerdict.Holds(ProtectedKeyAlgorithm.AesGcm)
+        EntryLookup.OtherType -> EntryVerdict.Refuse(KeyStoreException.CorruptEntry())
+        is EntryLookup.Unloadable ->
+            if (lookup.keystoreFailed) {
+                EntryVerdict.Refuse(KeyStoreException.StorageFailure(retryable = true))
+            } else {
+                EntryVerdict.Refuse(KeyStoreException.CorruptEntry())
+            }
+    }

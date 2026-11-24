@@ -505,17 +505,30 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
         )
     }
 
-    /** The [ProtectedKeyAlgorithm] stored under [alias], or `null` if the alias is empty. */
+    /**
+     * The [ProtectedKeyAlgorithm] stored under [alias], or `null` only when the keystore says no key is there. The
+     * lookup goes through `getKey`, not `containsAlias`: `containsAlias` answers `false` for any keystore error
+     * (android-36 `AndroidKeyStoreSpi.getKeyMetadata` logs and returns `null`), which would let a get-or-generate write
+     * a new key over a live one, while `getKey` answers `null` only for `KEY_NOT_FOUND` and throws otherwise. Every
+     * other answer refuses (see [entryVerdict]); nothing is ever generated over an alias that could not be read.
+     */
     internal suspend fun entryAlgorithm(alias: String): ProtectedKeyAlgorithm? =
         keystoreOp {
-            if (!keyStore.containsAlias(alias)) {
-                null
-            } else {
-                when (val entry = keyStore.getEntry(alias, null)) {
-                    is KeyStore.PrivateKeyEntry -> privateEntryAlgorithm(entry.privateKey)
-                    is KeyStore.SecretKeyEntry -> ProtectedKeyAlgorithm.AesGcm
-                    else -> null
+            val lookup =
+                try {
+                    when (val key = keyStore.getKey(alias, null)) {
+                        null -> EntryLookup.Absent
+                        is PrivateKey -> EntryLookup.Private(privateEntryAlgorithm(key))
+                        is SecretKey -> EntryLookup.Secret
+                        else -> EntryLookup.OtherType
+                    }
+                } catch (e: java.security.UnrecoverableKeyException) {
+                    EntryLookup.Unloadable(e.cause is KeyStoreException)
                 }
+            when (val verdict = entryVerdict(lookup)) {
+                EntryVerdict.Empty -> null
+                is EntryVerdict.Holds -> verdict.algorithm
+                is EntryVerdict.Refuse -> throw verdict.failure
             }
         }
 

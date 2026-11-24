@@ -76,6 +76,8 @@ internal fun openAppleKeychainStore(
 internal fun enclaveGenerateFailure(status: Int): CryptoException =
     when (status) {
         BCKS_ERR_LOCKED -> KeyStoreException.DeviceLocked()
+        // The binary lacks the entitlement the Enclave requires: a definite answer, not a passing failure.
+        BCKS_ERR_DENIED -> KeyStoreException.AccessDenied()
         else -> HardwareKeyException.SecureElementUnavailable()
     }
 
@@ -163,6 +165,7 @@ internal class AppleKeychainKeyStore(
             ProtectedKeyAlgorithm.EcdsaP256,
             attach = { record -> provider.signingFromRecord(record, spec) },
             generate = { provider.generatePersistentSigning(spec) },
+            release = { it.close() },
         )
     }
 
@@ -191,6 +194,7 @@ internal class AppleKeychainKeyStore(
             ProtectedKeyAlgorithm.EcdhP256,
             attach = { record -> provider.keyAgreementFromRecord(record, spec) },
             generate = { provider.generatePersistentKeyAgreement(spec) },
+            release = { it.close() },
         )
     }
 
@@ -204,6 +208,7 @@ internal class AppleKeychainKeyStore(
         expected: ProtectedKeyAlgorithm,
         attach: (ReadBuffer) -> K,
         generate: () -> Pair<K, PlatformBuffer>,
+        release: (K) -> Unit,
     ): K =
         withContext(Dispatchers.Default) {
             migrateOnce()
@@ -217,8 +222,10 @@ internal class AppleKeychainKeyStore(
                     }
                 when (put) {
                     KeychainPut.Added -> key
-                    KeychainPut.AlreadyPresent ->
+                    KeychainPut.AlreadyPresent -> {
+                        release(key)
                         existing(alias, expected, attach) ?: throw KeyStoreException.StorageFailure(retryable = true)
+                    }
                 }
             }
         }
@@ -342,13 +349,17 @@ internal class AppleKeychainKeyStore(
     }
 
     /**
-     * The same move before a listing, which must be whole: while a record under the older class is withheld by a
-     * locked device, a listing would silently leave it out, so it is [KeyStoreException.DeviceLocked] instead.
+     * The same move before a listing, until it has once succeeded. While a record under the older class is withheld
+     * by a locked device a listing would silently leave it out, so that, and only that, is
+     * [KeyStoreException.DeviceLocked]; any other failure of the move is left for the next call and the listing goes
+     * ahead.
      */
     private fun migrateBeforeListing() {
+        if (migrated.load() == 1) return
         when (val status = bcks_keychain_migrate(name)) {
             BCKS_OK -> migrated.store(1)
-            else -> throw keychainFailure(status)
+            BCKS_ERR_LOCKED -> throw KeyStoreException.DeviceLocked()
+            else -> Unit
         }
     }
 

@@ -12,7 +12,18 @@ import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_NO_KEYCHAIN
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_RETRY
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_keychain_classify
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_keychain_delete
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_keychain_get
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_keychain_put
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.UByteVar
+import kotlinx.cinterop.alloc
+import kotlinx.cinterop.allocArray
+import kotlinx.cinterop.convert
+import kotlinx.cinterop.get
+import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.ptr
+import kotlinx.cinterop.set
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -65,7 +76,7 @@ class KeychainStoreHardeningTest {
     }
 
     @Test
-    fun twoStoresRacingToCreateOneAliasEndWithOneKey() =
+    fun fourEnclaveStoresRacingToCreateOneAliasEndWithOneKey() =
         runTest {
             if (appleEnclaveProviderOrNull() == null) return@runTest
             val name = "bcks-race-${kotlin.random.Random.nextInt(Int.MAX_VALUE)}"
@@ -88,6 +99,37 @@ class KeychainStoreHardeningTest {
             } finally {
                 CryptoCapabilities.keyStore(KeyStoreConfig(name = name)).delete("one")
             }
+        }
+
+    @Test
+    fun aPutNeverReplacesTheRecordAlreadyUnderAnAlias() {
+        // Runs on every host: the add-only write is what lets a racing get-or-generate keep the first key.
+        val service = "bcks-put-${kotlin.random.Random.nextInt(Int.MAX_VALUE)}"
+        try {
+            assertEquals(BCKS_OK, putByte(service, FIRST))
+            assertEquals(BCKS_ERR_DUPLICATE, putByte(service, SECOND))
+            assertEquals(FIRST, readByte(service))
+        } finally {
+            bcks_keychain_delete(service, "one")
+        }
+    }
+
+    private fun putByte(
+        service: String,
+        value: Byte,
+    ): Int =
+        memScoped {
+            val one = allocArray<UByteVar>(1)
+            one[0] = value.toUByte()
+            bcks_keychain_put(service, "one", one, 1.convert())
+        }
+
+    private fun readByte(service: String): Byte =
+        memScoped {
+            val out = allocArray<UByteVar>(1)
+            val len = alloc<platform.posix.size_tVar>()
+            assertEquals(BCKS_OK, bcks_keychain_get(service, "one", out, 1.convert(), len.ptr))
+            out[0].toByte()
         }
 
     @Test
@@ -119,6 +161,8 @@ class KeychainStoreHardeningTest {
         const val ERR_SEC_PARAM = -50
         const val ERR_SEC_IO = -36
         const val BYTE_MASK = 0xFF
+        const val FIRST: Byte = 1
+        const val SECOND: Byte = 2
         const val HEX = 16
     }
 

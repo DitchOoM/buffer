@@ -368,8 +368,8 @@ tracked to completion:
   only key attestation, verified off the device, proves where a key lives. Before API 31 a secure key counts at the
   TEE floor, since a StrongBox request can be served in the TEE without a word. The provider itself reports
   `dedicatedSecureElement = false`; each key's `KeyCustody` says whether StrongBox holds it.
-- **StrongBox falls back to the TEE, with the reason recorded.** A transient StrongBox refusal is retried in StrongBox
-  up to twice, then the key is made in the TEE; every other refusal goes to the TEE at once. A key made that way carries
+- **StrongBox falls back to the TEE, with the reason recorded.** A transient StrongBox refusal gets one more StrongBox
+  attempt (two in all), then the key is made in the TEE; every other refusal goes to the TEE at once. A key made that way carries
   `SecureElementFallback.ToTee(reason, keystoreCode)` (`SigningKey.secureElementFallback` and the AES-GCM and
   key-agreement equivalents), so a caller can log why a key is not in StrongBox. Before API 33 the keystore publishes no
   code, and the fallback says `Unclassified` / `Unpublished`.
@@ -382,8 +382,15 @@ tracked to completion:
   refusals are typed: `DeviceLocked` (`errSecInteractionNotAllowed`), `AccessDenied`, `CorruptEntry`,
   `StorageFailure(retryable = true)` for a busy keychain, and `StorageFailure(retryable = false)` for a process with no
   keychain (`errSecNotAvailable`) or any other status.
-- **A refused backend is probed again, not on every call.** A refused probe stands for a few seconds, so asking
-  `eligible` or `custodyFor` repeatedly does not mint and discard a probe key each time.
+- **A refused backend is probed again, not on every call.** A refused probe stands for a few seconds (measured on
+  `TimeSource.Monotonic` in production), so asking `eligible` or `custodyFor` repeatedly does not mint and discard a
+  probe key each time. The Apple agreement probe settles on a definite answer (an entitlement refusal, a declined
+  agreement) and, after three undecided failures in a row, settles agreement off.
+- **Android lookups never let a key be written over another.** A get-or-generate reads the alias with `getKey`, which
+  answers `null` only for a missing key; `containsAlias` answers `false` for any keystore error. A lookup that fails,
+  or finds a key of a type the store never writes, refuses rather than generating over it.
+- **Apple listings.** The protection-class move before a listing is best effort: only a device that is locked while an
+  older record is withheld fails the listing (`DeviceLocked`).
 - **Desktop JVM / Linux non-exportable custody** — desktop JVM / Linux expose no portable
   non-exportable store (DPAPI / Keychain / Secret Service are platform-native, none reachable from
   pure KMP), so both `keyProvider()` and `keyStore()` resolve to the exportable software tier (see

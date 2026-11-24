@@ -251,7 +251,6 @@ internal val PROBE_RETRY_AFTER: Duration = 5.seconds
  * [get] computes again. So a refused probe is neither pinned for the process lifetime nor repeated on every call.
  * Concurrent reads may compute twice; the first settled value wins and every later read sees it.
  */
-
 @OptIn(ExperimentalAtomicApi::class)
 internal class SettlingLazy<T : Any>(
     private val retryAfter: Duration,

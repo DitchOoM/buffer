@@ -2,6 +2,7 @@ package com.ditchoom.buffer.crypto
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import android.security.KeyStoreException as Ks
 import android.security.keystore.KeyProperties as Level
 import com.ditchoom.buffer.crypto.SecureElementFallbackReason as Reason
@@ -77,6 +78,19 @@ class KeystorePlacementTest {
             strongBoxRefusal(listOf(KeystoreFailureFact.Wrapper, KeystoreFailureFact.Unclassifiable), 1),
             "before API 33 the keystore names no reason, and the fallback says so",
         )
+    }
+
+    @Test
+    fun aLookupThatFailedNeverLetsAKeyBeGeneratedOverIt() {
+        assertEquals(EntryVerdict.Empty, entryVerdict(EntryLookup.Absent))
+        assertEquals(EntryVerdict.Holds(ProtectedKeyAlgorithm.AesGcm), entryVerdict(EntryLookup.Secret))
+        listOf(
+            EntryLookup.OtherType,
+            EntryLookup.Unloadable(keystoreFailed = true),
+            EntryLookup.Unloadable(keystoreFailed = false),
+        ).forEach { lookup -> assertTrue(entryVerdict(lookup) is EntryVerdict.Refuse, "$lookup must refuse") }
+        val busy = entryVerdict(EntryLookup.Unloadable(keystoreFailed = true)) as EntryVerdict.Refuse
+        assertTrue((busy.failure as KeyStoreException.StorageFailure).retryable)
     }
 
     private fun coded(

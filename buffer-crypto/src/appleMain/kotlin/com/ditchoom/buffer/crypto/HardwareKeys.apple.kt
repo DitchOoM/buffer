@@ -27,6 +27,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import platform.posix.size_tVar
+import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.time.Duration
 import kotlin.time.TimeMark
 import kotlin.time.TimeSource
@@ -71,6 +73,7 @@ import kotlin.time.TimeSource
  * the platform boundary and returns `null` where LocalAuthentication cannot be driven (tvOS), so
  * no bound-key request ever reaches this provider without a usable prompt host.
  */
+@OptIn(ExperimentalAtomicApi::class)
 internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
     override val dedicatedSecureElement: Boolean get() = true
 
@@ -252,10 +255,15 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
             try {
                 val peer = generateKeyPairPlatform(KeyAgreementCurve.P256)
                 try {
-                    val secret = enclaveAgreeP256(key.blob, peer.publicKey.encoded, laHandle = 0L)
-                    val ok = secret != null && secret.remaining() == KeyAgreementCurve.P256.sharedSecretBytes
-                    secret?.freeNativeMemory()
-                    Settlement.Settled(ok)
+                    when (val secret = enclaveAgreeP256(key.blob, peer.publicKey.encoded, laHandle = 0L)) {
+                        // A refused authentication on a key bound to none says nothing about agreement.
+                        null -> undecided()
+                        else -> {
+                            val ok = secret.remaining() == KeyAgreementCurve.P256.sharedSecretBytes
+                            secret.freeNativeMemory()
+                            Settlement.Settled(ok)
+                        }
+                    }
                 } finally {
                     peer.close()
                 }
@@ -263,14 +271,31 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
                 key.blob.freeNativeMemory()
                 key.point.freeNativeMemory()
             }
+        } catch (_: KeyStoreException.AccessDenied) {
+            // The binary may not use the Enclave at all: a definite answer.
+            Settlement.Settled(false)
+        } catch (_: InvalidPublicKey) {
+            // The element ran the agreement and declined this valid peer: it answered, and will answer the same.
+            Settlement.Settled(false)
         } catch (_: KeyStoreException.DeviceLocked) {
-            // Locked: the answer after the unlock may differ, so it is not settled.
-            Settlement.Unsettled(false)
-        } catch (_: HardwareKeyException.TransientHardwareFailure) {
+            // Locked: the answer after the unlock may differ, and a locked device does not count toward giving up.
             Settlement.Unsettled(false)
         } catch (_: CryptoException) {
-            // No Enclave, no entitlement, or an element that declines agreement keys.
+            undecided()
+        }
+
+    private val undecidedProbes = AtomicInt(0)
+
+    /**
+     * A failure that says nothing about the element is asked again after the probe window, but not for ever: after
+     * [UNDECIDED_PROBES] of them in a row the element has answered as clearly as it will, and agreement is settled off,
+     * so a device whose agreement always fails does not mint and discard a key every few seconds for the process life.
+     */
+    private fun undecided(): Settlement<Boolean> =
+        if (undecidedProbes.addAndFetch(1) >= UNDECIDED_PROBES) {
             Settlement.Settled(false)
+        } else {
+            Settlement.Unsettled(false)
         }
 
     private fun requireP256(peer: KeyAgreementPublicKey) =
@@ -750,3 +775,6 @@ internal fun appleEnclaveProviderOrNull(): SecureEnclaveHardwareKeyProvider? =
         EnclaveProbe.Usable -> enclaveProvider
         EnclaveProbe.NotPresent, EnclaveProbe.NotEntitled, EnclaveProbe.Refused -> null
     }
+
+/** Undecided agreement probes in a row after which agreement is settled off. */
+internal const val UNDECIDED_PROBES = 3
