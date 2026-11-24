@@ -1334,6 +1334,9 @@ public final class com/ditchoom/buffer/crypto/KeyCustodyKt {
 	public static final fun getDedicatedSecureElement (Lcom/ditchoom/buffer/crypto/KeyCustody;)Z
 	public static final fun getExportable (Lcom/ditchoom/buffer/crypto/KeyCustody;)Z
 	public static final fun getProvenance (Lcom/ditchoom/buffer/crypto/KeyCustody;)Lcom/ditchoom/buffer/crypto/KeyProvenance;
+	public static final fun getSecureElementFallback (Lcom/ditchoom/buffer/crypto/AesGcmKey;)Lcom/ditchoom/buffer/crypto/SecureElementFallback;
+	public static final fun getSecureElementFallback (Lcom/ditchoom/buffer/crypto/KeyAgreementPrivateKey;)Lcom/ditchoom/buffer/crypto/SecureElementFallback;
+	public static final fun getSecureElementFallback (Lcom/ditchoom/buffer/crypto/SigningKey;)Lcom/ditchoom/buffer/crypto/SecureElementFallback;
 }
 
 public final class com/ditchoom/buffer/crypto/KeyProvenance : java/lang/Enum {
@@ -1424,6 +1427,27 @@ public final class com/ditchoom/buffer/crypto/KeyStoreException$StorageFailure :
 public final class com/ditchoom/buffer/crypto/KeyStoreKt {
 	public static final fun keyStore (Lcom/ditchoom/buffer/crypto/CryptoCapabilities;Lcom/ditchoom/buffer/crypto/KeyStoreConfig;)Lcom/ditchoom/buffer/crypto/KeyStore;
 	public static synthetic fun keyStore$default (Lcom/ditchoom/buffer/crypto/CryptoCapabilities;Lcom/ditchoom/buffer/crypto/KeyStoreConfig;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/KeyStore;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/KeystoreCode {
+}
+
+public final class com/ditchoom/buffer/crypto/KeystoreCode$Public : com/ditchoom/buffer/crypto/KeystoreCode {
+	public fun <init> (I)V
+	public final fun component1 ()I
+	public final fun copy (I)Lcom/ditchoom/buffer/crypto/KeystoreCode$Public;
+	public static synthetic fun copy$default (Lcom/ditchoom/buffer/crypto/KeystoreCode$Public;IILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/KeystoreCode$Public;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCode ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/KeystoreCode$Unpublished : com/ditchoom/buffer/crypto/KeystoreCode {
+	public static final field INSTANCE Lcom/ditchoom/buffer/crypto/KeystoreCode$Unpublished;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class com/ditchoom/buffer/crypto/MessageLimitReached : com/ditchoom/buffer/crypto/CryptoMisuseException {
@@ -1832,6 +1856,41 @@ public final class com/ditchoom/buffer/crypto/SecureBufferKt {
 	public static synthetic fun secure$default (Lcom/ditchoom/buffer/BufferFactory;IILjava/lang/Object;)Lcom/ditchoom/buffer/BufferFactory;
 	public static final fun toSecureBuffer (Lcom/ditchoom/buffer/PlatformBuffer;Z)Lcom/ditchoom/buffer/PlatformBuffer;
 	public static synthetic fun toSecureBuffer$default (Lcom/ditchoom/buffer/PlatformBuffer;ZILjava/lang/Object;)Lcom/ditchoom/buffer/PlatformBuffer;
+}
+
+public abstract interface class com/ditchoom/buffer/crypto/SecureElementFallback {
+}
+
+public final class com/ditchoom/buffer/crypto/SecureElementFallback$None : com/ditchoom/buffer/crypto/SecureElementFallback {
+	public static final field INSTANCE Lcom/ditchoom/buffer/crypto/SecureElementFallback$None;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/SecureElementFallback$ToTee : com/ditchoom/buffer/crypto/SecureElementFallback {
+	public fun <init> (Lcom/ditchoom/buffer/crypto/SecureElementFallbackReason;Lcom/ditchoom/buffer/crypto/KeystoreCode;)V
+	public final fun component1 ()Lcom/ditchoom/buffer/crypto/SecureElementFallbackReason;
+	public final fun component2 ()Lcom/ditchoom/buffer/crypto/KeystoreCode;
+	public final fun copy (Lcom/ditchoom/buffer/crypto/SecureElementFallbackReason;Lcom/ditchoom/buffer/crypto/KeystoreCode;)Lcom/ditchoom/buffer/crypto/SecureElementFallback$ToTee;
+	public static synthetic fun copy$default (Lcom/ditchoom/buffer/crypto/SecureElementFallback$ToTee;Lcom/ditchoom/buffer/crypto/SecureElementFallbackReason;Lcom/ditchoom/buffer/crypto/KeystoreCode;ILjava/lang/Object;)Lcom/ditchoom/buffer/crypto/SecureElementFallback$ToTee;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getKeystoreCode ()Lcom/ditchoom/buffer/crypto/KeystoreCode;
+	public final fun getReason ()Lcom/ditchoom/buffer/crypto/SecureElementFallbackReason;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/ditchoom/buffer/crypto/SecureElementFallbackReason : java/lang/Enum {
+	public static final field KeyMintFailure Lcom/ditchoom/buffer/crypto/SecureElementFallbackReason;
+	public static final field SecureElementAbsent Lcom/ditchoom/buffer/crypto/SecureElementFallbackReason;
+	public static final field SecureElementBusy Lcom/ditchoom/buffer/crypto/SecureElementFallbackReason;
+	public static final field SystemError Lcom/ditchoom/buffer/crypto/SecureElementFallbackReason;
+	public static final field Unclassified Lcom/ditchoom/buffer/crypto/SecureElementFallbackReason;
+	public static final field UnsupportedParameters Lcom/ditchoom/buffer/crypto/SecureElementFallbackReason;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/ditchoom/buffer/crypto/SecureElementFallbackReason;
+	public static fun values ()[Lcom/ditchoom/buffer/crypto/SecureElementFallbackReason;
 }
 
 public final class com/ditchoom/buffer/crypto/SecurePoolKt {

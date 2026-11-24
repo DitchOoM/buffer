@@ -97,7 +97,9 @@ fun CryptoCapabilities.keyProvider(): KeyProvider = ResolvingKeyProvider(strong 
  *    then fails to generate;
  *  - otherwise, if the strongest eligible custody is weaker than [tier] it throws
  *    [InsufficientKeyCustody]. Custody tiers are ordered ([CustodyTier]), so "at least" is a simple
- *    comparison.
+ *    comparison;
+ *  - a platform [KeyStore] whose backend cannot be opened right now throws the typed [KeyStoreException] that refused
+ *    it ([KeyStoreException.StorageFailure], [KeyStoreException.AccessDenied], [KeyStoreException.DeviceLocked]).
  *
  * On the total [keyProvider] resolver every algorithm is eligible (it routes to the software floor),
  * so only a single-backend provider — a secure-element/WebCrypto [KeyStore] — ever takes the

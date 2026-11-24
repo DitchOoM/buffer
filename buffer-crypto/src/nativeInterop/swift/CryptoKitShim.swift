@@ -40,7 +40,9 @@ private let BCKS_ERR_CANCELED: Int32 = -6 // user/system dismissed an interactiv
 private let BCKS_ERR_LOCKED: Int32 = -7 // keychain item unavailable until the device is unlocked
 private let BCKS_ERR_DENIED: Int32 = -8 // this process may not reach the item / the Enclave
 private let BCKS_ERR_CORRUPT: Int32 = -9 // stored keychain item cannot be decoded
-private let BCKS_ERR_RETRY: Int32 = -10 // keychain momentarily unavailable, or a racing writer
+private let BCKS_ERR_RETRY: Int32 = -10 // keychain momentarily busy
+private let BCKS_ERR_DUPLICATE: Int32 = -11 // an item already exists under this (service, account)
+private let BCKS_ERR_NO_KEYCHAIN: Int32 = -12 // this process has no keychain at all
 
 // Copy a CryptoKit Data result into a caller-provided output buffer, writing the length out.
 private func emit(_ data: Data, _ out: UnsafeMutablePointer<UInt8>?, _ outCap: Int, _ outLen: UnsafeMutablePointer<Int>?) -> Int32 {
@@ -439,21 +441,46 @@ public func bcks_secure_enclave_available() -> Int32 {
     return SecureEnclave.isAvailable ? 1 : 0
 }
 
+// The OSStatus behind an Enclave failure. The Enclave reports through the Security framework, so a
+// failure arrives as an NSError in NSOSStatusErrorDomain; CryptoKit's own CryptoKitError carries a
+// code only in `underlyingCoreCryptoError`, which is read too in case a release routes it there.
+private func enclaveStatus(_ error: Error) -> OSStatus? {
+    if let kit = error as? CryptoKitError, case let .underlyingCoreCryptoError(code) = kit { return OSStatus(code) }
+    let ns = error as NSError
+    return ns.domain == NSOSStatusErrorDomain ? OSStatus(ns.code) : nil
+}
+
+// The status an Enclave failure that is not a user-authentication decision maps to: the device is
+// locked (the key's protection class is unavailable), the binary lacks the entitlement, or another
+// failure.
+private func classifyEnclaveFailure(_ error: Error, otherwise: Int32) -> Int32 {
+    switch enclaveStatus(error) {
+    case errSecInteractionNotAllowed: return BCKS_ERR_LOCKED
+    case errSecMissingEntitlement: return BCKS_ERR_DENIED
+    default: return otherwise
+    }
+}
+
+// The access control of every Enclave key that is not bound to user authentication: usable from the
+// first unlock after boot until the next restart, locked or not, and never leaving this device.
+private func noAuthAccessControl() -> SecAccessControl? {
+    var acError: Unmanaged<CFError>?
+    return SecAccessControlCreateWithFlags(
+        kCFAllocatorDefault, kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly, .privateKeyUsage, &acError
+    )
+}
+
 // Generate-and-discard probe. A missing entitlement is told apart from every other refusal because
-// it is a property of the signed binary, so the caller may settle on it; any other refusal may not
-// recur and is reported as BCKS_ERR_INTERNAL.
+// it is a property of the signed binary, so the caller may settle on it; a locked device is
+// BCKS_ERR_LOCKED; any other refusal may not recur and is reported as BCKS_ERR_INTERNAL.
 @_cdecl("bcks_secure_enclave_probe")
 public func bcks_secure_enclave_probe() -> Int32 {
-    guard SecureEnclave.isAvailable else { return BCKS_ERR_INTERNAL }
+    guard SecureEnclave.isAvailable, let ac = noAuthAccessControl() else { return BCKS_ERR_INTERNAL }
     do {
-        _ = try SecureEnclave.P256.Signing.PrivateKey()
+        _ = try SecureEnclave.P256.Signing.PrivateKey(accessControl: ac)
         return BCKS_OK
     } catch {
-        let ns = error as NSError
-        if ns.domain == NSOSStatusErrorDomain && OSStatus(ns.code) == errSecMissingEntitlement {
-            return BCKS_ERR_DENIED
-        }
-        return BCKS_ERR_INTERNAL
+        return classifyEnclaveFailure(error, otherwise: BCKS_ERR_INTERNAL)
     }
 }
 
@@ -466,8 +493,13 @@ public func bcks_secure_enclave_p256_generate(
     _ pointOut: UnsafeMutablePointer<UInt8>?, _ pointCap: Int,
     _ pointLenOut: UnsafeMutablePointer<Int>?
 ) -> Int32 {
-    guard SecureEnclave.isAvailable else { return BCKS_ERR_INTERNAL }
-    guard let key = try? SecureEnclave.P256.Signing.PrivateKey() else { return BCKS_ERR_INTERNAL }
+    guard SecureEnclave.isAvailable, let ac = noAuthAccessControl() else { return BCKS_ERR_INTERNAL }
+    let key: SecureEnclave.P256.Signing.PrivateKey
+    do {
+        key = try SecureEnclave.P256.Signing.PrivateKey(accessControl: ac)
+    } catch {
+        return classifyEnclaveFailure(error, otherwise: BCKS_ERR_INTERNAL)
+    }
     let s = emit(key.dataRepresentation, blobOut, blobCap, blobLenOut)
     if s != BCKS_OK { return s }
     return emit(key.publicKey.x963Representation, pointOut, pointCap, pointLenOut)
@@ -482,11 +514,17 @@ public func bcks_secure_enclave_p256_sign(
     _ sigOut: UnsafeMutablePointer<UInt8>?, _ sigCap: Int,
     _ sigLenOut: UnsafeMutablePointer<Int>?
 ) -> Int32 {
-    guard let key = try? SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: bytes(blobPtr, blobLen)) else {
-        return BCKS_ERR_INPUT
+    let key: SecureEnclave.P256.Signing.PrivateKey
+    do {
+        key = try SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: bytes(blobPtr, blobLen))
+    } catch {
+        return classifyEnclaveFailure(error, otherwise: BCKS_ERR_INPUT)
     }
-    guard let sig = try? key.signature(for: bytes(msgPtr, msgLen)) else { return BCKS_ERR_INTERNAL }
-    return emit(sig.derRepresentation, sigOut, sigCap, sigLenOut)
+    do {
+        return emit(try key.signature(for: bytes(msgPtr, msgLen)).derRepresentation, sigOut, sigCap, sigLenOut)
+    } catch {
+        return classifyEnclaveFailure(error, otherwise: BCKS_ERR_INTERNAL)
+    }
 }
 
 // =============================================================================
@@ -605,6 +643,13 @@ public func bcks_secure_enclave_p256_generate_ac(
     return emit(key.publicKey.x963Representation, pointOut, pointCap, pointLenOut)
 }
 
+// Classify a failure of an operation that carried no LAContext: no user authentication was asked
+// for, so errSecInteractionNotAllowed means the device is locked, not that a prompt was refused.
+private func classifyContextlessFailure(_ error: Error) -> Int32 {
+    if enclaveStatus(error) == errSecInteractionNotAllowed { return BCKS_ERR_LOCKED }
+    return classifySignFailure(error)
+}
+
 // Classify a signing failure on an access-controlled key: user-auth denials (cancel, no match,
 // interaction not allowed, auth failed) map to BCKS_ERR_AUTH; everything else is internal.
 private func classifySignFailure(_ error: Error) -> Int32 {
@@ -648,19 +693,27 @@ public func bcks_secure_enclave_p256_sign_ctx(
             return classifySignFailure(error)
         }
     }
-    guard let key = try? SecureEnclave.P256.Signing.PrivateKey(
-        dataRepresentation: bytes(blobPtr, blobLen), authenticationContext: ctx
-    ) else { return BCKS_ERR_INPUT }
+    let key: SecureEnclave.P256.Signing.PrivateKey
+    do {
+        key = try SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: bytes(blobPtr, blobLen), authenticationContext: ctx)
+    } catch {
+        return classifyEnclaveFailure(error, otherwise: BCKS_ERR_INPUT)
+    }
+    let contextless = ctx == nil
     #else
-    guard let key = try? SecureEnclave.P256.Signing.PrivateKey(
-        dataRepresentation: bytes(blobPtr, blobLen)
-    ) else { return BCKS_ERR_INPUT }
+    let key: SecureEnclave.P256.Signing.PrivateKey
+    do {
+        key = try SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: bytes(blobPtr, blobLen))
+    } catch {
+        return classifyEnclaveFailure(error, otherwise: BCKS_ERR_INPUT)
+    }
+    let contextless = true
     #endif
     do {
         let sig = try key.signature(for: bytes(msgPtr, msgLen))
         return emit(sig.derRepresentation, sigOut, sigCap, sigLenOut)
     } catch {
-        return classifySignFailure(error)
+        return contextless ? classifyContextlessFailure(error) : classifySignFailure(error)
     }
 }
 
@@ -687,8 +740,13 @@ public func bcks_secure_enclave_p256_ka_generate(
     _ pointOut: UnsafeMutablePointer<UInt8>?, _ pointCap: Int,
     _ pointLenOut: UnsafeMutablePointer<Int>?
 ) -> Int32 {
-    guard SecureEnclave.isAvailable else { return BCKS_ERR_INTERNAL }
-    guard let key = try? SecureEnclave.P256.KeyAgreement.PrivateKey() else { return BCKS_ERR_INTERNAL }
+    guard SecureEnclave.isAvailable, let ac = noAuthAccessControl() else { return BCKS_ERR_INTERNAL }
+    let key: SecureEnclave.P256.KeyAgreement.PrivateKey
+    do {
+        key = try SecureEnclave.P256.KeyAgreement.PrivateKey(accessControl: ac)
+    } catch {
+        return classifyEnclaveFailure(error, otherwise: BCKS_ERR_INTERNAL)
+    }
     let s = emit(key.dataRepresentation, blobOut, blobCap, blobLenOut)
     if s != BCKS_OK { return s }
     return emit(key.publicKey.x963Representation, pointOut, pointCap, pointLenOut)
@@ -752,20 +810,31 @@ public func bcks_secure_enclave_p256_ka_agree_ctx(
     if laHandle != 0 && ctx == nil { return BCKS_ERR_INPUT }
     // The context-carrying init needs watchOS 9; below that (floor: 7) restore without one — the
     // access control still holds, the OS just drives any prompt itself.
-    let key: SecureEnclave.P256.KeyAgreement.PrivateKey?
-    if #available(watchOS 9.0, iOS 13.0, macOS 10.15, *) {
-        key = try? SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: blob, authenticationContext: ctx)
-    } else {
-        key = try? SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: blob)
+    let key: SecureEnclave.P256.KeyAgreement.PrivateKey
+    do {
+        if #available(watchOS 9.0, iOS 13.0, macOS 10.15, *) {
+            key = try SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: blob, authenticationContext: ctx)
+        } else {
+            key = try SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: blob)
+        }
+    } catch {
+        return classifyEnclaveFailure(error, otherwise: BCKS_ERR_INPUT)
     }
+    let contextless = ctx == nil
     #else
-    let key = try? SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: blob)
+    let key: SecureEnclave.P256.KeyAgreement.PrivateKey
+    do {
+        key = try SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: blob)
+    } catch {
+        return classifyEnclaveFailure(error, otherwise: BCKS_ERR_INPUT)
+    }
+    let contextless = true
     #endif
-    guard let key = key else { return BCKS_ERR_INPUT }
     do {
         let shared = try key.sharedSecretFromKeyAgreement(with: peer)
         return emit(shared.withUnsafeBytes { Data($0) }, secretOut, secretCap, secretLenOut)
     } catch {
+        if contextless && enclaveStatus(error) == errSecInteractionNotAllowed { return BCKS_ERR_LOCKED }
         return classifyAgreeFailure(error)
     }
 }
@@ -780,7 +849,10 @@ public func bcks_secure_enclave_p256_ka_agree_ctx(
 // representation only the same Enclave can restore (see the Secure Enclave section). Items are
 // kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly: they never sync off-device, and a process the OS
 // launches in the background while the device is locked (after its first unlock since boot) can still
-// list and load its keys — the same protection class CryptoKit gives the Enclave keys themselves.
+// list and load its keys. The Enclave keys that are not bound to user authentication are created with
+// the same class (noAuthAccessControl), so a record that can be read can also be used. A key's class is
+// fixed when it is created: an Enclave key made under an older class keeps it, and refuses while the
+// device is locked with BCKS_ERR_LOCKED.
 // Only strings/bytes cross the C-ABI boundary; no CFType is exposed.
 
 private let keychainAccessibility = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
@@ -801,7 +873,11 @@ private func classifyKeychain(_ status: OSStatus) -> Int32 {
     case errSecInteractionNotAllowed: return BCKS_ERR_LOCKED
     case errSecMissingEntitlement, errSecNoAccessForItem, errSecAuthFailed, errSecUserCanceled: return BCKS_ERR_DENIED
     case errSecDecode: return BCKS_ERR_CORRUPT
-    case errSecNotAvailable, errSecDuplicateItem, errSecIO, errSecAllocate: return BCKS_ERR_RETRY
+    case errSecDuplicateItem: return BCKS_ERR_DUPLICATE
+    // "No keychain is available": a process (an extension, a sandbox) that has no keychain to reach.
+    // It is not a busy keychain, so retrying is not offered.
+    case errSecNotAvailable: return BCKS_ERR_NO_KEYCHAIN
+    case errSecIO, errSecAllocate: return BCKS_ERR_RETRY
     default: return BCKS_ERR_INTERNAL
     }
 }
@@ -817,10 +893,8 @@ public func bcks_keychain_put(
     _ dataPtr: UnsafePointer<UInt8>?, _ dataLen: Int
 ) -> Int32 {
     var query = keychainBaseQuery(service, account)
-    // Replace-any-existing: delete then add, so a re-put under the same alias is idempotent and the
-    // rewritten item always carries the current protection class.
-    let deleted = SecItemDelete(query as CFDictionary)
-    if deleted != errSecSuccess && deleted != errSecItemNotFound { return classifyKeychain(deleted) }
+    // Add only: an item already under this alias answers BCKS_ERR_DUPLICATE and is left as it is, so
+    // two writers racing to create one alias cannot replace each other's key.
     query[kSecValueData as String] = bytes(dataPtr, dataLen)
     query[kSecAttrAccessible as String] = keychainAccessibility
     return classifyKeychain(SecItemAdd(query as CFDictionary, nil))
@@ -832,6 +906,18 @@ private func upgradeAccessibility(_ query: [String: Any], _ attributes: [String:
     guard let current = attributes[kSecAttrAccessible as String] as? String else { return }
     if current == (keychainAccessibility as String) { return }
     _ = SecItemUpdate(query as CFDictionary, [kSecAttrAccessible as String: keychainAccessibility] as CFDictionary)
+}
+
+// Moves every item of `service` written under an older protection class to the current one. BCKS_OK
+// when every item already has it (or there is none); BCKS_ERR_LOCKED while an older-class item is
+// withheld because the device is locked.
+@_cdecl("bcks_keychain_migrate")
+public func bcks_keychain_migrate(_ service: UnsafePointer<CChar>?) -> Int32 {
+    let status = SecItemUpdate(
+        keychainBaseQuery(service, nil) as CFDictionary,
+        [kSecAttrAccessible as String: keychainAccessibility] as CFDictionary
+    )
+    return status == errSecItemNotFound ? BCKS_OK : classifyKeychain(status)
 }
 
 @_cdecl("bcks_keychain_get")

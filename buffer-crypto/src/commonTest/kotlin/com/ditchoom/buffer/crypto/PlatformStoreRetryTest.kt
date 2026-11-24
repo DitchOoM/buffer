@@ -6,6 +6,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TestTimeSource
 
 /**
  * A platform store whose backend fails to open answers with a typed [KeyStoreException] and opens
@@ -54,14 +56,20 @@ class PlatformStoreRetryTest {
     @Test
     fun onlyASettledResolutionIsCached() {
         var computed = 0
+        val clock = TestTimeSource()
         val unsettledThenSettled =
-            SettlingLazy {
+            SettlingLazy(1.seconds, clock) {
                 computed++
                 if (computed < 3) Settlement.Unsettled("refused-$computed") else Settlement.Settled("available")
             }
         assertEquals("refused-1", unsettledThenSettled.get())
-        assertEquals("refused-2", unsettledThenSettled.get(), "an unsettled refusal is computed again")
+        assertEquals("refused-1", unsettledThenSettled.get(), "a refusal stands for the retry window")
+        assertEquals(1, computed)
+        clock += 1.seconds
+        assertEquals("refused-2", unsettledThenSettled.get(), "after the window the refusal is computed again")
+        clock += 1.seconds
         assertEquals("available", unsettledThenSettled.get())
+        clock += 10.seconds
         assertEquals("available", unsettledThenSettled.get())
         assertEquals(3, computed, "a settled answer is never recomputed")
     }
@@ -69,7 +77,7 @@ class PlatformStoreRetryTest {
     @Test
     fun theFirstSettledAnswerWins() {
         val first = Any()
-        val lazy = SettlingLazy { Settlement.Settled(first) }
+        val lazy = SettlingLazy(1.seconds, TestTimeSource()) { Settlement.Settled(first) }
         assertSame(first, lazy.get())
         assertSame(first, lazy.get())
     }

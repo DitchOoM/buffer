@@ -309,8 +309,9 @@ typealias HardwareKeySpec = ProtectedKeySpec
  */
 interface HardwareKeyProvider : ProtectedKeyProvider {
     /**
-     * `true` if keys live in a dedicated secure element (StrongBox / Secure Enclave), `false` for a
-     * software-isolated keystore (TEE-only). Informational; does not change the op contract.
+     * `true` if every key from this provider lives in a dedicated secure element (Secure Enclave), `false` when that
+     * cannot be promised for every key. The Android Keystore provider is always `false`: whether StrongBox holds a key
+     * is known only per key, from its own [KeyCustody]. Informational; does not change the op contract.
      */
     val dedicatedSecureElement: Boolean
 
@@ -428,7 +429,9 @@ internal class ProtectedAesGcmKey(
     val gatedSeal: HardwareAesGcmSeal,
     val gatedOpen: HardwareAesGcmOpen,
     private val onClose: () -> Unit = {},
-) : AesGcmKey {
+    override val secureElementFallback: SecureElementFallback = SecureElementFallback.None,
+) : AesGcmKey,
+    FallbackNoted {
     /**
      * Opaque handle; there is no process-memory material to wipe. [onClose] lets a provider release
      * an out-of-process resource (e.g. delete the keystore alias). Defaults to a no-op.
@@ -449,7 +452,9 @@ internal class ProtectedSigningKey(
     /** The public key matching this signing key, captured by the provider at generation. */
     override val verifyKey: VerifyKey,
     private val onClose: () -> Unit = {},
-) : SigningKey {
+    override val secureElementFallback: SecureElementFallback = SecureElementFallback.None,
+) : SigningKey,
+    FallbackNoted {
     /**
      * Opaque handle; there is no process-memory material to wipe. [onClose] lets a provider release
      * an out-of-process resource (e.g. delete the keystore alias). Defaults to a no-op.

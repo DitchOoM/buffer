@@ -246,7 +246,9 @@ internal class ProtectedKeyAgreementPrivateKey(
     val custody: KeyCustody.NonExportable,
     val gatedDh: HardwareDh,
     private val onClose: () -> Unit = {},
-) : KeyAgreementPrivateKey {
+    override val secureElementFallback: SecureElementFallback = SecureElementFallback.None,
+) : KeyAgreementPrivateKey,
+    FallbackNoted {
     override val provenance: KeyProvenance get() = custody.provenance
 
     /**

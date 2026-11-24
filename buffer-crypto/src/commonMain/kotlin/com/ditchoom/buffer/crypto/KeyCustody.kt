@@ -70,3 +70,72 @@ val KeyCustody.provenance: KeyProvenance get() =
 /** `true` when the key lives in a dedicated secure element (StrongBox / Secure Enclave). */
 val KeyCustody.dedicatedSecureElement: Boolean get() =
     this is KeyCustody.NonExportable.Hardware && dedicatedSecureElement
+
+/**
+ * Whether a hardware key that asked for a dedicated secure element (Android StrongBox) was made in the TEE instead,
+ * and why. Known only for a key generated in this process: a reattached key reports [None], since the keystore keeps
+ * no record of the fallback. The key's [KeyCustody] says where it lives either way; this says why it is not where it
+ * asked to be, with the keystore's code, so a caller can log it.
+ */
+sealed interface SecureElementFallback {
+    /** No fallback happened, or none is known (a software key, a reattached key, a platform without one). */
+    data object None : SecureElementFallback
+
+    /** Asked for StrongBox, made in the TEE because of [reason]; [keystoreCode] is what the keystore said. */
+    data class ToTee(
+        val reason: SecureElementFallbackReason,
+        val keystoreCode: KeystoreCode,
+    ) : SecureElementFallback
+}
+
+/** Why a StrongBox generation was retried in the TEE. */
+enum class SecureElementFallbackReason {
+    /** The device has no StrongBox for this key. */
+    SecureElementAbsent,
+
+    /** StrongBox does not implement the key's algorithm, size or purpose. */
+    UnsupportedParameters,
+
+    /** StrongBox stayed busy or unreachable through every attempt. */
+    SecureElementBusy,
+
+    /** The StrongBox KeyMint failed the request. */
+    KeyMintFailure,
+
+    /** The keystore reported a generic system error for the StrongBox request. */
+    SystemError,
+
+    /** The keystore gave no code that says why (before Android 13 it publishes none), or a code not named above. */
+    Unclassified,
+}
+
+/** An Android keystore error code, as the platform publishes it. */
+sealed interface KeystoreCode {
+    /** `android.security.KeyStoreException.getNumericErrorCode()`, from API 33. */
+    data class Public(
+        val code: Int,
+    ) : KeystoreCode
+
+    /** The keystore published no code (before API 33, or no keystore exception in the cause chain). */
+    data object Unpublished : KeystoreCode
+}
+
+/** A key type that records its [SecureElementFallback]. */
+internal interface FallbackNoted {
+    val secureElementFallback: SecureElementFallback
+}
+
+/** This signing key's [SecureElementFallback]: [SecureElementFallback.None] for any key that did not fall back. */
+val SigningKey.secureElementFallback: SecureElementFallback get() = fallbackOf(this)
+
+/** This AES-GCM key's [SecureElementFallback]. */
+val AesGcmKey.secureElementFallback: SecureElementFallback get() = fallbackOf(this)
+
+/** This key-agreement private key's [SecureElementFallback]. */
+val KeyAgreementPrivateKey.secureElementFallback: SecureElementFallback get() = fallbackOf(this)
+
+private fun fallbackOf(key: Any): SecureElementFallback =
+    when (key) {
+        is FallbackNoted -> key.secureElementFallback
+        else -> SecureElementFallback.None
+    }

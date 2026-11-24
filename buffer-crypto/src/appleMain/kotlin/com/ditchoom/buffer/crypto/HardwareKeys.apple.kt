@@ -9,7 +9,6 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_AUTH
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_DENIED
-import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_INPUT
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_available
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_p256_generate
@@ -84,7 +83,9 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
      * in [appleEnclaveProbe] — a failure routes key agreement to the software floor instead of
      * over-promising hardware custody.
      */
-    private val agreementSupported: Boolean by lazy { probeAgreement() }
+    private val agreementSupport = SettlingLazy(PROBE_RETRY_AFTER, TimeSource.Monotonic) { probeAgreement() }
+
+    private val agreementSupported: Boolean get() = agreementSupport.get()
 
     override fun eligible(alg: ProtectedKeyAlgorithm): Boolean =
         when (alg) {
@@ -245,7 +246,7 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
      * [enclaveAgreeP256] path. Generation alone would over-promise — an element that mints the key
      * and then refuses the DH must route to the software floor, not report hardware custody.
      */
-    private fun probeAgreement(): Boolean =
+    private fun probeAgreement(): Settlement<Boolean> =
         try {
             val key = enclaveGenerateKaP256()
             try {
@@ -254,7 +255,7 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
                     val secret = enclaveAgreeP256(key.blob, peer.publicKey.encoded, laHandle = 0L)
                     val ok = secret != null && secret.remaining() == KeyAgreementCurve.P256.sharedSecretBytes
                     secret?.freeNativeMemory()
-                    ok
+                    Settlement.Settled(ok)
                 } finally {
                     peer.close()
                 }
@@ -262,9 +263,14 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
                 key.blob.freeNativeMemory()
                 key.point.freeNativeMemory()
             }
-        } catch (_: Throwable) {
+        } catch (_: KeyStoreException.DeviceLocked) {
+            // Locked: the answer after the unlock may differ, so it is not settled.
+            Settlement.Unsettled(false)
+        } catch (_: HardwareKeyException.TransientHardwareFailure) {
+            Settlement.Unsettled(false)
+        } catch (_: CryptoException) {
             // No Enclave, no entitlement, or an element that declines agreement keys.
-            false
+            Settlement.Settled(false)
         }
 
     private fun requireP256(peer: KeyAgreementPublicKey) =
@@ -616,7 +622,11 @@ internal inline fun enclaveGenerate(
         blobWritten = blobLen.value.toInt()
         pointWritten = pointLen.value.toInt()
     }
-    if (status != BCKS_OK) throw HardwareKeyException.SecureElementUnavailable()
+    if (status != BCKS_OK) {
+        blob.freeNativeMemory()
+        point.freeNativeMemory()
+        throw enclaveGenerateFailure(status)
+    }
     blob.position(blobWritten)
     blob.resetForRead()
     point.position(pointWritten)
@@ -673,8 +683,7 @@ private fun enclaveSignP256Into(
             out
         }
         BCKS_ERR_AUTH -> null
-        BCKS_ERR_INPUT -> throw HardwareKeyException.KeyInvalidated()
-        else -> throw HardwareKeyException.TransientHardwareFailure(retryable = false)
+        else -> throw enclaveSignFailure(status)
     }
 }
 
@@ -708,7 +717,7 @@ internal fun enclaveProbeOf(status: Int): Settlement<EnclaveProbe> =
  * A refusal for any other reason is probed again on the next resolution rather than pinned.
  */
 private val enclaveProbe =
-    SettlingLazy<EnclaveProbe> {
+    SettlingLazy<EnclaveProbe>(PROBE_RETRY_AFTER, TimeSource.Monotonic) {
         if (bcks_secure_enclave_available() == 0) {
             Settlement.Settled(EnclaveProbe.NotPresent)
         } else {

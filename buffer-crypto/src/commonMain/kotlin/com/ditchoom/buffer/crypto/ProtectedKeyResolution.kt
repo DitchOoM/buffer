@@ -3,6 +3,10 @@ package com.ditchoom.buffer.crypto
 import kotlin.concurrent.atomics.AtomicReference
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.jvm.JvmInline
+import kotlin.time.ComparableTimeMark
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 /*
  * Typed backend resolution — the "why", not just the "whether".
@@ -236,24 +240,63 @@ internal sealed interface Settlement<out T> {
 }
 
 /**
- * A lazily computed value that caches only a [Settlement.Settled] outcome. An [Settlement.Unsettled]
- * outcome is returned and recomputed on the next [get]. Concurrent first reads may compute twice;
- * the first settled value wins and every later read sees it.
+ * How long a refused probe's answer stands before the next call probes again, so a refused backend does not mint and
+ * discard a probe key on every eligibility or custody question.
  */
+internal val PROBE_RETRY_AFTER: Duration = 5.seconds
+
+/**
+ * A lazily computed value that caches a [Settlement.Settled] outcome for good and an [Settlement.Unsettled] one for
+ * [retryAfter], measured on [timeSource]: within that window the unsettled answer is returned again, after it the next
+ * [get] computes again. So a refused probe is neither pinned for the process lifetime nor repeated on every call.
+ * Concurrent reads may compute twice; the first settled value wins and every later read sees it.
+ */
+
 @OptIn(ExperimentalAtomicApi::class)
 internal class SettlingLazy<T : Any>(
+    private val retryAfter: Duration,
+    private val timeSource: TimeSource.WithComparableMarks,
     private val compute: () -> Settlement<T>,
 ) {
-    private val settled = AtomicReference<T?>(null)
+    private sealed interface Held<out T> {
+        data object Nothing : Held<kotlin.Nothing>
 
-    fun get(): T {
-        settled.load()?.let { return it }
-        return when (val attempt = compute()) {
-            is Settlement.Settled -> {
-                settled.compareAndSet(null, attempt.value)
-                settled.load() ?: attempt.value
+        class Settled<T>(
+            val value: T,
+        ) : Held<T>
+
+        class Unsettled<T>(
+            val value: T,
+            val until: ComparableTimeMark,
+        ) : Held<T>
+    }
+
+    private val held = AtomicReference<Held<T>>(Held.Nothing)
+
+    fun get(): T =
+        when (val current = held.load()) {
+            is Held.Settled -> current.value
+            is Held.Unsettled -> if (timeSource.markNow() < current.until) current.value else recompute()
+            Held.Nothing -> recompute()
+        }
+
+    private fun recompute(): T =
+        when (val attempt = compute()) {
+            is Settlement.Settled -> settle(Held.Settled(attempt.value))
+            is Settlement.Unsettled -> {
+                val now = held.load()
+                val until = timeSource.markNow() + retryAfter
+                if (now !is Held.Settled) held.compareAndSet(now, Held.Unsettled(attempt.value, until))
+                attempt.value
             }
-            is Settlement.Unsettled -> attempt.value
+        }
+
+    /** Stores [settled] unless another read settled first; either way, returns the value every later read sees. */
+    private fun settle(settled: Held.Settled<T>): T {
+        while (true) {
+            val now = held.load()
+            if (now is Held.Settled) return now.value
+            if (held.compareAndSet(now, settled)) return settled.value
         }
     }
 }

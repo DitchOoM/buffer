@@ -178,7 +178,7 @@ sealed class KeyStoreException protected constructor(
      * data (Apple `errSecInteractionNotAllowed`). Always worth retrying once the device is unlocked;
      * nothing about the stored keys changed.
      */
-    class DeviceLocked internal constructor() : KeyStoreException("key store is unavailable until the device is unlocked")
+    class DeviceLocked internal constructor() : KeyStoreException("key store unavailable until device unlock")
 
     /**
      * This process may not reach the store at all: the binary lacks the entitlement the backend

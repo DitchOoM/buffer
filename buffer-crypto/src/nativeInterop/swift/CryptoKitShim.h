@@ -28,11 +28,15 @@
 // protection class is unavailable until the device is unlocked (errSecInteractionNotAllowed), so a
 // retry after unlock can succeed. DENIED: this process may not reach the item at all (missing
 // entitlement, no access, a refused prompt). CORRUPT: the stored item cannot be decoded. RETRY: the
-// keychain is momentarily unavailable or another writer raced this one.
+// keychain is momentarily busy.
 #define BCKS_ERR_LOCKED (-7)
 #define BCKS_ERR_DENIED (-8)
 #define BCKS_ERR_CORRUPT (-9)
 #define BCKS_ERR_RETRY (-10)
+// An item already exists under the alias a put named; the put left it untouched.
+#define BCKS_ERR_DUPLICATE (-11)
+// This process has no keychain to reach at all (errSecNotAvailable); retrying does not help.
+#define BCKS_ERR_NO_KEYCHAIN (-12)
 
 // AES-GCM.
 int32_t bcks_aesgcm_seal(
@@ -143,7 +147,10 @@ int32_t bcks_secure_enclave_available(void);
 
 // Generates and discards one Enclave P-256 signing key. BCKS_OK when the Enclave minted it,
 // BCKS_ERR_DENIED when this binary lacks the entitlement the Enclave requires (stable for the life of
-// the process), BCKS_ERR_INTERNAL for any other refusal (which a later probe may not repeat).
+// the process), BCKS_ERR_LOCKED while the device is locked, BCKS_ERR_INTERNAL for any other refusal
+// (which a later probe may not repeat). Enclave keys that are not bound to user authentication are
+// AfterFirstUnlockThisDeviceOnly with privateKeyUsage; an Enclave operation on a key whose class is
+// unavailable because the device is locked answers BCKS_ERR_LOCKED.
 int32_t bcks_secure_enclave_probe(void);
 
 int32_t bcks_secure_enclave_p256_generate(
@@ -232,7 +239,8 @@ int32_t bcks_secure_enclave_p256_ka_agree_ctx(
 // Every keychain call answers a keychain refusal with one of BCKS_ERR_LOCKED / DENIED / CORRUPT /
 // RETRY / INTERNAL (see bcks_keychain_classify), never a bare failure.
 
-// Stores dataPtr/dataLen under (service, account), replacing any existing item.
+// Stores dataPtr/dataLen under (service, account). BCKS_ERR_DUPLICATE when an item is already there;
+// it is never replaced.
 int32_t bcks_keychain_put(
     const char *service, const char *account,
     const uint8_t *dataPtr, size_t dataLen);
@@ -257,6 +265,10 @@ int32_t bcks_keychain_delete(const char *service, const char *account);
 int32_t bcks_keychain_aliases(
     const char *service,
     uint8_t *out, size_t outCap, size_t *outLenOut);
+
+// Moves every item of `service` to the current protection class. BCKS_ERR_LOCKED while an item under an
+// older class is withheld because the device is locked.
+int32_t bcks_keychain_migrate(const char *service);
 
 // The BCKS status a keychain OSStatus classifies to (BCKS_OK for errSecSuccess, BCKS_ERR_INPUT for
 // errSecItemNotFound). Exposed so the classification itself is testable.

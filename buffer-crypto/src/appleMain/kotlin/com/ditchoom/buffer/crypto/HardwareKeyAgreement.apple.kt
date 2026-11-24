@@ -9,6 +9,7 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_AUTH
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_INPUT
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_LOCKED
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_PEER
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_p256_ka_agree_ctx
@@ -132,6 +133,8 @@ private fun enclaveAgreeFailure(status: Int): Throwable =
         BCKS_ERR_PEER -> InvalidPublicKey(KeyAgreementCurve.P256)
         // The Enclave cannot restore this blob (wrong device, or an OS-invalidated key).
         BCKS_ERR_INPUT -> HardwareKeyException.KeyInvalidated()
+        // The key's protection class is unavailable while the device is locked; it works again after the unlock.
+        BCKS_ERR_LOCKED -> KeyStoreException.DeviceLocked()
         else -> HardwareKeyException.TransientHardwareFailure(retryable = false)
     }
 

@@ -8,10 +8,14 @@ package com.ditchoom.buffer.crypto
  * constant [ConcreteKeyProvider.custody].
  */
 interface KeyProvider {
-    /** The exact [KeyCustody] a key generated for [alg] will have on this platform (routing introspection). */
+    /**
+     * The [KeyCustody] a key generated for [alg] has at least on this platform (routing introspection); a hardware key
+     * may report a stronger custody of its own. A platform [KeyStore] whose backend could not be opened throws the
+     * typed [KeyStoreException] that refused it, and opens it again on the next call.
+     */
     fun custodyFor(alg: ProtectedKeyAlgorithm): KeyCustody
 
-    /** Whether this provider can generate a key for [alg]. */
+    /** Whether this provider can generate a key for [alg]. Throws like [custodyFor] when a backend cannot open. */
     fun eligible(alg: ProtectedKeyAlgorithm): Boolean
 
     /** Generates a fresh signing key for [scheme], per [spec]. */

@@ -4,18 +4,24 @@ package com.ditchoom.buffer.crypto
 
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_CORRUPT
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_DENIED
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_DUPLICATE
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_INPUT
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_INTERNAL
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_LOCKED
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_NO_KEYCHAIN
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_RETRY
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_keychain_classify
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -39,15 +45,50 @@ class KeychainStoreHardeningTest {
         assertEquals(BCKS_ERR_DENIED, bcks_keychain_classify(ERR_SEC_MISSING_ENTITLEMENT))
         assertEquals(BCKS_ERR_DENIED, bcks_keychain_classify(ERR_SEC_AUTH_FAILED))
         assertEquals(BCKS_ERR_CORRUPT, bcks_keychain_classify(ERR_SEC_DECODE))
-        assertEquals(BCKS_ERR_RETRY, bcks_keychain_classify(ERR_SEC_DUPLICATE_ITEM))
-        assertEquals(BCKS_ERR_RETRY, bcks_keychain_classify(ERR_SEC_NOT_AVAILABLE))
+        assertEquals(BCKS_ERR_DUPLICATE, bcks_keychain_classify(ERR_SEC_DUPLICATE_ITEM))
+        assertEquals(BCKS_ERR_NO_KEYCHAIN, bcks_keychain_classify(ERR_SEC_NOT_AVAILABLE))
+        assertEquals(BCKS_ERR_RETRY, bcks_keychain_classify(ERR_SEC_IO))
         assertEquals(BCKS_ERR_INTERNAL, bcks_keychain_classify(ERR_SEC_PARAM))
 
         assertIs<KeyStoreException.AccessDenied>(keychainFailure(BCKS_ERR_DENIED))
         assertIs<KeyStoreException.CorruptEntry>(keychainFailure(BCKS_ERR_CORRUPT))
         assertTrue(assertIs<KeyStoreException.StorageFailure>(keychainFailure(BCKS_ERR_RETRY)).retryable)
+        assertTrue(!assertIs<KeyStoreException.StorageFailure>(keychainFailure(BCKS_ERR_NO_KEYCHAIN)).retryable)
         assertTrue(!assertIs<KeyStoreException.StorageFailure>(keychainFailure(BCKS_ERR_INTERNAL)).retryable)
     }
+
+    @Test
+    fun aLockedEnclaveIsDeviceLockedWhereverItRefuses() {
+        assertIs<KeyStoreException.DeviceLocked>(enclaveGenerateFailure(BCKS_ERR_LOCKED))
+        assertIs<HardwareKeyException.SecureElementUnavailable>(enclaveGenerateFailure(BCKS_ERR_INTERNAL))
+        assertIs<Settlement.Unsettled<EnclaveProbe>>(enclaveProbeOf(BCKS_ERR_LOCKED), "asked again after the unlock")
+    }
+
+    @Test
+    fun twoStoresRacingToCreateOneAliasEndWithOneKey() =
+        runTest {
+            if (appleEnclaveProviderOrNull() == null) return@runTest
+            val name = "bcks-race-${kotlin.random.Random.nextInt(Int.MAX_VALUE)}"
+            try {
+                val keys =
+                    (0 until 4)
+                        .map {
+                            async(Dispatchers.Default) {
+                                CryptoCapabilities
+                                    .keyStore(
+                                        KeyStoreConfig(name = name),
+                                    ).getOrGenerateSigning("one", SignatureScheme.EcdsaP256)
+                            }
+                        }.awaitAll()
+                val stored = assertNotNull(CryptoCapabilities.keyStore(KeyStoreConfig(name = name)).loadSigning("one"))
+                val expected = stored.verifyKey.exportEncoded().toHexForTest()
+                keys.forEach { key ->
+                    assertEquals(expected, key.verifyKey.exportEncoded().toHexForTest(), "each racer holds it")
+                }
+            } finally {
+                CryptoCapabilities.keyStore(KeyStoreConfig(name = name)).delete("one")
+            }
+        }
 
     @Test
     fun aRefusedEnclaveProbeIsTypedAndNeverASoftwareStore() =
@@ -76,5 +117,13 @@ class KeychainStoreHardeningTest {
         const val ERR_SEC_DUPLICATE_ITEM = -25299
         const val ERR_SEC_NOT_AVAILABLE = -25291
         const val ERR_SEC_PARAM = -50
+        const val ERR_SEC_IO = -36
+        const val BYTE_MASK = 0xFF
+        const val HEX = 16
     }
+
+    private fun com.ditchoom.buffer.ReadBuffer.toHexForTest(): String =
+        (0 until remaining()).joinToString("") { i ->
+            (get(position() + i).toInt() and BYTE_MASK).toString(HEX).padStart(2, '0')
+        }
 }

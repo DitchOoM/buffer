@@ -32,13 +32,13 @@ import javax.crypto.KeyAgreement
  */
 internal fun agreementSpec(
     alias: String,
-    strongBox: Boolean,
+    request: StrongBoxRequest,
     policy: ResolvedAndroidPolicy,
 ): KeyGenParameterSpec =
     KeyGenParameterSpec
         .Builder(alias, KeyProperties.PURPOSE_AGREE_KEY)
         .setAlgorithmParameterSpec(ECGenParameterSpec(SECP256R1))
-        .setIsStrongBoxBacked(strongBox)
+        .setIsStrongBoxBacked(request.strongBoxBacked)
         .apply { applyUserAuth(policy) }
         .build()
 
