@@ -13,8 +13,9 @@ import kotlin.test.assertTrue
  *
  * Three states, each with its own honest answer: a curve the Enclave never backs (X25519) is
  * refused outright; an element whose generate-and-agree probe fails refuses rather than serving
- * ECDH at a silently weaker custody; and a target with no Enclave at all (the iOS simulator, an
- * unentitled binary) degrades to the software store — still functional, never claiming hardware.
+ * ECDH at a silently weaker custody; and hardware with no Enclave at all (the iOS simulator)
+ * degrades to the software store — still functional, never claiming hardware. (An Enclave that is
+ * present but refuses the probe is a typed store failure instead; see [KeychainStoreHardeningTest].)
  */
 class EnclaveAgreementEligibilityTest {
     private val storeName = "bcks-kex-gate-${Random.nextInt(Int.MAX_VALUE)}"
@@ -53,9 +54,9 @@ class EnclaveAgreementEligibilityTest {
     @Test
     fun withoutAnEnclaveTheStoreDegradesToAnHonestSoftwareTier() =
         runTest {
-            if (appleEnclaveProviderOrNull() != null) return@runTest
-            // iOS simulator / unentitled binary: keyStore() falls back to the software store. Key
-            // agreement still works there — it just must never claim hardware custody.
+            if (appleEnclaveProbe() != EnclaveProbe.NotPresent) return@runTest
+            // iOS simulator: keyStore() falls back to the software store. Key agreement still works
+            // there — it just must never claim hardware custody.
             val s = store()
             val alias = "degraded-kex"
             val pair = s.getOrGenerateKeyAgreement(alias, KeyAgreementCurve.P256)

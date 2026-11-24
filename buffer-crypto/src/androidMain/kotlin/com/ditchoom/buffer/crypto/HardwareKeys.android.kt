@@ -21,7 +21,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.math.BigInteger
 import java.security.GeneralSecurityException
-import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.PrivateKey
@@ -52,20 +51,25 @@ import javax.crypto.spec.GCMParameterSpec
  * ECDH P-256 key agreement. (Ed25519 / P-384 / P-521 / X25519 are not offered — see [eligible].)
  *
  * **Robustness shape (all driven by real device behaviour):**
- *  - **StrongBox fallback is exception-broad.** A device that lacks (or under-provisions) a secure
- *    element does not reliably throw [StrongBoxUnavailableException]: Pixel 4 surfaces a plain
- *    `ProviderException` and Samsung S24/Android 14 a `KeyStoreException` (code 4) even for a
- *    spec-guaranteed AES-256-GCM key. So the StrongBox attempt catches the whole
- *    `GeneralSecurityException` / `ProviderException` family and retries in the TEE rather than
- *    crashing; a terminal TEE failure is normalized to a [HardwareKeyException] state.
+ *  - **StrongBox falls back to the TEE only when StrongBox cannot hold the key.** A device that
+ *    lacks (or under-provisions) a secure element does not reliably throw
+ *    [StrongBoxUnavailableException]: it may refuse with a keystore code instead (see
+ *    [strongBoxRefusal]). Those refusals retry in the TEE; a *transient* refusal (StrongBox busy)
+ *    surfaces as [HardwareKeyException.TransientHardwareFailure] instead, because a key minted in the
+ *    TEE while StrongBox was only busy would stay weaker for its whole life.
+ *  - **Every key reports its own custody.** After each generation and reattach the provider reads
+ *    the key's `KeyInfo` security level and accepts only TEE or StrongBox: a key the keystore placed
+ *    anywhere else (a software KeyMint behind a compatibility layer, an unknown level) is deleted
+ *    and refused with [InsufficientKeyCustody]. The custody on each key is what its `KeyInfo` says,
+ *    never what was requested.
  *  - **The keystore generates the GCM IV.** AES keys are *randomized-encryption-required* (the JCA
  *    default), so `Cipher.init(ENCRYPT_MODE, key)` makes the keystore mint a fresh IV; the seal reads
  *    it back via [Cipher.getIV] and frames `nonce ‖ ciphertext ‖ tag`. The library never supplies a
  *    seal IV — a single reused GCM nonce is catastrophic, and letting the element choose matches
  *    Signal / Tink / AndroidX.
- *  - **`dedicatedSecureElement` is confirmed, not inferred.** On API 31+ the probe reads back
- *    `KeyInfo.getSecurityLevel() == SECURITY_LEVEL_STRONGBOX` (a device may honor a StrongBox request
- *    silently in the TEE); pre-31 cannot query the level, so it stays best-effort (no throw ⇒ assume).
+ *  - **The provider's own custody is the floor.** Which element holds a key is known only per key,
+ *    so [dedicatedSecureElement] is `false` and [custody] is the TEE floor every key is guaranteed;
+ *    a StrongBox key says so on its own [KeyCustody].
  *  - **All keystore access is serialized + off the calling thread.** AndroidKeyStore is not
  *    thread-safe and StrongBox ops are slow, so generation and every per-op cipher/signature run
  *    under a [Mutex] on [Dispatchers.Default]. The auth gate ([HardwareAuthorization.authorize]) is
@@ -93,7 +97,7 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
     /**
      * Serializes suspend keystore ops (so only one [Dispatchers.Default] worker is ever blocked on a
      * slow StrongBox round-trip at a time). [keystoreMonitor] additionally excludes the non-suspend
-     * lazy [probeStrongBox] — which can't take the suspend [Mutex] — so the probe and live ops never
+     * [probeAgreement] — which can't take the suspend [Mutex] — so the probe and live ops never
      * touch the keystore concurrently. Lock order is always Mutex → monitor; the probe takes only the
      * monitor, so there is no cycle.
      */
@@ -101,21 +105,23 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
     private val keystoreMonitor = Any()
 
     /**
-     * `true` once a `setIsStrongBoxBacked(true)` generation succeeds *and*, on API 31+, the resulting
-     * key reports `SECURITY_LEVEL_STRONGBOX` — i.e. a dedicated StrongBox secure element actually
-     * backs it. Probed once (generate-and-delete a throwaway key) because the SPI carries no `Context`
-     * with which to query `FEATURE_STRONGBOX_KEYSTORE`.
+     * `false`: the floor every key from this provider is guaranteed (the TEE). Whether StrongBox holds
+     * a particular key is known only from that key's `KeyInfo`, so it is reported on the key's own
+     * [KeyCustody], not pinned here for every key.
      */
-    override val dedicatedSecureElement: Boolean by lazy { probeStrongBox() }
+    override val dedicatedSecureElement: Boolean get() = false
 
     /**
-     * `true` once a `PURPOSE_AGREE_KEY` generation *and* a full keystore ECDH against a software
-     * peer succeed. Probed (generate-and-agree with a throwaway key) rather than inferred from the
-     * API level: `PURPOSE_AGREE_KEY` exists from API 31, but whether the device's Keymaster/KeyMint
-     * actually implements agreement is exactly the kind of claim cheap-device implementations and
-     * the emulator diverge on — so the answer comes from the keystore itself, like [probeStrongBox].
+     * `true` once a `PURPOSE_AGREE_KEY` generation lands in secure hardware *and* a full keystore
+     * ECDH against a software peer succeeds. Probed (generate-and-agree with a throwaway key) rather
+     * than inferred from the API level: `PURPOSE_AGREE_KEY` exists from API 31, but whether the
+     * device's KeyMint actually implements agreement in hardware — rather than in a software KeyMint
+     * behind a compatibility layer — is exactly what devices diverge on. A transient keystore refusal
+     * is not settled, so the next eligibility check probes again.
      */
-    private val agreementSupported: Boolean by lazy { probeAgreement() }
+    private val agreementSupport = SettlingLazy { probeAgreement() }
+
+    private val agreementSupported: Boolean get() = agreementSupport.get()
 
     override fun eligible(alg: ProtectedKeyAlgorithm): Boolean =
         when (alg) {
@@ -143,29 +149,17 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
         }
         val policy = ResolvedAndroidPolicy.Advisory(spec.authorization)
         val alias = newAlias("ecdh")
-        val keyPair = keystoreOp { generateAgreementKeyPair(alias, policy) }
-        val publicKey = KeyAgreementPublicKey.of(curve, uncompressedPoint(keyPair.public as ECPublicKey))
+        val placed = keystoreOp { generateAgreementKeyPair(alias, policy) }
+        val publicKey = KeyAgreementPublicKey.of(curve, uncompressedPoint(placed.key.public as ECPublicKey))
         // Ephemeral: the scratch alias is deleted when the returned pair (or its private key) is closed.
         return buildKeyAgreementPair(
-            keyPair.private,
+            placed.key.private,
             publicKey,
-            policy.gate,
+            policy,
+            placed.custody,
             onClose = { runCatching { keyStore.deleteEntry(alias) } },
         )
     }
-
-    /**
-     * Wraps an AndroidKeystore ECDH private-key handle as an **advisory**-gated [KeyAgreementKeyPair]
-     * — the [gate] is [ProtectedKeySpec.authorization], evaluated before every derive. This is the
-     * path the unbound provider and the persistent store use; the OS-bound path takes the
-     * [ResolvedAndroidPolicy] overload below.
-     */
-    internal fun buildKeyAgreementPair(
-        privateKey: PrivateKey,
-        publicKey: KeyAgreementPublicKey,
-        gate: HardwareAuthorization,
-        onClose: () -> Unit,
-    ): KeyAgreementKeyPair = buildKeyAgreementPair(privateKey, publicKey, ResolvedAndroidPolicy.Advisory(gate), onClose)
 
     /**
      * Wraps an AndroidKeystore ECDH private-key handle as a [KeyAgreementKeyPair] gated by
@@ -180,6 +174,7 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
         privateKey: PrivateKey,
         publicKey: KeyAgreementPublicKey,
         policy: ResolvedAndroidPolicy,
+        custody: KeyCustody.NonExportable.Hardware,
         onClose: () -> Unit,
     ): KeyAgreementKeyPair {
         val curve = publicKey.curve
@@ -240,13 +235,14 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
     internal suspend fun generateKeyAgreementBound(policy: ResolvedAndroidPolicy): KeyAgreementKeyPair {
         if (!eligible(ProtectedKeyAlgorithm.EcdhP256)) throw HardwareKeyException.AlgorithmNotEligible()
         val alias = newAlias("ecdh")
-        val keyPair = keystoreOp { generateAgreementKeyPair(alias, policy) }
+        val placed = keystoreOp { generateAgreementKeyPair(alias, policy) }
         val publicKey =
-            KeyAgreementPublicKey.of(KeyAgreementCurve.P256, uncompressedPoint(keyPair.public as ECPublicKey))
+            KeyAgreementPublicKey.of(KeyAgreementCurve.P256, uncompressedPoint(placed.key.public as ECPublicKey))
         return buildKeyAgreementPair(
-            keyPair.private,
+            placed.key.private,
             publicKey,
             policy,
+            placed.custody,
             onClose = { runCatching { keyStore.deleteEntry(alias) } },
         )
     }
@@ -258,9 +254,15 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
     ): AesGcmKey {
         requireValidAesSize(aesKeySizeBits)
         val alias = newAlias("aes")
-        val key = keystoreOp { generateAesKey(alias, aesKeySizeBits, policy) }
+        val placed = keystoreOp { generateAesKey(alias, aesKeySizeBits, policy) }
         // Ephemeral: the scratch alias is deleted when the returned key is closed.
-        return buildAesGcmKey(key, aesKeySizeBits, policy, onClose = { runCatching { keyStore.deleteEntry(alias) } })
+        return buildAesGcmKey(
+            placed.key,
+            aesKeySizeBits,
+            policy,
+            placed.custody,
+            onClose = { runCatching { keyStore.deleteEntry(alias) } },
+        )
     }
 
     /**
@@ -274,6 +276,7 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
         key: SecretKey,
         sizeBits: Int,
         policy: ResolvedAndroidPolicy,
+        custody: KeyCustody.NonExportable.Hardware,
         onClose: () -> Unit,
     ): AesGcmKey =
         ProtectedAesGcmKey(
@@ -334,10 +337,16 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
     ): SigningKey {
         if (!eligible(scheme.toProtectedKeyAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
         val alias = newAlias("ec")
-        val keyPair = keystoreOp { generateEcKeyPair(alias, policy) }
-        val verifyKey = VerifyKey.ecdsaP256(uncompressedPoint(keyPair.public as ECPublicKey))
+        val placed = keystoreOp { generateEcKeyPair(alias, policy) }
+        val verifyKey = VerifyKey.ecdsaP256(uncompressedPoint(placed.key.public as ECPublicKey))
         // Ephemeral: the scratch alias is deleted when the returned key is closed.
-        return buildSigningKey(keyPair.private, verifyKey, policy, onClose = { runCatching { keyStore.deleteEntry(alias) } })
+        return buildSigningKey(
+            placed.key.private,
+            verifyKey,
+            policy,
+            placed.custody,
+            onClose = { runCatching { keyStore.deleteEntry(alias) } },
+        )
     }
 
     /**
@@ -350,6 +359,7 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
         privateKey: PrivateKey,
         verifyKey: VerifyKey,
         policy: ResolvedAndroidPolicy,
+        custody: KeyCustody.NonExportable.Hardware,
         onClose: () -> Unit,
     ): SigningKey =
         ProtectedSigningKey(
@@ -388,9 +398,9 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
         spec: ProtectedKeySpec,
     ): SigningKey {
         val policy = ResolvedAndroidPolicy.Advisory(spec.authorization)
-        val keyPair = keystoreOp { generateEcKeyPair(alias, policy) }
-        val verifyKey = VerifyKey.ecdsaP256(uncompressedPoint(keyPair.public as ECPublicKey))
-        return buildSigningKey(keyPair.private, verifyKey, policy, onClose = {})
+        val placed = keystoreOp { generateEcKeyPair(alias, policy) }
+        val verifyKey = VerifyKey.ecdsaP256(uncompressedPoint(placed.key.public as ECPublicKey))
+        return buildSigningKey(placed.key.private, verifyKey, policy, placed.custody, onClose = {})
     }
 
     /** Generates a persistent AES-GCM key under [alias]; onClose is a no-op (the stored key survives). */
@@ -400,8 +410,8 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
     ): AesGcmKey {
         requireValidAesSize(spec.aesKeySizeBits)
         val policy = ResolvedAndroidPolicy.Advisory(spec.authorization)
-        val key = keystoreOp { generateAesKey(alias, spec.aesKeySizeBits, policy) }
-        return buildAesGcmKey(key, spec.aesKeySizeBits, policy, onClose = {})
+        val placed = keystoreOp { generateAesKey(alias, spec.aesKeySizeBits, policy) }
+        return buildAesGcmKey(placed.key, spec.aesKeySizeBits, policy, placed.custody, onClose = {})
     }
 
     /** Generates a persistent ECDH P-256 agreement key under [alias]; onClose is a no-op (the stored key survives). */
@@ -410,10 +420,10 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
         spec: ProtectedKeySpec,
     ): KeyAgreementKeyPair {
         val policy = ResolvedAndroidPolicy.Advisory(spec.authorization)
-        val keyPair = keystoreOp { generateAgreementKeyPair(alias, policy) }
+        val placed = keystoreOp { generateAgreementKeyPair(alias, policy) }
         val publicKey =
-            KeyAgreementPublicKey.of(KeyAgreementCurve.P256, uncompressedPoint(keyPair.public as ECPublicKey))
-        return buildKeyAgreementPair(keyPair.private, publicKey, policy.gate, onClose = {})
+            KeyAgreementPublicKey.of(KeyAgreementCurve.P256, uncompressedPoint(placed.key.public as ECPublicKey))
+        return buildKeyAgreementPair(placed.key.private, publicKey, policy, placed.custody, onClose = {})
     }
 
     /**
@@ -430,9 +440,17 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
             keystoreOp {
                 (keyStore.getEntry(alias, null) as? KeyStore.PrivateKeyEntry)
                     ?.takeIf { privateEntryAlgorithm(it.privateKey) == ProtectedKeyAlgorithm.EcdsaP256 }
+                    ?.let { it to reattachedCustody(alias, it.privateKey, ProtectedKeyAlgorithm.EcdsaP256) }
             } ?: return null
-        val verifyKey = VerifyKey.ecdsaP256(uncompressedPoint(entry.certificate.publicKey as ECPublicKey))
-        return buildSigningKey(entry.privateKey, verifyKey, ResolvedAndroidPolicy.Advisory(spec.authorization), onClose = {})
+        val (privateEntry, custody) = entry
+        val verifyKey = VerifyKey.ecdsaP256(uncompressedPoint(privateEntry.certificate.publicKey as ECPublicKey))
+        return buildSigningKey(
+            privateEntry.privateKey,
+            verifyKey,
+            ResolvedAndroidPolicy.Advisory(spec.authorization),
+            custody,
+            onClose = {},
+        )
     }
 
     /**
@@ -448,10 +466,18 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
             keystoreOp {
                 (keyStore.getEntry(alias, null) as? KeyStore.PrivateKeyEntry)
                     ?.takeIf { privateEntryAlgorithm(it.privateKey) == ProtectedKeyAlgorithm.EcdhP256 }
+                    ?.let { it to reattachedCustody(alias, it.privateKey, ProtectedKeyAlgorithm.EcdhP256) }
             } ?: return null
-        val point = uncompressedPoint(entry.certificate.publicKey as ECPublicKey)
+        val (privateEntry, custody) = entry
+        val point = uncompressedPoint(privateEntry.certificate.publicKey as ECPublicKey)
         val publicKey = KeyAgreementPublicKey.of(KeyAgreementCurve.P256, point)
-        return buildKeyAgreementPair(entry.privateKey, publicKey, spec.authorization, onClose = {})
+        return buildKeyAgreementPair(
+            privateEntry.privateKey,
+            publicKey,
+            ResolvedAndroidPolicy.Advisory(spec.authorization),
+            custody,
+            onClose = {},
+        )
     }
 
     /** Re-attaches to a persisted AES-GCM key under [alias], or `null` if absent / a different kind. */
@@ -459,9 +485,20 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
         alias: String,
         spec: ProtectedKeySpec,
     ): AesGcmKey? {
-        val entry = keystoreOp { keyStore.getEntry(alias, null) } as? KeyStore.SecretKeyEntry ?: return null
-        val sizeBits = aesKeySizeBits(entry.secretKey)
-        return buildAesGcmKey(entry.secretKey, sizeBits, ResolvedAndroidPolicy.Advisory(spec.authorization), onClose = {})
+        val entry =
+            keystoreOp {
+                (keyStore.getEntry(alias, null) as? KeyStore.SecretKeyEntry)
+                    ?.let { it to reattachedCustody(alias, it.secretKey, ProtectedKeyAlgorithm.AesGcm) }
+            } ?: return null
+        val (secretEntry, custody) = entry
+        val sizeBits = aesKeySizeBits(secretEntry.secretKey)
+        return buildAesGcmKey(
+            secretEntry.secretKey,
+            sizeBits,
+            ResolvedAndroidPolicy.Advisory(spec.authorization),
+            custody,
+            onClose = {},
+        )
     }
 
     /** The [ProtectedKeyAlgorithm] stored under [alias], or `null` if the alias is empty. */
@@ -566,8 +603,8 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
         alias: String,
         sizeBits: Int,
         policy: ResolvedAndroidPolicy,
-    ): SecretKey =
-        generateWithStrongBoxFallback { strongBox ->
+    ): Placed<SecretKey> =
+        generatePlaced(alias, ProtectedKeyAlgorithm.AesGcm, { it }) { strongBox ->
             KeyGenerator
                 .getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEY_STORE)
                 .apply {
@@ -578,8 +615,8 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
     private fun generateEcKeyPair(
         alias: String,
         policy: ResolvedAndroidPolicy,
-    ): java.security.KeyPair =
-        generateWithStrongBoxFallback { strongBox ->
+    ): Placed<java.security.KeyPair> =
+        generatePlaced(alias, ProtectedKeyAlgorithm.EcdsaP256, { it.private }) { strongBox ->
             KeyPairGenerator
                 .getInstance(KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEY_STORE)
                 .apply {
@@ -590,8 +627,8 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
     private fun generateAgreementKeyPair(
         alias: String,
         policy: ResolvedAndroidPolicy,
-    ): java.security.KeyPair =
-        generateWithStrongBoxFallback { strongBox ->
+    ): Placed<java.security.KeyPair> =
+        generatePlaced(alias, ProtectedKeyAlgorithm.EcdhP256, { it.private }) { strongBox ->
             KeyPairGenerator
                 .getInstance(KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEY_STORE)
                 .apply {
@@ -599,68 +636,87 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
                 }.generateKeyPair()
         }
 
+    /** Generates under [alias], StrongBox first (see [generateWithStrongBoxFallback]), and confirms where it landed. */
+    private inline fun <T> generatePlaced(
+        alias: String,
+        alg: ProtectedKeyAlgorithm,
+        keyOf: (T) -> java.security.Key,
+        build: (strongBox: Boolean) -> T,
+    ): Placed<T> {
+        val generated = generateWithStrongBoxFallback(build)
+        val custody = confirmedCustody(alias, keyOf(generated.key), alg, generated.inStrongBox)
+        return Placed(generated.key, custody)
+    }
+
     /**
-     * Builds a key with `setIsStrongBoxBacked(true)`, falling back to the TEE on *any* StrongBox
-     * rejection. Crucially this is not gated on [StrongBoxUnavailableException]: real devices reject
-     * StrongBox with a plain [ProviderException] / [KeyStoreException] (Pixel 4: `UNSUPPORTED_KEY_SIZE`;
-     * Samsung S24/Android 14: code 4 for spec-guaranteed AES-256-GCM), so the StrongBox attempt swallows
-     * the whole [GeneralSecurityException] / [ProviderException] family and retries. A terminal TEE
+     * Builds a key with `setIsStrongBoxBacked(true)` and, only when [strongBoxRefusal] says StrongBox
+     * cannot hold it, again in the TEE. A transient StrongBox refusal surfaces as
+     * [HardwareKeyException.TransientHardwareFailure] rather than settling for the TEE; a terminal
      * failure is normalized to a [HardwareKeyException].
      */
-    private inline fun <T> generateWithStrongBoxFallback(build: (strongBox: Boolean) -> T): T {
-        try {
-            return build(true)
-        } catch (_: GeneralSecurityException) {
-            // StrongBox rejected the spec (KeyStoreException / InvalidAlgorithmParameterException) ⇒ TEE.
-        } catch (_: ProviderException) {
-            // StrongBoxUnavailableException or a plain ProviderException StrongBox rejection ⇒ TEE.
-        }
-        return try {
-            build(false)
-        } catch (e: GeneralSecurityException) {
-            throw mapKeystoreFailure(e)
-        } catch (e: ProviderException) {
-            throw mapKeystoreFailure(e)
+    private inline fun <T> generateWithStrongBoxFallback(build: (strongBox: Boolean) -> T): Attempted<T> {
+        val refusal =
+            try {
+                return Attempted(build(true), inStrongBox = true)
+            } catch (e: GeneralSecurityException) {
+                e
+            } catch (e: ProviderException) {
+                e
+            }
+        val decision = strongBoxRefusal(keystoreFailureFacts(refusal))
+        if (decision != StrongBoxRefusal.FallBackToTee) throw strongBoxFailure(decision, refusal)
+        return mappingKeystoreFailures { Attempted(build(false), inStrongBox = false) }
+    }
+
+    /** A reattached key has no StrongBox attempt to vouch for it: before API 31 it reports the TEE floor. */
+    private fun reattachedCustody(
+        alias: String,
+        key: java.security.Key,
+        alg: ProtectedKeyAlgorithm,
+    ): KeyCustody.NonExportable.Hardware = confirmedCustody(alias, key, alg, placedInStrongBox = false)
+
+    /**
+     * The custody [key] (stored under [alias]) actually has, read from its `KeyInfo`. A key outside
+     * TEE / StrongBox is deleted and refused, so a key in software is never handed out as hardware.
+     */
+    private fun confirmedCustody(
+        alias: String,
+        key: java.security.Key,
+        alg: ProtectedKeyAlgorithm,
+        placedInStrongBox: Boolean,
+    ): KeyCustody.NonExportable.Hardware {
+        val info = keyInfoOf(key)
+        val placement =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                placementOfSecurityLevel(info.securityLevel)
+            } else {
+                @Suppress("DEPRECATION")
+                placementOfLegacyKeyInfo(info.isInsideSecureHardware, placedInStrongBox)
+            }
+        return when (placement) {
+            is KeystorePlacement.SecureHardware -> placement.custody
+            KeystorePlacement.NotSecureHardware -> {
+                keyStore.deleteEntry(alias)
+                throw InsufficientKeyCustody(
+                    alg = alg,
+                    required = CustodyTier.Hardware,
+                    available = CustodyTier.NonExportableSoftware,
+                )
+            }
         }
     }
 
-    private fun probeStrongBox(): Boolean =
-        synchronized(keystoreMonitor) {
-            val alias = newAlias("probe")
-            try {
-                val keyPair =
-                    KeyPairGenerator
-                        .getInstance(KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEY_STORE)
-                        .apply {
-                            initialize(
-                                ecSpec(alias, strongBox = true, policy = probeAdvisoryPolicy),
-                            )
-                        }.generateKeyPair()
-                // A device may honor a StrongBox request silently in the TEE, so confirm the level
-                // where the OS exposes it (API 31+); pre-31 keep the best-effort "no throw ⇒ assume".
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    securityLevelIsStrongBox(keyPair.private)
-                } else {
-                    true
-                }
-            } catch (_: Throwable) {
-                // StrongBoxUnavailableException (no secure element) or any provisioning failure ⇒ not a
-                // dedicated secure element. AES-GCM / ECDSA still work TEE-backed.
-                false
-            } finally {
-                runCatching { keyStore.deleteEntry(alias) }
-            }
-        }
-
     /**
-     * Probes whether the keystore actually backs ECDH P-256 agreement keys: generates a throwaway
-     * `PURPOSE_AGREE_KEY` key and runs a full keystore ECDH against a fresh software peer. The
-     * end-to-end agreement matters — a device may accept the generation spec and still fail the
-     * `KeyAgreement` op (support claims and Keymaster reality diverge on exactly this purpose), so
-     * generation alone would over-promise. Pre-31 the purpose does not exist; fail fast.
+     * Probes whether the keystore actually backs ECDH P-256 agreement keys in secure hardware:
+     * generates a throwaway `PURPOSE_AGREE_KEY` key, confirms its `KeyInfo` level, and runs a full
+     * keystore ECDH against a fresh software peer. The end-to-end agreement matters — a device may
+     * accept the generation spec and still fail the `KeyAgreement` op, or place the key in a software
+     * KeyMint — so generation alone would over-promise. Pre-31 the purpose does not exist. A transient
+     * keystore refusal is [Settlement.Unsettled], so a busy keystore is not taken for one without
+     * agreement.
      */
-    private fun probeAgreement(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
+    private fun probeAgreement(): Settlement<Boolean> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return Settlement.Settled(false)
         return synchronized(keystoreMonitor) {
             val alias = newAlias("probe-ecdh")
             try {
@@ -670,28 +726,65 @@ internal class AndroidKeystoreHardwareKeyProvider : HardwareKeyProvider {
                         .apply {
                             initialize(agreementSpec(alias, strongBox = false, policy = probeAdvisoryPolicy))
                         }.generateKeyPair()
-                val peer =
-                    KeyPairGenerator
-                        .getInstance("EC")
-                        .apply { initialize(ECGenParameterSpec(SECP256R1)) }
-                        .generateKeyPair()
-                val ka = KeyAgreement.getInstance(ECDH, ANDROID_KEY_STORE)
-                ka.init(keyPair.private)
-                ka.doPhase(peer.public, true)
-                val secret = ka.generateSecret()
-                val ok = secret.size == P256_FIELD_BYTES
-                secret.fill(0)
-                ok
-            } catch (_: Throwable) {
-                // Purpose rejected, agreement unimplemented, or any provisioning failure ⇒ route
-                // key agreement to the software floor instead of over-promising hardware custody.
-                false
+                when (placementOfSecurityLevel(keyInfoOf(keyPair.private).securityLevel)) {
+                    KeystorePlacement.NotSecureHardware -> Settlement.Settled(false)
+                    is KeystorePlacement.SecureHardware -> Settlement.Settled(agreesWithSoftwarePeer(keyPair.private))
+                }
+            } catch (e: GeneralSecurityException) {
+                probeRefusal(e)
+            } catch (e: ProviderException) {
+                probeRefusal(e)
             } finally {
                 runCatching { keyStore.deleteEntry(alias) }
             }
         }
     }
+
+    private fun agreesWithSoftwarePeer(privateKey: PrivateKey): Boolean {
+        val peer =
+            KeyPairGenerator
+                .getInstance("EC")
+                .apply { initialize(ECGenParameterSpec(SECP256R1)) }
+                .generateKeyPair()
+        val ka = KeyAgreement.getInstance(ECDH, ANDROID_KEY_STORE)
+        ka.init(privateKey)
+        ka.doPhase(peer.public, true)
+        val secret = ka.generateSecret()
+        val ok = secret.size == P256_FIELD_BYTES
+        secret.fill(0)
+        return ok
+    }
+
+    /** A refused probe: transient ⇒ ask again next time; anything else ⇒ no hardware agreement on this device. */
+    private fun probeRefusal(failure: Throwable): Settlement<Boolean> =
+        if (keystoreFailureFacts(failure).any { it is KeystoreFailureFact.Coded && it.transientFailure }) {
+            Settlement.Unsettled(false)
+        } else {
+            Settlement.Settled(false)
+        }
 }
+
+/** A keystore generation's result and whether the StrongBox attempt was the one that produced it. */
+private class Attempted<T>(
+    val key: T,
+    val inStrongBox: Boolean,
+)
+
+/** A generated keystore key with the custody its `KeyInfo` reports. */
+internal class Placed<T>(
+    val key: T,
+    val custody: KeyCustody.NonExportable.Hardware,
+)
+
+/** The failure a StrongBox refusal that does not fall back surfaces as. */
+private fun strongBoxFailure(
+    decision: StrongBoxRefusal,
+    refusal: Throwable,
+): HardwareKeyException =
+    when (decision) {
+        StrongBoxRefusal.Transient -> HardwareKeyException.TransientHardwareFailure(retryable = true)
+        StrongBoxRefusal.Terminal, StrongBoxRefusal.FallBackToTee -> mapKeystoreFailure(refusal)
+    }
 
 private fun newAlias(kind: String): String = "$ALIAS_PREFIX$kind-${UUID.randomUUID()}"
 
@@ -716,7 +809,7 @@ private const val SEC1_UNCOMPRESSED = 0x04
 
 // --- stateless keystore helpers (file-level: no provider state, kept off the class) --------------
 
-/** Unbound throwaway-key policy for the StrongBox probe. */
+/** Unbound throwaway-key policy for the agreement probe. */
 private val probeAdvisoryPolicy = ResolvedAndroidPolicy.Advisory(HardwareAuthorization { true })
 
 private fun aesSpec(
@@ -784,7 +877,7 @@ private fun mapKeystoreFailure(failure: Throwable): HardwareKeyException {
                 is KeyPermanentlyInvalidatedException -> HardwareKeyException.KeyInvalidated()
                 is StrongBoxUnavailableException -> HardwareKeyException.SecureElementUnavailable()
                 is KeyStoreException ->
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && cur.isTransientFailure) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && cur.isTransientFailure) {
                         HardwareKeyException.TransientHardwareFailure(retryable = true)
                     } else {
                         HardwareKeyException.UnsupportedHardwareKey()
@@ -795,16 +888,6 @@ private fun mapKeystoreFailure(failure: Throwable): HardwareKeyException {
         cur = cur.cause
     }
     return HardwareKeyException.UnsupportedHardwareKey()
-}
-
-/** API 31+ only: `true` iff [privateKey]'s keystore-reported security level is StrongBox. */
-private fun securityLevelIsStrongBox(privateKey: PrivateKey): Boolean {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
-    val info =
-        KeyFactory
-            .getInstance(privateKey.algorithm, ANDROID_KEY_STORE)
-            .getKeySpec(privateKey, KeyInfo::class.java)
-    return info.securityLevel == KeyProperties.SECURITY_LEVEL_STRONGBOX
 }
 
 /** Encodes an EC public key as an uncompressed SEC1 point (`04 ‖ X ‖ Y`) for [VerifyKey]. */
@@ -832,36 +915,36 @@ private fun fixedBigEndian(
 }
 
 /**
- * The Android Keystore provider, resolved once. A device/emulator always has an `AndroidKeyStore`
- * (StrongBox vs TEE is reflected by [HardwareKeyProvider.dedicatedSecureElement], not by presence),
- * but a host-JVM unit-test run — which inherits the common test suite — has no `AndroidKeyStore`
- * provider, so construction fails closed to `null` there, keeping [CryptoCapabilities.hardware]
- * honestly [HardwareSupport.Unavailable] off-device.
+ * The Android Keystore provider, resolved through a [SettlingLazy]. A device/emulator always
+ * registers an `AndroidKeyStore` provider, but a host-JVM unit-test run — which inherits the common
+ * test suite — has none, which is settled as [CapabilityFinding.Keystore.ProviderMissing] and keeps
+ * [CryptoCapabilities.hardware] honestly [HardwareSupport.Unavailable] off-device. A registered
+ * provider whose keystore fails to load is [CapabilityFinding.Keystore.LoadFailed] for that attempt
+ * only: the next resolution tries again instead of pinning the failure for the process lifetime.
  */
-private val androidProvider: HardwareKeyProvider? by lazy {
-    try {
-        AndroidKeystoreHardwareKeyProvider()
-    } catch (_: Throwable) {
-        null
+private val androidResolution =
+    SettlingLazy<ProtectedKeyResolution> {
+        if (!androidKeystoreProviderRegistered()) {
+            Settlement.Settled(keystoreRefused(CapabilityFinding.Keystore.ProviderMissing))
+        } else {
+            try {
+                Settlement.Settled(
+                    ProtectedKeyResolution.Available(
+                        ProtectedKeyBackend.AndroidKeystore,
+                        AndroidKeystoreHardwareKeyProvider(),
+                    ),
+                )
+            } catch (_: GeneralSecurityException) {
+                keystoreLoadFailed()
+            } catch (_: java.io.IOException) {
+                keystoreLoadFailed()
+            } catch (_: ProviderException) {
+                keystoreLoadFailed()
+            }
+        }
     }
-}
 
-private val androidResolution: ProtectedKeyResolution by lazy {
-    androidProvider
-        ?.let { ProtectedKeyResolution.Available(ProtectedKeyBackend.AndroidKeystore, it) }
-        // Construction only fails where there is no AndroidKeyStore JCA provider at all — a host-JVM
-        // unit-test run, never a device or emulator.
-        ?: ProtectedKeyResolution.Refused(
-            ProtectedKeyBackend.AndroidKeystore,
-            CapabilityFinding.Keystore.ProviderMissing,
-        )
-}
+private fun keystoreLoadFailed(): Settlement<ProtectedKeyResolution> =
+    Settlement.Unsettled(keystoreRefused(CapabilityFinding.Keystore.LoadFailed))
 
-internal actual fun platformProtectedKeyResolution(): ProtectedKeyResolution = androidResolution
-
-/**
- * The AndroidKeystore provider narrowed to its concrete type, or `null` off-device (a host-JVM unit
- * test has no `AndroidKeyStore` provider). [platformKeyStore] uses it to back a persistent
- * [AndroidKeystoreKeyStore] on a device, falling back to the on-disk software store otherwise.
- */
-internal fun androidKeystoreProviderOrNull(): AndroidKeystoreHardwareKeyProvider? = androidProvider as? AndroidKeystoreHardwareKeyProvider
+internal actual fun platformProtectedKeyResolution(): ProtectedKeyResolution = androidResolution.get()

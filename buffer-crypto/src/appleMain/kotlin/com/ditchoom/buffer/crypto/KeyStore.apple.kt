@@ -6,13 +6,19 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_BUFFER
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_CORRUPT
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_DENIED
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_INPUT
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_LOCKED
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_RETRY
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_keychain_aliases
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_keychain_contains
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_keychain_delete
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_keychain_get
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_keychain_put
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_available
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.alloc
@@ -29,21 +35,49 @@ import kotlinx.coroutines.withContext
 import platform.posix.size_tVar
 
 /**
- * Apple: a durable [AppleKeychainKeyStore] where the Secure Enclave is present and usable — each
+ * Apple: a durable [AppleKeychainKeyStore] wherever the hardware has a Secure Enclave — each
  * persistent key's private scalar lives in the Enclave ([KeyCustody.NonExportable.Hardware]) and the
  * Keychain durably holds its restore record keyed by (`kSecAttrService` = [KeyStoreConfig.name],
- * `kSecAttrAccount` = alias). Where the Enclave is unavailable (simulator, an unentitled CLI runner)
- * it falls back to an in-process, **non-durable** software store ([KeyCustody.ExportableSoftware]) —
- * honest about the weaker custody (a `requireTier` caller is refused rather than silently upgraded),
- * but keys there do not survive a process restart. A signed, entitled app always has the Enclave and
- * takes the durable path; a consumer needing durability without it supplies [KeyStoreConfig.storage].
+ * `kSecAttrAccount` = alias). The Enclave is probed on first use; a refused probe answers that call
+ * with a typed [KeyStoreException] ([KeyStoreException.AccessDenied] for a binary without the
+ * entitlement, a retryable [KeyStoreException.StorageFailure] otherwise) and is probed again on the
+ * next, so a device with an Enclave never ends up on a weaker or non-durable store.
+ *
+ * Only hardware with no Enclave at all (the simulator) uses an in-process, **non-durable** software
+ * store ([KeyCustody.ExportableSoftware]) — honest about the weaker custody (a `requireTier` caller is
+ * refused rather than silently upgraded), but keys there do not survive a process restart. A consumer
+ * needing durability without the Enclave supplies [KeyStoreConfig.storage].
  */
 internal actual fun platformKeyStore(config: KeyStoreConfig): KeyStore =
     when {
         config.storage != null -> SoftwareKeyStore(config.storage)
-        else ->
-            appleEnclaveProviderOrNull()?.let { AppleKeychainKeyStore(it, config.name) }
-                ?: SoftwareKeyStore(InMemoryKeyStorage())
+        bcks_secure_enclave_available() == 0 -> SoftwareKeyStore(InMemoryKeyStorage())
+        else -> RetryingKeyStore { openAppleKeychainStore(config.name, appleEnclaveProbe()) }
+    }
+
+/** One attempt to open the Keychain-backed store named [name], given this call's Enclave [probe]. */
+internal fun openAppleKeychainStore(
+    name: String,
+    probe: EnclaveProbe,
+): PlatformStoreOpening =
+    when (probe) {
+        EnclaveProbe.Usable -> PlatformStoreOpening.Opened(AppleKeychainKeyStore(enclaveProvider, name))
+        EnclaveProbe.NotEntitled -> PlatformStoreOpening.Refused(KeyStoreException.AccessDenied())
+        EnclaveProbe.Refused, EnclaveProbe.NotPresent ->
+            PlatformStoreOpening.Refused(KeyStoreException.StorageFailure(retryable = true))
+    }
+
+/**
+ * The [KeyStoreException] a keychain status names. [BCKS_ERR_LOCKED] is the one a background launch on
+ * a locked device meets, and is [KeyStoreException.DeviceLocked] so a caller can wait for the unlock.
+ */
+internal fun keychainFailure(status: Int): KeyStoreException =
+    when (status) {
+        BCKS_ERR_LOCKED -> KeyStoreException.DeviceLocked()
+        BCKS_ERR_DENIED -> KeyStoreException.AccessDenied()
+        BCKS_ERR_CORRUPT -> KeyStoreException.CorruptEntry()
+        BCKS_ERR_RETRY -> KeyStoreException.StorageFailure(retryable = true)
+        else -> KeyStoreException.StorageFailure(retryable = false)
     }
 
 /**
@@ -70,6 +104,7 @@ internal actual fun platformKeyStore(config: KeyStoreConfig): KeyStore =
 internal class AppleKeychainKeyStore(
     private val provider: SecureEnclaveHardwareKeyProvider,
     private val name: String,
+    private val initialAliasesCapacity: Int = DEFAULT_ALIASES_CAPACITY,
 ) : KeyStore {
     override fun custodyFor(alg: ProtectedKeyAlgorithm): KeyCustody = provider.custody
 
@@ -233,7 +268,7 @@ internal class AppleKeychainKeyStore(
         record.withRemainingBytes2(recLen) { recPtr ->
             status = bcks_keychain_put(name, alias, recPtr.reinterpret(), recLen.convert())
         }
-        if (status != BCKS_OK) throw KeyStoreException.StorageFailure(retryable = false)
+        if (status != BCKS_OK) throw keychainFailure(status)
     }
 
     /** The record stored under [alias] as a fresh read-ready buffer (caller frees it), or `null` if absent. */
@@ -260,41 +295,75 @@ internal class AppleKeychainKeyStore(
             }
             else -> {
                 out.freeNativeMemory()
-                throw KeyStoreException.StorageFailure(retryable = false)
+                throw keychainFailure(status)
             }
         }
     }
 
     private fun keychainContains(alias: String): Boolean =
-        when (bcks_keychain_contains(name, alias)) {
+        when (val status = bcks_keychain_contains(name, alias)) {
             1 -> true
             0 -> false
-            else -> throw KeyStoreException.StorageFailure(retryable = false)
+            else -> throw keychainFailure(status)
         }
 
     private fun keychainDelete(alias: String): Boolean =
-        when (bcks_keychain_delete(name, alias)) {
+        when (val status = bcks_keychain_delete(name, alias)) {
             BCKS_OK -> true
             BCKS_ERR_INPUT -> false
-            else -> throw KeyStoreException.StorageFailure(retryable = false)
+            else -> throw keychainFailure(status)
         }
 
-    private fun keychainAliases(): Set<String> =
+    /**
+     * Every account name under this store. Starts from [initialAliasesCapacity] and, when the names
+     * outgrow it, retries with the size the keychain reported, so the listing is bounded by the item
+     * count rather than a fixed cap. Items added between two reads only grow the next request.
+     */
+    private fun keychainAliases(): Set<String> {
+        var capacity = initialAliasesCapacity
+        repeat(ALIASES_ATTEMPTS) {
+            when (val listing = readAliases(capacity)) {
+                is AliasListing.Read -> return listing.names
+                is AliasListing.Needs -> capacity = listing.bytes
+            }
+        }
+        throw KeyStoreException.StorageFailure(retryable = true)
+    }
+
+    private sealed interface AliasListing {
+        class Read(
+            val names: Set<String>,
+        ) : AliasListing
+
+        class Needs(
+            val bytes: Int,
+        ) : AliasListing
+    }
+
+    private fun readAliases(capacity: Int): AliasListing =
         memScoped {
-            val out = allocArray<ByteVar>(ALIASES_CAP + 1)
+            val out = allocArray<ByteVar>(capacity + 1)
             val lenOut = alloc<size_tVar>()
-            val status = bcks_keychain_aliases(name, out.reinterpret(), ALIASES_CAP.convert(), lenOut.ptr)
-            if (status != BCKS_OK) throw KeyStoreException.StorageFailure(retryable = false)
-            val n = lenOut.value.toInt()
-            out[n] = 0.toByte() // NUL-terminate the newline-joined names for toKString
-            out.toKString().split('\n').filterTo(mutableSetOf()) { it.isNotEmpty() }
+            when (val status = bcks_keychain_aliases(name, out.reinterpret(), capacity.convert(), lenOut.ptr)) {
+                BCKS_OK -> {
+                    val n = lenOut.value.toInt()
+                    out[n] = 0.toByte() // NUL-terminate the newline-joined names for toKString
+                    AliasListing.Read(out.toKString().split('\n').filterTo(mutableSetOf()) { it.isNotEmpty() })
+                }
+                BCKS_ERR_BUFFER -> AliasListing.Needs(maxOf(lenOut.value.toInt(), capacity * 2))
+                else -> throw keychainFailure(status)
+            }
         }
 
     private companion object {
         // A record is `u8 kind | u16 pointLen | point(65) | Enclave blob(~284)` — well under 4 KiB.
         const val RECORD_CAP = 4096
 
-        // Newline-joined account names; a device identity store holds few keys, so 64 KiB is ample.
-        const val ALIASES_CAP = 65536
+        // Newline-joined account names: the first read's buffer. A listing that outgrows it is re-read
+        // at the size the keychain reports.
+        const val DEFAULT_ALIASES_CAPACITY = 4096
+
+        // Reads before giving up on a listing that keeps growing between reads (a concurrent writer).
+        const val ALIASES_ATTEMPTS = 4
     }
 }

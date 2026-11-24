@@ -8,12 +8,14 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_AUTH
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_DENIED
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_INPUT
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_available
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_p256_generate
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_p256_generate_ac
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_p256_sign_ctx
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_probe
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.convert
@@ -79,7 +81,7 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
      * rather than inferred from OS version or [bcks_secure_enclave_available]: the answer that
      * matters is whether *this* element performs the DH, which is what an unentitled binary, a
      * simulator, or a locked device diverge on. Same shape as the signing generate-and-discard probe
-     * in [appleResolution] — a failure routes key agreement to the software floor instead of
+     * in [appleEnclaveProbe] — a failure routes key agreement to the software floor instead of
      * over-promising hardware custody.
      */
     private val agreementSupported: Boolean by lazy { probeAgreement() }
@@ -676,49 +678,66 @@ private fun enclaveSignP256Into(
     }
 }
 
+/** What the generate-and-discard Enclave probe found. */
+internal sealed interface EnclaveProbe {
+    /** The Enclave minted a key: the provider is usable. */
+    data object Usable : EnclaveProbe
+
+    /** CryptoKit reports no Enclave on this hardware (or the simulator). */
+    data object NotPresent : EnclaveProbe
+
+    /** The Enclave refuses this binary for lack of an entitlement — stable for the life of the process. */
+    data object NotEntitled : EnclaveProbe
+
+    /** The Enclave refused for another reason, which a later probe may not repeat. */
+    data object Refused : EnclaveProbe
+}
+
+/** The probe outcome a [bcks_secure_enclave_probe] status names; only [EnclaveProbe.Refused] is not settled. */
+internal fun enclaveProbeOf(status: Int): Settlement<EnclaveProbe> =
+    when (status) {
+        BCKS_OK -> Settlement.Settled(EnclaveProbe.Usable)
+        BCKS_ERR_DENIED -> Settlement.Settled(EnclaveProbe.NotEntitled)
+        else -> Settlement.Unsettled(EnclaveProbe.Refused)
+    }
+
 /**
- * The Secure Enclave provider, resolved once. Returned only when the Enclave is both present
- * ([bcks_secure_enclave_available]) and actually usable — probed by a generate-and-discard, which
- * fails closed on an unentitled/unsigned binary (e.g. the macOS CLI test runner) or the simulator,
- * keeping [CryptoCapabilities.hardware] honestly [HardwareSupport.Unavailable] there.
+ * The Secure Enclave probe, through a [SettlingLazy]: presence ([bcks_secure_enclave_available]) and
+ * a generate-and-discard ([bcks_secure_enclave_probe]) that fails closed on an unentitled binary or
+ * the simulator, keeping [CryptoCapabilities.hardware] honestly [HardwareSupport.Unavailable] there.
+ * A refusal for any other reason is probed again on the next resolution rather than pinned.
  */
-private val appleResolution: ProtectedKeyResolution by lazy {
-    if (bcks_secure_enclave_available() == 0) {
-        // CryptoKit reports no Enclave on this hardware (or the simulator).
-        ProtectedKeyResolution.Refused(
-            ProtectedKeyBackend.AppleSecureEnclave,
-            CapabilityFinding.Enclave.NotPresent,
-        )
-    } else {
-        val usable =
-            try {
-                enclaveGenerateP256()
-                true
-            } catch (_: Throwable) {
-                false
-            }
-        if (usable) {
-            ProtectedKeyResolution.Available(ProtectedKeyBackend.AppleSecureEnclave, SecureEnclaveHardwareKeyProvider())
+private val enclaveProbe =
+    SettlingLazy<EnclaveProbe> {
+        if (bcks_secure_enclave_available() == 0) {
+            Settlement.Settled(EnclaveProbe.NotPresent)
         } else {
-            // Present but the generate-and-discard probe failed — typically an unentitled binary
-            // (the macOS CLI test runner).
-            ProtectedKeyResolution.Refused(
-                ProtectedKeyBackend.AppleSecureEnclave,
-                CapabilityFinding.Enclave.ProbeFailed,
-            )
+            enclaveProbeOf(bcks_secure_enclave_probe())
         }
     }
-}
 
-private val appleProvider: HardwareKeyProvider? by lazy {
-    (appleResolution as? ProtectedKeyResolution.Available)?.provider as? HardwareKeyProvider
-}
+/** The probe's answer for this call: settled, or this attempt's refusal. */
+internal fun appleEnclaveProbe(): EnclaveProbe = enclaveProbe.get()
 
-internal actual fun platformProtectedKeyResolution(): ProtectedKeyResolution = appleResolution
+internal val enclaveProvider: SecureEnclaveHardwareKeyProvider by lazy { SecureEnclaveHardwareKeyProvider() }
+
+internal actual fun platformProtectedKeyResolution(): ProtectedKeyResolution =
+    when (appleEnclaveProbe()) {
+        EnclaveProbe.Usable ->
+            ProtectedKeyResolution.Available(ProtectedKeyBackend.AppleSecureEnclave, enclaveProvider)
+        EnclaveProbe.NotPresent -> enclaveRefused(CapabilityFinding.Enclave.NotPresent)
+        EnclaveProbe.NotEntitled, EnclaveProbe.Refused -> enclaveRefused(CapabilityFinding.Enclave.ProbeFailed)
+    }
+
+private fun enclaveRefused(finding: CapabilityFinding.Enclave): ProtectedKeyResolution =
+    ProtectedKeyResolution.Refused(ProtectedKeyBackend.AppleSecureEnclave, finding)
 
 /**
- * The Secure Enclave provider narrowed to its concrete type, or `null` where the Enclave is
- * unavailable (simulator, an unentitled CLI runner). [platformKeyStore] uses it to back a durable
- * Keychain-backed [AppleKeychainKeyStore], falling back to a software store otherwise.
+ * The Secure Enclave provider where the probe says it is usable, or `null` where the Enclave is
+ * unavailable for this call (simulator, an unentitled binary, a refused probe).
  */
-internal fun appleEnclaveProviderOrNull(): SecureEnclaveHardwareKeyProvider? = appleProvider as? SecureEnclaveHardwareKeyProvider
+internal fun appleEnclaveProviderOrNull(): SecureEnclaveHardwareKeyProvider? =
+    when (appleEnclaveProbe()) {
+        EnclaveProbe.Usable -> enclaveProvider
+        EnclaveProbe.NotPresent, EnclaveProbe.NotEntitled, EnclaveProbe.Refused -> null
+    }

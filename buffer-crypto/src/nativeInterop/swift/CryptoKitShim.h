@@ -24,6 +24,15 @@
 // The user (or the system) dismissed an interactive prompt — a decision, not a failure. Only
 // bcks_la_unlock_with_credential returns it; see PromptOutcome.UserCancelled on the Kotlin side.
 #define BCKS_ERR_CANCELED (-6)
+// Keychain refusals, classified from the OSStatus by bcks_keychain_classify. LOCKED: the item's
+// protection class is unavailable until the device is unlocked (errSecInteractionNotAllowed), so a
+// retry after unlock can succeed. DENIED: this process may not reach the item at all (missing
+// entitlement, no access, a refused prompt). CORRUPT: the stored item cannot be decoded. RETRY: the
+// keychain is momentarily unavailable or another writer raced this one.
+#define BCKS_ERR_LOCKED (-7)
+#define BCKS_ERR_DENIED (-8)
+#define BCKS_ERR_CORRUPT (-9)
+#define BCKS_ERR_RETRY (-10)
 
 // AES-GCM.
 int32_t bcks_aesgcm_seal(
@@ -132,6 +141,11 @@ int32_t bcks_ecdsa_sign_from_scalar(
 // Secure Enclave (hardware-backed P-256 signing).
 int32_t bcks_secure_enclave_available(void);
 
+// Generates and discards one Enclave P-256 signing key. BCKS_OK when the Enclave minted it,
+// BCKS_ERR_DENIED when this binary lacks the entitlement the Enclave requires (stable for the life of
+// the process), BCKS_ERR_INTERNAL for any other refusal (which a later probe may not repeat).
+int32_t bcks_secure_enclave_probe(void);
+
 int32_t bcks_secure_enclave_p256_generate(
     uint8_t *blobOut, size_t blobCap, size_t *blobLenOut,
     uint8_t *pointOut, size_t pointCap, size_t *pointLenOut);
@@ -211,17 +225,21 @@ int32_t bcks_secure_enclave_p256_ka_agree_ctx(
 // `service` and `account` are NUL-terminated UTF-8 C strings (account == the caller's alias). The
 // stored value is opaque store-owned bytes (the framed public point + Enclave restore blob) — never
 // a private key: the Secure Enclave holds the private scalar, and the blob is an encrypted
-// representation only that same Enclave can restore. Items are ThisDeviceOnly + WhenUnlocked, so
-// they never sync off-device and are unreadable while the device is locked.
+// representation only that same Enclave can restore. Items are AfterFirstUnlock + ThisDeviceOnly:
+// they never sync off-device, and once the device has been unlocked after boot they stay readable
+// while it is locked, so background work can reach its keys.
+//
+// Every keychain call answers a keychain refusal with one of BCKS_ERR_LOCKED / DENIED / CORRUPT /
+// RETRY / INTERNAL (see bcks_keychain_classify), never a bare failure.
 
-// Stores dataPtr/dataLen under (service, account), replacing any existing item. BCKS_OK, or
-// BCKS_ERR_INTERNAL on a keychain failure.
+// Stores dataPtr/dataLen under (service, account), replacing any existing item.
 int32_t bcks_keychain_put(
     const char *service, const char *account,
     const uint8_t *dataPtr, size_t dataLen);
 
 // Reads the item under (service, account) into out/outCap, writing its length to outLenOut. BCKS_OK
-// when found, BCKS_ERR_INPUT when no such item exists, BCKS_ERR_BUFFER when out is too small.
+// when found, BCKS_ERR_INPUT when no such item exists, BCKS_ERR_BUFFER when out is too small. An item
+// written under an older protection class is moved to AfterFirstUnlock + ThisDeviceOnly on read.
 int32_t bcks_keychain_get(
     const char *service, const char *account,
     uint8_t *out, size_t outCap, size_t *outLenOut);
@@ -235,10 +253,14 @@ int32_t bcks_keychain_delete(const char *service, const char *account);
 
 // Writes every account name under `service`, newline-separated UTF-8 (accounts are validated to a
 // charset without '\n'), into out/outCap with the byte count in outLenOut. BCKS_OK (0 length when
-// none), BCKS_ERR_BUFFER when out is too small.
+// none). BCKS_ERR_BUFFER when out is too small, with the size the names need in outLenOut.
 int32_t bcks_keychain_aliases(
     const char *service,
     uint8_t *out, size_t outCap, size_t *outLenOut);
+
+// The BCKS status a keychain OSStatus classifies to (BCKS_OK for errSecSuccess, BCKS_ERR_INPUT for
+// errSecItemNotFound). Exposed so the classification itself is testable.
+int32_t bcks_keychain_classify(int32_t osStatus);
 
 // Interactive user verification — probing (and remedying) the device's biometric / device-credential
 // facility, for UserVerification.apple.kt. The probes create their own throwaway LAContext and never

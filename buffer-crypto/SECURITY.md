@@ -266,7 +266,7 @@ at the default). The tiers, weakest → strongest (`CustodyTier`): `ExportableSo
 |---|---|---|---|
 | JVM / Linux | `ExportableSoftware` | in-process software keys | (floor) all — no portable non-exportable store exists |
 | **JS / WASM** | `NonExportableSoftware` | **WebCrypto `extractable:false`** — software isolation, *not* a secure element | ECDSA P-256/384/521, AES-GCM, ECDH P-256/384/521; X25519 where the engine exposes it (feature-detected). Ed25519 excluded (uneven engine support) → routes to the floor |
-| Android (API 28+) | `Hardware` | Android Keystore — StrongBox secure element where present, else TEE | AES-GCM, ECDSA P-256 |
+| Android (API 28+) | `Hardware` | Android Keystore — StrongBox secure element where it holds the key, else TEE (read back per key) | AES-GCM, ECDSA P-256 |
 | Apple | `Hardware` | Secure Enclave | ECDSA P-256 |
 
 Whatever an algorithm's platform tier does not back routes **down** to the next eligible tier
@@ -352,13 +352,28 @@ tracked to completion:
   true custody, so a `requireTier(Hardware)` caller is refused rather than silently downgraded on a
   weaker platform. Availability is probed, not assumed: the web store requires both `crypto.subtle`
   and IndexedDB, Android needs an `AndroidKeyStore` provider (absent in a host-JVM unit run), and
-  Apple needs a usable Enclave (absent on the simulator / an unentitled CLI runner). A production
-  browser and a signed, entitled Apple app always take the durable path. Where the probe fails —
-  a dev/test environment (bare Node without IndexedDB, the iOS simulator, an unentitled runner) — the
-  store falls back to an **in-process, non-durable** medium and reports the weaker `ExportableSoftware`
-  tier honestly; keys there do **not** survive a process restart. A consumer that needs durability in
-  such an environment supplies its own `KeyStoreConfig.storage`. (JVM and Linux always use their
-  durable on-disk store — no probe, no in-memory fallback.)
+  Apple needs an Enclave (absent on the simulator). Only an environment that **has no such backend at
+  all** (bare Node without IndexedDB, a host JVM without `AndroidKeyStore`, the iOS simulator) uses a
+  software medium, and it reports the weaker tier honestly; the Apple simulator's medium is
+  in-process and does **not** survive a process restart. Where the backend exists but refuses — a
+  keystore that fails to load, an Enclave probe that fails — the store **never** falls back: the call
+  fails with a typed `KeyStoreException` (`StorageFailure(retryable = true)`, or `AccessDenied` for a
+  binary without the Enclave entitlement) and the backend is opened again on the next call. A
+  consumer that needs durability without the platform backend supplies its own
+  `KeyStoreConfig.storage`. (JVM and Linux always use their durable on-disk store.)
+- **Android custody is read back per key.** After every generation and reattach the store reads the
+  key's `KeyInfo` security level and accepts only `TRUSTED_ENVIRONMENT` or `STRONGBOX`; any other
+  level (a software KeyMint behind a compatibility layer, an unknown level) deletes the key and fails
+  with `InsufficientKeyCustody`. Each key's `KeyCustody` says whether StrongBox holds it. A StrongBox
+  generation falls back to the TEE only when StrongBox is absent or does not implement the
+  parameters; a transient StrongBox refusal surfaces as `TransientHardwareFailure` rather than
+  settling for the TEE.
+- **Apple Keychain records are `AfterFirstUnlockThisDeviceOnly`.** They never leave the device, and a
+  process launched in the background while the device is locked (after its first unlock since boot)
+  can still reach them. A record written under an older protection class is moved to this one the
+  next time it is read. A keychain that withholds its items (`errSecInteractionNotAllowed`) is the
+  typed `KeyStoreException.DeviceLocked`, distinct from `AccessDenied`, `CorruptEntry` and
+  `StorageFailure`.
 - **Desktop JVM / Linux non-exportable custody** — desktop JVM / Linux expose no portable
   non-exportable store (DPAPI / Keychain / Secret Service are platform-native, none reachable from
   pure KMP), so both `keyProvider()` and `keyStore()` resolve to the exportable software tier (see

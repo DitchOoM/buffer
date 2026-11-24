@@ -1,5 +1,7 @@
 package com.ditchoom.buffer.crypto
 
+import kotlin.concurrent.atomics.AtomicReference
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.jvm.JvmInline
 
 /*
@@ -123,6 +125,12 @@ sealed interface CapabilityFinding {
     sealed interface Keystore : CapabilityFinding {
         /** No `AndroidKeyStore` JCA provider in this runtime (a host-JVM unit-test run, not a device). */
         data object ProviderMissing : Keystore
+
+        /**
+         * The `AndroidKeyStore` provider is registered but the keystore failed to load. Not settled:
+         * the next resolution tries again.
+         */
+        data object LoadFailed : Keystore
     }
 
     /** [ProtectedKeyBackend.AppleSecureEnclave] findings. */
@@ -130,7 +138,11 @@ sealed interface CapabilityFinding {
         /** CryptoKit reports no Secure Enclave on this hardware (or the simulator). */
         data object NotPresent : Enclave
 
-        /** The Enclave exists but the generate-and-discard probe failed (typically an unentitled binary). */
+        /**
+         * The Enclave exists but the generate-and-discard probe failed. Settled when the binary lacks
+         * the entitlement the Enclave requires; any other refusal is probed again on the next
+         * resolution.
+         */
         data object ProbeFailed : Enclave
     }
 
@@ -201,9 +213,50 @@ sealed interface ProtectedKeyResolution {
 /**
  * The per-platform resolution seam. Internal so the platform actuals stay out of the public ABI;
  * the public surface is [CryptoCapabilities.protectedKeyResolution] plus the frozen witnesses.
- * Actuals must cache (the probes are expensive and the answer is stable for the process lifetime).
+ * Actuals cache a settled answer (the probes are expensive) through [SettlingLazy], and never cache a
+ * refusal that a later attempt might not repeat.
  */
 internal expect fun platformProtectedKeyResolution(): ProtectedKeyResolution
+
+/**
+ * What one resolution attempt came to: [Settled] is the answer for the rest of the process (a backend
+ * that works, or one that cannot work in this process at all); [Unsettled] is this attempt's answer
+ * only, so a transient refusal is never pinned for the process lifetime.
+ */
+internal sealed interface Settlement<out T> {
+    val value: T
+
+    class Settled<out T>(
+        override val value: T,
+    ) : Settlement<T>
+
+    class Unsettled<out T>(
+        override val value: T,
+    ) : Settlement<T>
+}
+
+/**
+ * A lazily computed value that caches only a [Settlement.Settled] outcome. An [Settlement.Unsettled]
+ * outcome is returned and recomputed on the next [get]. Concurrent first reads may compute twice;
+ * the first settled value wins and every later read sees it.
+ */
+@OptIn(ExperimentalAtomicApi::class)
+internal class SettlingLazy<T : Any>(
+    private val compute: () -> Settlement<T>,
+) {
+    private val settled = AtomicReference<T?>(null)
+
+    fun get(): T {
+        settled.load()?.let { return it }
+        return when (val attempt = compute()) {
+            is Settlement.Settled -> {
+                settled.compareAndSet(null, attempt.value)
+                settled.load() ?: attempt.value
+            }
+            is Settlement.Unsettled -> attempt.value
+        }
+    }
+}
 
 /**
  * The typed backend resolution for this platform — diagnostics, telemetry, and operator-facing

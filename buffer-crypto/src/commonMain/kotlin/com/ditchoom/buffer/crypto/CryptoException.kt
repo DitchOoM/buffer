@@ -83,10 +83,13 @@ class InvalidPublicKey internal constructor(
 class AuthorizationFailed internal constructor() : CryptoMisuseException("hardware key authorization denied")
 
 /**
- * A [KeyProvider.requireTier] assertion failed: the platform's strongest eligible custody for [alg]
- * ([available]) is weaker than the [required] tier the caller demanded. Structured and non-secret —
- * it names only public tiers, never key material — so a security-sensitive caller can branch on it.
- * Only ever constructed on the unmet path, so an "available ≥ required" instance is unrepresentable.
+ * The custody on offer for [alg] ([available]) is weaker than the [required] tier: either a
+ * [KeyProvider.requireTier] assertion failed, or a key a hardware backend just generated or reattached
+ * reported a weaker security level than the backend promises (an OS keystore that silently placed the
+ * key in software). In the second case the key has already been deleted, so nothing weaker than
+ * [required] is ever handed out. Structured and non-secret — it names only public tiers, never key
+ * material. Only ever constructed on the unmet path, so an "available ≥ required" instance is
+ * unrepresentable.
  */
 class InsufficientKeyCustody internal constructor(
     val alg: ProtectedKeyAlgorithm,
@@ -161,13 +164,29 @@ sealed class KeyStoreException protected constructor(
     ) : KeyStoreException("alias '$alias' holds $stored, not the requested $requested")
 
     /**
-     * The backing store could not be reached (disk IO, keystore/Keychain access). [retryable]
-     * mirrors the platform's guidance where it provides one; a raw platform IO exception is
-     * normalized into this rather than leaking through.
+     * The backing store could not be reached (disk IO, keystore/Keychain access, a platform keystore
+     * that failed to open). [retryable] mirrors the platform's guidance where it provides one; a raw
+     * platform IO exception is normalized into this rather than leaking through. A store that could
+     * not be opened is opened again on the next call, never replaced by a weaker one.
      */
     class StorageFailure internal constructor(
         val retryable: Boolean,
     ) : KeyStoreException("key store backend unavailable")
+
+    /**
+     * The store's entries are unreadable until the device is unlocked — the OS withholds the protected
+     * data (Apple `errSecInteractionNotAllowed`). Always worth retrying once the device is unlocked;
+     * nothing about the stored keys changed.
+     */
+    class DeviceLocked internal constructor() : KeyStoreException("key store is unavailable until the device is unlocked")
+
+    /**
+     * This process may not reach the store at all: the binary lacks the entitlement the backend
+     * requires, or the platform refused access to the item. Retrying does not help; the fix is in how
+     * the process is signed or configured. A [KeyStoreConfig.storage] medium is the escape hatch for a
+     * process that must persist keys without the platform store.
+     */
+    class AccessDenied internal constructor() : KeyStoreException("key store access denied to this process")
 
     /** A stored entry could not be decoded — its bytes are truncated, corrupt, or a newer format. */
     class CorruptEntry internal constructor() : KeyStoreException("stored key entry is corrupt or unreadable")

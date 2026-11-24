@@ -2,19 +2,19 @@ package com.ditchoom.buffer.crypto
 
 /**
  * Android: a durable [AndroidKeystoreKeyStore] on a device (or emulator) whose keys live in the
- * `AndroidKeyStore` and never leave it ([KeyCustody.NonExportable.Hardware] — StrongBox where a
- * dedicated secure element is present, TEE otherwise). A host-JVM unit-test run has no
- * `AndroidKeyStore` provider, so it falls back to the durable on-disk software store
- * ([KeyCustody.ExportableSoftware]); a caller that requires hardware custody there is correctly
- * refused by [KeyProvider.requireTier]. A consumer may still force a software medium (e.g. an
- * encrypted DB) via [KeyStoreConfig.storage].
+ * `AndroidKeyStore` and never leave it ([KeyCustody.NonExportable.Hardware] — StrongBox or TEE, as
+ * each key's own custody reports). The keystore is opened on first use; one that fails to load answers
+ * that call with a retryable [KeyStoreException.StorageFailure] and is opened again on the next, so a
+ * device never falls back to a weaker store. A host-JVM unit-test run has no `AndroidKeyStore`
+ * provider at all, so it uses the durable on-disk software store ([KeyCustody.ExportableSoftware]); a
+ * caller that requires hardware custody there is correctly refused by [KeyProvider.requireTier]. A
+ * consumer may still force a software medium (e.g. an encrypted DB) via [KeyStoreConfig.storage].
  */
 internal actual fun platformKeyStore(config: KeyStoreConfig): KeyStore =
     when {
         config.storage != null -> SoftwareKeyStore(config.storage)
-        else ->
-            androidKeystoreProviderOrNull()?.let { AndroidKeystoreKeyStore(it, config.name) }
-                ?: SoftwareKeyStore(FileKeyStorage(config.name, config.location))
+        !androidKeystoreProviderRegistered() -> SoftwareKeyStore(FileKeyStorage(config.name, config.location))
+        else -> RetryingKeyStore { openAndroidKeystoreStore(config.name) }
     }
 
 /**
@@ -141,3 +141,19 @@ internal class AndroidKeystoreKeyStore(
     /** The keystore entry name for a store [alias]: `"$name:$alias"` (neither part contains `:`). */
     private fun namespaced(alias: String): String = "$name:$alias"
 }
+
+/**
+ * One attempt to open the persistent [AndroidKeystoreKeyStore] named [name]. A keystore that fails to
+ * load is a retryable [KeyStoreException.StorageFailure] for this attempt, never a software store.
+ */
+internal fun openAndroidKeystoreStore(name: String): PlatformStoreOpening =
+    when (val resolution = platformProtectedKeyResolution()) {
+        is ProtectedKeyResolution.Available ->
+            when (val provider = resolution.provider) {
+                is AndroidKeystoreHardwareKeyProvider ->
+                    PlatformStoreOpening.Opened(AndroidKeystoreKeyStore(provider, name))
+                else -> PlatformStoreOpening.Refused(KeyStoreException.StorageFailure(retryable = false))
+            }
+        is ProtectedKeyResolution.Refused, ProtectedKeyResolution.None ->
+            PlatformStoreOpening.Refused(KeyStoreException.StorageFailure(retryable = true))
+    }
