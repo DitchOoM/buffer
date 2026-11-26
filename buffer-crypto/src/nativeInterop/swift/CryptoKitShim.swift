@@ -42,7 +42,8 @@ private let BCKS_ERR_DENIED: Int32 = -8 // this process may not reach the item /
 private let BCKS_ERR_CORRUPT: Int32 = -9 // stored keychain item cannot be decoded
 private let BCKS_ERR_RETRY: Int32 = -10 // keychain momentarily busy
 private let BCKS_ERR_DUPLICATE: Int32 = -11 // an item already exists under this (service, account)
-private let BCKS_ERR_NO_KEYCHAIN: Int32 = -12 // this process has no keychain at all
+private let BCKS_ERR_NO_KEYCHAIN: Int32 = -12 // no keychain answered (none for this process, or not up yet)
+private let BCKS_ERR_INTERACTION: Int32 = -13 // macOS: the keychain needs a prompt this process may not show
 
 // Copy a CryptoKit Data result into a caller-provided output buffer, writing the length out.
 private func emit(_ data: Data, _ out: UnsafeMutablePointer<UInt8>?, _ outCap: Int, _ outLen: UnsafeMutablePointer<Int>?) -> Int32 {
@@ -870,12 +871,21 @@ private func classifyKeychain(_ status: OSStatus) -> Int32 {
     switch status {
     case errSecSuccess: return BCKS_OK
     case errSecItemNotFound: return BCKS_ERR_INPUT
-    case errSecInteractionNotAllowed: return BCKS_ERR_LOCKED
-    case errSecMissingEntitlement, errSecNoAccessForItem, errSecAuthFailed, errSecUserCanceled: return BCKS_ERR_DENIED
+    // iOS-family: the item's class is unavailable while the device is locked. macOS: the file keychain needs a
+    // prompt (unlock or access approval) that this process may not show, which no device unlock alone fixes.
+    case errSecInteractionNotAllowed:
+        #if os(macOS)
+        return BCKS_ERR_INTERACTION
+        #else
+        return BCKS_ERR_LOCKED
+        #endif
+    case errSecMissingEntitlement, errSecNoAccessForItem: return BCKS_ERR_DENIED
+    // The user dismissed or failed an access prompt: a decision, not a property of the binary.
+    case errSecUserCanceled: return BCKS_ERR_CANCELED
+    case errSecAuthFailed: return BCKS_ERR_AUTH
     case errSecDecode: return BCKS_ERR_CORRUPT
     case errSecDuplicateItem: return BCKS_ERR_DUPLICATE
-    // "No keychain is available": a process (an extension, a sandbox) that has no keychain to reach.
-    // It is not a busy keychain, so retrying is not offered.
+    // "No keychain is available": a process without one, or a keychain not up yet early in boot.
     case errSecNotAvailable: return BCKS_ERR_NO_KEYCHAIN
     case errSecIO, errSecAllocate: return BCKS_ERR_RETRY
     default: return BCKS_ERR_INTERNAL

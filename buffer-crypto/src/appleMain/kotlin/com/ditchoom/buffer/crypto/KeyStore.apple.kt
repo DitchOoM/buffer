@@ -6,11 +6,14 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_AUTH
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_BUFFER
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_CANCELED
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_CORRUPT
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_DENIED
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_DUPLICATE
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_INPUT
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_INTERACTION
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_LOCKED
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_NO_KEYCHAIN
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_RETRY
@@ -45,8 +48,9 @@ import kotlin.concurrent.atomics.ExperimentalAtomicApi
  * Keychain durably holds its restore record keyed by (`kSecAttrService` = [KeyStoreConfig.name],
  * `kSecAttrAccount` = alias). The Enclave is probed on first use; a refused probe answers that call
  * with a typed [KeyStoreException] ([KeyStoreException.AccessDenied] for a binary without the
- * entitlement, a retryable [KeyStoreException.StorageFailure] otherwise) and is probed again on the
- * next, so a device with an Enclave never ends up on a weaker or non-durable store.
+ * entitlement, [KeyStoreException.DeviceLocked] on a locked device, a retryable
+ * [KeyStoreException.StorageFailure] otherwise) and is probed again on the next, so a device with an
+ * Enclave never ends up on a weaker or non-durable store.
  *
  * Only hardware with no Enclave at all (the simulator) uses an in-process, **non-durable** software
  * store ([KeyCustody.ExportableSoftware]) — honest about the weaker custody (a `requireTier` caller is
@@ -68,16 +72,17 @@ internal fun openAppleKeychainStore(
     when (probe) {
         EnclaveProbe.Usable -> PlatformStoreOpening.Opened(AppleKeychainKeyStore(enclaveProvider, name))
         EnclaveProbe.NotEntitled -> PlatformStoreOpening.Refused(KeyStoreException.AccessDenied())
+        EnclaveProbe.Locked -> PlatformStoreOpening.Refused(KeyStoreException.DeviceLocked())
         EnclaveProbe.Refused, EnclaveProbe.NotPresent ->
             PlatformStoreOpening.Refused(KeyStoreException.StorageFailure(retryable = true))
     }
 
-/** The failure an Enclave generate status names: a locked device is [KeyStoreException.DeviceLocked]. */
-internal fun enclaveGenerateFailure(status: Int): CryptoException =
+/** The failure an Enclave generate status names: a locked device is [HardwareKeyException.DeviceLocked]. */
+internal fun enclaveGenerateFailure(status: Int): HardwareKeyException =
     when (status) {
-        BCKS_ERR_LOCKED -> KeyStoreException.DeviceLocked()
+        BCKS_ERR_LOCKED -> HardwareKeyException.DeviceLocked()
         // The binary lacks the entitlement the Enclave requires: a definite answer, not a passing failure.
-        BCKS_ERR_DENIED -> KeyStoreException.AccessDenied()
+        BCKS_ERR_DENIED -> HardwareKeyException.AccessDenied()
         else -> HardwareKeyException.SecureElementUnavailable()
     }
 
@@ -85,10 +90,10 @@ internal fun enclaveGenerateFailure(status: Int): CryptoException =
  * The failure an Enclave sign status names. [BCKS_ERR_LOCKED] is a key whose class is unavailable while the device is
  * locked: an older key made under a when-unlocked class, which keeps that class for life.
  */
-internal fun enclaveSignFailure(status: Int): CryptoException =
+internal fun enclaveSignFailure(status: Int): HardwareKeyException =
     when (status) {
         BCKS_ERR_INPUT -> HardwareKeyException.KeyInvalidated()
-        BCKS_ERR_LOCKED -> KeyStoreException.DeviceLocked()
+        BCKS_ERR_LOCKED -> HardwareKeyException.DeviceLocked()
         else -> HardwareKeyException.TransientHardwareFailure(retryable = false)
     }
 
@@ -99,12 +104,29 @@ internal fun enclaveSignFailure(status: Int): CryptoException =
 internal fun keychainFailure(status: Int): KeyStoreException =
     when (status) {
         BCKS_ERR_LOCKED -> KeyStoreException.DeviceLocked()
+        BCKS_ERR_INTERACTION -> KeyStoreException.InteractionRequired()
+        BCKS_ERR_CANCELED, BCKS_ERR_AUTH -> KeyStoreException.AuthenticationDeclined()
         BCKS_ERR_DENIED -> KeyStoreException.AccessDenied()
         BCKS_ERR_CORRUPT -> KeyStoreException.CorruptEntry()
-        BCKS_ERR_RETRY, BCKS_ERR_DUPLICATE -> KeyStoreException.StorageFailure(retryable = true)
-        // The process has no keychain at all (an extension or sandbox without one): retrying cannot help.
-        BCKS_ERR_NO_KEYCHAIN -> KeyStoreException.StorageFailure(retryable = false)
+        // No keychain answered: early in boot it may not be up yet, so a later call can succeed.
+        BCKS_ERR_RETRY, BCKS_ERR_DUPLICATE, BCKS_ERR_NO_KEYCHAIN -> KeyStoreException.StorageFailure(retryable = true)
         else -> KeyStoreException.StorageFailure(retryable = false)
+    }
+
+/** Whether a protection-class move is asked again on the next call. */
+internal sealed interface MigrationStep {
+    /** Done, or refused in a way the next call would only repeat: not asked again for this store. */
+    data object Settled : MigrationStep
+
+    /** Refused for now (a locked device, a busy keychain): asked again on the next call. */
+    data object TryAgain : MigrationStep
+}
+
+/** What a [bcks_keychain_migrate] status means for the next call. */
+internal fun migrationStep(status: Int): MigrationStep =
+    when (status) {
+        BCKS_ERR_LOCKED, BCKS_ERR_RETRY, BCKS_ERR_INTERACTION, BCKS_ERR_NO_KEYCHAIN -> MigrationStep.TryAgain
+        else -> MigrationStep.Settled
     }
 
 /**
@@ -127,6 +149,11 @@ internal fun keychainFailure(status: Int): KeyStoreException =
  * Both key kinds are (public point + restore blob) records, so the record's kind byte is what keeps
  * them apart: a kind-mismatched load answers `null` and a kind-mismatched get-or-generate raises
  * [KeyStoreException.AliasMismatch], never a mistyped handle.
+ *
+ * Records an earlier release wrote under `WhenUnlockedThisDeviceOnly` are moved to
+ * `AfterFirstUnlockThisDeviceOnly` without an opt-in, on first use: the move is one-way and makes them readable
+ * while the device is locked after its first unlock. A record is restore data, not a private key, and an older
+ * Enclave key keeps its own class.
  */
 internal class AppleKeychainKeyStore(
     private val provider: SecureEnclaveHardwareKeyProvider,
@@ -340,12 +367,16 @@ internal class AppleKeychainKeyStore(
     private val migrated = AtomicInt(0)
 
     /**
-     * Moves this store's records written under an older protection class to the current one, once per store. Best
-     * effort before an ordinary operation: a device locked right now leaves the move for the next call.
+     * Moves this store's records written under an older protection class to the current one, until the move settles
+     * (see [migrationStep]). Best effort before an ordinary operation: a device locked right now leaves the move for
+     * the next call.
      */
     private fun migrateOnce() {
         if (migrated.load() == 1) return
-        if (bcks_keychain_migrate(name) == BCKS_OK) migrated.store(1)
+        when (migrationStep(bcks_keychain_migrate(name))) {
+            MigrationStep.Settled -> migrated.store(1)
+            MigrationStep.TryAgain -> Unit
+        }
     }
 
     /**
@@ -356,10 +387,11 @@ internal class AppleKeychainKeyStore(
      */
     private fun migrateBeforeListing() {
         if (migrated.load() == 1) return
-        when (val status = bcks_keychain_migrate(name)) {
-            BCKS_OK -> migrated.store(1)
-            BCKS_ERR_LOCKED -> throw KeyStoreException.DeviceLocked()
-            else -> Unit
+        val status = bcks_keychain_migrate(name)
+        if (status == BCKS_ERR_LOCKED) throw KeyStoreException.DeviceLocked()
+        when (migrationStep(status)) {
+            MigrationStep.Settled -> migrated.store(1)
+            MigrationStep.TryAgain -> Unit
         }
     }
 

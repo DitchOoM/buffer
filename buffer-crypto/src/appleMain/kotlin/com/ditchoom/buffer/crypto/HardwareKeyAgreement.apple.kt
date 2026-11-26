@@ -126,7 +126,7 @@ internal fun enclaveAgreeP256(
  * The typed failure a non-OK, non-auth agreement status stands for. Returned rather than thrown so
  * the caller frees the secret buffer first and keeps a single throw site.
  */
-private fun enclaveAgreeFailure(status: Int): Throwable =
+internal fun enclaveAgreeFailure(status: Int): Throwable =
     when (status) {
         // Every peer-point rejection — malformed encoding, wrong length, off-curve — arrives as this
         // one code, so the exception carries no information about *which* check failed.
@@ -134,7 +134,7 @@ private fun enclaveAgreeFailure(status: Int): Throwable =
         // The Enclave cannot restore this blob (wrong device, or an OS-invalidated key).
         BCKS_ERR_INPUT -> HardwareKeyException.KeyInvalidated()
         // The key's protection class is unavailable while the device is locked; it works again after the unlock.
-        BCKS_ERR_LOCKED -> KeyStoreException.DeviceLocked()
+        BCKS_ERR_LOCKED -> HardwareKeyException.DeviceLocked()
         else -> HardwareKeyException.TransientHardwareFailure(retryable = false)
     }
 

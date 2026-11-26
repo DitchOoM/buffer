@@ -9,6 +9,7 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_AUTH
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_DENIED
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_LOCKED
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_available
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_p256_generate
@@ -75,6 +76,7 @@ import kotlin.time.TimeSource
  */
 @OptIn(ExperimentalAtomicApi::class)
 internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
+    @Suppress("OVERRIDE_DEPRECATION")
     override val dedicatedSecureElement: Boolean get() = true
 
     /**
@@ -271,13 +273,13 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
                 key.blob.freeNativeMemory()
                 key.point.freeNativeMemory()
             }
-        } catch (_: KeyStoreException.AccessDenied) {
+        } catch (_: HardwareKeyException.AccessDenied) {
             // The binary may not use the Enclave at all: a definite answer.
             Settlement.Settled(false)
         } catch (_: InvalidPublicKey) {
             // The element ran the agreement and declined this valid peer: it answered, and will answer the same.
             Settlement.Settled(false)
-        } catch (_: KeyStoreException.DeviceLocked) {
+        } catch (_: HardwareKeyException.DeviceLocked) {
             // Locked: the answer after the unlock may differ, and a locked device does not count toward giving up.
             Settlement.Unsettled(false)
         } catch (_: CryptoException) {
@@ -288,7 +290,8 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
 
     /**
      * A failure that says nothing about the element is asked again after the probe window, but not for ever: after
-     * [UNDECIDED_PROBES] of them in a row the element has answered as clearly as it will, and agreement is settled off,
+     * [UNDECIDED_PROBES] of them in all (a locked device is not counted), the element has answered as clearly as it
+     * will, and agreement is settled off,
      * so a device whose agreement always fails does not mint and discard a key every few seconds for the process life.
      */
     private fun undecided(): Settlement<Boolean> =
@@ -723,15 +726,19 @@ internal sealed interface EnclaveProbe {
     /** The Enclave refuses this binary for lack of an entitlement — stable for the life of the process. */
     data object NotEntitled : EnclaveProbe
 
+    /** The device is locked: probed again, since the answer after the unlock may differ. */
+    data object Locked : EnclaveProbe
+
     /** The Enclave refused for another reason, which a later probe may not repeat. */
     data object Refused : EnclaveProbe
 }
 
-/** The probe outcome a [bcks_secure_enclave_probe] status names; only [EnclaveProbe.Refused] is not settled. */
+/** The probe outcome a [bcks_secure_enclave_probe] status names; [EnclaveProbe.Locked] and [EnclaveProbe.Refused] are not settled. */
 internal fun enclaveProbeOf(status: Int): Settlement<EnclaveProbe> =
     when (status) {
         BCKS_OK -> Settlement.Settled(EnclaveProbe.Usable)
         BCKS_ERR_DENIED -> Settlement.Settled(EnclaveProbe.NotEntitled)
+        BCKS_ERR_LOCKED -> Settlement.Unsettled(EnclaveProbe.Locked)
         else -> Settlement.Unsettled(EnclaveProbe.Refused)
     }
 
@@ -760,7 +767,8 @@ internal actual fun platformProtectedKeyResolution(): ProtectedKeyResolution =
         EnclaveProbe.Usable ->
             ProtectedKeyResolution.Available(ProtectedKeyBackend.AppleSecureEnclave, enclaveProvider)
         EnclaveProbe.NotPresent -> enclaveRefused(CapabilityFinding.Enclave.NotPresent)
-        EnclaveProbe.NotEntitled, EnclaveProbe.Refused -> enclaveRefused(CapabilityFinding.Enclave.ProbeFailed)
+        EnclaveProbe.NotEntitled, EnclaveProbe.Locked, EnclaveProbe.Refused ->
+            enclaveRefused(CapabilityFinding.Enclave.ProbeFailed)
     }
 
 private fun enclaveRefused(finding: CapabilityFinding.Enclave): ProtectedKeyResolution =
@@ -773,8 +781,8 @@ private fun enclaveRefused(finding: CapabilityFinding.Enclave): ProtectedKeyReso
 internal fun appleEnclaveProviderOrNull(): SecureEnclaveHardwareKeyProvider? =
     when (appleEnclaveProbe()) {
         EnclaveProbe.Usable -> enclaveProvider
-        EnclaveProbe.NotPresent, EnclaveProbe.NotEntitled, EnclaveProbe.Refused -> null
+        EnclaveProbe.NotPresent, EnclaveProbe.NotEntitled, EnclaveProbe.Locked, EnclaveProbe.Refused -> null
     }
 
-/** Undecided agreement probes in a row after which agreement is settled off. */
+/** Undecided agreement probes, in all, after which agreement is settled off. */
 internal const val UNDECIDED_PROBES = 3

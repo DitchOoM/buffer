@@ -27,16 +27,19 @@
 // Keychain refusals, classified from the OSStatus by bcks_keychain_classify. LOCKED: the item's
 // protection class is unavailable until the device is unlocked (errSecInteractionNotAllowed), so a
 // retry after unlock can succeed. DENIED: this process may not reach the item at all (missing
-// entitlement, no access, a refused prompt). CORRUPT: the stored item cannot be decoded. RETRY: the
-// keychain is momentarily busy.
+// entitlement, no access). CORRUPT: the stored item cannot be decoded. RETRY: the keychain is
+// momentarily busy. A keychain prompt the user dismissed is BCKS_ERR_CANCELED, one they failed BCKS_ERR_AUTH.
 #define BCKS_ERR_LOCKED (-7)
 #define BCKS_ERR_DENIED (-8)
 #define BCKS_ERR_CORRUPT (-9)
 #define BCKS_ERR_RETRY (-10)
 // An item already exists under the alias a put named; the put left it untouched.
 #define BCKS_ERR_DUPLICATE (-11)
-// This process has no keychain to reach at all (errSecNotAvailable); retrying does not help.
+// No keychain answered (errSecNotAvailable): a process without one, or one that is not up yet early in boot.
 #define BCKS_ERR_NO_KEYCHAIN (-12)
+// macOS: the keychain needs the user to unlock it or approve access, and this process may not prompt
+// (errSecInteractionNotAllowed outside a UI session).
+#define BCKS_ERR_INTERACTION (-13)
 
 // AES-GCM.
 int32_t bcks_aesgcm_seal(
@@ -236,8 +239,8 @@ int32_t bcks_secure_enclave_p256_ka_agree_ctx(
 // they never sync off-device, and once the device has been unlocked after boot they stay readable
 // while it is locked, so background work can reach its keys.
 //
-// Every keychain call answers a keychain refusal with one of BCKS_ERR_LOCKED / DENIED / CORRUPT /
-// RETRY / INTERNAL (see bcks_keychain_classify), never a bare failure.
+// Every keychain call answers a keychain refusal with one of BCKS_ERR_LOCKED / INTERACTION / CANCELED /
+// AUTH / DENIED / CORRUPT / RETRY / NO_KEYCHAIN / INTERNAL (see bcks_keychain_classify), never a bare failure.
 
 // Stores dataPtr/dataLen under (service, account). BCKS_ERR_DUPLICATE when an item is already there;
 // it is never replaced.
