@@ -73,16 +73,22 @@ val KeyCustody.dedicatedSecureElement: Boolean get() =
 
 /**
  * Whether a hardware key that asked for a dedicated secure element (Android StrongBox) was made in the TEE instead,
- * and why. Known only for a key generated in this process: a reattached key reports [None], since the keystore keeps
- * no record of the fallback. The key's [KeyCustody] says where it lives either way; this says why it is not where it
- * asked to be, with the keystore's code, so a caller can log it.
+ * and why. The key's [KeyCustody] says where it lives either way; this says why it is not where it asked to be, with
+ * the keystore's code, so a caller can log it.
  */
 sealed interface SecureElementFallback {
-    /** No fallback happened, or none is known (a software key, a reattached key, a platform without one). */
+    /** No fallback happened: the key is where it asked to be, or it never asked for a dedicated secure element. */
     data object None : SecureElementFallback
 
+    /**
+     * Not known: the key was persisted earlier and reattached, and the keystore keeps no record of whether its
+     * generation fell back. Its [KeyCustody] still says whether StrongBox holds it.
+     */
+    data object NotRecorded : SecureElementFallback
+
     /** Asked for StrongBox, made in the TEE because of [reason]; [keystoreCode] is what the keystore said. */
-    data class ToTee(
+    @ConsistentCopyVisibility
+    data class ToTee internal constructor(
         val reason: SecureElementFallbackReason,
         val keystoreCode: KeystoreCode,
     ) : SecureElementFallback
@@ -112,12 +118,25 @@ enum class SecureElementFallbackReason {
 /** An Android keystore error code, as the platform publishes it. */
 sealed interface KeystoreCode {
     /** `android.security.KeyStoreException.getNumericErrorCode()`, from API 33. */
-    data class Public(
+    @ConsistentCopyVisibility
+    data class Public internal constructor(
         val code: Int,
     ) : KeystoreCode
 
     /** The keystore published no code (before API 33, or no keystore exception in the cause chain). */
     data object Unpublished : KeystoreCode
+}
+
+/** What a platform reported about a key's or an algorithm's custody when it fell short. */
+sealed interface OfferedCustody {
+    /** The platform named this tier. */
+    @ConsistentCopyVisibility
+    data class Tier internal constructor(
+        val tier: CustodyTier,
+    ) : OfferedCustody
+
+    /** The platform named no level it would vouch for (Android `SECURITY_LEVEL_UNKNOWN`). */
+    data object Unreported : OfferedCustody
 }
 
 /** A key type that records its [SecureElementFallback]. */

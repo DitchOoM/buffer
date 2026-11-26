@@ -313,14 +313,18 @@ interface HardwareKeyProvider : ProtectedKeyProvider {
      * cannot be promised for every key. The Android Keystore provider is always `false`: whether StrongBox holds a key
      * is known only per key, from its own [KeyCustody]. Informational; does not change the op contract.
      */
+    @Deprecated(
+        "Where a key lives is known per key. Read the key's own custody: `key.custody.dedicatedSecureElement`.",
+    )
     val dedicatedSecureElement: Boolean
 
     /**
      * A hardware provider's keys are always [KeyCustody.NonExportable.Hardware]; the narrowed return
      * type re-states, at the type level, that a hardware key can never be exportable or
-     * software-backed. Derived from [dedicatedSecureElement] so the two can never disagree.
+     * software-backed. This is the floor every key from the provider has; a key may report a stronger custody.
      */
     override val custody: KeyCustody.NonExportable.Hardware
+        @Suppress("DEPRECATION")
         get() = KeyCustody.NonExportable.Hardware(dedicatedSecureElement)
 
     /** Whether this provider can generate a key for [alg] (a secure element backs only a subset). */

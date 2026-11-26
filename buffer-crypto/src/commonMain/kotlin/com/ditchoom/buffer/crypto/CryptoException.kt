@@ -94,8 +94,26 @@ class AuthorizationFailed internal constructor() : CryptoMisuseException("hardwa
 class InsufficientKeyCustody internal constructor(
     val alg: ProtectedKeyAlgorithm,
     val required: CustodyTier,
-    val available: CustodyTier,
-) : CryptoMisuseException("$alg requires custody $required, platform offers only $available")
+    /** What the platform reported for the key or algorithm; [OfferedCustody.Unreported] when it named no level. */
+    val offered: OfferedCustody,
+) : CryptoMisuseException("$alg requires custody $required, platform offers only $offered") {
+    internal constructor(
+        alg: ProtectedKeyAlgorithm,
+        required: CustodyTier,
+        available: CustodyTier,
+    ) : this(alg, required, OfferedCustody.Tier(available))
+
+    /**
+     * The strongest tier the platform vouches for. An [OfferedCustody.Unreported] level vouches for none, so it is
+     * [CustodyTier.ExportableSoftware]; read [offered] to tell that apart from a reported tier.
+     */
+    val available: CustodyTier
+        get() =
+            when (val o = offered) {
+                is OfferedCustody.Tier -> o.tier
+                OfferedCustody.Unreported -> CustodyTier.ExportableSoftware
+            }
+}
 
 /**
  * A hardware-backed key operation failed in the secure element / keystore itself. `sealed` so every
@@ -130,6 +148,19 @@ sealed class HardwareKeyException protected constructor(
     class TransientHardwareFailure internal constructor(
         val retryable: Boolean,
     ) : HardwareKeyException("transient secure-hardware failure")
+
+    /**
+     * The key's protection class is unavailable while the device is locked (Apple: an Enclave key made under a
+     * when-unlocked class, or any Enclave operation on a locked device that the OS refuses). Retry after the unlock;
+     * the key itself is unchanged.
+     */
+    class DeviceLocked internal constructor() : HardwareKeyException("hardware key unavailable until device unlock")
+
+    /**
+     * This process may not use the secure element at all: the binary lacks the entitlement it requires. Retrying
+     * does not help; the fix is in how the process is signed.
+     */
+    class AccessDenied internal constructor() : HardwareKeyException("secure element access denied to this process")
 
     /** The secure element does not support the requested algorithm / key size / parameters. */
     class UnsupportedHardwareKey internal constructor() : HardwareKeyException("unsupported hardware key parameters")
@@ -187,6 +218,19 @@ sealed class KeyStoreException protected constructor(
      * process that must persist keys without the platform store.
      */
     class AccessDenied internal constructor() : KeyStoreException("key store access denied to this process")
+
+    /**
+     * The OS asked the user to allow access to the store and the user dismissed the prompt or failed it (Apple
+     * `errSecUserCanceled`, `errSecAuthFailed`). Retry on the user's own action, not in a loop that prompts again.
+     */
+    class AuthenticationDeclined internal constructor() : KeyStoreException("key store access declined by the user")
+
+    /**
+     * The store needs the user to unlock it or approve access, and this process may not show that prompt (macOS
+     * `errSecInteractionNotAllowed`: a locked login keychain or an access prompt, reached from a session without UI).
+     * Retry from a session that can prompt, or after the keychain is unlocked.
+     */
+    class InteractionRequired internal constructor() : KeyStoreException("key store needs user interaction")
 
     /** A stored entry could not be decoded — its bytes are truncated, corrupt, or a newer format. */
     class CorruptEntry internal constructor() : KeyStoreException("stored key entry is corrupt or unreadable")

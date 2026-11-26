@@ -48,7 +48,7 @@ class StrongBoxInstrumentedTest {
                     signing.custody,
                     "an ECDSA P-256 key's custody must equal the device StrongBox feature ($hasStrongBox)",
                 )
-                assertEquals(false, provider.dedicatedSecureElement, "the provider reports the TEE floor")
+                assertEquals(false, provider.custody.dedicatedSecureElement, "the provider reports the TEE floor")
                 // The provider-minted key publishes its public key and produces a verifiable signature.
                 val vk = signing.verifyKey
                 val ops = signatureAsyncOrNull(SignatureScheme.EcdsaP256)

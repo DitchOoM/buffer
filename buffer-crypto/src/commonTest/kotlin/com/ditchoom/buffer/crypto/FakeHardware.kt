@@ -25,6 +25,7 @@ import kotlin.time.TimeSource
  * / [ProtectedSigningKey] directly — which is how a real provider in a later minor would build them.
  */
 internal class FakeHardware(
+    @Suppress("OVERRIDE_DEPRECATION")
     override val dedicatedSecureElement: Boolean = true,
     /** Injectable clock so tests can advance a [UserAuthenticationPolicy.Session] window. */
     private val timeSource: TimeSource = TimeSource.Monotonic,

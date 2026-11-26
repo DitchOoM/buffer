@@ -12,10 +12,17 @@ interface KeyProvider {
      * The [KeyCustody] a key generated for [alg] has at least on this platform (routing introspection); a hardware key
      * may report a stronger custody of its own. A platform [KeyStore] whose backend could not be opened throws the
      * typed [KeyStoreException] that refused it, and opens it again on the next call.
+     *
+     * On a platform [KeyStore] the first call (and the first after a refused probe's window) opens the backend on the
+     * calling thread, which can mean a generate-and-discard probe key in the secure element; call it off the main
+     * thread where that matters.
      */
     fun custodyFor(alg: ProtectedKeyAlgorithm): KeyCustody
 
-    /** Whether this provider can generate a key for [alg]. Throws like [custodyFor] when a backend cannot open. */
+    /**
+     * Whether this provider can generate a key for [alg]. Throws like [custodyFor] when a backend cannot open, and
+     * may probe on the calling thread like it; for a key-agreement algorithm the probe also runs one agreement.
+     */
     fun eligible(alg: ProtectedKeyAlgorithm): Boolean
 
     /** Generates a fresh signing key for [scheme], per [spec]. */
