@@ -638,10 +638,25 @@ public func bcks_secure_enclave_p256_generate_ac(
     guard let ac = SecAccessControlCreateWithFlags(
         kCFAllocatorDefault, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, flags, &acError
     ) else { return BCKS_ERR_INTERNAL }
-    guard let key = try? SecureEnclave.P256.Signing.PrivateKey(accessControl: ac) else { return BCKS_ERR_INTERNAL }
+    let key: SecureEnclave.P256.Signing.PrivateKey
+    do {
+        key = try SecureEnclave.P256.Signing.PrivateKey(accessControl: ac)
+    } catch {
+        return classifyBoundGenerateFailure(error)
+    }
     let s = emit(key.dataRepresentation, blobOut, blobCap, blobLenOut)
     if s != BCKS_OK { return s }
     return emit(key.publicKey.x963Representation, pointOut, pointCap, pointLenOut)
+}
+
+// Classify a failed generation of a key bound to user authentication. LocalAuthentication refusing the binding (no
+// passcode or biometry enrolled to bind the key to) is BCKS_ERR_AUTH; anything else is classified as any Enclave
+// failure.
+private func classifyBoundGenerateFailure(_ error: Error) -> Int32 {
+    #if canImport(LocalAuthentication) && !os(tvOS)
+    if (error as NSError).domain == LAError.errorDomain { return BCKS_ERR_AUTH }
+    #endif
+    return classifyEnclaveFailure(error, otherwise: BCKS_ERR_INTERNAL)
 }
 
 // Classify a failure of an operation that carried no LAContext: no user authentication was asked
@@ -783,8 +798,11 @@ public func bcks_secure_enclave_p256_ka_generate_ac(
     guard let ac = SecAccessControlCreateWithFlags(
         kCFAllocatorDefault, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, flags, &acError
     ) else { return BCKS_ERR_INTERNAL }
-    guard let key = try? SecureEnclave.P256.KeyAgreement.PrivateKey(accessControl: ac) else {
-        return BCKS_ERR_INTERNAL
+    let key: SecureEnclave.P256.KeyAgreement.PrivateKey
+    do {
+        key = try SecureEnclave.P256.KeyAgreement.PrivateKey(accessControl: ac)
+    } catch {
+        return classifyBoundGenerateFailure(error)
     }
     let s = emit(key.dataRepresentation, blobOut, blobCap, blobLenOut)
     if s != BCKS_OK { return s }
@@ -847,13 +865,17 @@ public func bcks_secure_enclave_p256_ka_agree_ctx(
 // The durable AppleKeychainKeyStore holds each key's framed (public point + Enclave restore blob) in
 // a generic-password Keychain item keyed by (service = store name, account = alias). The stored value
 // is NOT a private key — the Secure Enclave holds the private scalar; the blob is an encrypted
-// representation only the same Enclave can restore (see the Secure Enclave section). Items are
-// kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly: they never sync off-device, and a process the OS
+// representation only the same Enclave can restore (see the Secure Enclave section). Items are added
+// with kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly. On iOS, watchOS and tvOS they live in the data
+// protection keychain, which enforces that class: they never sync off-device, and a process the OS
 // launches in the background while the device is locked (after its first unlock since boot) can still
-// list and load its keys. The Enclave keys that are not bound to user authentication are created with
-// the same class (noAuthAccessControl), so a record that can be read can also be used. A key's class is
-// fixed when it is created: an Enclave key made under an older class keeps it, and refuses while the
-// device is locked with BCKS_ERR_LOCKED.
+// list and load its keys. On macOS no query sets kSecUseDataProtectionKeychain, so the items live in the
+// legacy file keychain (normally the login keychain), which does not enforce protection classes: there
+// they are as readable, and as copyable with the keychain file, as any item of that keychain. The
+// Enclave keys that are not bound to user authentication are created with the same class
+// (noAuthAccessControl), so a record that can be read can also be used. A key's class is fixed when it
+// is created: an Enclave key made under an older class keeps it, and a call the OS refuses for it with
+// errSecInteractionNotAllowed is BCKS_ERR_LOCKED.
 // Only strings/bytes cross the C-ABI boundary; no CFType is exposed.
 
 private let keychainAccessibility = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
@@ -886,9 +908,21 @@ private func classifyKeychain(_ status: OSStatus) -> Int32 {
         return BCKS_ERR_LOCKED
         #endif
     case errSecMissingEntitlement, errSecNoAccessForItem: return BCKS_ERR_DENIED
-    // The user dismissed or failed an access prompt: a decision, not a property of the binary.
-    case errSecUserCanceled: return BCKS_ERR_CANCELED
-    case errSecAuthFailed: return BCKS_ERR_AUTH
+    // macOS: the user dismissed or failed the file keychain's access prompt, a decision, not a property of the binary.
+    // iOS-family: the store's items carry no access control, so no prompt was shown and there is no decision; the
+    // status is a keychain failure.
+    case errSecUserCanceled:
+        #if os(macOS)
+        return BCKS_ERR_CANCELED
+        #else
+        return BCKS_ERR_INTERNAL
+        #endif
+    case errSecAuthFailed:
+        #if os(macOS)
+        return BCKS_ERR_AUTH
+        #else
+        return BCKS_ERR_INTERNAL
+        #endif
     case errSecDecode: return BCKS_ERR_CORRUPT
     case errSecDuplicateItem: return BCKS_ERR_DUPLICATE
     // "No keychain is available": a process without one, or a keychain not up yet early in boot.
@@ -926,14 +960,19 @@ private func upgradeAccessibility(_ query: [String: Any], _ attributes: [String:
     _ = SecItemUpdate(query as CFDictionary, [kSecAttrAccessible as String: keychainAccessibility] as CFDictionary)
 }
 
-// Moves every item of `service` written under an older protection class to the current one. BCKS_OK
-// when every item already has it (or there is none); BCKS_ERR_LOCKED while an older-class item is
-// withheld because the device is locked.
+// The protection class earlier releases wrote records under.
+private let legacyKeychainAccessibility = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+
+// Moves the items of `service` written under the earlier class to the current one; items already under it are not
+// matched, so they are not rewritten. BCKS_OK when no item has the earlier class (or there is none); BCKS_ERR_LOCKED
+// while an earlier-class item is withheld because the device is locked.
 @_cdecl("bcks_keychain_migrate")
 public func bcks_keychain_migrate(_ service: UnsafePointer<CChar>?) -> Int32 {
     return keychainQueue.sync {
+        var query = keychainBaseQuery(service, nil)
+        query[kSecAttrAccessible as String] = legacyKeychainAccessibility
         let status = SecItemUpdate(
-            keychainBaseQuery(service, nil) as CFDictionary,
+            query as CFDictionary,
             [kSecAttrAccessible as String: keychainAccessibility] as CFDictionary
         )
         return status == errSecItemNotFound ? BCKS_OK : classifyKeychain(status)

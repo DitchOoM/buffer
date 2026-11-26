@@ -48,12 +48,23 @@ class KeychainStatusClassificationTest {
         assertIs<KeyStoreException.InteractionRequired>(keychainFailure(BCKS_ERR_INTERACTION))
     }
 
+    /**
+     * On macOS a cancelled or failed status is the user's answer to the file keychain's access prompt. On iOS, watchOS
+     * and tvOS the store's items carry no access control, so no prompt was shown, and the status is a keychain failure;
+     * that arm is compiled for those targets and not reachable from this host.
+     */
+    @OptIn(ExperimentalNativeApi::class)
     @Test
-    fun aDeclinedOrFailedPromptIsDeclinedNotAccessDenied() {
-        assertEquals(BCKS_ERR_CANCELED, bcks_keychain_classify(ERR_SEC_USER_CANCELED))
-        assertEquals(BCKS_ERR_AUTH, bcks_keychain_classify(ERR_SEC_AUTH_FAILED))
+    fun aDeclinedOrFailedPromptIsDeclinedOnlyWhereThereIsAPrompt() {
         assertIs<KeyStoreException.AuthenticationDeclined>(keychainFailure(BCKS_ERR_CANCELED))
         assertIs<KeyStoreException.AuthenticationDeclined>(keychainFailure(BCKS_ERR_AUTH))
+        if (Platform.osFamily == OsFamily.MACOSX) {
+            assertEquals(BCKS_ERR_CANCELED, bcks_keychain_classify(ERR_SEC_USER_CANCELED))
+            assertEquals(BCKS_ERR_AUTH, bcks_keychain_classify(ERR_SEC_AUTH_FAILED))
+        } else {
+            assertEquals(BCKS_ERR_INTERNAL, bcks_keychain_classify(ERR_SEC_USER_CANCELED))
+            assertEquals(BCKS_ERR_INTERNAL, bcks_keychain_classify(ERR_SEC_AUTH_FAILED))
+        }
     }
 
     @Test

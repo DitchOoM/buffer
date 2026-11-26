@@ -184,7 +184,7 @@ int32_t bcks_la_evaluate(int64_t handle, int32_t method, int32_t interactionAllo
 
 // Generates a Secure Enclave P-256 signing key bound to user authentication via SecAccessControl
 // (authReq: 1 = userPresence, 2 = biometryCurrentSet). Outputs match
-// bcks_secure_enclave_p256_generate.
+// bcks_secure_enclave_p256_generate; BCKS_ERR_AUTH when LocalAuthentication refuses the binding.
 int32_t bcks_secure_enclave_p256_generate_ac(
     int32_t authReq,
     uint8_t *blobOut, size_t blobCap, size_t *blobLenOut,
@@ -213,7 +213,8 @@ int32_t bcks_secure_enclave_p256_ka_generate(
 
 // Generates a Secure Enclave P-256 key-agreement key bound to user authentication via
 // SecAccessControl (authReq: 1 = userPresence, 2 = biometryCurrentSet); the element then refuses an
-// unauthenticated derive. Outputs match bcks_secure_enclave_p256_ka_generate.
+// unauthenticated derive. Outputs match bcks_secure_enclave_p256_ka_generate; BCKS_ERR_AUTH when
+// LocalAuthentication refuses the binding.
 int32_t bcks_secure_enclave_p256_ka_generate_ac(
     int32_t authReq,
     uint8_t *blobOut, size_t blobCap, size_t *blobLenOut,
@@ -269,8 +270,9 @@ int32_t bcks_keychain_aliases(
     const char *service,
     uint8_t *out, size_t outCap, size_t *outLenOut);
 
-// Moves every item of `service` to the current protection class. BCKS_ERR_LOCKED while an item under an
-// older class is withheld because the device is locked.
+// Moves the items of `service` still under the earlier protection class (WhenUnlockedThisDeviceOnly) to
+// the current one; items already under it are not rewritten. BCKS_ERR_LOCKED while an earlier-class
+// item is withheld because the device is locked.
 int32_t bcks_keychain_migrate(const char *service);
 
 // The BCKS status a keychain OSStatus classifies to (BCKS_OK for errSecSuccess, BCKS_ERR_INPUT for
