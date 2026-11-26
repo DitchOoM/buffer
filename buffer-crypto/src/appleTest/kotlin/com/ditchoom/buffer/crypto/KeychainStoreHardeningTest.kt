@@ -27,10 +27,13 @@ import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.set
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.experimental.ExperimentalNativeApi
 import kotlin.native.OsFamily
 import kotlin.native.Platform
@@ -40,6 +43,8 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.test.fail
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * The Keychain store's failure contract. The locked-device case cannot be
@@ -128,22 +133,30 @@ class KeychainStoreHardeningTest {
         }
     }
 
+    /**
+     * The racers run detached from the test, under a real-time bound: concurrent keychain calls that deadlock fail
+     * here instead of hanging the run, and nothing touches the keychain after such a failure.
+     */
     @Test
     fun fourEnclaveStoresRacingToCreateOneAliasEndWithOneKey() =
-        runTest {
+        runTest(timeout = RACE_BUDGET * 2) {
             if (appleEnclaveProviderOrNull() == null) return@runTest
             val name = "bcks-race-${kotlin.random.Random.nextInt(Int.MAX_VALUE)}"
+            val racers = CoroutineScope(Dispatchers.Default)
+            val keys =
+                withContext(Dispatchers.Default) {
+                    withTimeoutOrNull(RACE_BUDGET) {
+                        (0 until 4)
+                            .map {
+                                racers.async {
+                                    CryptoCapabilities
+                                        .keyStore(KeyStoreConfig(name = name))
+                                        .getOrGenerateSigning("one", SignatureScheme.EcdsaP256)
+                                }
+                            }.awaitAll()
+                    }
+                } ?: fail("four concurrent get-or-generates did not finish within $RACE_BUDGET: the keychain deadlocked")
             try {
-                val keys =
-                    (0 until 4)
-                        .map {
-                            async(Dispatchers.Default) {
-                                CryptoCapabilities
-                                    .keyStore(
-                                        KeyStoreConfig(name = name),
-                                    ).getOrGenerateSigning("one", SignatureScheme.EcdsaP256)
-                            }
-                        }.awaitAll()
                 val stored = assertNotNull(CryptoCapabilities.keyStore(KeyStoreConfig(name = name)).loadSigning("one"))
                 val expected = stored.verifyKey.exportEncoded().toHexForTest()
                 keys.forEach { key ->
@@ -152,6 +165,37 @@ class KeychainStoreHardeningTest {
             } finally {
                 CryptoCapabilities.keyStore(KeyStoreConfig(name = name)).delete("one")
             }
+        }
+
+    /**
+     * Adds, reads and deletes from many threads at once: the call mix that deadlocks inside the macOS file keychain
+     * when two calls run concurrently (an add holds the keychain lock and waits for an item's, a read holds the item's
+     * and waits for the keychain's). Bounded in real time, so a deadlock fails instead of hanging.
+     */
+    @Test
+    fun keychainCallsFromManyThreadsAllFinish() =
+        runTest(timeout = RACE_BUDGET * 2) {
+            if (appleEnclaveProviderOrNull() == null) return@runTest
+            val service = "bcks-threads-${kotlin.random.Random.nextInt(Int.MAX_VALUE)}"
+            val workers = CoroutineScope(Dispatchers.Default)
+            val finished =
+                withContext(Dispatchers.Default) {
+                    withTimeoutOrNull(RACE_BUDGET) {
+                        (0 until KEYCHAIN_THREADS)
+                            .map { worker ->
+                                workers.async {
+                                    // Every worker contends on one item: reads land on an item another is adding.
+                                    repeat(KEYCHAIN_ROUNDS) { round ->
+                                        putByte(service, FIRST, SHARED_ACCOUNT)
+                                        getStatus(service, SHARED_ACCOUNT)
+                                        if ((round + worker) % 2 == 0) bcks_keychain_delete(service, SHARED_ACCOUNT)
+                                    }
+                                }
+                            }.awaitAll()
+                    }
+                }
+            assertNotNull(finished, "keychain calls from $KEYCHAIN_THREADS threads did not finish within $RACE_BUDGET")
+            bcks_keychain_delete(service, SHARED_ACCOUNT)
         }
 
     @Test
@@ -174,18 +218,32 @@ class KeychainStoreHardeningTest {
     private fun putByte(
         service: String,
         value: Byte,
+        account: String = "one",
     ): Int =
         memScoped {
             val one = allocArray<UByteVar>(1)
             one[0] = value.toUByte()
-            bcks_keychain_put(service, "one", one, 1.convert())
+            bcks_keychain_put(service, account, one, 1.convert())
         }
 
-    private fun readByte(service: String): Byte =
+    private fun getStatus(
+        service: String,
+        account: String,
+    ): Int =
         memScoped {
             val out = allocArray<UByteVar>(1)
             val len = alloc<platform.posix.size_tVar>()
-            assertEquals(BCKS_OK, bcks_keychain_get(service, "one", out, 1.convert(), len.ptr))
+            bcks_keychain_get(service, account, out, 1.convert(), len.ptr)
+        }
+
+    private fun readByte(
+        service: String,
+        account: String = "one",
+    ): Byte =
+        memScoped {
+            val out = allocArray<UByteVar>(1)
+            val len = alloc<platform.posix.size_tVar>()
+            assertEquals(BCKS_OK, bcks_keychain_get(service, account, out, 1.convert(), len.ptr))
             out[0].toByte()
         }
 
@@ -223,6 +281,10 @@ class KeychainStoreHardeningTest {
         const val FIRST: Byte = 1
         const val SECOND: Byte = 2
         const val HEX = 16
+        val RACE_BUDGET = 30.seconds
+        const val KEYCHAIN_THREADS = 8
+        const val KEYCHAIN_ROUNDS = 200
+        const val SHARED_ACCOUNT = "shared"
     }
 
     private fun com.ditchoom.buffer.ReadBuffer.toHexForTest(): String =

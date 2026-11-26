@@ -858,6 +858,12 @@ public func bcks_secure_enclave_p256_ka_agree_ctx(
 
 private let keychainAccessibility = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
 
+// Every keychain call this shim makes runs on this one serial queue. Two SecItem calls running at once
+// against the macOS file keychain can deadlock inside Security.framework (an add holds the keychain's
+// lock and waits for an item's while a read holds the item's and waits for the keychain's), so a
+// store used from several threads must never have two in flight.
+private let keychainQueue = DispatchQueue(label: "com.ditchoom.buffer.crypto.keychain")
+
 private func keychainBaseQuery(_ service: UnsafePointer<CChar>?, _ account: UnsafePointer<CChar>?) -> [String: Any] {
     var query: [String: Any] = [kSecClass as String: kSecClassGenericPassword]
     if let service = service { query[kSecAttrService as String] = String(cString: service) }
@@ -902,12 +908,14 @@ public func bcks_keychain_put(
     _ service: UnsafePointer<CChar>?, _ account: UnsafePointer<CChar>?,
     _ dataPtr: UnsafePointer<UInt8>?, _ dataLen: Int
 ) -> Int32 {
-    var query = keychainBaseQuery(service, account)
-    // Add only: an item already under this alias answers BCKS_ERR_DUPLICATE and is left as it is, so
-    // two writers racing to create one alias cannot replace each other's key.
-    query[kSecValueData as String] = bytes(dataPtr, dataLen)
-    query[kSecAttrAccessible as String] = keychainAccessibility
-    return classifyKeychain(SecItemAdd(query as CFDictionary, nil))
+    return keychainQueue.sync {
+        var query = keychainBaseQuery(service, account)
+        // Add only: an item already under this alias answers BCKS_ERR_DUPLICATE and is left as it is, so
+        // two writers racing to create one alias cannot replace each other's key.
+        query[kSecValueData as String] = bytes(dataPtr, dataLen)
+        query[kSecAttrAccessible as String] = keychainAccessibility
+        return classifyKeychain(SecItemAdd(query as CFDictionary, nil))
+    }
 }
 
 // Moves an item written under an older protection class to the current one. Best effort: a failed
@@ -923,11 +931,13 @@ private func upgradeAccessibility(_ query: [String: Any], _ attributes: [String:
 // withheld because the device is locked.
 @_cdecl("bcks_keychain_migrate")
 public func bcks_keychain_migrate(_ service: UnsafePointer<CChar>?) -> Int32 {
-    let status = SecItemUpdate(
-        keychainBaseQuery(service, nil) as CFDictionary,
-        [kSecAttrAccessible as String: keychainAccessibility] as CFDictionary
-    )
-    return status == errSecItemNotFound ? BCKS_OK : classifyKeychain(status)
+    return keychainQueue.sync {
+        let status = SecItemUpdate(
+            keychainBaseQuery(service, nil) as CFDictionary,
+            [kSecAttrAccessible as String: keychainAccessibility] as CFDictionary
+        )
+        return status == errSecItemNotFound ? BCKS_OK : classifyKeychain(status)
+    }
 }
 
 @_cdecl("bcks_keychain_get")
@@ -935,35 +945,41 @@ public func bcks_keychain_get(
     _ service: UnsafePointer<CChar>?, _ account: UnsafePointer<CChar>?,
     _ out: UnsafeMutablePointer<UInt8>?, _ outCap: Int, _ outLenOut: UnsafeMutablePointer<Int>?
 ) -> Int32 {
-    let base = keychainBaseQuery(service, account)
-    var query = base
-    query[kSecReturnData as String] = true
-    query[kSecReturnAttributes as String] = true
-    query[kSecMatchLimit as String] = kSecMatchLimitOne
-    var item: CFTypeRef?
-    let status = SecItemCopyMatching(query as CFDictionary, &item)
-    if status != errSecSuccess { return classifyKeychain(status) }
-    guard let attributes = item as? [String: Any], let data = attributes[kSecValueData as String] as? Data else {
-        return BCKS_ERR_CORRUPT
+    return keychainQueue.sync {
+        let base = keychainBaseQuery(service, account)
+        var query = base
+        query[kSecReturnData as String] = true
+        query[kSecReturnAttributes as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        if status != errSecSuccess { return classifyKeychain(status) }
+        guard let attributes = item as? [String: Any], let data = attributes[kSecValueData as String] as? Data else {
+            return BCKS_ERR_CORRUPT
+        }
+        upgradeAccessibility(base, attributes)
+        return emit(data, out, outCap, outLenOut)
     }
-    upgradeAccessibility(base, attributes)
-    return emit(data, out, outCap, outLenOut)
 }
 
 @_cdecl("bcks_keychain_contains")
 public func bcks_keychain_contains(_ service: UnsafePointer<CChar>?, _ account: UnsafePointer<CChar>?) -> Int32 {
-    var query = keychainBaseQuery(service, account)
-    query[kSecMatchLimit as String] = kSecMatchLimitOne
-    switch SecItemCopyMatching(query as CFDictionary, nil) {
-    case errSecSuccess: return 1
-    case errSecItemNotFound: return 0
-    case let status: return classifyKeychain(status)
+    return keychainQueue.sync {
+        var query = keychainBaseQuery(service, account)
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        switch SecItemCopyMatching(query as CFDictionary, nil) {
+        case errSecSuccess: return 1
+        case errSecItemNotFound: return 0
+        case let status: return classifyKeychain(status)
+        }
     }
 }
 
 @_cdecl("bcks_keychain_delete")
 public func bcks_keychain_delete(_ service: UnsafePointer<CChar>?, _ account: UnsafePointer<CChar>?) -> Int32 {
-    return classifyKeychain(SecItemDelete(keychainBaseQuery(service, account) as CFDictionary))
+    return keychainQueue.sync {
+        return classifyKeychain(SecItemDelete(keychainBaseQuery(service, account) as CFDictionary))
+    }
 }
 
 @_cdecl("bcks_keychain_aliases")
@@ -971,22 +987,24 @@ public func bcks_keychain_aliases(
     _ service: UnsafePointer<CChar>?,
     _ out: UnsafeMutablePointer<UInt8>?, _ outCap: Int, _ outLenOut: UnsafeMutablePointer<Int>?
 ) -> Int32 {
-    var query = keychainBaseQuery(service, nil)
-    query[kSecMatchLimit as String] = kSecMatchLimitAll
-    query[kSecReturnAttributes as String] = true
-    var items: CFTypeRef?
-    let status = SecItemCopyMatching(query as CFDictionary, &items)
-    if status == errSecItemNotFound { outLenOut?.pointee = 0; return BCKS_OK }
-    if status != errSecSuccess { return classifyKeychain(status) }
-    guard let array = items as? [[String: Any]] else { return BCKS_ERR_CORRUPT }
-    let names = Data(array.compactMap { $0[kSecAttrAccount as String] as? String }.joined(separator: "\n").utf8)
-    if names.count > outCap {
-        // Report the size the names need, so the caller can size its buffer from the item count
-        // instead of guessing a cap.
-        outLenOut?.pointee = names.count
-        return BCKS_ERR_BUFFER
+    return keychainQueue.sync {
+        var query = keychainBaseQuery(service, nil)
+        query[kSecMatchLimit as String] = kSecMatchLimitAll
+        query[kSecReturnAttributes as String] = true
+        var items: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &items)
+        if status == errSecItemNotFound { outLenOut?.pointee = 0; return BCKS_OK }
+        if status != errSecSuccess { return classifyKeychain(status) }
+        guard let array = items as? [[String: Any]] else { return BCKS_ERR_CORRUPT }
+        let names = Data(array.compactMap { $0[kSecAttrAccount as String] as? String }.joined(separator: "\n").utf8)
+        if names.count > outCap {
+            // Report the size the names need, so the caller can size its buffer from the item count
+            // instead of guessing a cap.
+            outLenOut?.pointee = names.count
+            return BCKS_ERR_BUFFER
+        }
+        return emit(names, out, outCap, outLenOut)
     }
-    return emit(names, out, outCap, outLenOut)
 }
 
 // =============================================================================
