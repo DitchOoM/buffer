@@ -67,12 +67,13 @@ internal class AndroidKeystoreKeyStore(
         requireValidAlias(alias)
         if (!provider.eligible(scheme.toProtectedKeyAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
         val ns = namespaced(alias)
-        return when (val stored = provider.entryAlgorithm(ns)) {
-            null -> provider.generatePersistentSigning(ns, spec)
-            ProtectedKeyAlgorithm.EcdsaP256 ->
-                provider.reattachSigning(ns, spec).orRetry()
-            else -> throw KeyStoreException.AliasMismatch(alias, stored, scheme.toProtectedKeyAlgorithm())
-        }
+        return provider
+            .getOrGenerateEntry(
+                ns,
+                ProtectedKeyAlgorithm.EcdsaP256,
+                reattach = { provider.reattachSigningEntry(ns, spec) },
+                generate = { provider.generatePersistentSigningEntry(ns, spec) },
+            ).keyOrMismatch(alias, scheme.toProtectedKeyAlgorithm())
     }
 
     override suspend fun getOrGenerateAesGcm(
@@ -81,12 +82,13 @@ internal class AndroidKeystoreKeyStore(
     ): AesGcmKey {
         requireValidAlias(alias)
         val ns = namespaced(alias)
-        return when (val stored = provider.entryAlgorithm(ns)) {
-            null -> provider.generatePersistentAesGcm(ns, spec)
-            ProtectedKeyAlgorithm.AesGcm ->
-                provider.reattachAesGcm(ns, spec).orRetry()
-            else -> throw KeyStoreException.AliasMismatch(alias, stored, ProtectedKeyAlgorithm.AesGcm)
-        }
+        return provider
+            .getOrGenerateEntry(
+                ns,
+                ProtectedKeyAlgorithm.AesGcm,
+                reattach = { provider.reattachAesGcmEntry(ns, spec) },
+                generate = { provider.generatePersistentAesGcmEntry(ns, spec) },
+            ).keyOrMismatch(alias, ProtectedKeyAlgorithm.AesGcm)
     }
 
     override suspend fun getOrGenerateKeyAgreement(
@@ -101,12 +103,13 @@ internal class AndroidKeystoreKeyStore(
             throw HardwareKeyException.AlgorithmNotEligible()
         }
         val ns = namespaced(alias)
-        return when (val stored = provider.entryAlgorithm(ns)) {
-            null -> provider.generatePersistentKeyAgreement(ns, spec)
-            ProtectedKeyAlgorithm.EcdhP256 ->
-                provider.reattachKeyAgreement(ns, spec).orRetry()
-            else -> throw KeyStoreException.AliasMismatch(alias, stored, curve.toProtectedKeyAlgorithm())
-        }
+        return provider
+            .getOrGenerateEntry(
+                ns,
+                ProtectedKeyAlgorithm.EcdhP256,
+                reattach = { provider.reattachKeyAgreementEntry(ns, spec) },
+                generate = { provider.generatePersistentKeyAgreementEntry(ns, spec) },
+            ).keyOrMismatch(alias, curve.toProtectedKeyAlgorithm())
     }
 
     override suspend fun loadSigning(alias: String): SigningKey? {
@@ -161,5 +164,12 @@ internal fun openAndroidKeystoreStore(name: String): PlatformStoreOpening =
             PlatformStoreOpening.Refused(KeyStoreException.StorageFailure(retryable = true))
     }
 
-/** A key the lookup just found that the reattach then could not read: the keystore failed between the two calls. */
-private fun <K : Any> K?.orRetry(): K = this ?: throw KeyStoreException.StorageFailure(retryable = true)
+private fun <K> AliasEntry<K>.keyOrMismatch(
+    alias: String,
+    requested: ProtectedKeyAlgorithm,
+): K =
+    when (this) {
+        is AliasEntry.Attached -> key
+        is AliasEntry.Generated -> key
+        is AliasEntry.HoldsOther -> throw KeyStoreException.AliasMismatch(alias, stored, requested)
+    }

@@ -112,7 +112,7 @@ internal fun p256PublicKey(encoded: ReadBuffer): PublicKey {
 /**
  * Distinguishes the two `PrivateKeyEntry` kinds a store can hold — ECDSA signing vs ECDH agreement —
  * by the keystore-recorded purposes ([KeyInfo.getPurposes], intrinsic to the entry, so no sidecar).
- * Callers already hold the keystore lock (`entryAlgorithm` / the reattach paths run this inside
+ * Callers already hold the keystore lock (the alias lookup and the reattach paths run this inside
  * `keystoreOp`).
  */
 internal fun privateEntryAlgorithm(privateKey: PrivateKey): ProtectedKeyAlgorithm {

@@ -15,29 +15,69 @@ import com.ditchoom.buffer.crypto.SecureElementFallbackReason as Reason
 class KeystorePlacementTest {
     private val tee = KeystorePlacement.SecureHardware(KeyCustody.NonExportable.Hardware(false))
     private val strongBox = KeystorePlacement.SecureHardware(KeyCustody.NonExportable.Hardware(true))
+    private val software = KeystorePlacement.NotSecureHardware(OfferedCustody.Tier(CustodyTier.NonExportableSoftware))
 
     @Test
     fun teeStrongBoxAndUnknownSecureAreHardware() {
         assertEquals(strongBox, placementOfSecurityLevel(Level.SECURITY_LEVEL_STRONGBOX))
         assertEquals(tee, placementOfSecurityLevel(Level.SECURITY_LEVEL_TRUSTED_ENVIRONMENT))
         assertEquals(tee, placementOfSecurityLevel(Level.SECURITY_LEVEL_UNKNOWN_SECURE), "secure, of an unnamed kind")
-        listOf(Level.SECURITY_LEVEL_SOFTWARE, Level.SECURITY_LEVEL_UNKNOWN).forEach { level ->
-            assertEquals(KeystorePlacement.NotSecureHardware, placementOfSecurityLevel(level), "level $level")
-        }
+        assertEquals(software, placementOfSecurityLevel(Level.SECURITY_LEVEL_SOFTWARE))
+    }
+
+    @Test
+    fun aLevelTheKeystoreWillNotNameIsRefusedAsUnreportedNotAsSoftware() {
+        val unknown = placementOfSecurityLevel(Level.SECURITY_LEVEL_UNKNOWN)
+        assertEquals(KeystorePlacement.NotSecureHardware(OfferedCustody.Unreported), unknown)
+        val refusal = custodyVerdict(unknown, KeyOrigin.Reattached) as CustodyVerdict.Refuse
+        val failure = notHardware(ProtectedKeyAlgorithm.EcdsaP256, refusal.offered)
+        assertEquals(OfferedCustody.Unreported, failure.offered)
+        assertEquals(CustodyTier.ExportableSoftware, failure.available, "an unnamed level vouches for no tier")
+        val softwareRefusal = custodyVerdict(software, KeyOrigin.Reattached) as CustodyVerdict.Refuse
+        assertEquals(OfferedCustody.Tier(CustodyTier.NonExportableSoftware), softwareRefusal.offered)
     }
 
     @Test
     fun aLegacyKeyCountsAtTheTeeFloor() {
         assertEquals(tee, placementOfLegacyKeyInfo(insideSecureHardware = true))
-        assertEquals(KeystorePlacement.NotSecureHardware, placementOfLegacyKeyInfo(insideSecureHardware = false))
+        assertEquals(software, placementOfLegacyKeyInfo(insideSecureHardware = false))
     }
 
     @Test
     fun onlyAJustGeneratedKeyOutsideHardwareIsDeleted() {
-        val software = KeystorePlacement.NotSecureHardware
-        assertEquals(CustodyVerdict.DeleteAndRefuse, custodyVerdict(software, KeyOrigin.JustGenerated))
-        assertEquals(CustodyVerdict.Refuse, custodyVerdict(KeystorePlacement.NotSecureHardware, KeyOrigin.Reattached))
-        assertEquals(CustodyVerdict.Accept(tee.custody), custodyVerdict(tee, KeyOrigin.Reattached))
+        val generated = KeyOrigin.JustGenerated(SecureElementFallback.None)
+        assertTrue(custodyVerdict(software, generated) is CustodyVerdict.DeleteAndRefuse)
+        assertTrue(custodyVerdict(software, KeyOrigin.Reattached) is CustodyVerdict.Refuse)
+    }
+
+    @Test
+    fun aReattachedKeySaysItsFallbackWasNotRecordedAndAGeneratedOneKeepsItsOwn() {
+        assertEquals(
+            CustodyVerdict.Accept(HardwarePlacement(tee.custody, SecureElementFallback.NotRecorded)),
+            custodyVerdict(tee, KeyOrigin.Reattached),
+        )
+        val toTee = SecureElementFallback.ToTee(Reason.SecureElementAbsent, KeystoreCode.Unpublished)
+        assertEquals(
+            CustodyVerdict.Accept(HardwarePlacement(tee.custody, toTee)),
+            custodyVerdict(tee, KeyOrigin.JustGenerated(toTee)),
+        )
+        assertEquals(
+            CustodyVerdict.Accept(HardwarePlacement(strongBox.custody, SecureElementFallback.None)),
+            custodyVerdict(strongBox, KeyOrigin.JustGenerated(SecureElementFallback.None)),
+        )
+    }
+
+    @Test
+    fun aKeystoreThatFailedToAnswerLeavesPresenceUnknownNotFalse() {
+        assertEquals(false, entryPresent(EntryLookup.Absent))
+        listOf(EntryLookup.Secret, EntryLookup.OtherType, EntryLookup.Unloadable(keystoreFailed = false)).forEach {
+            assertEquals(true, entryPresent(it), "$it is there")
+        }
+        val failure =
+            kotlin.test.assertFailsWith<KeyStoreException.StorageFailure> {
+                entryPresent(EntryLookup.Unloadable(keystoreFailed = true))
+            }
+        assertTrue(failure.retryable)
     }
 
     @Test
