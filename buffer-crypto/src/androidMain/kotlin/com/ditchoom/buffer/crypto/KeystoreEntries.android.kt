@@ -30,11 +30,12 @@ internal sealed interface EntryLookup {
     data object OtherType : EntryLookup
 
     /**
-     * `UnrecoverableKeyException`. With a keystore exception as its cause the keystore failed to answer. Without one it
-     * could not build the key from the entry (no or an unparsable certificate, an unsupported key type), or the key was
-     * permanently invalidated: `AndroidKeyStoreSpi.engineGetKey` rethrows `KeyPermanentlyInvalidatedException` as a bare
-     * `UnrecoverableKeyException`, so the two cannot be told apart. A key is invalidated only when it is bound to user
-     * authentication, which the persistent store's keys never are, so for them it is a corrupt entry.
+     * `UnrecoverableKeyException`. With a keystore exception as its cause the keystore failed to answer.
+     * Without one it could not build the key from the entry (no or an unparsable certificate, an
+     * unsupported key type), or the key was permanently invalidated: `AndroidKeyStoreSpi.engineGetKey`
+     * rethrows `KeyPermanentlyInvalidatedException` as a bare `UnrecoverableKeyException`, so the two
+     * cannot be told apart. Only a key bound to user authentication is invalidated, which the persistent
+     * store's keys never are, so for them it is a corrupt entry.
      */
     data class Unloadable(
         val keystoreFailed: Boolean,

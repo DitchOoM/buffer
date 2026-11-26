@@ -46,7 +46,8 @@ internal fun keychainReach(): KeychainReach {
             bcks_keychain_put(service, "probe", one, 1.convert())
         }
     bcks_keychain_delete(service, "probe")
-    return if (status == BCKS_OK || status == BCKS_ERR_DUPLICATE) KeychainReach.Reachable else KeychainReach.Refused(status)
+    val added = status == BCKS_OK || status == BCKS_ERR_DUPLICATE
+    return if (added) KeychainReach.Reachable else KeychainReach.Refused(status)
 }
 
 /**

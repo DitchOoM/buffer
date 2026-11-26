@@ -308,11 +308,14 @@ internal class SettlingLazy<T : Any>(
      */
     private fun undecide(value: T): T {
         val now = held.load()
-        if (now is Held.Settled) return now.value
         val markNow = timeSource.markNow()
-        if (now is Held.Unsettled && markNow < now.until) return now.value
-        if (!held.compareAndSet(now, Held.Unsettled(value, markNow + retryAfter))) return value
-        return if (undecided.addAndFetch(1) >= undecidedLimit) settle(Held.Settled(value)) else value
+        return when {
+            now is Held.Settled -> now.value
+            now is Held.Unsettled && markNow < now.until -> now.value
+            !held.compareAndSet(now, Held.Unsettled(value, markNow + retryAfter)) -> value
+            undecided.addAndFetch(1) >= undecidedLimit -> settle(Held.Settled(value))
+            else -> value
+        }
     }
 
     /** Stores [settled] unless another read settled first; either way, returns the value every later read sees. */

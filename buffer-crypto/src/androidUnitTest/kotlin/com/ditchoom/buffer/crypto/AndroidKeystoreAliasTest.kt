@@ -190,7 +190,7 @@ class AndroidKeystoreAliasTest {
         /** The keystore cannot answer: `getKey` throws and `containsAlias` answers `false`. */
         @Volatile var failing = false
 
-        /** `containsAlias` and `isKeyEntry` answer `false` whatever is stored, as the platform's do on a failed read. */
+        /** `containsAlias` and `isKeyEntry` answer `false` whatever is stored, as the platform's do on a failure. */
         @Volatile var containsAliasBlind = false
 
         override fun engineGetKey(

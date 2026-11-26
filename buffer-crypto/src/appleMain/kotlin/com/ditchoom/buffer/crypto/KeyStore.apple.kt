@@ -181,8 +181,8 @@ internal class AppleKeychainKeyStore(
         this(provider, ShimKeychainRecords(name, DEFAULT_ALIASES_CAPACITY))
 
     /**
-     * The Enclave's custody for an algorithm it holds; for one it cannot hold, [HardwareKeyException.AlgorithmNotEligible],
-     * since no key of it will ever come from this store.
+     * The Enclave's custody for an algorithm it holds; for one it cannot hold,
+     * [HardwareKeyException.AlgorithmNotEligible], since no key of it will ever come from this store.
      */
     override fun custodyFor(alg: ProtectedKeyAlgorithm): KeyCustody =
         if (provider.eligible(alg)) provider.custody else throw HardwareKeyException.AlgorithmNotEligible()

@@ -52,7 +52,8 @@ class KeystorePlacementTest {
             CustodyVerdict.Accept(KeyPlacement(KeyCustody.NonExportable.Software, SecureElementFallback.NotRecorded))
         // A key an earlier release stored outside hardware stays usable, reporting the custody it really has.
         assertEquals(honest, custodyVerdict(software, KeyOrigin.Reattached))
-        assertEquals(honest, custodyVerdict(KeystorePlacement.NotSecureHardware(OfferedCustody.Unreported), KeyOrigin.Reattached))
+        val unnamed = KeystorePlacement.NotSecureHardware(OfferedCustody.Unreported)
+        assertEquals(honest, custodyVerdict(unnamed, KeyOrigin.Reattached))
     }
 
     @Test

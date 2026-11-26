@@ -52,7 +52,7 @@ class StrongBoxInstrumentedTest {
                 assertEquals(false, provider.custody.dedicatedSecureElement, "the provider reports the TEE floor")
                 @Suppress("DEPRECATION")
                 val probed = provider.dedicatedSecureElement
-                assertEquals(hasStrongBox, probed, "the deprecated probe still answers whether the device has StrongBox")
+                assertEquals(hasStrongBox, probed, "the deprecated probe still answers whether StrongBox is there")
                 // The provider-minted key publishes its public key and produces a verifiable signature.
                 val vk = signing.verifyKey
                 val ops = signatureAsyncOrNull(SignatureScheme.EcdsaP256)

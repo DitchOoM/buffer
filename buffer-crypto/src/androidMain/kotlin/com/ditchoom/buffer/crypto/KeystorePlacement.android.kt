@@ -118,10 +118,12 @@ internal fun custodyVerdict(
         is KeystorePlacement.NotSecureHardware ->
             when (origin) {
                 is KeyOrigin.JustGenerated -> CustodyVerdict.DeleteAndRefuse(placement.offered)
-                KeyOrigin.Reattached ->
-                    CustodyVerdict.Accept(KeyPlacement(KeyCustody.NonExportable.Software, SecureElementFallback.NotRecorded))
+                KeyOrigin.Reattached -> CustodyVerdict.Accept(reattachedOutsideHardware)
             }
     }
+
+private val reattachedOutsideHardware =
+    KeyPlacement(KeyCustody.NonExportable.Software, SecureElementFallback.NotRecorded)
 
 /** The refusal of a key of [alg] that a generation placed outside secure hardware, as [offered]. */
 internal fun notHardware(

@@ -105,7 +105,8 @@ class KeychainStoreDecisionsTest {
 
     @Test
     fun hardwareWithNoEnclaveIsAStoreFailureThatRetryingWillNotFix() {
-        val refused = assertIs<PlatformStoreOpening.Refused>(openAppleKeychainStore("bcks-none", EnclaveProbe.NotPresent))
+        val opening = openAppleKeychainStore("bcks-none", EnclaveProbe.NotPresent)
+        val refused = assertIs<PlatformStoreOpening.Refused>(opening)
         val failure = assertIs<KeyStoreException.StorageFailure>(refused.failure)
         assertTrue(!failure.retryable, "no later call finds an Enclave on this hardware")
     }
@@ -177,11 +178,9 @@ class KeychainStoreDecisionsTest {
         ): KeychainPut {
             puts++
             putFailure?.let { throw it() }
-            if (invisibleDuplicate) return KeychainPut.AlreadyPresent
-            if (duplicateThenGone && puts == 1) return KeychainPut.AlreadyPresent
-            if (stored.containsKey(alias)) return KeychainPut.AlreadyPresent
-            stored[alias] = record.get(record.position())
-            return KeychainPut.Added
+            val present = invisibleDuplicate || (duplicateThenGone && puts == 1) || stored.containsKey(alias)
+            if (!present) stored[alias] = record.get(record.position())
+            return if (present) KeychainPut.AlreadyPresent else KeychainPut.Added
         }
 
         override fun get(alias: String): PlatformBuffer? =
