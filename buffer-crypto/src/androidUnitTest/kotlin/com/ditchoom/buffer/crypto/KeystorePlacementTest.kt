@@ -56,7 +56,7 @@ class KeystorePlacementTest {
             CustodyVerdict.Accept(HardwarePlacement(tee.custody, SecureElementFallback.NotRecorded)),
             custodyVerdict(tee, KeyOrigin.Reattached),
         )
-        val toTee = SecureElementFallback.ToTee(Reason.SecureElementAbsent, KeystoreCode.Unpublished)
+        val toTee = weaker(Reason.ElementAbsent, AndroidKeystoreCode.Unpublished)
         assertEquals(
             CustodyVerdict.Accept(HardwarePlacement(tee.custody, toTee)),
             custodyVerdict(tee, KeyOrigin.JustGenerated(toTee)),
@@ -85,7 +85,7 @@ class KeystorePlacementTest {
         val busy = listOf(KeystoreFailureFact.Wrapper, coded(Ks.ERROR_KEYMINT_FAILURE, transient = true))
         assertEquals(StrongBoxRefusal.RetryStrongBox, strongBoxRefusal(busy, attempt = 1))
         assertEquals(
-            toTee(Reason.SecureElementBusy, Ks.ERROR_KEYMINT_FAILURE),
+            toTee(Reason.ElementBusy, Ks.ERROR_KEYMINT_FAILURE),
             strongBoxRefusal(busy, attempt = STRONGBOX_ATTEMPTS),
             "a StrongBox that stays busy does not loop for ever",
         )
@@ -94,27 +94,25 @@ class KeystorePlacementTest {
     @Test
     fun everyOtherRefusalGoesToTheTeeWithItsReasonAndCode() {
         assertEquals(
-            toTee(Reason.SecureElementAbsent, Ks.ERROR_UNIMPLEMENTED),
+            toTee(Reason.ElementAbsent, Ks.ERROR_UNIMPLEMENTED),
             strongBoxRefusal(listOf(KeystoreFailureFact.StrongBoxUnavailable, coded(Ks.ERROR_UNIMPLEMENTED)), 1),
         )
         mapOf(
             Ks.ERROR_UNIMPLEMENTED to Reason.UnsupportedParameters,
             Ks.ERROR_INCORRECT_USAGE to Reason.UnsupportedParameters,
-            Ks.ERROR_KEYMINT_FAILURE to Reason.KeyMintFailure,
-            Ks.ERROR_INTERNAL_SYSTEM_ERROR to Reason.SystemError,
+            Ks.ERROR_KEYMINT_FAILURE to Reason.ElementFailed,
+            Ks.ERROR_INTERNAL_SYSTEM_ERROR to Reason.ElementFailed,
             Ks.ERROR_KEY_CORRUPTED to Reason.Unclassified,
         ).forEach { (code, reason) ->
             val refusal = strongBoxRefusal(listOf(KeystoreFailureFact.Wrapper, coded(code)), 1)
             assertEquals(toTee(reason, code), refusal, "code $code")
         }
         assertEquals(
-            StrongBoxRefusal.FallBackToTee(
-                SecureElementFallback.ToTee(Reason.UnsupportedParameters, KeystoreCode.Unpublished),
-            ),
+            StrongBoxRefusal.FallBackToTee(weaker(Reason.UnsupportedParameters, AndroidKeystoreCode.Unpublished)),
             strongBoxRefusal(listOf(KeystoreFailureFact.SpecRejected), 1),
         )
         assertEquals(
-            StrongBoxRefusal.FallBackToTee(SecureElementFallback.ToTee(Reason.Unclassified, KeystoreCode.Unpublished)),
+            StrongBoxRefusal.FallBackToTee(weaker(Reason.Unclassified, AndroidKeystoreCode.Unpublished)),
             strongBoxRefusal(listOf(KeystoreFailureFact.Wrapper, KeystoreFailureFact.Unclassifiable), 1),
             "before API 33 the keystore names no reason, and the fallback says so",
         )
@@ -141,5 +139,10 @@ class KeystorePlacementTest {
     private fun toTee(
         reason: Reason,
         code: Int,
-    ) = StrongBoxRefusal.FallBackToTee(SecureElementFallback.ToTee(reason, KeystoreCode.Public(code)))
+    ) = StrongBoxRefusal.FallBackToTee(weaker(reason, AndroidKeystoreCode.Public(code)))
+
+    private fun weaker(
+        reason: Reason,
+        code: AndroidKeystoreCode,
+    ) = SecureElementFallback.ToWeakerSecureTier(reason, AndroidKeystoreFallbackDetail(code))
 }

@@ -59,7 +59,7 @@ import kotlin.time.TimeSource
  *    [strongBoxRefusal]). A *transient* refusal (StrongBox busy) is asked of StrongBox once more
  *    ([STRONGBOX_ATTEMPTS] attempts in all), so a moment's contention does not settle a key in the TEE
  *    for life; after that, and for every other refusal, the key is made in the TEE and carries
- *    [SecureElementFallback.ToTee] naming why. Only a failure of the TEE generation itself throws.
+ *    [SecureElementFallback.ToWeakerSecureTier] naming why. Only a failure of the TEE generation itself throws.
  *  - **Every key reports its own custody.** After each generation and reattach the provider reads
  *    the key's `KeyInfo` security level and accepts only TEE or StrongBox: a key the keystore placed
  *    anywhere else (a software KeyMint behind a compatibility layer, an unknown level) is deleted
@@ -720,7 +720,7 @@ internal class AndroidKeystoreHardwareKeyProvider(
     /**
      * Builds a key in StrongBox and, when [strongBoxRefusal] says so, in the TEE: a transient StrongBox refusal is
      * tried in StrongBox again up to [STRONGBOX_ATTEMPTS] times, every other refusal goes to the TEE at once. The TEE
-     * key carries the reason and the keystore's code ([SecureElementFallback.ToTee]); a TEE failure is normalized to a
+     * key carries the reason and the keystore's code ([SecureElementFallback.ToWeakerSecureTier]); a TEE failure is normalized to a
      * [HardwareKeyException].
      */
     private inline fun <T> generateWithStrongBoxFallback(build: (StrongBoxRequest) -> T): Attempted<T> {

@@ -434,8 +434,7 @@ internal class ProtectedAesGcmKey(
     val gatedOpen: HardwareAesGcmOpen,
     private val onClose: () -> Unit = {},
     override val secureElementFallback: SecureElementFallback = SecureElementFallback.None,
-) : AesGcmKey,
-    FallbackNoted {
+) : AesGcmKey {
     /**
      * Opaque handle; there is no process-memory material to wipe. [onClose] lets a provider release
      * an out-of-process resource (e.g. delete the keystore alias). Defaults to a no-op.
@@ -457,8 +456,7 @@ internal class ProtectedSigningKey(
     override val verifyKey: VerifyKey,
     private val onClose: () -> Unit = {},
     override val secureElementFallback: SecureElementFallback = SecureElementFallback.None,
-) : SigningKey,
-    FallbackNoted {
+) : SigningKey {
     /**
      * Opaque handle; there is no process-memory material to wipe. [onClose] lets a provider release
      * an out-of-process resource (e.g. delete the keystore alias). Defaults to a no-op.

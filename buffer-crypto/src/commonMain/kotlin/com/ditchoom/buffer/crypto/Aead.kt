@@ -101,6 +101,12 @@ sealed interface AesGcmKey :
     /** Whether the key material is in software memory or hardware-backed. Derived from [custody]. */
     val provenance: KeyProvenance get() = custody.provenance
 
+    /**
+     * Whether this key asked for a dedicated secure element and was made in a weaker secure tier instead, and why.
+     * [SecureElementFallback.None] for a key that never asked for one.
+     */
+    val secureElementFallback: SecureElementFallback get() = SecureElementFallback.None
+
     /** Key size in bytes (16 for AES-128, 32 for AES-256). */
     val sizeBytes: Int get() = sizeBits / 8
 

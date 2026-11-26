@@ -72,60 +72,59 @@ val KeyCustody.dedicatedSecureElement: Boolean get() =
     this is KeyCustody.NonExportable.Hardware && dedicatedSecureElement
 
 /**
- * Whether a hardware key that asked for a dedicated secure element (Android StrongBox) was made in the TEE instead,
- * and why. The key's [KeyCustody] says where it lives either way; this says why it is not where it asked to be, with
- * the keystore's code, so a caller can log it.
+ * Whether a hardware key that asked for a dedicated secure element (Android StrongBox) was made in a weaker secure tier
+ * instead (the Android TEE), and why. The key's [KeyCustody] says where it lives either way; this says why it is not
+ * where it asked to be, so a caller can log it.
  */
 sealed interface SecureElementFallback {
     /** No fallback happened: the key is where it asked to be, or it never asked for a dedicated secure element. */
     data object None : SecureElementFallback
 
     /**
-     * Not known: the key was persisted earlier and reattached, and the keystore keeps no record of whether its
-     * generation fell back. Its [KeyCustody] still says whether StrongBox holds it.
+     * Not known: the key was persisted earlier and reattached, and the platform keeps no record of whether its
+     * generation fell back. Its [KeyCustody] still says whether a dedicated secure element holds it.
      */
     data object NotRecorded : SecureElementFallback
 
-    /** Asked for StrongBox, made in the TEE because of [reason]; [keystoreCode] is what the keystore said. */
+    /**
+     * Asked for a dedicated secure element and made in the platform's other secure hardware because of [reason].
+     * [detail] is what the platform itself reported, for logs; on Android it is an `AndroidKeystoreFallbackDetail`.
+     */
     @ConsistentCopyVisibility
-    data class ToTee internal constructor(
+    data class ToWeakerSecureTier internal constructor(
         val reason: SecureElementFallbackReason,
-        val keystoreCode: KeystoreCode,
+        val detail: SecureElementFallbackDetail,
     ) : SecureElementFallback
 }
 
-/** Why a StrongBox generation was retried in the TEE. */
-enum class SecureElementFallbackReason {
-    /** The device has no StrongBox for this key. */
-    SecureElementAbsent,
+/**
+ * Why a dedicated secure element did not take a key, in terms every platform shares. A platform's own finer reason is
+ * carried in [SecureElementFallback.ToWeakerSecureTier.detail], so a new platform maps onto these arms, with
+ * [Unclassified] for anything it cannot place, instead of adding one.
+ */
+sealed interface SecureElementFallbackReason {
+    /** The device has no dedicated secure element for this key. */
+    data object ElementAbsent : SecureElementFallbackReason
 
-    /** StrongBox does not implement the key's algorithm, size or purpose. */
-    UnsupportedParameters,
+    /** The dedicated secure element does not implement the key's algorithm, size or purpose. */
+    data object UnsupportedParameters : SecureElementFallbackReason
 
-    /** StrongBox stayed busy or unreachable through every attempt. */
-    SecureElementBusy,
+    /** The dedicated secure element stayed busy or unreachable through every attempt. */
+    data object ElementBusy : SecureElementFallbackReason
 
-    /** The StrongBox KeyMint failed the request. */
-    KeyMintFailure,
+    /** The dedicated secure element, or the platform service in front of it, failed the request. */
+    data object ElementFailed : SecureElementFallbackReason
 
-    /** The keystore reported a generic system error for the StrongBox request. */
-    SystemError,
-
-    /** The keystore gave no code that says why (before Android 13 it publishes none), or a code not named above. */
-    Unclassified,
+    /** The platform gave nothing that says why. */
+    data object Unclassified : SecureElementFallbackReason
 }
 
-/** An Android keystore error code, as the platform publishes it. */
-sealed interface KeystoreCode {
-    /** `android.security.KeyStoreException.getNumericErrorCode()`, from API 33. */
-    @ConsistentCopyVisibility
-    data class Public internal constructor(
-        val code: Int,
-    ) : KeystoreCode
-
-    /** The keystore published no code (before API 33, or no keystore exception in the cause chain). */
-    data object Unpublished : KeystoreCode
-}
+/**
+ * What the platform itself reported when a dedicated secure element refused a key. Open-ended on purpose: each
+ * platform adds its own subtype in its own source set, and a `when` over it needs an `else`, so a new platform's detail
+ * never breaks existing code. Only this library constructs one.
+ */
+abstract class SecureElementFallbackDetail internal constructor()
 
 /** What a platform reported about a key's or an algorithm's custody when it fell short. */
 sealed interface OfferedCustody {
@@ -138,23 +137,3 @@ sealed interface OfferedCustody {
     /** The platform named no level it would vouch for (Android `SECURITY_LEVEL_UNKNOWN`). */
     data object Unreported : OfferedCustody
 }
-
-/** A key type that records its [SecureElementFallback]. */
-internal interface FallbackNoted {
-    val secureElementFallback: SecureElementFallback
-}
-
-/** This signing key's [SecureElementFallback]: [SecureElementFallback.None] for any key that did not fall back. */
-val SigningKey.secureElementFallback: SecureElementFallback get() = fallbackOf(this)
-
-/** This AES-GCM key's [SecureElementFallback]. */
-val AesGcmKey.secureElementFallback: SecureElementFallback get() = fallbackOf(this)
-
-/** This key-agreement private key's [SecureElementFallback]. */
-val KeyAgreementPrivateKey.secureElementFallback: SecureElementFallback get() = fallbackOf(this)
-
-private fun fallbackOf(key: Any): SecureElementFallback =
-    when (key) {
-        is FallbackNoted -> key.secureElementFallback
-        else -> SecureElementFallback.None
-    }

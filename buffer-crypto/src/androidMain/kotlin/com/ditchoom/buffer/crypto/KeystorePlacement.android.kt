@@ -154,7 +154,7 @@ internal sealed interface StrongBoxRefusal {
 
     /** Make the key in the TEE, recording why. */
     data class FallBackToTee(
-        val fallback: SecureElementFallback.ToTee,
+        val fallback: SecureElementFallback.ToWeakerSecureTier,
     ) : StrongBoxRefusal
 }
 
@@ -174,29 +174,31 @@ internal fun strongBoxRefusal(
     val coded = chain.filterIsInstance<KeystoreFailureFact.Coded>().firstOrNull()
     val code =
         when (coded) {
-            null -> KeystoreCode.Unpublished
-            else -> KeystoreCode.Public(coded.numericErrorCode)
+            null -> AndroidKeystoreCode.Unpublished
+            else -> AndroidKeystoreCode.Public(coded.numericErrorCode)
         }
     val transient = coded != null && coded.transientFailure
     if (transient && attempt < STRONGBOX_ATTEMPTS) return StrongBoxRefusal.RetryStrongBox
     val reason =
         when {
-            KeystoreFailureFact.StrongBoxUnavailable in chain -> SecureElementFallbackReason.SecureElementAbsent
-            transient -> SecureElementFallbackReason.SecureElementBusy
+            KeystoreFailureFact.StrongBoxUnavailable in chain -> SecureElementFallbackReason.ElementAbsent
+            transient -> SecureElementFallbackReason.ElementBusy
             coded == null && KeystoreFailureFact.SpecRejected in chain ->
                 SecureElementFallbackReason.UnsupportedParameters
             coded == null -> SecureElementFallbackReason.Unclassified
             else -> reasonOfCode(coded.numericErrorCode)
         }
-    return StrongBoxRefusal.FallBackToTee(SecureElementFallback.ToTee(reason, code))
+    return StrongBoxRefusal.FallBackToTee(
+        SecureElementFallback.ToWeakerSecureTier(reason, AndroidKeystoreFallbackDetail(code)),
+    )
 }
 
 private fun reasonOfCode(code: Int): SecureElementFallbackReason =
     when (code) {
         AndroidKeyStoreException.ERROR_UNIMPLEMENTED, AndroidKeyStoreException.ERROR_INCORRECT_USAGE ->
             SecureElementFallbackReason.UnsupportedParameters
-        AndroidKeyStoreException.ERROR_KEYMINT_FAILURE -> SecureElementFallbackReason.KeyMintFailure
-        AndroidKeyStoreException.ERROR_INTERNAL_SYSTEM_ERROR -> SecureElementFallbackReason.SystemError
+        AndroidKeyStoreException.ERROR_KEYMINT_FAILURE, AndroidKeyStoreException.ERROR_INTERNAL_SYSTEM_ERROR ->
+            SecureElementFallbackReason.ElementFailed
         else -> SecureElementFallbackReason.Unclassified
     }
 

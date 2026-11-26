@@ -133,6 +133,12 @@ sealed interface SigningKey : AutoCloseable {
     val provenance: KeyProvenance get() = custody.provenance
 
     /**
+     * Whether this key asked for a dedicated secure element and was made in a weaker secure tier instead, and why.
+     * [SecureElementFallback.None] for a key that never asked for one.
+     */
+    val secureElementFallback: SecureElementFallback get() = SecureElementFallback.None
+
+    /**
      * The public [VerifyKey] matching this signing key. Every signing key knows its verifier:
      * an imported in-memory key carries the [VerifyKey] supplied at construction, and a
      * provider-minted hardware key carries the public key the secure element produced at generation.
