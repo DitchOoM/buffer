@@ -383,7 +383,9 @@ tracked to completion:
   created `AfterFirstUnlockThisDeviceOnly` with `privateKeyUsage`; Keychain records use the same class. An Enclave key's
   class is fixed when it is made: a key created under an older class keeps it and fails while the device is locked.
   Records are added, never replaced: two writers racing to create one alias end with the one record that was added
-  first.
+  first. Every keychain call the store makes runs on one serial queue per process: two `SecItem` calls running at
+  once against the macOS file keychain can deadlock inside Security.framework. Keychain calls made elsewhere in the
+  process are outside that queue.
 - **Existing Keychain records are moved to the new class without an opt-in.** Records written by earlier releases under
   `WhenUnlockedThisDeviceOnly` are moved to `AfterFirstUnlockThisDeviceOnly` on first use and before a listing. The move
   is one-way and makes those records readable while the device is locked, after its first unlock since boot; they still
