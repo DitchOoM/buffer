@@ -83,16 +83,37 @@ class InvalidPublicKey internal constructor(
 class AuthorizationFailed internal constructor() : CryptoMisuseException("hardware key authorization denied")
 
 /**
- * A [KeyProvider.requireTier] assertion failed: the platform's strongest eligible custody for [alg]
- * ([available]) is weaker than the [required] tier the caller demanded. Structured and non-secret —
- * it names only public tiers, never key material — so a security-sensitive caller can branch on it.
- * Only ever constructed on the unmet path, so an "available ≥ required" instance is unrepresentable.
+ * The custody on offer for [alg] ([available]) is weaker than the [required] tier: either a
+ * [KeyProvider.requireTier] assertion failed, or a key a hardware backend just generated reported a
+ * weaker security level than the backend promises (an OS keystore that silently placed the key in
+ * software). In the second case the generated key has been deleted. A key persisted earlier is never
+ * refused or deleted for its level: it is handed out reporting the custody it has, which the caller
+ * checks. Structured and non-secret — it names only public tiers, never key material. Only ever
+ * constructed on the unmet path, so an "available ≥ required" instance is unrepresentable.
  */
 class InsufficientKeyCustody internal constructor(
     val alg: ProtectedKeyAlgorithm,
     val required: CustodyTier,
-    val available: CustodyTier,
-) : CryptoMisuseException("$alg requires custody $required, platform offers only $available")
+    /** What the platform reported for the key or algorithm; [OfferedCustody.Unreported] when it named no level. */
+    val offered: OfferedCustody,
+) : CryptoMisuseException("$alg requires custody $required, platform offers only $offered") {
+    internal constructor(
+        alg: ProtectedKeyAlgorithm,
+        required: CustodyTier,
+        available: CustodyTier,
+    ) : this(alg, required, OfferedCustody.Tier(available))
+
+    /**
+     * The strongest tier the platform vouches for. An [OfferedCustody.Unreported] level vouches for none, so it is
+     * [CustodyTier.ExportableSoftware]; read [offered] to tell that apart from a reported tier.
+     */
+    val available: CustodyTier
+        get() =
+            when (val o = offered) {
+                is OfferedCustody.Tier -> o.tier
+                OfferedCustody.Unreported -> CustodyTier.ExportableSoftware
+            }
+}
 
 /**
  * A hardware-backed key operation failed in the secure element / keystore itself. `sealed` so every
@@ -128,6 +149,20 @@ sealed class HardwareKeyException protected constructor(
         val retryable: Boolean,
     ) : HardwareKeyException("transient secure-hardware failure")
 
+    /**
+     * The OS refused the key operation because the key's protection class is unavailable (Apple: an Enclave call
+     * refused with `errSecInteractionNotAllowed` on a key bound to no user authentication, which a locked device is
+     * documented to return, for example for an older key made under a when-unlocked class). Retry after the unlock;
+     * the key itself is unchanged.
+     */
+    class DeviceLocked internal constructor() : HardwareKeyException("hardware key unavailable until device unlock")
+
+    /**
+     * This process may not use the secure element at all: the binary lacks the entitlement it requires. Retrying
+     * does not help; the fix is in how the process is signed.
+     */
+    class AccessDenied internal constructor() : HardwareKeyException("secure element access denied to this process")
+
     /** The secure element does not support the requested algorithm / key size / parameters. */
     class UnsupportedHardwareKey internal constructor() : HardwareKeyException("unsupported hardware key parameters")
 
@@ -161,13 +196,42 @@ sealed class KeyStoreException protected constructor(
     ) : KeyStoreException("alias '$alias' holds $stored, not the requested $requested")
 
     /**
-     * The backing store could not be reached (disk IO, keystore/Keychain access). [retryable]
-     * mirrors the platform's guidance where it provides one; a raw platform IO exception is
-     * normalized into this rather than leaking through.
+     * The backing store could not be reached (disk IO, keystore/Keychain access, a platform keystore
+     * that failed to open). [retryable] mirrors the platform's guidance where it provides one; a raw
+     * platform IO exception is normalized into this rather than leaking through. A store that could
+     * not be opened is opened again on the next call, never replaced by a weaker one.
      */
     class StorageFailure internal constructor(
         val retryable: Boolean,
     ) : KeyStoreException("key store backend unavailable")
+
+    /**
+     * The store's entries are unreadable until the device is unlocked — the OS withholds the protected
+     * data (Apple `errSecInteractionNotAllowed`). Always worth retrying once the device is unlocked;
+     * nothing about the stored keys changed.
+     */
+    class DeviceLocked internal constructor() : KeyStoreException("key store unavailable until device unlock")
+
+    /**
+     * This process may not reach the store at all: the binary lacks the entitlement the backend
+     * requires, or the platform refused access to the item. Retrying does not help; the fix is in how
+     * the process is signed or configured. A [KeyStoreConfig.storage] medium is the escape hatch for a
+     * process that must persist keys without the platform store.
+     */
+    class AccessDenied internal constructor() : KeyStoreException("key store access denied to this process")
+
+    /**
+     * The OS asked the user to allow access to the store and the user dismissed the prompt or failed it (Apple
+     * `errSecUserCanceled`, `errSecAuthFailed`). Retry on the user's own action, not in a loop that prompts again.
+     */
+    class AuthenticationDeclined internal constructor() : KeyStoreException("key store access declined by the user")
+
+    /**
+     * The store needs the user to unlock it or approve access, and this process may not show that prompt (macOS
+     * `errSecInteractionNotAllowed`: a locked login keychain or an access prompt, reached from a session without UI).
+     * Retry from a session that can prompt, or after the keychain is unlocked.
+     */
+    class InteractionRequired internal constructor() : KeyStoreException("key store needs user interaction")
 
     /** A stored entry could not be decoded — its bytes are truncated, corrupt, or a newer format. */
     class CorruptEntry internal constructor() : KeyStoreException("stored key entry is corrupt or unreadable")

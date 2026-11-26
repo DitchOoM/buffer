@@ -4,6 +4,8 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import kotlin.concurrent.atomics.AtomicReference
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
 /**
  * A persistent, alias-addressable key store. Where [KeyProvider.generateSigning] et al. mint
@@ -482,5 +484,96 @@ internal class SoftwareKeyStore(
     private companion object {
         val secureFactory: BufferFactory = BufferFactory.deterministicSecure()
         val emptyBuffer: ReadBuffer = BufferFactory.Default.allocate(0).also { it.resetForRead() }
+    }
+}
+
+// =============================================================================
+// RetryingKeyStore — a platform store that is opened on first use and re-opened after a failure
+// =============================================================================
+
+/** What one attempt to open a platform's durable store came to. */
+internal sealed interface PlatformStoreOpening {
+    class Opened(
+        val store: KeyStore,
+    ) : PlatformStoreOpening
+
+    /** This attempt failed with [failure]; the next call opens again. */
+    class Refused(
+        val failure: KeyStoreException,
+    ) : PlatformStoreOpening
+}
+
+/**
+ * The [KeyStore] a platform hands out when its durable backend exists but may not open on the first
+ * try (a keystore daemon that is not up yet, an Enclave probe that failed). Every call opens the
+ * backend through [open] until one attempt succeeds, and a refused attempt surfaces as its typed
+ * [KeyStoreException] — so a failure is never answered by quietly switching to a weaker or
+ * non-durable store for the rest of the process.
+ */
+@OptIn(ExperimentalAtomicApi::class)
+@Suppress("TooManyFunctions") // one forwarding member per KeyStore member
+internal class RetryingKeyStore(
+    private val open: () -> PlatformStoreOpening,
+) : KeyStore {
+    private val opened = AtomicReference<KeyStore?>(null)
+
+    private fun store(): KeyStore {
+        opened.load()?.let { return it }
+        return when (val attempt = open()) {
+            is PlatformStoreOpening.Opened -> {
+                opened.compareAndSet(null, attempt.store)
+                opened.load() ?: attempt.store
+            }
+            is PlatformStoreOpening.Refused -> throw attempt.failure
+        }
+    }
+
+    override fun custodyFor(alg: ProtectedKeyAlgorithm): KeyCustody = store().custodyFor(alg)
+
+    override fun eligible(alg: ProtectedKeyAlgorithm): Boolean = store().eligible(alg)
+
+    override suspend fun generateSigning(
+        scheme: SignatureScheme,
+        spec: ProtectedKeySpec,
+    ): SigningKey = store().generateSigning(scheme, spec)
+
+    override suspend fun generateAesGcm(spec: ProtectedKeySpec): AesGcmKey = store().generateAesGcm(spec)
+
+    override suspend fun generateKeyAgreement(
+        curve: KeyAgreementCurve,
+        spec: ProtectedKeySpec,
+    ): KeyAgreementKeyPair = store().generateKeyAgreement(curve, spec)
+
+    override suspend fun getOrGenerateSigning(
+        alias: String,
+        scheme: SignatureScheme,
+        spec: ProtectedKeySpec,
+    ): SigningKey = store().getOrGenerateSigning(alias, scheme, spec)
+
+    override suspend fun getOrGenerateAesGcm(
+        alias: String,
+        spec: ProtectedKeySpec,
+    ): AesGcmKey = store().getOrGenerateAesGcm(alias, spec)
+
+    override suspend fun getOrGenerateKeyAgreement(
+        alias: String,
+        curve: KeyAgreementCurve,
+        spec: ProtectedKeySpec,
+    ): KeyAgreementKeyPair = store().getOrGenerateKeyAgreement(alias, curve, spec)
+
+    override suspend fun loadSigning(alias: String): SigningKey? = store().loadSigning(alias)
+
+    override suspend fun loadAesGcm(alias: String): AesGcmKey? = store().loadAesGcm(alias)
+
+    override suspend fun loadKeyAgreement(alias: String): KeyAgreementKeyPair? = store().loadKeyAgreement(alias)
+
+    override suspend fun contains(alias: String): Boolean = store().contains(alias)
+
+    override suspend fun aliases(): Set<String> = store().aliases()
+
+    override suspend fun delete(alias: String): Boolean = store().delete(alias)
+
+    override fun close() {
+        opened.load()?.close()
     }
 }

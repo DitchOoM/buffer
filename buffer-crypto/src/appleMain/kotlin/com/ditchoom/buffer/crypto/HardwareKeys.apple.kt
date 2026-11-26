@@ -8,12 +8,14 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_AUTH
-import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_INPUT
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_DENIED
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_LOCKED
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_available
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_p256_generate
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_p256_generate_ac
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_p256_sign_ctx
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.bcks_secure_enclave_probe
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.convert
@@ -26,6 +28,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import platform.posix.size_tVar
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.time.Duration
 import kotlin.time.TimeMark
 import kotlin.time.TimeSource
@@ -70,7 +73,9 @@ import kotlin.time.TimeSource
  * the platform boundary and returns `null` where LocalAuthentication cannot be driven (tvOS), so
  * no bound-key request ever reaches this provider without a usable prompt host.
  */
+@OptIn(ExperimentalAtomicApi::class)
 internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
+    @Suppress("OVERRIDE_DEPRECATION")
     override val dedicatedSecureElement: Boolean get() = true
 
     /**
@@ -79,10 +84,13 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
      * rather than inferred from OS version or [bcks_secure_enclave_available]: the answer that
      * matters is whether *this* element performs the DH, which is what an unentitled binary, a
      * simulator, or a locked device diverge on. Same shape as the signing generate-and-discard probe
-     * in [appleResolution] — a failure routes key agreement to the software floor instead of
+     * in [appleEnclaveProbe] — a failure routes key agreement to the software floor instead of
      * over-promising hardware custody.
      */
-    private val agreementSupported: Boolean by lazy { probeAgreement() }
+    private val agreementSupport =
+        SettlingLazy(PROBE_RETRY_AFTER, TimeSource.Monotonic, undecidedLimit = UNDECIDED_PROBES) { probeAgreement() }
+
+    private val agreementSupported: Boolean get() = agreementSupport.get()
 
     override fun eligible(alg: ProtectedKeyAlgorithm): Boolean =
         when (alg) {
@@ -243,16 +251,21 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
      * [enclaveAgreeP256] path. Generation alone would over-promise — an element that mints the key
      * and then refuses the DH must route to the software floor, not report hardware custody.
      */
-    private fun probeAgreement(): Boolean =
+    private fun probeAgreement(): Settlement<Boolean> =
         try {
             val key = enclaveGenerateKaP256()
             try {
                 val peer = generateKeyPairPlatform(KeyAgreementCurve.P256)
                 try {
-                    val secret = enclaveAgreeP256(key.blob, peer.publicKey.encoded, laHandle = 0L)
-                    val ok = secret != null && secret.remaining() == KeyAgreementCurve.P256.sharedSecretBytes
-                    secret?.freeNativeMemory()
-                    ok
+                    when (val secret = enclaveAgreeP256(key.blob, peer.publicKey.encoded, laHandle = 0L)) {
+                        // A refused authentication on a key bound to none says nothing about agreement.
+                        null -> undecided()
+                        else -> {
+                            val ok = secret.remaining() == KeyAgreementCurve.P256.sharedSecretBytes
+                            secret.freeNativeMemory()
+                            Settlement.Settled(ok)
+                        }
+                    }
                 } finally {
                     peer.close()
                 }
@@ -260,10 +273,26 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
                 key.blob.freeNativeMemory()
                 key.point.freeNativeMemory()
             }
-        } catch (_: Throwable) {
-            // No Enclave, no entitlement, or an element that declines agreement keys.
-            false
+        } catch (_: HardwareKeyException.AccessDenied) {
+            // The binary may not use the Enclave at all: a definite answer.
+            Settlement.Settled(false)
+        } catch (_: InvalidPublicKey) {
+            // The element ran the agreement and declined this valid peer: it answered, and will answer the same.
+            Settlement.Settled(false)
+        } catch (_: HardwareKeyException.DeviceLocked) {
+            // Locked: the answer after the unlock may differ, and a locked device does not count toward giving up.
+            Settlement.Unsettled(false)
+        } catch (_: CryptoException) {
+            undecided()
         }
+
+    /**
+     * A failure that says nothing about the element is asked again after the probe window, but not for ever: after
+     * [UNDECIDED_PROBES] windows that ended undecided (a locked device is not counted), the element has answered as
+     * clearly as it will, and agreement is settled off, so a device whose agreement always fails does not mint and
+     * discard a key every few seconds for the process life.
+     */
+    private fun undecided(): Settlement<Boolean> = Settlement.Undecided(false)
 
     private fun requireP256(peer: KeyAgreementPublicKey) =
         require(peer.curve == KeyAgreementCurve.P256) { "private/public key curve mismatch" }
@@ -614,7 +643,11 @@ internal inline fun enclaveGenerate(
         blobWritten = blobLen.value.toInt()
         pointWritten = pointLen.value.toInt()
     }
-    if (status != BCKS_OK) throw HardwareKeyException.SecureElementUnavailable()
+    if (status != BCKS_OK) {
+        blob.freeNativeMemory()
+        point.freeNativeMemory()
+        throw enclaveGenerateFailure(status)
+    }
     blob.position(blobWritten)
     blob.resetForRead()
     point.position(pointWritten)
@@ -671,54 +704,81 @@ private fun enclaveSignP256Into(
             out
         }
         BCKS_ERR_AUTH -> null
-        BCKS_ERR_INPUT -> throw HardwareKeyException.KeyInvalidated()
-        else -> throw HardwareKeyException.TransientHardwareFailure(retryable = false)
+        else -> throw enclaveSignFailure(status)
     }
 }
 
+/** What the generate-and-discard Enclave probe found. */
+internal sealed interface EnclaveProbe {
+    /** The Enclave minted a key: the provider is usable. */
+    data object Usable : EnclaveProbe
+
+    /** CryptoKit reports no Enclave: a simulator, an Intel Mac without a T2 chip, a virtual machine. */
+    data object NotPresent : EnclaveProbe
+
+    /** The Enclave refuses this binary for lack of an entitlement — stable for the life of the process. */
+    data object NotEntitled : EnclaveProbe
+
+    /** The probe was refused with `errSecInteractionNotAllowed` (a locked device): probed again later. */
+    data object Locked : EnclaveProbe
+
+    /** The Enclave refused for another reason, which a later probe may not repeat. */
+    data object Refused : EnclaveProbe
+}
+
 /**
- * The Secure Enclave provider, resolved once. Returned only when the Enclave is both present
- * ([bcks_secure_enclave_available]) and actually usable — probed by a generate-and-discard, which
- * fails closed on an unentitled/unsigned binary (e.g. the macOS CLI test runner) or the simulator,
- * keeping [CryptoCapabilities.hardware] honestly [HardwareSupport.Unavailable] there.
+ * The probe outcome a [bcks_secure_enclave_probe] status names; [EnclaveProbe.Locked] and [EnclaveProbe.Refused] are
+ * not settled.
  */
-private val appleResolution: ProtectedKeyResolution by lazy {
-    if (bcks_secure_enclave_available() == 0) {
-        // CryptoKit reports no Enclave on this hardware (or the simulator).
-        ProtectedKeyResolution.Refused(
-            ProtectedKeyBackend.AppleSecureEnclave,
-            CapabilityFinding.Enclave.NotPresent,
-        )
-    } else {
-        val usable =
-            try {
-                enclaveGenerateP256()
-                true
-            } catch (_: Throwable) {
-                false
-            }
-        if (usable) {
-            ProtectedKeyResolution.Available(ProtectedKeyBackend.AppleSecureEnclave, SecureEnclaveHardwareKeyProvider())
+internal fun enclaveProbeOf(status: Int): Settlement<EnclaveProbe> =
+    when (status) {
+        BCKS_OK -> Settlement.Settled(EnclaveProbe.Usable)
+        BCKS_ERR_DENIED -> Settlement.Settled(EnclaveProbe.NotEntitled)
+        BCKS_ERR_LOCKED -> Settlement.Unsettled(EnclaveProbe.Locked)
+        else -> Settlement.Unsettled(EnclaveProbe.Refused)
+    }
+
+/**
+ * The Secure Enclave probe, through a [SettlingLazy]: presence ([bcks_secure_enclave_available]) and
+ * a generate-and-discard ([bcks_secure_enclave_probe]) that fails closed on an unentitled binary or
+ * hardware without an Enclave, keeping [CryptoCapabilities.hardware] honestly [HardwareSupport.Unavailable] there.
+ * A refusal for any other reason is probed again on the next resolution rather than pinned.
+ */
+private val enclaveProbe =
+    SettlingLazy<EnclaveProbe>(PROBE_RETRY_AFTER, TimeSource.Monotonic) {
+        if (bcks_secure_enclave_available() == 0) {
+            Settlement.Settled(EnclaveProbe.NotPresent)
         } else {
-            // Present but the generate-and-discard probe failed — typically an unentitled binary
-            // (the macOS CLI test runner).
-            ProtectedKeyResolution.Refused(
-                ProtectedKeyBackend.AppleSecureEnclave,
-                CapabilityFinding.Enclave.ProbeFailed,
-            )
+            enclaveProbeOf(bcks_secure_enclave_probe())
         }
     }
-}
 
-private val appleProvider: HardwareKeyProvider? by lazy {
-    (appleResolution as? ProtectedKeyResolution.Available)?.provider as? HardwareKeyProvider
-}
+/** The probe's answer for this call: settled, or this attempt's refusal. */
+internal fun appleEnclaveProbe(): EnclaveProbe = enclaveProbe.get()
 
-internal actual fun platformProtectedKeyResolution(): ProtectedKeyResolution = appleResolution
+internal val enclaveProvider: SecureEnclaveHardwareKeyProvider by lazy { SecureEnclaveHardwareKeyProvider() }
+
+internal actual fun platformProtectedKeyResolution(): ProtectedKeyResolution =
+    when (appleEnclaveProbe()) {
+        EnclaveProbe.Usable ->
+            ProtectedKeyResolution.Available(ProtectedKeyBackend.AppleSecureEnclave, enclaveProvider)
+        EnclaveProbe.NotPresent -> enclaveRefused(CapabilityFinding.Enclave.NotPresent)
+        EnclaveProbe.NotEntitled, EnclaveProbe.Locked, EnclaveProbe.Refused ->
+            enclaveRefused(CapabilityFinding.Enclave.ProbeFailed)
+    }
+
+private fun enclaveRefused(finding: CapabilityFinding.Enclave): ProtectedKeyResolution =
+    ProtectedKeyResolution.Refused(ProtectedKeyBackend.AppleSecureEnclave, finding)
 
 /**
- * The Secure Enclave provider narrowed to its concrete type, or `null` where the Enclave is
- * unavailable (simulator, an unentitled CLI runner). [platformKeyStore] uses it to back a durable
- * Keychain-backed [AppleKeychainKeyStore], falling back to a software store otherwise.
+ * The Secure Enclave provider where the probe says it is usable, or `null` where the Enclave is
+ * unavailable for this call (simulator, an unentitled binary, a refused probe).
  */
-internal fun appleEnclaveProviderOrNull(): SecureEnclaveHardwareKeyProvider? = appleProvider as? SecureEnclaveHardwareKeyProvider
+internal fun appleEnclaveProviderOrNull(): SecureEnclaveHardwareKeyProvider? =
+    when (appleEnclaveProbe()) {
+        EnclaveProbe.Usable -> enclaveProvider
+        EnclaveProbe.NotPresent, EnclaveProbe.NotEntitled, EnclaveProbe.Locked, EnclaveProbe.Refused -> null
+    }
+
+/** Undecided agreement probes, in all, after which agreement is settled off. */
+internal const val UNDECIDED_PROBES = 3

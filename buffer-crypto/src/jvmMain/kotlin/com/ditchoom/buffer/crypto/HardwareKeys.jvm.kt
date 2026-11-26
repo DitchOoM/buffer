@@ -106,6 +106,7 @@ internal class Tpm2Pkcs11HardwareKeyProvider(
     private val slotIndex: Int,
 ) : HardwareKeyProvider {
     /** PKCS#11 cannot confirm a discrete element, so this never over-claims. See the file KDoc. */
+    @Suppress("OVERRIDE_DEPRECATION")
     override val dedicatedSecureElement: Boolean get() = false
 
     /**

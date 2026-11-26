@@ -2,19 +2,20 @@ package com.ditchoom.buffer.crypto
 
 /**
  * Android: a durable [AndroidKeystoreKeyStore] on a device (or emulator) whose keys live in the
- * `AndroidKeyStore` and never leave it ([KeyCustody.NonExportable.Hardware] — StrongBox where a
- * dedicated secure element is present, TEE otherwise). A host-JVM unit-test run has no
- * `AndroidKeyStore` provider, so it falls back to the durable on-disk software store
- * ([KeyCustody.ExportableSoftware]); a caller that requires hardware custody there is correctly
- * refused by [KeyProvider.requireTier]. A consumer may still force a software medium (e.g. an
- * encrypted DB) via [KeyStoreConfig.storage].
+ * `AndroidKeyStore` and never leave it ([KeyCustody.NonExportable.Hardware] — StrongBox or TEE, as
+ * each key's own custody reports; a key an earlier release stored outside secure hardware reports
+ * [KeyCustody.NonExportable.Software]). The keystore is opened on first use; one that fails to load answers
+ * that call with a retryable [KeyStoreException.StorageFailure] and is opened again on the next, so a
+ * device never falls back to a weaker store. A host-JVM unit-test run has no `AndroidKeyStore`
+ * provider at all, so it uses the durable on-disk software store ([KeyCustody.ExportableSoftware]); a
+ * caller that requires hardware custody there is correctly refused by [KeyProvider.requireTier]. A
+ * consumer may still force a software medium (e.g. an encrypted DB) via [KeyStoreConfig.storage].
  */
 internal actual fun platformKeyStore(config: KeyStoreConfig): KeyStore =
     when {
         config.storage != null -> SoftwareKeyStore(config.storage)
-        else ->
-            androidKeystoreProviderOrNull()?.let { AndroidKeystoreKeyStore(it, config.name) }
-                ?: SoftwareKeyStore(FileKeyStorage(config.name, config.location))
+        !androidKeystoreProviderRegistered() -> SoftwareKeyStore(FileKeyStorage(config.name, config.location))
+        else -> RetryingKeyStore { openAndroidKeystoreStore(config.name) }
     }
 
 /**
@@ -39,7 +40,12 @@ internal class AndroidKeystoreKeyStore(
     private val provider: AndroidKeystoreHardwareKeyProvider,
     private val name: String,
 ) : KeyStore {
-    override fun custodyFor(alg: ProtectedKeyAlgorithm): KeyCustody = provider.custody
+    /**
+     * The TEE floor for an algorithm the keystore holds (a StrongBox key reports more on its own custody); for one it
+     * cannot hold, [HardwareKeyException.AlgorithmNotEligible], since no key of it will ever come from this store.
+     */
+    override fun custodyFor(alg: ProtectedKeyAlgorithm): KeyCustody =
+        if (provider.eligible(alg)) provider.custody else throw HardwareKeyException.AlgorithmNotEligible()
 
     override fun eligible(alg: ProtectedKeyAlgorithm): Boolean = provider.eligible(alg)
 
@@ -67,11 +73,13 @@ internal class AndroidKeystoreKeyStore(
         requireValidAlias(alias)
         if (!provider.eligible(scheme.toProtectedKeyAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
         val ns = namespaced(alias)
-        return when (val stored = provider.entryAlgorithm(ns)) {
-            null -> provider.generatePersistentSigning(ns, spec)
-            ProtectedKeyAlgorithm.EcdsaP256 -> requireNotNull(provider.reattachSigning(ns, spec))
-            else -> throw KeyStoreException.AliasMismatch(alias, stored, scheme.toProtectedKeyAlgorithm())
-        }
+        return provider
+            .getOrGenerateEntry(
+                ns,
+                ProtectedKeyAlgorithm.EcdsaP256,
+                reattach = { provider.reattachSigningEntry(ns, spec) },
+                generate = { provider.generatePersistentSigningEntry(ns, spec) },
+            ).keyOrMismatch(alias, scheme.toProtectedKeyAlgorithm())
     }
 
     override suspend fun getOrGenerateAesGcm(
@@ -80,11 +88,13 @@ internal class AndroidKeystoreKeyStore(
     ): AesGcmKey {
         requireValidAlias(alias)
         val ns = namespaced(alias)
-        return when (val stored = provider.entryAlgorithm(ns)) {
-            null -> provider.generatePersistentAesGcm(ns, spec)
-            ProtectedKeyAlgorithm.AesGcm -> requireNotNull(provider.reattachAesGcm(ns, spec))
-            else -> throw KeyStoreException.AliasMismatch(alias, stored, ProtectedKeyAlgorithm.AesGcm)
-        }
+        return provider
+            .getOrGenerateEntry(
+                ns,
+                ProtectedKeyAlgorithm.AesGcm,
+                reattach = { provider.reattachAesGcmEntry(ns, spec) },
+                generate = { provider.generatePersistentAesGcmEntry(ns, spec) },
+            ).keyOrMismatch(alias, ProtectedKeyAlgorithm.AesGcm)
     }
 
     override suspend fun getOrGenerateKeyAgreement(
@@ -99,11 +109,13 @@ internal class AndroidKeystoreKeyStore(
             throw HardwareKeyException.AlgorithmNotEligible()
         }
         val ns = namespaced(alias)
-        return when (val stored = provider.entryAlgorithm(ns)) {
-            null -> provider.generatePersistentKeyAgreement(ns, spec)
-            ProtectedKeyAlgorithm.EcdhP256 -> requireNotNull(provider.reattachKeyAgreement(ns, spec))
-            else -> throw KeyStoreException.AliasMismatch(alias, stored, curve.toProtectedKeyAlgorithm())
-        }
+        return provider
+            .getOrGenerateEntry(
+                ns,
+                ProtectedKeyAlgorithm.EcdhP256,
+                reattach = { provider.reattachKeyAgreementEntry(ns, spec) },
+                generate = { provider.generatePersistentKeyAgreementEntry(ns, spec) },
+            ).keyOrMismatch(alias, curve.toProtectedKeyAlgorithm())
     }
 
     override suspend fun loadSigning(alias: String): SigningKey? {
@@ -126,6 +138,7 @@ internal class AndroidKeystoreKeyStore(
         return provider.containsAlias(namespaced(alias))
     }
 
+    /** See [AndroidKeystoreHardwareKeyProvider.listAliases]: a keystore failing partway can end the listing early. */
     override suspend fun aliases(): Set<String> {
         val prefix = "$name:"
         return provider.listAliases(prefix).mapTo(mutableSetOf()) { it.substring(prefix.length) }
@@ -141,3 +154,29 @@ internal class AndroidKeystoreKeyStore(
     /** The keystore entry name for a store [alias]: `"$name:$alias"` (neither part contains `:`). */
     private fun namespaced(alias: String): String = "$name:$alias"
 }
+
+/**
+ * One attempt to open the persistent [AndroidKeystoreKeyStore] named [name]. A keystore that fails to
+ * load is a retryable [KeyStoreException.StorageFailure] for this attempt, never a software store.
+ */
+internal fun openAndroidKeystoreStore(name: String): PlatformStoreOpening =
+    when (val resolution = platformProtectedKeyResolution()) {
+        is ProtectedKeyResolution.Available ->
+            when (val provider = resolution.provider) {
+                is AndroidKeystoreHardwareKeyProvider ->
+                    PlatformStoreOpening.Opened(AndroidKeystoreKeyStore(provider, name))
+                else -> PlatformStoreOpening.Refused(KeyStoreException.StorageFailure(retryable = false))
+            }
+        is ProtectedKeyResolution.Refused, ProtectedKeyResolution.None ->
+            PlatformStoreOpening.Refused(KeyStoreException.StorageFailure(retryable = true))
+    }
+
+private fun <K> AliasEntry<K>.keyOrMismatch(
+    alias: String,
+    requested: ProtectedKeyAlgorithm,
+): K =
+    when (this) {
+        is AliasEntry.Attached -> key
+        is AliasEntry.Generated -> key
+        is AliasEntry.HoldsOther -> throw KeyStoreException.AliasMismatch(alias, stored, requested)
+    }

@@ -180,6 +180,18 @@ sealed interface KeyAgreementPrivateKey : AutoCloseable {
     val provenance: KeyProvenance
 
     /**
+     * This key's custody: where its secret lives and whether the process can read it, carried by the key itself so it
+     * stays honest independent of the provider that minted it.
+     */
+    val custody: KeyCustody
+
+    /**
+     * Whether this key asked for a dedicated secure element and was made in a weaker secure tier instead, and why.
+     * [SecureElementFallback.None] for a key that never asked for one.
+     */
+    val secureElementFallback: SecureElementFallback get() = SecureElementFallback.None
+
+    /**
      * Exports the encoded private scalar (the [KeyAgreementCurve] private-key encoding) into a
      * freshly allocated buffer from [factory], for persistence / interop. Returns a copy for a
      * [KeyProvenance.Software] key; a hardware-backed key holds no exportable material and throws
@@ -197,6 +209,7 @@ internal class InMemoryKeyAgreementPrivateKey(
     private val material: PlatformBuffer,
 ) : KeyAgreementPrivateKey {
     override val provenance: KeyProvenance get() = KeyProvenance.Software
+    override val custody: KeyCustody get() = KeyCustody.ExportableSoftware
     private var closed = false
 
     /** Zeroes and frees the key material. Idempotent. */
@@ -243,9 +256,10 @@ sealed interface KeyAgreementKeyPair : AutoCloseable {
  */
 internal class ProtectedKeyAgreementPrivateKey(
     override val curve: KeyAgreementCurve,
-    val custody: KeyCustody.NonExportable,
+    override val custody: KeyCustody.NonExportable,
     val gatedDh: HardwareDh,
     private val onClose: () -> Unit = {},
+    override val secureElementFallback: SecureElementFallback = SecureElementFallback.None,
 ) : KeyAgreementPrivateKey {
     override val provenance: KeyProvenance get() = custody.provenance
 

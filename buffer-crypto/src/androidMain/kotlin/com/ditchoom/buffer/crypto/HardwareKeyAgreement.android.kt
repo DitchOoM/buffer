@@ -32,13 +32,13 @@ import javax.crypto.KeyAgreement
  */
 internal fun agreementSpec(
     alias: String,
-    strongBox: Boolean,
+    request: StrongBoxRequest,
     policy: ResolvedAndroidPolicy,
 ): KeyGenParameterSpec =
     KeyGenParameterSpec
         .Builder(alias, KeyProperties.PURPOSE_AGREE_KEY)
         .setAlgorithmParameterSpec(ECGenParameterSpec(SECP256R1))
-        .setIsStrongBoxBacked(strongBox)
+        .setIsStrongBoxBacked(request.strongBoxBacked)
         .apply { applyUserAuth(policy) }
         .build()
 
@@ -110,22 +110,16 @@ internal fun p256PublicKey(encoded: ReadBuffer): PublicKey {
 }
 
 /**
- * Distinguishes the two `PrivateKeyEntry` kinds a store can hold — ECDSA signing vs ECDH agreement —
- * by the keystore-recorded purposes ([KeyInfo.getPurposes], intrinsic to the entry, so no sidecar).
- * Callers already hold the keystore lock (`entryAlgorithm` / the reattach paths run this inside
- * `keystoreOp`).
+ * The keystore-recorded purposes of an AndroidKeystore [privateKey] ([KeyInfo.getPurposes], intrinsic to the entry, so
+ * no sidecar), which tell the two P-256 `PrivateKeyEntry` kinds a store writes apart: ECDSA signing and ECDH
+ * agreement. Callers already hold the keystore lock.
  */
-internal fun privateEntryAlgorithm(privateKey: PrivateKey): ProtectedKeyAlgorithm {
-    val info =
+internal fun keystorePurposes(privateKey: PrivateKey): Int =
+    (
         KeyFactory
             .getInstance(privateKey.algorithm, ANDROID_KEY_STORE)
             .getKeySpec(privateKey, KeyInfo::class.java) as KeyInfo
-    return if (info.purposes and KeyProperties.PURPOSE_AGREE_KEY != 0) {
-        ProtectedKeyAlgorithm.EcdhP256
-    } else {
-        ProtectedKeyAlgorithm.EcdsaP256
-    }
-}
+    ).purposes
 
 internal const val ECDH = "ECDH"
 private const val UBYTE_MASK = 0xFF

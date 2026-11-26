@@ -70,3 +70,70 @@ val KeyCustody.provenance: KeyProvenance get() =
 /** `true` when the key lives in a dedicated secure element (StrongBox / Secure Enclave). */
 val KeyCustody.dedicatedSecureElement: Boolean get() =
     this is KeyCustody.NonExportable.Hardware && dedicatedSecureElement
+
+/**
+ * Whether a hardware key that asked for a dedicated secure element (Android StrongBox) was made in a weaker secure tier
+ * instead (the Android TEE), and why. The key's [KeyCustody] says where it lives either way; this says why it is not
+ * where it asked to be, so a caller can log it.
+ */
+sealed interface SecureElementFallback {
+    /** No fallback happened: the key is where it asked to be, or it never asked for a dedicated secure element. */
+    data object None : SecureElementFallback
+
+    /**
+     * Not known: the key was persisted earlier and reattached, and the platform keeps no record of whether its
+     * generation fell back. Its [KeyCustody] still says whether a dedicated secure element holds it.
+     */
+    data object NotRecorded : SecureElementFallback
+
+    /**
+     * Asked for a dedicated secure element and made in the platform's other secure hardware because of [reason].
+     * [detail] is what the platform itself reported, for logs; on Android it is an `AndroidKeystoreFallbackDetail`.
+     */
+    @ConsistentCopyVisibility
+    data class ToWeakerSecureTier internal constructor(
+        val reason: SecureElementFallbackReason,
+        val detail: SecureElementFallbackDetail,
+    ) : SecureElementFallback
+}
+
+/**
+ * Why a dedicated secure element did not take a key, in terms every platform shares. A platform's own finer reason is
+ * carried in [SecureElementFallback.ToWeakerSecureTier.detail], so a new platform maps onto these arms, with
+ * [Unclassified] for anything it cannot place, instead of adding one.
+ */
+sealed interface SecureElementFallbackReason {
+    /** The device has no dedicated secure element for this key. */
+    data object ElementAbsent : SecureElementFallbackReason
+
+    /** The dedicated secure element does not implement the key's algorithm, size or purpose. */
+    data object UnsupportedParameters : SecureElementFallbackReason
+
+    /** The dedicated secure element stayed busy or unreachable through every attempt. */
+    data object ElementBusy : SecureElementFallbackReason
+
+    /** The dedicated secure element, or the platform service in front of it, failed the request. */
+    data object ElementFailed : SecureElementFallbackReason
+
+    /** The platform gave nothing that says why. */
+    data object Unclassified : SecureElementFallbackReason
+}
+
+/**
+ * What the platform itself reported when a dedicated secure element refused a key. Open-ended on purpose: each
+ * platform adds its own subtype in its own source set, and a `when` over it needs an `else`, so a new platform's detail
+ * never breaks existing code. Only this library constructs one.
+ */
+abstract class SecureElementFallbackDetail internal constructor()
+
+/** What a platform reported about a key's or an algorithm's custody when it fell short. */
+sealed interface OfferedCustody {
+    /** The platform named this tier. */
+    @ConsistentCopyVisibility
+    data class Tier internal constructor(
+        val tier: CustodyTier,
+    ) : OfferedCustody
+
+    /** The platform named no level it would vouch for (Android `SECURITY_LEVEL_UNKNOWN`). */
+    data object Unreported : OfferedCustody
+}

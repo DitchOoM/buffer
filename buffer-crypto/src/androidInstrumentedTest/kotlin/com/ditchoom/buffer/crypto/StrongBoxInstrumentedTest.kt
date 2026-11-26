@@ -15,12 +15,13 @@ import kotlin.test.assertTrue
  * can exercise. The emulator keystore is TEE-only (no StrongBox), and a host-JVM unit test has no
  * `AndroidKeyStore` at all, so [HardwareKeyConformanceTest]'s `Available` branch never fires there.
  * This `androidInstrumentedTest` runs under `connectedCheck` on a real device and pins the one thing
- * CI is otherwise blind to: that [HardwareKeyProvider.dedicatedSecureElement] matches what the
- * device actually advertises via `FEATURE_STRONGBOX_KEYSTORE`, and that the real provider round-trips.
+ * CI is otherwise blind to: that a key's own [KeyCustody] matches what the device actually advertises
+ * via `FEATURE_STRONGBOX_KEYSTORE`, and that the real provider round-trips.
  *
- * On a StrongBox device (Pixel 3+, recent Samsung, …) it asserts `dedicatedSecureElement == true`;
- * on a TEE-only device it asserts `false` — either way a regression in the StrongBox-vs-TEE decision
- * fails the build on the device that can see it.
+ * On a StrongBox device (Pixel 3+, recent Samsung, …) an ECDSA P-256 key — which every StrongBox must
+ * hold — reports `dedicatedSecureElement == true`; on a TEE-only device `false`. The provider's custody
+ * reports the TEE floor either way, because which element holds a key is known only per key; the
+ * deprecated provider-wide `dedicatedSecureElement` keeps its StrongBox probe.
  */
 class StrongBoxInstrumentedTest {
     private val hasStrongBox: Boolean =
@@ -36,18 +37,22 @@ class StrongBoxInstrumentedTest {
     }
 
     @Test
-    fun dedicatedSecureElementMatchesDeviceStrongBox() =
+    fun keyCustodyMatchesDeviceStrongBox() =
         runTest {
             val provider = provider()
             val signing = provider.generateSigning(SignatureScheme.EcdsaP256, ProtectedKeySpec())
             try {
                 assertEquals(KeyProvenance.Hardware, signing.provenance)
-                // The dedicated-secure-element claim must equal the device's StrongBox capability.
+                // The key's own custody must equal the device's StrongBox capability.
                 assertEquals(
-                    hasStrongBox,
-                    provider.dedicatedSecureElement,
-                    "dedicatedSecureElement must equal device StrongBox feature ($hasStrongBox)",
+                    KeyCustody.NonExportable.Hardware(dedicatedSecureElement = hasStrongBox),
+                    signing.custody,
+                    "an ECDSA P-256 key's custody must equal the device StrongBox feature ($hasStrongBox)",
                 )
+                assertEquals(false, provider.custody.dedicatedSecureElement, "the provider reports the TEE floor")
+                @Suppress("DEPRECATION")
+                val probed = provider.dedicatedSecureElement
+                assertEquals(hasStrongBox, probed, "the deprecated probe still answers whether StrongBox is there")
                 // The provider-minted key publishes its public key and produces a verifiable signature.
                 val vk = signing.verifyKey
                 val ops = signatureAsyncOrNull(SignatureScheme.EcdsaP256)

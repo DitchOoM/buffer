@@ -309,17 +309,24 @@ typealias HardwareKeySpec = ProtectedKeySpec
  */
 interface HardwareKeyProvider : ProtectedKeyProvider {
     /**
-     * `true` if keys live in a dedicated secure element (StrongBox / Secure Enclave), `false` for a
-     * software-isolated keystore (TEE-only). Informational; does not change the op contract.
+     * `true` if this provider's keys live in a dedicated secure element (StrongBox / Secure Enclave), `false` for a
+     * TEE-only keystore. On Android it is a one-time StrongBox probe of the device: a particular key can still be made
+     * in the TEE, so read the key's own custody. Informational; does not change the op contract.
      */
+    @Deprecated(
+        "Where a key lives is known per key: read `key.custody.dedicatedSecureElement`.",
+    )
     val dedicatedSecureElement: Boolean
 
     /**
      * A hardware provider's keys are always [KeyCustody.NonExportable.Hardware]; the narrowed return
      * type re-states, at the type level, that a hardware key can never be exportable or
-     * software-backed. Derived from [dedicatedSecureElement] so the two can never disagree.
+     * software-backed. This is the floor every key from the provider has; a key may report a stronger custody. The
+     * default derives it from [dedicatedSecureElement]; the Android provider reports the TEE floor instead, since
+     * whether StrongBox holds a key is known only from that key.
      */
     override val custody: KeyCustody.NonExportable.Hardware
+        @Suppress("DEPRECATION")
         get() = KeyCustody.NonExportable.Hardware(dedicatedSecureElement)
 
     /** Whether this provider can generate a key for [alg] (a secure element backs only a subset). */
@@ -428,6 +435,7 @@ internal class ProtectedAesGcmKey(
     val gatedSeal: HardwareAesGcmSeal,
     val gatedOpen: HardwareAesGcmOpen,
     private val onClose: () -> Unit = {},
+    override val secureElementFallback: SecureElementFallback = SecureElementFallback.None,
 ) : AesGcmKey {
     /**
      * Opaque handle; there is no process-memory material to wipe. [onClose] lets a provider release
@@ -449,6 +457,7 @@ internal class ProtectedSigningKey(
     /** The public key matching this signing key, captured by the provider at generation. */
     override val verifyKey: VerifyKey,
     private val onClose: () -> Unit = {},
+    override val secureElementFallback: SecureElementFallback = SecureElementFallback.None,
 ) : SigningKey {
     /**
      * Opaque handle; there is no process-memory material to wipe. [onClose] lets a provider release

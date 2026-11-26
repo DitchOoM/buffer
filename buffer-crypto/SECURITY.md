@@ -266,7 +266,7 @@ at the default). The tiers, weakest → strongest (`CustodyTier`): `ExportableSo
 |---|---|---|---|
 | JVM / Linux | `ExportableSoftware` | in-process software keys | (floor) all — no portable non-exportable store exists |
 | **JS / WASM** | `NonExportableSoftware` | **WebCrypto `extractable:false`** — software isolation, *not* a secure element | ECDSA P-256/384/521, AES-GCM, ECDH P-256/384/521; X25519 where the engine exposes it (feature-detected). Ed25519 excluded (uneven engine support) → routes to the floor |
-| Android (API 28+) | `Hardware` | Android Keystore — StrongBox secure element where present, else TEE | AES-GCM, ECDSA P-256 |
+| Android (API 28+) | `Hardware` | Android Keystore — StrongBox secure element where it holds the key, else TEE (read back per key) | AES-GCM, ECDSA P-256 |
 | Apple | `Hardware` | Secure Enclave | ECDSA P-256 |
 
 Whatever an algorithm's platform tier does not back routes **down** to the next eligible tier
@@ -352,13 +352,113 @@ tracked to completion:
   true custody, so a `requireTier(Hardware)` caller is refused rather than silently downgraded on a
   weaker platform. Availability is probed, not assumed: the web store requires both `crypto.subtle`
   and IndexedDB, Android needs an `AndroidKeyStore` provider (absent in a host-JVM unit run), and
-  Apple needs a usable Enclave (absent on the simulator / an unentitled CLI runner). A production
-  browser and a signed, entitled Apple app always take the durable path. Where the probe fails —
-  a dev/test environment (bare Node without IndexedDB, the iOS simulator, an unentitled runner) — the
-  store falls back to an **in-process, non-durable** medium and reports the weaker `ExportableSoftware`
-  tier honestly; keys there do **not** survive a process restart. A consumer that needs durability in
-  such an environment supplies its own `KeyStoreConfig.storage`. (JVM and Linux always use their
-  durable on-disk store — no probe, no in-memory fallback.)
+  Apple needs CryptoKit to report a Secure Enclave. Only an environment that **has no such backend at
+  all** uses a software medium, and it reports the weaker tier honestly: bare Node without IndexedDB, a
+  host JVM without `AndroidKeyStore`, and every Apple host without an Enclave (the simulators, an Intel
+  Mac without a T2 chip, a virtual machine). The Apple medium is in-process and does **not** survive a
+  process restart. Where the backend exists but refuses — a keystore that fails to load, an Enclave probe
+  that fails — the store **never** falls back: the call fails with a typed `KeyStoreException`
+  (`StorageFailure(retryable = true)`, `AccessDenied` for a binary without the Enclave entitlement, or
+  `DeviceLocked` for an Enclave probe the OS refused with `errSecInteractionNotAllowed`) and the backend is
+  opened again on the next call. A consumer that needs durability without the platform backend supplies
+  its own `KeyStoreConfig.storage`. (JVM and Linux always use their durable on-disk store.)
+- **Android custody is read back per key.** After every generation and reattach the store reads the
+  key's `KeyInfo` security level. A key the call just generated must be at `TRUSTED_ENVIRONMENT`,
+  `STRONGBOX` or `UNKNOWN_SECURE` (secure hardware of an unnamed kind, at the TEE floor); any other level
+  deletes it and fails with `InsufficientKeyCustody`, naming what the keystore reported:
+  `OfferedCustody.Tier(NonExportableSoftware)` for a software level, `OfferedCustody.Unreported` for a level
+  it will not name (`InsufficientKeyCustody.available` is then `ExportableSoftware`). A key persisted
+  earlier is never refused or deleted for its level, so a key an earlier release stored outside secure
+  hardware stays usable: it is handed out as `NonExportable.Software` (the keystore never exports it, and
+  nothing vouches for hardware), and a caller that needs hardware checks the key's own `custody`.
+  `KeyInfo` is the keystore's own report: only key attestation, verified off the device, proves where a key
+  lives. Before API 31 a secure key counts at the TEE floor, since a StrongBox request can be served in the
+  TEE without a word. The provider's `custody` (and so `custodyFor`) is the TEE floor; the deprecated
+  provider-wide `HardwareKeyProvider.dedicatedSecureElement` is the one-time StrongBox probe it was in the
+  last release (always `true` on Apple); each key's `custody` says whether StrongBox holds it.
+- **StrongBox falls back to the TEE, with the reason recorded.** A transient StrongBox refusal gets one more StrongBox
+  attempt (two in all), then the key is made in the TEE; every other refusal goes to the TEE at once. A key made that
+  way carries `SecureElementFallback.ToWeakerSecureTier(reason, detail)` (the `secureElementFallback` member of
+  `SigningKey`, `AesGcmKey` and `KeyAgreementPrivateKey`), so a caller can log why a key is not in StrongBox. The
+  `reason` is platform-neutral (`ElementAbsent`, `UnsupportedParameters`, `ElementBusy`, `ElementFailed`,
+  `Unclassified`); the `detail` is what the platform reported, on Android an `AndroidKeystoreFallbackDetail` with the
+  keystore's `AndroidKeystoreCode`. Before API 33 the keystore publishes no code, and the fallback says `Unclassified`
+  / `Unpublished`. A key reattached from the store reports `SecureElementFallback.NotRecorded`: the keystore keeps no
+  record of how its generation went. `None` means no fallback happened.
+- **Apple keys and records use the after-first-unlock class.** Enclave keys that are not bound to user authentication
+  are created `AfterFirstUnlockThisDeviceOnly` with `privateKeyUsage`; Keychain records are added with the same class.
+  On iOS, watchOS and tvOS the records live in the data protection keychain, which enforces the class: they are
+  readable while the device is locked after its first unlock since boot, and never leave the device. On macOS no
+  query sets `kSecUseDataProtectionKeychain`, so the records live in the legacy file keychain (normally the login
+  keychain), which does not enforce protection classes: there a record is as readable, and as copyable with the
+  keychain file, as any other item of that keychain. An Enclave key's class is fixed when it is made: a key created
+  under an older class keeps it. Records are added, never replaced: two writers racing to create one alias end with
+  the one record that was added first; an add refused as a duplicate while no read returns the record is tried once
+  more and is then `KeyStoreException.AccessDenied` (an item this process cannot read).
+- **Which Apple calls are serialized.** Every keychain call the store makes (add, read, contains, delete, list, class
+  move) runs on one dispatcher of parallelism one, so a call blocked inside Security.framework (a macOS access prompt)
+  holds one thread while every other store caller waits suspended; inside the shim the same calls run on one serial
+  queue, which also covers code calling the shim directly. Two `SecItem` calls running at once against the macOS file
+  keychain can deadlock inside Security.framework. Keychain calls made elsewhere in the process are outside both. The
+  Enclave generate, sign and agree calls are not serialized: they pass no keychain attributes (CryptoKit returns the
+  key as an encrypted blob, and nothing is added to a keychain), and the in-memory `SecKeyCreateRandomKey` /
+  `SecKeyCreateWithData` keys of the software paths set no `kSecAttrIsPermanent`, so none of them adds or reads a
+  keychain item. Whether Security.framework takes keychain-wide locks internally for them is not something this
+  library controls or has measured.
+- **Existing Keychain records are moved to the new class without an opt-in.** Records written by earlier releases under
+  `WhenUnlockedThisDeviceOnly` are moved to `AfterFirstUnlockThisDeviceOnly` on first use and before a listing; the
+  move matches only records still under the earlier class, so records already moved are not rewritten. The move is
+  one-way; on iOS-family it makes those records readable while the device is locked, after its first unlock since
+  boot. A record is opaque restore data, not a private key: the private scalar stays in the Enclave, and an older key
+  keeps its own class. A listing that would silently miss a record the OS withholds with
+  `errSecInteractionNotAllowed` is `KeyStoreException.DeviceLocked` instead. The move is asked again only while it may
+  still pass (a locked device, a busy or not-yet-available keychain); a store whose move is refused for any other
+  reason stops asking.
+- **Failures are typed by family.** A failure of a key operation is a `HardwareKeyException`: an Enclave generate,
+  sign or agreement the OS refuses with `errSecInteractionNotAllowed` is `HardwareKeyException.DeviceLocked` (observed
+  for an access-controlled generation on a Mac whose screen was locked; the other calls' statuses on a locked iPhone
+  are not observed here), and an Enclave refused for lack of an entitlement is `HardwareKeyException.AccessDenied`.
+  A failure of the store is a `KeyStoreException`. On Android
+  that covers the store's lookups, loads, `KeyInfo` reads, listings and deletes: a keystore failure in one of them is
+  `StorageFailure(retryable = true)`, while a key generation that fails stays a `HardwareKeyException`. On Apple:
+
+  | Keychain status | `KeyStoreException` |
+  |---|---|
+  | `errSecInteractionNotAllowed` on iOS, watchOS, tvOS | `DeviceLocked` |
+  | `errSecInteractionNotAllowed` on macOS (a prompt this process may not show) | `InteractionRequired` |
+  | `errSecUserCanceled`, `errSecAuthFailed` on macOS (the file keychain's access prompt) | `AuthenticationDeclined` |
+  | `errSecUserCanceled`, `errSecAuthFailed` on iOS, watchOS, tvOS (no prompt: the records carry no access control) | `StorageFailure(retryable = false)` |
+  | `errSecMissingEntitlement`, `errSecNoAccessForItem` | `AccessDenied` |
+  | `errSecDecode`, an empty or truncated record | `CorruptEntry` |
+  | `errSecIO`, `errSecAllocate`, `errSecNotAvailable` (no keychain yet, as early in boot) | `StorageFailure(retryable = true)` |
+  | hardware with no Enclave (settled for the process) | `StorageFailure(retryable = false)` |
+  | any other status | `StorageFailure(retryable = false)` |
+
+- **A refused backend is probed again, not on every call.** A refused probe stands for a few seconds (measured on
+  `TimeSource.Monotonic` in production), so asking `eligible` or `custodyFor` repeatedly does not mint and discard a
+  probe key each time. The Apple agreement probe settles on a definite answer (an entitlement refusal, a declined
+  agreement) and, after three retry windows that each ended undecided (a refusal with `errSecInteractionNotAllowed` is
+  not counted), settles agreement off. Callers that probe at once during one window count as one.
+- **`custodyFor`, `eligible` and `requireTier` may throw and may probe on the caller's thread.** On a platform
+  `KeyStore` they open the backend first, so a backend that cannot open right now throws its typed
+  `KeyStoreException` from them rather than answering for a store that is not there, and `custodyFor` for an
+  algorithm the backend cannot hold throws `HardwareKeyException.AlgorithmNotEligible` rather than name a custody no
+  key will have. The first call, and the first call after a refused probe's window, can run the platform probe
+  synchronously on the calling thread: on Apple a generate-and-discard Enclave key (and, for `EcdhP256`, one
+  agreement); on Android the keystore load and, for `EcdhP256`, a throwaway agreement key. Call them off the main
+  thread where that matters.
+- **Android get-or-generate never writes a key over another, and a stored key is never reported absent.** Every
+  lookup goes through `getKey` (which answers `null` only for a missing key), not `containsAlias` or `getEntry`:
+  `AndroidKeyStoreSpi` answers both of those from a metadata read that logs any keystore error and returns `null`, so
+  they answer `false` / `null` for a key that is there. A get-or-generate looks the alias up and generates in the same
+  keystore critical section, so two callers in one process cannot both generate under one alias, and a generation
+  that fails deletes only the key it made. A lookup that fails, or finds a key of a type the store never writes (only
+  P-256 keys are; an RSA or P-384 key is another type), refuses rather than generating over it. `contains`, `delete`
+  and the loads read the alias the same way: a keystore that cannot answer is `StorageFailure(retryable = true)`,
+  never a `false` or a `null` while a key is stored, and a load whose entry read then misses the key the lookup found
+  is that failure too. `aliases()` is the exception the platform imposes: `AndroidKeyStoreSpi` ends its listing early,
+  without an error, when the keystore fails partway, so a listing can miss aliases. Separate processes of one app
+  share the keystore without this lock.
 - **Desktop JVM / Linux non-exportable custody** — desktop JVM / Linux expose no portable
   non-exportable store (DPAPI / Keychain / Secret Service are platform-native, none reachable from
   pure KMP), so both `keyProvider()` and `keyStore()` resolve to the exportable software tier (see

@@ -1,6 +1,13 @@
 package com.ditchoom.buffer.crypto
 
+import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.AtomicReference
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.jvm.JvmInline
+import kotlin.time.ComparableTimeMark
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 /*
  * Typed backend resolution — the "why", not just the "whether".
@@ -123,14 +130,24 @@ sealed interface CapabilityFinding {
     sealed interface Keystore : CapabilityFinding {
         /** No `AndroidKeyStore` JCA provider in this runtime (a host-JVM unit-test run, not a device). */
         data object ProviderMissing : Keystore
+
+        /**
+         * The `AndroidKeyStore` provider is registered but the keystore failed to load. Not settled:
+         * the next resolution tries again.
+         */
+        data object LoadFailed : Keystore
     }
 
     /** [ProtectedKeyBackend.AppleSecureEnclave] findings. */
     sealed interface Enclave : CapabilityFinding {
-        /** CryptoKit reports no Secure Enclave on this hardware (or the simulator). */
+        /** CryptoKit reports no Secure Enclave: a simulator, an Intel Mac without a T2 chip, a virtual machine. */
         data object NotPresent : Enclave
 
-        /** The Enclave exists but the generate-and-discard probe failed (typically an unentitled binary). */
+        /**
+         * The Enclave exists but the generate-and-discard probe failed. Settled when the binary lacks
+         * the entitlement the Enclave requires; any other refusal is probed again on the next
+         * resolution.
+         */
         data object ProbeFailed : Enclave
     }
 
@@ -201,9 +218,115 @@ sealed interface ProtectedKeyResolution {
 /**
  * The per-platform resolution seam. Internal so the platform actuals stay out of the public ABI;
  * the public surface is [CryptoCapabilities.protectedKeyResolution] plus the frozen witnesses.
- * Actuals must cache (the probes are expensive and the answer is stable for the process lifetime).
+ * Actuals cache a settled answer (the probes are expensive) through [SettlingLazy], and never cache a
+ * refusal that a later attempt might not repeat.
  */
 internal expect fun platformProtectedKeyResolution(): ProtectedKeyResolution
+
+/**
+ * What one resolution attempt came to: [Settled] is the answer for the rest of the process (a backend
+ * that works, or one that cannot work in this process at all); [Unsettled] is this attempt's answer
+ * only, so a transient refusal is never pinned for the process lifetime. [Undecided] is also this
+ * attempt's answer only, but counts toward the [SettlingLazy]'s limit of undecided windows.
+ */
+internal sealed interface Settlement<out T> {
+    val value: T
+
+    class Settled<out T>(
+        override val value: T,
+    ) : Settlement<T>
+
+    class Unsettled<out T>(
+        override val value: T,
+    ) : Settlement<T>
+
+    class Undecided<out T>(
+        override val value: T,
+    ) : Settlement<T>
+}
+
+/**
+ * How long a refused probe's answer stands before the next call probes again, so a refused backend does not mint and
+ * discard a probe key on every eligibility or custody question.
+ */
+internal val PROBE_RETRY_AFTER: Duration = 5.seconds
+
+/**
+ * A lazily computed value that caches a [Settlement.Settled] outcome for good and an [Settlement.Unsettled] one for
+ * [retryAfter], measured on [timeSource]: within that window the unsettled answer is returned again, after it the next
+ * [get] computes again. So a refused probe is neither pinned for the process lifetime nor repeated on every call.
+ * Concurrent reads may compute twice; the first settled value wins and every later read sees it. A
+ * [Settlement.Undecided] answer is held like an unsettled one, and after [undecidedLimit] retry windows that each
+ * ended undecided it is settled; concurrent undecided answers within one window count once.
+ */
+@OptIn(ExperimentalAtomicApi::class)
+internal class SettlingLazy<T : Any>(
+    private val retryAfter: Duration,
+    private val timeSource: TimeSource.WithComparableMarks,
+    /** After this many [Settlement.Undecided] answers the last one is settled for good. */
+    private val undecidedLimit: Int = Int.MAX_VALUE,
+    private val compute: () -> Settlement<T>,
+) {
+    private sealed interface Held<out T> {
+        data object Nothing : Held<kotlin.Nothing>
+
+        class Settled<T>(
+            val value: T,
+        ) : Held<T>
+
+        class Unsettled<T>(
+            val value: T,
+            val until: ComparableTimeMark,
+        ) : Held<T>
+    }
+
+    private val held = AtomicReference<Held<T>>(Held.Nothing)
+    private val undecided = AtomicInt(0)
+
+    fun get(): T =
+        when (val current = held.load()) {
+            is Held.Settled -> current.value
+            is Held.Unsettled -> if (timeSource.markNow() < current.until) current.value else recompute()
+            Held.Nothing -> recompute()
+        }
+
+    private fun recompute(): T =
+        when (val attempt = compute()) {
+            is Settlement.Settled -> settle(Held.Settled(attempt.value))
+            is Settlement.Unsettled -> {
+                val now = held.load()
+                val until = timeSource.markNow() + retryAfter
+                if (now !is Held.Settled) held.compareAndSet(now, Held.Unsettled(attempt.value, until))
+                attempt.value
+            }
+            is Settlement.Undecided -> undecide(attempt.value)
+        }
+
+    /**
+     * Holds an undecided [value] for the retry window, and counts it only when it is the answer that opened the window:
+     * reads that probed at once during one failure, and lost the race to store their hold, are one undecided window.
+     */
+    private fun undecide(value: T): T {
+        val now = held.load()
+        val markNow = timeSource.markNow()
+        return when {
+            now is Held.Settled -> now.value
+            now is Held.Unsettled && markNow < now.until -> now.value
+            !held.compareAndSet(now, Held.Unsettled(value, markNow + retryAfter)) -> value
+            undecided.addAndFetch(1) >= undecidedLimit -> settle(Held.Settled(value))
+            else -> value
+        }
+    }
+
+    /** Stores [settled] unless another read settled first; either way, returns the value every later read sees. */
+    private fun settle(settled: Held.Settled<T>): T {
+        while (true) {
+            val now = held.load()
+            if (now is Held.Settled) return now.value
+            if (held.compareAndSet(now, settled)) return settled.value
+        }
+    }
+}
 
 /**
  * The typed backend resolution for this platform — diagnostics, telemetry, and operator-facing
