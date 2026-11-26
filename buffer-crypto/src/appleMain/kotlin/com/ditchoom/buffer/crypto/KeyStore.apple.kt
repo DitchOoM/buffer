@@ -36,7 +36,9 @@ import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.set
 import kotlinx.cinterop.toKString
 import kotlinx.cinterop.value
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 import kotlinx.coroutines.withContext
 import platform.posix.size_tVar
 import kotlin.concurrent.atomics.AtomicInt
@@ -48,14 +50,15 @@ import kotlin.concurrent.atomics.ExperimentalAtomicApi
  * Keychain durably holds its restore record keyed by (`kSecAttrService` = [KeyStoreConfig.name],
  * `kSecAttrAccount` = alias). The Enclave is probed on first use; a refused probe answers that call
  * with a typed [KeyStoreException] ([KeyStoreException.AccessDenied] for a binary without the
- * entitlement, [KeyStoreException.DeviceLocked] on a locked device, a retryable
- * [KeyStoreException.StorageFailure] otherwise) and is probed again on the next, so a device with an
+ * entitlement, [KeyStoreException.DeviceLocked] for a probe the OS refused with `errSecInteractionNotAllowed`,
+ * a retryable [KeyStoreException.StorageFailure] otherwise) and is probed again on the next, so a device with an
  * Enclave never ends up on a weaker or non-durable store.
  *
- * Only hardware with no Enclave at all (the simulator) uses an in-process, **non-durable** software
- * store ([KeyCustody.ExportableSoftware]) — honest about the weaker custody (a `requireTier` caller is
- * refused rather than silently upgraded), but keys there do not survive a process restart. A consumer
- * needing durability without the Enclave supplies [KeyStoreConfig.storage].
+ * Every Apple host where CryptoKit reports no Enclave (`SecureEnclave.isAvailable` is false: the simulators, an Intel
+ * Mac without a T2 chip, a virtual machine) uses an in-process, **non-durable** software store
+ * ([KeyCustody.ExportableSoftware]) — honest about the weaker custody (a `requireTier` caller is refused rather than
+ * silently upgraded), but keys there do not survive a process restart. A consumer needing durability without the
+ * Enclave supplies [KeyStoreConfig.storage].
  */
 internal actual fun platformKeyStore(config: KeyStoreConfig): KeyStore =
     when {
@@ -73,11 +76,23 @@ internal fun openAppleKeychainStore(
         EnclaveProbe.Usable -> PlatformStoreOpening.Opened(AppleKeychainKeyStore(enclaveProvider, name))
         EnclaveProbe.NotEntitled -> PlatformStoreOpening.Refused(KeyStoreException.AccessDenied())
         EnclaveProbe.Locked -> PlatformStoreOpening.Refused(KeyStoreException.DeviceLocked())
-        EnclaveProbe.Refused, EnclaveProbe.NotPresent ->
-            PlatformStoreOpening.Refused(KeyStoreException.StorageFailure(retryable = true))
+        EnclaveProbe.Refused -> PlatformStoreOpening.Refused(KeyStoreException.StorageFailure(retryable = true))
+        // Settled for the process: no later call finds an Enclave on this hardware.
+        EnclaveProbe.NotPresent -> PlatformStoreOpening.Refused(KeyStoreException.StorageFailure(retryable = false))
     }
 
-/** The failure an Enclave generate status names: a locked device is [HardwareKeyException.DeviceLocked]. */
+/**
+ * Where every Apple store's keychain work runs: one thread at a time, so a call that blocks inside Security.framework
+ * (a macOS keychain access prompt, a slow file keychain) parks one thread while the other callers suspend, instead of
+ * each blocking a [Dispatchers.Default] worker on the shim's serial queue.
+ */
+internal val keychainDispatcher: CoroutineDispatcher = Dispatchers.IO.limitedParallelism(1)
+
+/**
+ * The failure an Enclave generate status names. [BCKS_ERR_LOCKED] is an Enclave call the OS refused with
+ * `errSecInteractionNotAllowed`, which is what a locked device is documented to return; [BCKS_ERR_AUTH] is a
+ * LocalAuthentication refusal while binding a key to user authentication (no passcode or biometry to bind it to).
+ */
 internal fun enclaveGenerateFailure(status: Int): HardwareKeyException =
     when (status) {
         BCKS_ERR_LOCKED -> HardwareKeyException.DeviceLocked()
@@ -87,8 +102,9 @@ internal fun enclaveGenerateFailure(status: Int): HardwareKeyException =
     }
 
 /**
- * The failure an Enclave sign status names. [BCKS_ERR_LOCKED] is a key whose class is unavailable while the device is
- * locked: an older key made under a when-unlocked class, which keeps that class for life.
+ * The failure an Enclave sign status names. [BCKS_ERR_LOCKED] is a sign the OS refused with
+ * `errSecInteractionNotAllowed` on a key bound to no user authentication: its protection class is unavailable, as for
+ * an older key made under a when-unlocked class on a locked device.
  */
 internal fun enclaveSignFailure(status: Int): HardwareKeyException =
     when (status) {
@@ -98,8 +114,9 @@ internal fun enclaveSignFailure(status: Int): HardwareKeyException =
     }
 
 /**
- * The [KeyStoreException] a keychain status names. [BCKS_ERR_LOCKED] is the one a background launch on
- * a locked device meets, and is [KeyStoreException.DeviceLocked] so a caller can wait for the unlock.
+ * The [KeyStoreException] a keychain status names. [BCKS_ERR_LOCKED] is `errSecInteractionNotAllowed` on iOS, watchOS
+ * and tvOS, the status a protection class unavailable while the device is locked is documented to return, and is
+ * [KeyStoreException.DeviceLocked] so a caller can wait for the unlock.
  */
 internal fun keychainFailure(status: Int): KeyStoreException =
     when (status) {
@@ -130,7 +147,7 @@ internal fun migrationStep(status: Int): MigrationStep =
     }
 
 /**
- * A persistent, alias-addressable [KeyStore] whose keys are Secure Enclave P-256 signing keys
+ * A persistent, alias-addressable [KeyStore] whose keys are Secure Enclave P-256 signing and agreement keys
  * ([KeyCustody.NonExportable.Hardware]). The Enclave holds the private scalar; the Keychain durably
  * holds each key's restore record (public point + encrypted Enclave blob) as a generic-password item
  * keyed by (`service` = [name], `account` = alias), so independent stores (distinct
@@ -151,16 +168,24 @@ internal fun migrationStep(status: Int): MigrationStep =
  * [KeyStoreException.AliasMismatch], never a mistyped handle.
  *
  * Records an earlier release wrote under `WhenUnlockedThisDeviceOnly` are moved to
- * `AfterFirstUnlockThisDeviceOnly` without an opt-in, on first use: the move is one-way and makes them readable
- * while the device is locked after its first unlock. A record is restore data, not a private key, and an older
- * Enclave key keeps its own class.
+ * `AfterFirstUnlockThisDeviceOnly` without an opt-in, on first use (`SECURITY.md` says where that class is enforced).
+ * The move is one-way. A record is restore data, not a private key, and an older Enclave key keeps its own class.
+ *
+ * Every keychain call runs on [keychainDispatcher].
  */
 internal class AppleKeychainKeyStore(
     private val provider: SecureEnclaveHardwareKeyProvider,
-    private val name: String,
-    private val initialAliasesCapacity: Int = DEFAULT_ALIASES_CAPACITY,
+    private val records: KeychainRecords,
 ) : KeyStore {
-    override fun custodyFor(alg: ProtectedKeyAlgorithm): KeyCustody = provider.custody
+    constructor(provider: SecureEnclaveHardwareKeyProvider, name: String) :
+        this(provider, ShimKeychainRecords(name, DEFAULT_ALIASES_CAPACITY))
+
+    /**
+     * The Enclave's custody for an algorithm it holds; for one it cannot hold, [HardwareKeyException.AlgorithmNotEligible],
+     * since no key of it will ever come from this store.
+     */
+    override fun custodyFor(alg: ProtectedKeyAlgorithm): KeyCustody =
+        if (provider.eligible(alg)) provider.custody else throw HardwareKeyException.AlgorithmNotEligible()
 
     override fun eligible(alg: ProtectedKeyAlgorithm): Boolean = provider.eligible(alg)
 
@@ -228,34 +253,50 @@ internal class AppleKeychainKeyStore(
     /**
      * Re-attaches the key under [alias] when its record says [expected], or generates one and adds its record. The add
      * never replaces: when another writer added a record under [alias] first, that one is the key, and the one this
-     * call generated is dropped — an Enclave key exists only through its record, so nothing of it is left behind.
+     * call generated is released — an Enclave key exists only through its record, so nothing of it is left behind. A
+     * generated key whose record is not added is released too.
+     *
+     * An add refused as a duplicate while no record can be read is asked once more: a record deleted in between lets
+     * the second add succeed, and a record still invisible to this process (another app's item, or one this process may
+     * not read) is [KeyStoreException.AccessDenied], which a retry would only repeat.
      */
-    private suspend fun <K> getOrGenerate(
+    internal suspend fun <K> getOrGenerate(
         alias: String,
         expected: ProtectedKeyAlgorithm,
         attach: (ReadBuffer) -> K,
         generate: () -> Pair<K, PlatformBuffer>,
         release: (K) -> Unit,
     ): K =
-        withContext(Dispatchers.Default) {
+        withContext(keychainDispatcher) {
             migrateOnce()
-            existing(alias, expected, attach) ?: run {
-                val (key, record) = generate()
-                val put =
-                    try {
-                        keychainPut(alias, record)
-                    } finally {
-                        record.freeNativeMemory()
+            existing(alias, expected, attach) ?: addGenerated(alias, expected, attach, generate, release)
+        }
+
+    private fun <K> addGenerated(
+        alias: String,
+        expected: ProtectedKeyAlgorithm,
+        attach: (ReadBuffer) -> K,
+        generate: () -> Pair<K, PlatformBuffer>,
+        release: (K) -> Unit,
+    ): K {
+        val (key, record) = generate()
+        var added = false
+        try {
+            repeat(DUPLICATE_ATTEMPTS) {
+                when (records.put(alias, record)) {
+                    KeychainPut.Added -> {
+                        added = true
+                        return key
                     }
-                when (put) {
-                    KeychainPut.Added -> key
-                    KeychainPut.AlreadyPresent -> {
-                        release(key)
-                        existing(alias, expected, attach) ?: throw KeyStoreException.StorageFailure(retryable = true)
-                    }
+                    KeychainPut.AlreadyPresent -> existing(alias, expected, attach)?.let { return it }
                 }
             }
+            throw KeyStoreException.AccessDenied()
+        } finally {
+            record.freeNativeMemory()
+            if (!added) release(key)
         }
+    }
 
     /** The key [alias] holds, if its record is [expected]; another kind is an [KeyStoreException.AliasMismatch]. */
     private fun <K> existing(
@@ -263,7 +304,7 @@ internal class AppleKeychainKeyStore(
         expected: ProtectedKeyAlgorithm,
         attach: (ReadBuffer) -> K,
     ): K? =
-        keychainGet(alias)?.let { record ->
+        records.get(alias)?.let { record ->
             try {
                 when (val stored = enclaveRecordAlgorithm(record)) {
                     expected -> attach(record)
@@ -299,14 +340,14 @@ internal class AppleKeychainKeyStore(
      * when its kind byte says [expected]. A record of the other kind answers `null` — the load
      * contract is "absent or a different kind", never a mistyped handle.
      */
-    private suspend fun <T> loadRecord(
+    internal suspend fun <T> loadRecord(
         alias: String,
         expected: ProtectedKeyAlgorithm,
         attach: (ReadBuffer) -> T,
     ): T? =
-        withContext(Dispatchers.Default) {
+        withContext(keychainDispatcher) {
             migrateOnce()
-            keychainGet(alias)?.let { record ->
+            records.get(alias)?.let { record ->
                 try {
                     if (enclaveRecordAlgorithm(record) == expected) attach(record) else null
                 } finally {
@@ -317,38 +358,105 @@ internal class AppleKeychainKeyStore(
 
     override suspend fun contains(alias: String): Boolean {
         requireValidAlias(alias)
-        return withContext(Dispatchers.Default) {
+        return withContext(keychainDispatcher) {
             migrateOnce()
-            keychainContains(alias)
+            records.contains(alias)
         }
     }
 
     override suspend fun aliases(): Set<String> =
-        withContext(Dispatchers.Default) {
+        withContext(keychainDispatcher) {
             migrateBeforeListing()
-            keychainAliases()
+            records.aliases()
         }
 
     override suspend fun delete(alias: String): Boolean {
         requireValidAlias(alias)
-        return withContext(Dispatchers.Default) { keychainDelete(alias) }
+        return withContext(keychainDispatcher) { records.delete(alias) }
     }
 
     override fun close() = Unit
 
-    // --- Keychain IO (generic-password items via the CryptoKit shim) -------------------------------
+    private val migrated = AtomicInt(0)
 
-    // service = store name, account = alias — both passed as Kotlin Strings, which Kotlin/Native
-    // cinterop converts to the shim's `const char*` for the call (as with bcks_la_context_create).
-
-    private sealed interface KeychainPut {
-        data object Added : KeychainPut
-
-        /** Another writer added a record under the alias first; it was left as it is. */
-        data object AlreadyPresent : KeychainPut
+    /**
+     * Moves this store's records written under an older protection class to the current one, until the move settles
+     * (see [migrationStep]). Best effort before an ordinary operation: a device locked right now leaves the move for
+     * the next call.
+     */
+    private fun migrateOnce() {
+        if (migrated.load() == 1) return
+        when (migrationStep(records.migrate())) {
+            MigrationStep.Settled -> migrated.store(1)
+            MigrationStep.TryAgain -> Unit
+        }
     }
 
-    private fun keychainPut(
+    /**
+     * The same move before a listing, until it has once succeeded. While a record under the older class is withheld
+     * by a locked device a listing would silently leave it out, so that, and only that, is
+     * [KeyStoreException.DeviceLocked]; any other failure of the move is left for the next call and the listing goes
+     * ahead.
+     */
+    private fun migrateBeforeListing() {
+        if (migrated.load() == 1) return
+        val status = records.migrate()
+        if (status == BCKS_ERR_LOCKED) throw KeyStoreException.DeviceLocked()
+        when (migrationStep(status)) {
+            MigrationStep.Settled -> migrated.store(1)
+            MigrationStep.TryAgain -> Unit
+        }
+    }
+
+    private companion object {
+        // Newline-joined account names: the first read's buffer. A listing that outgrows it is re-read
+        // at the size the keychain reports.
+        const val DEFAULT_ALIASES_CAPACITY = 4096
+
+        // Adds tried when the keychain says a record is there that no read returns: once, then once more.
+        const val DUPLICATE_ATTEMPTS = 2
+    }
+}
+
+/** What adding a record found. */
+internal sealed interface KeychainPut {
+    data object Added : KeychainPut
+
+    /** Another writer added a record under the alias first; it was left as it is. */
+    data object AlreadyPresent : KeychainPut
+}
+
+/** One store's keychain records by alias: the shim in production ([ShimKeychainRecords]), a fake in tests. */
+internal interface KeychainRecords {
+    /** Adds [record] under [alias], never replacing one already there. */
+    fun put(
+        alias: String,
+        record: ReadBuffer,
+    ): KeychainPut
+
+    /** The record under [alias] as a fresh read-ready buffer (the caller frees it), or `null` if there is none. */
+    fun get(alias: String): PlatformBuffer?
+
+    fun contains(alias: String): Boolean
+
+    /** `true` if a record was removed, `false` if there was none. */
+    fun delete(alias: String): Boolean
+
+    fun aliases(): Set<String>
+
+    /** Moves records under an older protection class to the current one; the shim's status. */
+    fun migrate(): Int
+}
+
+/**
+ * [KeychainRecords] through the CryptoKit shim's generic-password items: service = store [name], account = alias, both
+ * passed as Kotlin Strings, which Kotlin/Native cinterop converts to the shim's `const char*` for the call.
+ */
+internal class ShimKeychainRecords(
+    private val name: String,
+    private val initialAliasesCapacity: Int,
+) : KeychainRecords {
+    override fun put(
         alias: String,
         record: ReadBuffer,
     ): KeychainPut {
@@ -364,39 +472,9 @@ internal class AppleKeychainKeyStore(
         }
     }
 
-    private val migrated = AtomicInt(0)
+    override fun migrate(): Int = bcks_keychain_migrate(name)
 
-    /**
-     * Moves this store's records written under an older protection class to the current one, until the move settles
-     * (see [migrationStep]). Best effort before an ordinary operation: a device locked right now leaves the move for
-     * the next call.
-     */
-    private fun migrateOnce() {
-        if (migrated.load() == 1) return
-        when (migrationStep(bcks_keychain_migrate(name))) {
-            MigrationStep.Settled -> migrated.store(1)
-            MigrationStep.TryAgain -> Unit
-        }
-    }
-
-    /**
-     * The same move before a listing, until it has once succeeded. While a record under the older class is withheld
-     * by a locked device a listing would silently leave it out, so that, and only that, is
-     * [KeyStoreException.DeviceLocked]; any other failure of the move is left for the next call and the listing goes
-     * ahead.
-     */
-    private fun migrateBeforeListing() {
-        if (migrated.load() == 1) return
-        val status = bcks_keychain_migrate(name)
-        if (status == BCKS_ERR_LOCKED) throw KeyStoreException.DeviceLocked()
-        when (migrationStep(status)) {
-            MigrationStep.Settled -> migrated.store(1)
-            MigrationStep.TryAgain -> Unit
-        }
-    }
-
-    /** The record stored under [alias] as a fresh read-ready buffer (caller frees it), or `null` if absent. */
-    private fun keychainGet(alias: String): PlatformBuffer? {
+    override fun get(alias: String): PlatformBuffer? {
         val out = BufferFactory.Default.allocate(RECORD_CAP)
         var status = -1
         var written = 0
@@ -424,14 +502,14 @@ internal class AppleKeychainKeyStore(
         }
     }
 
-    private fun keychainContains(alias: String): Boolean =
+    override fun contains(alias: String): Boolean =
         when (val status = bcks_keychain_contains(name, alias)) {
             1 -> true
             0 -> false
             else -> throw keychainFailure(status)
         }
 
-    private fun keychainDelete(alias: String): Boolean =
+    override fun delete(alias: String): Boolean =
         when (val status = bcks_keychain_delete(name, alias)) {
             BCKS_OK -> true
             BCKS_ERR_INPUT -> false
@@ -443,7 +521,7 @@ internal class AppleKeychainKeyStore(
      * outgrow it, retries with the size the keychain reported, so the listing is bounded by the item
      * count rather than a fixed cap. Items added between two reads only grow the next request.
      */
-    private fun keychainAliases(): Set<String> {
+    override fun aliases(): Set<String> {
         var capacity = initialAliasesCapacity
         repeat(ALIASES_ATTEMPTS) {
             when (val listing = readAliases(capacity)) {
@@ -482,10 +560,6 @@ internal class AppleKeychainKeyStore(
     private companion object {
         // A record is `u8 kind | u16 pointLen | point(65) | Enclave blob(~284)` — well under 4 KiB.
         const val RECORD_CAP = 4096
-
-        // Newline-joined account names: the first read's buffer. A listing that outgrows it is re-read
-        // at the size the keychain reports.
-        const val DEFAULT_ALIASES_CAPACITY = 4096
 
         // Reads before giving up on a listing that keeps growing between reads (a concurrent writer).
         const val ALIASES_ATTEMPTS = 4

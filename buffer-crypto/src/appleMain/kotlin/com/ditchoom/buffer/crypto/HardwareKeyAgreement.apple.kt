@@ -185,11 +185,13 @@ internal fun frameEnclaveRecord(
 
 /** Splits a durable record into its kind and freshly-owned (blob, point) buffers. */
 internal fun parseEnclaveRecord(record: ReadBuffer): EnclaveRecord {
+    if (record.remaining() < RECORD_HEADER_BYTES) throw KeyStoreException.CorruptEntry()
     val first = record.readByte().toInt() and BYTE_MASK
     val legacy = first == LEGACY_SIGNING_TAG
     // Legacy: `first` was the point length's high byte (0x00), so its low byte comes next.
     val pointLen =
         if (legacy) record.readByte().toInt() and BYTE_MASK else record.readShort().toInt() and SHORT_MASK
+    if (pointLen > record.remaining()) throw KeyStoreException.CorruptEntry()
     val point = copyBuffer(record.readBytes(pointLen), BufferFactory.Default)
     val blob = copyBuffer(record.readBytes(record.remaining()), BufferFactory.Default)
     return EnclaveRecord(if (legacy) EnclaveKeyKind.Signing else enclaveKind(first), blob, point)
@@ -200,12 +202,14 @@ internal fun parseEnclaveRecord(record: ReadBuffer): EnclaveRecord {
  * kind check before it hands the record to the matching re-attach path (a mismatch answers `null`
  * on a load and [KeyStoreException.AliasMismatch] on a get-or-generate).
  */
-internal fun enclaveRecordAlgorithm(record: ReadBuffer): ProtectedKeyAlgorithm =
-    when (record.get(record.position()).toInt() and BYTE_MASK) {
+internal fun enclaveRecordAlgorithm(record: ReadBuffer): ProtectedKeyAlgorithm {
+    if (record.remaining() == 0) throw KeyStoreException.CorruptEntry()
+    return when (record.get(record.position()).toInt() and BYTE_MASK) {
         LEGACY_SIGNING_TAG, EnclaveKeyKind.Signing.tag -> ProtectedKeyAlgorithm.EcdsaP256
         EnclaveKeyKind.Agreement.tag -> ProtectedKeyAlgorithm.EcdhP256
         else -> throw KeyStoreException.CorruptEntry()
     }
+}
 
 private fun enclaveKind(tag: Int): EnclaveKeyKind =
     when (tag) {
