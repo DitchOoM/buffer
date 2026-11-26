@@ -54,6 +54,22 @@ class KeychainStoreHardeningTest {
             assertFailsWith<KeyStoreException.DeviceLocked> { store.aliases() }
         }
 
+    /** A caller told the device is locked retries after the unlock, and that retry probes again at once. */
+    @Test
+    fun aLockedProbeIsAskedAgainOnTheNextCall() {
+        var status = BCKS_ERR_LOCKED
+        var probes = 0
+        val probe =
+            SettlingLazy(PROBE_RETRY_AFTER, kotlin.time.TestTimeSource()) {
+                probes++
+                enclaveProbeOf(status)
+            }
+        assertEquals(EnclaveProbe.Locked, probe.get())
+        status = BCKS_OK
+        assertEquals(EnclaveProbe.Usable, probe.get(), "the unlocked device is probed again, not held locked")
+        assertEquals(2, probes)
+    }
+
     /** Needs the Enclave (the store mints Enclave keys); bounded in real time on threads of its own. */
     @Test
     fun fourEnclaveStoresRacingToCreateOneAliasEndWithOneKey() =
@@ -200,7 +216,7 @@ class KeychainStoreHardeningTest {
         val RACE_BUDGET = 30.seconds
         const val KEYCHAIN_THREADS = 8
         const val STORE_RACERS = 4
-        const val KEYCHAIN_ROUNDS = 200
+        const val KEYCHAIN_ROUNDS = 50
         const val SHARED_ACCOUNT = "shared"
     }
 

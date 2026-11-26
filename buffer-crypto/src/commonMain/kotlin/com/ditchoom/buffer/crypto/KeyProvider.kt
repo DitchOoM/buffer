@@ -10,10 +10,14 @@ package com.ditchoom.buffer.crypto
 interface KeyProvider {
     /**
      * The [KeyCustody] a key generated for [alg] has at least on this platform (routing introspection); a hardware key
-     * may report a stronger custody of its own. A platform [KeyStore] whose backend could not be opened throws the
-     * typed [KeyStoreException] that refused it, and opens it again on the next call. A platform [KeyStore] asked about
-     * an algorithm its backend cannot hold ([eligible] is `false`) throws [HardwareKeyException.AlgorithmNotEligible]
-     * rather than name a custody no key of it will have.
+     * may report a stronger custody of its own. It is a floor for keys this provider *generates*: a key an Android
+     * [KeyStore] reattaches from an earlier release can sit below it ([KeyCustody.NonExportable.Software]), so a
+     * caller that needs a tier for a stored key checks that key's own `custody`. A platform [KeyStore] whose backend
+     * could not be opened throws the typed [KeyStoreException] that refused it, and opens it again once the probe's
+     * retry window has passed. A platform [KeyStore] asked about an algorithm its backend cannot hold throws
+     * [HardwareKeyException.AlgorithmNotEligible] rather than name a custody no key of it will have; asked about key
+     * agreement while its agreement probe is undecided, it throws that probe's failure
+     * ([HardwareKeyException.DeviceLocked] or a retryable [HardwareKeyException.TransientHardwareFailure]).
      *
      * On a platform [KeyStore] the first call (and the first after a refused probe's window) opens the backend on the
      * calling thread, which can mean a generate-and-discard probe key in the secure element; call it off the main

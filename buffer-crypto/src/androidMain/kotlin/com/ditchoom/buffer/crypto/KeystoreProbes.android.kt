@@ -9,6 +9,7 @@ import java.security.PrivateKey
 import java.security.ProviderException
 import java.security.spec.ECGenParameterSpec
 import javax.crypto.KeyAgreement
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * The Android Keystore provider's two device probes, each a throwaway key generated and deleted under [monitor], the
@@ -23,29 +24,31 @@ internal class KeystoreProbes(
      * generates a throwaway `PURPOSE_AGREE_KEY` key, confirms its `KeyInfo` level, and runs a full
      * keystore ECDH against a fresh software peer. The end-to-end agreement matters — a device may
      * accept the generation spec and still fail the `KeyAgreement` op, or place the key in a software
-     * KeyMint — so generation alone would over-promise. Pre-31 the purpose does not exist. A transient
-     * keystore refusal is [Settlement.Unsettled], so a busy keystore is not taken for one without
-     * agreement.
+     * KeyMint — so generation alone would over-promise. Pre-31 the purpose does not exist. How a failed
+     * probe is read is [agreementProbeOutcome].
      */
-    fun agreement(): Settlement<Boolean> {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return Settlement.Settled(false)
+    fun agreement(): Settlement<AgreementSupport> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return Settlement.Settled(AgreementSupport.NotSupported)
         return synchronized(monitor) {
             val alias = newAlias("probe-ecdh")
             try {
-                val keyPair =
-                    KeyPairGenerator
-                        .getInstance(KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEY_STORE)
-                        .apply {
-                            initialize(agreementSpec(alias, StrongBoxRequest.Tee, probeAdvisoryPolicy))
-                        }.generateKeyPair()
-                when (placementOfSecurityLevel(keyInfoOf(keyPair.private).securityLevel)) {
-                    is KeystorePlacement.NotSecureHardware -> Settlement.Settled(false)
-                    is KeystorePlacement.SecureHardware -> Settlement.Settled(agreesWithSoftwarePeer(keyPair.private))
+                agreementProbeOutcome {
+                    val keyPair =
+                        KeyPairGenerator
+                            .getInstance(KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEY_STORE)
+                            .apply {
+                                initialize(agreementSpec(alias, StrongBoxRequest.Tee, probeAdvisoryPolicy))
+                            }.generateKeyPair()
+                    when (placementOfSecurityLevel(keyInfoOf(keyPair.private).securityLevel)) {
+                        is KeystorePlacement.NotSecureHardware -> AgreementSupport.NotSupported
+                        KeystorePlacement.StrongBox, KeystorePlacement.Tee, KeystorePlacement.UnnamedSecure ->
+                            if (agreesWithSoftwarePeer(keyPair.private)) {
+                                AgreementSupport.Supported
+                            } else {
+                                AgreementSupport.NotSupported
+                            }
+                    }
                 }
-            } catch (e: GeneralSecurityException) {
-                probeRefusal(e)
-            } catch (e: ProviderException) {
-                probeRefusal(e)
             } finally {
                 runCatching { keyStore.deleteEntry(alias) }
             }
@@ -67,7 +70,7 @@ internal class KeystoreProbes(
                             initialize(ecSpec(alias, StrongBoxRequest.StrongBox, probeAdvisoryPolicy))
                         }.generateKeyPair()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    placementOfSecurityLevel(keyInfoOf(keyPair.private).securityLevel).isStrongBox()
+                    placementOfSecurityLevel(keyInfoOf(keyPair.private).securityLevel) == KeystorePlacement.StrongBox
                 } else {
                     true
                 }
@@ -98,22 +101,37 @@ internal class KeystoreProbes(
         return ok
     }
 
-    /** A refused probe: transient ⇒ ask again next time; anything else ⇒ no hardware agreement on this device. */
-    private fun probeRefusal(failure: Throwable): Settlement<Boolean> =
-        if (keystoreFailureFacts(failure).any { it is KeystoreFailureFact.Coded && it.transientFailure }) {
-            Settlement.Unsettled(false)
-        } else {
-            Settlement.Settled(false)
-        }
 }
 
 /** Unbound throwaway-key policy for the probes. */
 private val probeAdvisoryPolicy = ResolvedAndroidPolicy.Advisory(HardwareAuthorization { true })
 
-private fun KeystorePlacement.isStrongBox(): Boolean =
-    when (this) {
-        is KeystorePlacement.SecureHardware -> custody.dedicatedSecureElement
-        is KeystorePlacement.NotSecureHardware -> false
+private const val P256_FIELD_BYTES = 32
+
+/**
+ * How one agreement [probe] that answered, or failed, is held: the keystore's answer is settled; a transient keystore
+ * refusal is [AgreementSupport.Undecided] for the retry window, so a busy keystore is not taken for one without
+ * agreement; any other keystore refusal settles agreement off. A probe that fails in a way nothing here expects is
+ * undecided too, never a crash of an eligibility question. Cancellation and errors pass through.
+ */
+internal inline fun agreementProbeOutcome(probe: () -> AgreementSupport): Settlement<AgreementSupport> =
+    try {
+        Settlement.Settled(probe())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: GeneralSecurityException) {
+        keystoreProbeRefusal(e)
+    } catch (e: ProviderException) {
+        keystoreProbeRefusal(e)
+    } catch (
+        @Suppress("TooGenericExceptionCaught") _: Exception,
+    ) {
+        Settlement.Unsettled(AgreementSupport.Undecided)
     }
 
-private const val P256_FIELD_BYTES = 32
+internal fun keystoreProbeRefusal(failure: Throwable): Settlement<AgreementSupport> =
+    if (keystoreFailureFacts(failure).any { it is KeystoreFailureFact.Coded && it.transientFailure }) {
+        Settlement.Unsettled(AgreementSupport.Undecided)
+    } else {
+        Settlement.Settled(AgreementSupport.NotSupported)
+    }

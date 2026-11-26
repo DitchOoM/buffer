@@ -48,9 +48,10 @@ internal fun KeyAgreementCurve.toProtectedKeyAlgorithm(): ProtectedKeyAlgorithm 
 
 /**
  * The router handed to consumers by [keyProvider]. Routes each request to the strongest tier that is
- * *eligible for that algorithm*, with [SoftwareKeyProvider] as the floor — so it never hands back a
- * provider that throws for custody reasons at the default, and never routes P-521 to a secure element
- * that only backs P-256. It is a [KeyProvider] but deliberately **not** a [ConcreteKeyProvider],
+ * *eligible for that algorithm*, with [SoftwareKeyProvider] as the floor, and never routes P-521 to a secure element
+ * that only backs P-256. A request routed to the secure element can still be refused there for custody: on Android a
+ * key the keystore places outside secure hardware is deleted and refused with [InsufficientKeyCustody], never handed
+ * out as a weaker key the caller did not ask for. It is a [KeyProvider] but deliberately **not** a [ConcreteKeyProvider],
  * because its custody varies per algorithm.
  */
 internal class ResolvingKeyProvider(
@@ -78,8 +79,9 @@ internal class ResolvingKeyProvider(
 /**
  * The **total**, non-null key-provider entry point: a [KeyProvider] that always works, routing each
  * request per algorithm to the strongest custody the platform offers and falling back to the
- * commonMain [SoftwareKeyProvider] floor. Never returns null and never throws for custody reasons at
- * the default — the only `?:` is internal, against the [platformProtectedKeyProvider] seam.
+ * commonMain [SoftwareKeyProvider] floor. Never returns null — the only `?:` is internal, against the
+ * [platformProtectedKeyProvider] seam. A generation it routes to the Android Keystore throws [InsufficientKeyCustody]
+ * when the keystore places that key outside secure hardware (see [ResolvingKeyProvider]).
  *
  * "I require a stronger tier" is expressed as an assertion on the inspectable custody
  * ([KeyProvider.requireTier] / [KeyProvider.custodyFor]), not as a nullable return. The two capability
@@ -101,6 +103,10 @@ fun CryptoCapabilities.keyProvider(): KeyProvider = ResolvingKeyProvider(strong 
  *  - a platform [KeyStore] whose backend cannot be opened right now throws the typed [KeyStoreException] that refused
  *    it ([KeyStoreException.StorageFailure], [KeyStoreException.AccessDenied], [KeyStoreException.DeviceLocked]),
  *    and may probe the backend on the calling thread first, as [KeyProvider.custodyFor] does.
+ *
+ * The assertion is about keys the provider *generates*. A key an Android [KeyStore] reattaches, persisted outside
+ * secure hardware by an earlier release, is handed out as [KeyCustody.NonExportable.Software] even after
+ * `requireTier(alg, CustodyTier.Hardware)` passed; check a stored key's own `custody` where that matters.
  *
  * On the total [keyProvider] resolver every algorithm is eligible (it routes to the software floor),
  * so only a single-backend provider — a secure-element/WebCrypto [KeyStore] — ever takes the

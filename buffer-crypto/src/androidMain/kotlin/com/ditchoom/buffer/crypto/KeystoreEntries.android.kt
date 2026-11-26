@@ -3,11 +3,14 @@ package com.ditchoom.buffer.crypto
 import android.security.keystore.KeyProperties
 import java.security.AlgorithmParameters
 import java.security.GeneralSecurityException
+import java.security.NoSuchAlgorithmException
+import java.security.NoSuchProviderException
 import java.security.PrivateKey
 import java.security.ProviderException
 import java.security.interfaces.ECKey
 import java.security.spec.ECGenParameterSpec
 import java.security.spec.ECParameterSpec
+import java.security.spec.InvalidKeySpecException
 
 /*
  * What the Android Keystore provider decides from one alias lookup: whether a get-or-generate may generate, whether
@@ -148,17 +151,86 @@ private val p256: ECParameterSpec by lazy {
 }
 
 /**
- * Runs a store [block] (a lookup, a read of an entry or its `KeyInfo`, a listing, a delete), normalizing a keystore
- * failure to a retryable [KeyStoreException.StorageFailure]: a store that could not answer, not a key that failed. A
- * [CryptoException] thrown inside passes through.
+ * Runs a store [block] (a lookup, a read of a stored entry or its `KeyInfo`, a listing, a delete), normalizing a
+ * keystore failure to a [KeyStoreException.StorageFailure]: a store that could not answer, not a key that failed. It
+ * is retryable unless the failure is one the next call would repeat (see [deterministic]). A [CryptoException] thrown
+ * inside passes through.
  */
 internal inline fun <T> mappingStoreFailures(block: () -> T): T =
     try {
         block()
     } catch (e: CryptoException) {
         throw e
-    } catch (_: GeneralSecurityException) {
-        throw KeyStoreException.StorageFailure(retryable = true)
+    } catch (e: GeneralSecurityException) {
+        throw KeyStoreException.StorageFailure(retryable = !deterministic(e))
     } catch (_: ProviderException) {
         throw KeyStoreException.StorageFailure(retryable = true)
     }
+
+/**
+ * A failure the next call would only repeat: no such algorithm or provider, or a key spec the provider cannot read.
+ * Anything else may be a keystore that could not answer this time.
+ */
+internal fun deterministic(failure: GeneralSecurityException): Boolean =
+    failure is NoSuchAlgorithmException || failure is NoSuchProviderException || failure is InvalidKeySpecException
+
+/** Why a key this provider generated and refused is still under its alias. */
+internal sealed interface Undeleted {
+    /** The keystore placed it outside secure hardware. */
+    data class OutsideHardware(
+        val alg: ProtectedKeyAlgorithm,
+        val offered: OfferedCustody,
+    ) : Undeleted
+
+    /** Its placement could not be read. */
+    data object Unconfirmed : Undeleted
+}
+
+/** The failure a lookup of an alias still holding a refused key throws: the generation's own refusal. */
+internal fun Undeleted.failure(): CryptoException =
+    when (this) {
+        is Undeleted.OutsideHardware -> notHardware(alg, offered)
+        Undeleted.Unconfirmed -> KeyStoreException.StorageFailure(retryable = true)
+    }
+
+/**
+ * Keys the provider generated and refused. Each is deleted at once; one whose delete fails is remembered, so a later
+ * lookup in this process deletes it before anything else and never reattaches it as a stored key: the refusal stands
+ * until it is gone. Only the provider's keystore critical section touches it.
+ */
+internal class DiscardedKeys(
+    private val keyStore: java.security.KeyStore,
+) {
+    private val undeleted = mutableMapOf<String, Undeleted>()
+
+    /**
+     * Deletes [alias] without asking `containsAlias` first, which answers `false` for a keystore error; deleting a
+     * missing alias is a no-op. A delete that fails remembers [why].
+     */
+    fun discard(
+        alias: String,
+        why: Undeleted,
+    ) {
+        if (!deleted(alias)) undeleted[alias] = why
+    }
+
+    /** Before a key lookup of [alias]: deletes a refused key still under it, or throws its refusal while it cannot. */
+    fun clearOrRefuse(alias: String) {
+        val why = undeleted[alias] ?: return
+        if (!deleted(alias)) throw why.failure()
+        undeleted.remove(alias)
+    }
+
+    /** [alias] was deleted by the store's own delete. */
+    fun forget(alias: String) {
+        undeleted.remove(alias)
+    }
+
+    private fun deleted(alias: String): Boolean =
+        try {
+            keyStore.deleteEntry(alias)
+            true
+        } catch (_: java.security.KeyStoreException) {
+            false
+        }
+}

@@ -497,7 +497,7 @@ internal sealed interface PlatformStoreOpening {
         val store: KeyStore,
     ) : PlatformStoreOpening
 
-    /** This attempt failed with [failure]; the next call opens again. */
+    /** This attempt failed with [failure]; a later call opens again (see [RetryingKeyStore]). */
     class Refused(
         val failure: KeyStoreException,
     ) : PlatformStoreOpening
@@ -508,7 +508,9 @@ internal sealed interface PlatformStoreOpening {
  * try (a keystore daemon that is not up yet, an Enclave probe that failed). Every call opens the
  * backend through [open] until one attempt succeeds, and a refused attempt surfaces as its typed
  * [KeyStoreException] — so a failure is never answered by quietly switching to a weaker or
- * non-durable store for the rest of the process.
+ * non-durable store for the rest of the process. [open] reads the platform's probe, which holds a refusal for the
+ * probe's retry window ([PROBE_RETRY_AFTER]): calls inside that window get the same refusal, and a locked device's
+ * refusal is probed again on the very next call.
  */
 @OptIn(ExperimentalAtomicApi::class)
 @Suppress("TooManyFunctions") // one forwarding member per KeyStore member
@@ -520,10 +522,14 @@ internal class RetryingKeyStore(
     private fun store(): KeyStore {
         opened.load()?.let { return it }
         return when (val attempt = open()) {
-            is PlatformStoreOpening.Opened -> {
-                opened.compareAndSet(null, attempt.store)
-                opened.load() ?: attempt.store
-            }
+            is PlatformStoreOpening.Opened ->
+                if (opened.compareAndSet(null, attempt.store)) {
+                    attempt.store
+                } else {
+                    // Another first call stored its store first: this one is never used, so it is not left open.
+                    attempt.store.close()
+                    checkNotNull(opened.load())
+                }
             is PlatformStoreOpening.Refused -> throw attempt.failure
         }
     }

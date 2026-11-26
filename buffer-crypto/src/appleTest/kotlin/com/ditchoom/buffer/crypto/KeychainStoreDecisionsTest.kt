@@ -11,14 +11,18 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_INTERNAL
+import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_ERR_LOCKED
 import com.ditchoom.buffer.crypto.cinterop.cryptokit.BCKS_OK
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.newSingleThreadContext
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -93,6 +97,46 @@ class KeychainStoreDecisionsTest {
             assertEquals(0, released)
         }
 
+    /**
+     * The caller is cancelled while its record is being added: the record is kept (the key is stored), and the key
+     * handle the caller will never receive is released.
+     */
+    @Test
+    fun aKeyAddedForACallerCancelledMeanwhileIsReleased() =
+        runTest {
+            val records = FakeRecords()
+            var released = 0
+            val caller =
+                launch(Dispatchers.Default, start = CoroutineStart.LAZY) {
+                    AppleKeychainKeyStore(enclaveProvider, records).getOrGenerate<String>(
+                        "one",
+                        ProtectedKeyAlgorithm.EcdsaP256,
+                        attach = { "attached" },
+                        generate = { "generated" to signingRecord() },
+                        release = { released++ },
+                    )
+                }
+            records.onPut = { caller.cancel() }
+            caller.start()
+            caller.join()
+            assertTrue(caller.isCancelled)
+            assertEquals(1, records.puts)
+            assertEquals(1, released, "the handle the cancelled caller never received is released")
+        }
+
+    /**
+     * A class move that settled by failing does not let a listing skip its guard: while the device is locked, a record
+     * still under the earlier class is withheld, so the listing is DeviceLocked, not a listing that misses it.
+     */
+    @Test
+    fun aListingAfterAMoveThatFailedStillRefusesWhileLocked() =
+        runTest {
+            val records = FakeRecords().apply { migrateStatuses = mutableListOf(BCKS_ERR_INTERNAL, BCKS_ERR_LOCKED) }
+            val store = AppleKeychainKeyStore(enclaveProvider, records)
+            store.contains("one")
+            assertFailsWith<KeyStoreException.DeviceLocked> { store.aliases() }
+        }
+
     @Test
     fun anEmptyOrTruncatedRecordIsACorruptEntry() {
         assertFailsWith<KeyStoreException.CorruptEntry> { enclaveRecordAlgorithm(BufferFactory.Default.allocate(0)) }
@@ -164,6 +208,8 @@ class KeychainStoreDecisionsTest {
     private class FakeRecords : KeychainRecords {
         private val stored = mutableMapOf<String, Byte>()
         var putFailure: (() -> KeyStoreException)? = null
+        var onPut: () -> Unit = {}
+        var migrateStatuses = mutableListOf<Int>()
         var invisibleDuplicate = false
         var duplicateThenGone = false
         var blockContainsUntil: AtomicInt? = null
@@ -177,6 +223,7 @@ class KeychainStoreDecisionsTest {
             record: ReadBuffer,
         ): KeychainPut {
             puts++
+            onPut()
             putFailure?.let { throw it() }
             val present = invisibleDuplicate || (duplicateThenGone && puts == 1) || stored.containsKey(alias)
             if (!present) stored[alias] = record.get(record.position())
@@ -211,7 +258,7 @@ class KeychainStoreDecisionsTest {
 
         override fun aliases(): Set<String> = stored.keys.toSet()
 
-        override fun migrate(): Int = BCKS_OK
+        override fun migrate(): Int = if (migrateStatuses.isEmpty()) BCKS_OK else migrateStatuses.removeAt(0)
     }
 
     private companion object {

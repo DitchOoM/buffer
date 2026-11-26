@@ -70,6 +70,8 @@ class KeychainStatusClassificationTest {
     @Test
     fun aKeychainNotAvailableIsWorthRetrying() {
         assertEquals(BCKS_ERR_NO_KEYCHAIN, bcks_keychain_classify(ERR_SEC_NOT_AVAILABLE))
+        assertEquals(BCKS_ERR_NO_KEYCHAIN, bcks_keychain_classify(ERR_SEC_NO_DEFAULT_KEYCHAIN), "no default keychain")
+        assertEquals(BCKS_ERR_NO_KEYCHAIN, bcks_keychain_classify(ERR_SEC_NO_SUCH_KEYCHAIN), "no such keychain")
         assertTrue(
             assertIs<KeyStoreException.StorageFailure>(keychainFailure(BCKS_ERR_NO_KEYCHAIN)).retryable,
             "early in boot the keychain may not be up yet",
@@ -114,6 +116,8 @@ class KeychainStatusClassificationTest {
         const val ERR_SEC_DECODE = -26275
         const val ERR_SEC_DUPLICATE_ITEM = -25299
         const val ERR_SEC_NOT_AVAILABLE = -25291
+        const val ERR_SEC_NO_DEFAULT_KEYCHAIN = -25307
+        const val ERR_SEC_NO_SUCH_KEYCHAIN = -25294
         const val ERR_SEC_PARAM = -50
         const val ERR_SEC_IO = -36
     }

@@ -199,7 +199,8 @@ sealed class KeyStoreException protected constructor(
      * The backing store could not be reached (disk IO, keystore/Keychain access, a platform keystore
      * that failed to open). [retryable] mirrors the platform's guidance where it provides one; a raw
      * platform IO exception is normalized into this rather than leaking through. A store that could
-     * not be opened is opened again on the next call, never replaced by a weaker one.
+     * not be opened is never replaced by a weaker one; it is opened again once the backend probe's retry window
+     * (a few seconds) has passed, and calls inside that window get the same failure.
      */
     class StorageFailure internal constructor(
         val retryable: Boolean,

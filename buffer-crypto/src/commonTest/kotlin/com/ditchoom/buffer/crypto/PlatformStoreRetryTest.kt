@@ -39,6 +39,35 @@ class PlatformStoreRetryTest {
             assertEquals(2, attempts, "an opened store is kept; only the refused attempt is repeated")
         }
 
+    /**
+     * Two first calls open at once: the inner one stores its store first, so the outer one's store is never used and
+     * is closed rather than left open.
+     */
+    @Test
+    fun aStoreOpenedByALosingFirstCallIsClosed() {
+        val stores = mutableListOf<ClosingStore>()
+        lateinit var store: RetryingKeyStore
+        store =
+            RetryingKeyStore {
+                val mine = ClosingStore().also { stores += it }
+                // The first opening is overtaken by a second call that opens and stores its store first.
+                if (stores.size == 1) store.custodyFor(ProtectedKeyAlgorithm.EcdsaP256)
+                PlatformStoreOpening.Opened(mine)
+            }
+        store.custodyFor(ProtectedKeyAlgorithm.EcdsaP256)
+        assertEquals(2, stores.size)
+        assertTrue(stores[0].closed, "the store that lost the race is closed")
+        assertTrue(!stores[1].closed, "the store every call uses stays open")
+    }
+
+    private class ClosingStore : KeyStore by SoftwareKeyStore(InMemoryKeyStorage()) {
+        var closed = false
+
+        override fun close() {
+            closed = true
+        }
+    }
+
     @Test
     fun aStoreThatNeverOpensNeverHandsOutAKey() =
         runTest {

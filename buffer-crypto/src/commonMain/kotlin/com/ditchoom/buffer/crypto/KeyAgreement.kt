@@ -176,8 +176,8 @@ sealed interface KeyAgreementPrivateKey : AutoCloseable {
     /** The curve this key agrees on. */
     val curve: KeyAgreementCurve
 
-    /** Whether the key material is in software memory or hardware-backed. */
-    val provenance: KeyProvenance
+    /** Whether the key material is in software memory or hardware-backed. Derived from [custody]. */
+    val provenance: KeyProvenance get() = custody.provenance
 
     /**
      * This key's custody: where its secret lives and whether the process can read it, carried by the key itself so it
@@ -208,7 +208,6 @@ internal class InMemoryKeyAgreementPrivateKey(
     override val curve: KeyAgreementCurve,
     private val material: PlatformBuffer,
 ) : KeyAgreementPrivateKey {
-    override val provenance: KeyProvenance get() = KeyProvenance.Software
     override val custody: KeyCustody get() = KeyCustody.ExportableSoftware
     private var closed = false
 
@@ -261,7 +260,6 @@ internal class ProtectedKeyAgreementPrivateKey(
     private val onClose: () -> Unit = {},
     override val secureElementFallback: SecureElementFallback = SecureElementFallback.None,
 ) : KeyAgreementPrivateKey {
-    override val provenance: KeyProvenance get() = custody.provenance
 
     /**
      * Opaque handle; there is no process-memory scalar to wipe. [onClose] lets a provider release an

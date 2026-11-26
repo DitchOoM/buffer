@@ -5,8 +5,8 @@ package com.ditchoom.buffer.crypto
  * `AndroidKeyStore` and never leave it ([KeyCustody.NonExportable.Hardware] — StrongBox or TEE, as
  * each key's own custody reports; a key an earlier release stored outside secure hardware reports
  * [KeyCustody.NonExportable.Software]). The keystore is opened on first use; one that fails to load answers
- * that call with a retryable [KeyStoreException.StorageFailure] and is opened again on the next, so a
- * device never falls back to a weaker store. A host-JVM unit-test run has no `AndroidKeyStore`
+ * with a retryable [KeyStoreException.StorageFailure] and is opened again once the load's retry window (a few seconds)
+ * has passed, so a device never falls back to a weaker store. A host-JVM unit-test run has no `AndroidKeyStore`
  * provider at all, so it uses the durable on-disk software store ([KeyCustody.ExportableSoftware]); a
  * caller that requires hardware custody there is correctly refused by [KeyProvider.requireTier]. A
  * consumer may still force a software medium (e.g. an encrypted DB) via [KeyStoreConfig.storage].
@@ -41,11 +41,15 @@ internal class AndroidKeystoreKeyStore(
     private val name: String,
 ) : KeyStore {
     /**
-     * The TEE floor for an algorithm the keystore holds (a StrongBox key reports more on its own custody); for one it
-     * cannot hold, [HardwareKeyException.AlgorithmNotEligible], since no key of it will ever come from this store.
+     * The TEE floor for an algorithm the keystore holds (a StrongBox key reports more on its own custody, and a key an
+     * earlier release stored outside secure hardware reports less); for one it cannot hold,
+     * [HardwareKeyException.AlgorithmNotEligible], since no key of it will ever come from this store; for key agreement
+     * while the agreement probe is undecided, that probe's failure.
      */
-    override fun custodyFor(alg: ProtectedKeyAlgorithm): KeyCustody =
-        if (provider.eligible(alg)) provider.custody else throw HardwareKeyException.AlgorithmNotEligible()
+    override fun custodyFor(alg: ProtectedKeyAlgorithm): KeyCustody {
+        provider.requireEligible(alg)
+        return provider.custody
+    }
 
     override fun eligible(alg: ProtectedKeyAlgorithm): Boolean = provider.eligible(alg)
 
@@ -71,7 +75,7 @@ internal class AndroidKeystoreKeyStore(
         spec: ProtectedKeySpec,
     ): SigningKey {
         requireValidAlias(alias)
-        if (!provider.eligible(scheme.toProtectedKeyAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
+        provider.requireEligible(scheme.toProtectedKeyAlgorithm())
         val ns = namespaced(alias)
         return provider
             .getOrGenerateEntry(
@@ -105,9 +109,8 @@ internal class AndroidKeystoreKeyStore(
         requireValidAlias(alias)
         // Only ECDH P-256, and only where the keystore-probed PURPOSE_AGREE_KEY support holds
         // (API 31+); X25519 has no AndroidKeystore agreement backing on any API level.
-        if (curve != KeyAgreementCurve.P256 || !provider.eligible(ProtectedKeyAlgorithm.EcdhP256)) {
-            throw HardwareKeyException.AlgorithmNotEligible()
-        }
+        if (curve != KeyAgreementCurve.P256) throw HardwareKeyException.AlgorithmNotEligible()
+        provider.requireEligible(ProtectedKeyAlgorithm.EcdhP256)
         val ns = namespaced(alias)
         return provider
             .getOrGenerateEntry(

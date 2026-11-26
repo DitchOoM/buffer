@@ -93,6 +93,49 @@ class KeystorePlacementTest {
         assertTrue(failure.retryable)
     }
 
+    /**
+     * StrongBox was asked for and did not refuse, yet the key is in the TEE: that is a fallback, not none. Where the level
+     * cannot be read (before API 31, or a secure level of an unnamed kind) whether it fell back is not recorded.
+     */
+    @Test
+    fun aStrongBoxRequestServedInTheTeeWithoutARefusalIsAFallback() {
+        val accepted = KeyOrigin.JustGenerated(SecureElementFallback.None)
+        assertEquals(
+            CustodyVerdict.Accept(
+                KeyPlacement(tee.custody, weaker(Reason.Unclassified, AndroidKeystoreCode.Unpublished)),
+            ),
+            custodyVerdict(tee, accepted),
+        )
+        assertEquals(
+            CustodyVerdict.Accept(KeyPlacement(tee.custody, SecureElementFallback.NotRecorded)),
+            custodyVerdict(placementOfLegacyKeyInfo(insideSecureHardware = true), accepted),
+            "before API 31 nothing says whether StrongBox holds it",
+        )
+        assertEquals(
+            CustodyVerdict.Accept(KeyPlacement(tee.custody, SecureElementFallback.NotRecorded)),
+            custodyVerdict(placementOfSecurityLevel(Level.SECURITY_LEVEL_UNKNOWN_SECURE), accepted),
+            "secure hardware of an unnamed kind may or may not be StrongBox",
+        )
+    }
+
+    /** A failure the next call would only repeat (no such algorithm, an unreadable key spec) is not retryable. */
+    @Test
+    fun aDeterministicStoreFailureIsNotRetryable() {
+        listOf<java.security.GeneralSecurityException>(
+            java.security.NoSuchAlgorithmException(),
+            java.security.NoSuchProviderException(),
+            java.security.spec.InvalidKeySpecException(),
+        ).forEach { failure ->
+            val mapped = kotlin.test.assertFailsWith<KeyStoreException.StorageFailure> { mappingStoreFailures { throw failure } }
+            assertTrue(!mapped.retryable, "${failure::class.simpleName} is not retryable")
+        }
+        val keystore =
+            kotlin.test.assertFailsWith<KeyStoreException.StorageFailure> {
+                mappingStoreFailures { throw java.security.KeyStoreException() }
+            }
+        assertTrue(keystore.retryable, "a keystore that could not answer is worth asking again")
+    }
+
     @Test
     fun aBusyStrongBoxIsAskedAgainThenTheTeeHoldsTheKey() {
         val busy = listOf(KeystoreFailureFact.Wrapper, coded(Ks.ERROR_KEYMINT_FAILURE, transient = true))

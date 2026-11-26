@@ -112,6 +112,7 @@ internal class AndroidKeystoreHardwareKeyProvider(
     private val keystoreLock = Mutex()
     private val keystoreMonitor = Any()
     private val probes = KeystoreProbes(keyStore, keystoreMonitor)
+    private val discarded = DiscardedKeys(keyStore)
 
     /**
      * `true` once a `setIsStrongBoxBacked(true)` generation succeeds and, on API 31+, the throwaway key
@@ -130,18 +131,29 @@ internal class AndroidKeystoreHardwareKeyProvider(
      * than inferred from the API level: `PURPOSE_AGREE_KEY` exists from API 31, but whether the
      * device's KeyMint actually implements agreement in hardware — rather than in a software KeyMint
      * behind a compatibility layer — is exactly what devices diverge on. A transient keystore refusal
-     * is not settled, so the next eligibility check probes again.
+     * is held for the probe window only, so a later eligibility check probes again.
      */
     private val agreementSupport = SettlingLazy(PROBE_RETRY_AFTER, TimeSource.Monotonic) { probes.agreement() }
-
-    private val agreementSupported: Boolean get() = agreementSupport.get()
 
     override fun eligible(alg: ProtectedKeyAlgorithm): Boolean =
         when (alg) {
             ProtectedKeyAlgorithm.AesGcm, ProtectedKeyAlgorithm.EcdsaP256 -> true
-            ProtectedKeyAlgorithm.EcdhP256 -> agreementSupported
+            ProtectedKeyAlgorithm.EcdhP256 -> agreementSupport.get().supported
             else -> false
         }
+
+    /**
+     * Returns when this provider can generate a key for [alg]. Otherwise throws [HardwareKeyException.AlgorithmNotEligible]
+     * for an algorithm the keystore cannot hold, or the agreement probe's own failure while that probe is undecided, so
+     * a busy keystore is not reported as one without agreement.
+     */
+    internal fun requireEligible(alg: ProtectedKeyAlgorithm) {
+        when (alg) {
+            ProtectedKeyAlgorithm.AesGcm, ProtectedKeyAlgorithm.EcdsaP256 -> Unit
+            ProtectedKeyAlgorithm.EcdhP256 -> agreementSupport.get().requireSupported()
+            else -> throw HardwareKeyException.AlgorithmNotEligible()
+        }
+    }
 
     override suspend fun generateAesGcm(spec: ProtectedKeySpec): AesGcmKey =
         generateAesGcmBound(ResolvedAndroidPolicy.Advisory(spec.authorization), spec.aesKeySizeBits)
@@ -157,12 +169,11 @@ internal class AndroidKeystoreHardwareKeyProvider(
     ): KeyAgreementKeyPair {
         // Only ECDH P-256, and only where the keystore-probed PURPOSE_AGREE_KEY support holds
         // (API 31+). X25519 has no AndroidKeyStore agreement backing on any API level.
-        if (curve != KeyAgreementCurve.P256 || !eligible(ProtectedKeyAlgorithm.EcdhP256)) {
-            throw HardwareKeyException.AlgorithmNotEligible()
-        }
+        if (curve != KeyAgreementCurve.P256) throw HardwareKeyException.AlgorithmNotEligible()
+        requireEligible(ProtectedKeyAlgorithm.EcdhP256)
         val policy = ResolvedAndroidPolicy.Advisory(spec.authorization)
         val alias = newAlias("ecdh")
-        val placed = keystoreOp { generateAgreementKeyPair(alias, policy) }
+        val placed = ephemeralOp(alias) { generateAgreementKeyPair(alias, policy) }
         val publicKey = KeyAgreementPublicKey.of(curve, uncompressedPoint(placed.key.public as ECPublicKey))
         // Ephemeral: the scratch alias is deleted when the returned pair (or its private key) is closed.
         return buildKeyAgreementPair(
@@ -247,9 +258,9 @@ internal class AndroidKeystoreHardwareKeyProvider(
      * agreement request from ever reaching here.
      */
     internal suspend fun generateKeyAgreementBound(policy: ResolvedAndroidPolicy): KeyAgreementKeyPair {
-        if (!eligible(ProtectedKeyAlgorithm.EcdhP256)) throw HardwareKeyException.AlgorithmNotEligible()
+        requireEligible(ProtectedKeyAlgorithm.EcdhP256)
         val alias = newAlias("ecdh")
-        val placed = keystoreOp { generateAgreementKeyPair(alias, policy) }
+        val placed = ephemeralOp(alias) { generateAgreementKeyPair(alias, policy) }
         val publicKey =
             KeyAgreementPublicKey.of(KeyAgreementCurve.P256, uncompressedPoint(placed.key.public as ECPublicKey))
         return buildKeyAgreementPair(
@@ -268,7 +279,7 @@ internal class AndroidKeystoreHardwareKeyProvider(
     ): AesGcmKey {
         requireValidAesSize(aesKeySizeBits)
         val alias = newAlias("aes")
-        val placed = keystoreOp { generateAesKey(alias, aesKeySizeBits, policy) }
+        val placed = ephemeralOp(alias) { generateAesKey(alias, aesKeySizeBits, policy) }
         // Ephemeral: the scratch alias is deleted when the returned key is closed.
         return buildAesGcmKey(
             placed.key,
@@ -350,9 +361,9 @@ internal class AndroidKeystoreHardwareKeyProvider(
         policy: ResolvedAndroidPolicy,
         scheme: SignatureScheme,
     ): SigningKey {
-        if (!eligible(scheme.toProtectedKeyAlgorithm())) throw HardwareKeyException.AlgorithmNotEligible()
+        requireEligible(scheme.toProtectedKeyAlgorithm())
         val alias = newAlias("ec")
-        val placed = keystoreOp { generateEcKeyPair(alias, policy) }
+        val placed = ephemeralOp(alias) { generateEcKeyPair(alias, policy) }
         val verifyKey = VerifyKey.ecdsaP256(uncompressedPoint(placed.key.public as ECPublicKey))
         // Ephemeral: the scratch alias is deleted when the returned key is closed.
         return buildSigningKey(
@@ -549,7 +560,7 @@ internal class AndroidKeystoreHardwareKeyProvider(
         alias: String,
         expected: ProtectedKeyAlgorithm,
     ): Boolean =
-        when (val verdict = loadVerdict(lookup(alias), expected)) {
+        when (val verdict = loadVerdict(keyLookup(alias), expected)) {
             LoadVerdict.Load -> true
             LoadVerdict.NoSuchKey -> false
             is LoadVerdict.Refuse -> throw verdict.failure
@@ -563,10 +574,18 @@ internal class AndroidKeystoreHardwareKeyProvider(
         entry.certificate.publicKey as? ECPublicKey ?: throw com.ditchoom.buffer.crypto.KeyStoreException
             .CorruptEntry()
 
+    /** [lookup] for a load or a get-or-generate, after a refused key this provider could not delete is dealt with. */
+    private fun keyLookup(alias: String): EntryLookup {
+        discarded.clearOrRefuse(alias)
+        return lookup(alias)
+    }
+
     /**
-     * What `KeyStore.getKey` says is under [alias]. The lookup goes through `getKey`, not `containsAlias`:
-     * `containsAlias` answers `false` for any keystore error (android-36 `AndroidKeyStoreSpi.getKeyMetadata` logs and
-     * returns `null`), while `getKey` answers `null` only for `KEY_NOT_FOUND` and throws otherwise.
+     * What `KeyStore.getKey` says is under [alias]. The lookup goes through `getKey`, not `containsAlias`: from API 31
+     * (keystore2) `containsAlias` answers `false` for any keystore error (android-36 `AndroidKeyStoreSpi.getKeyMetadata`
+     * logs and returns `null`), while `getKey` answers `null` only for `KEY_NOT_FOUND` and throws otherwise. On API
+     * 28–30 (keystore1) `getKey` itself asks `contains` first, which answers `false` for a keystore that could not
+     * answer, so there a stored key can be reported absent; see `SECURITY.md`.
      */
     private fun lookup(alias: String): EntryLookup =
         try {
@@ -590,7 +609,7 @@ internal class AndroidKeystoreHardwareKeyProvider(
      * other answer refuses (see [entryVerdict]); nothing is ever generated over an alias that could not be read.
      */
     private fun storedAlgorithm(alias: String): ProtectedKeyAlgorithm? =
-        when (val verdict = entryVerdict(lookup(alias))) {
+        when (val verdict = entryVerdict(keyLookup(alias))) {
             EntryVerdict.Empty -> null
             is EntryVerdict.Holds -> verdict.algorithm
             is EntryVerdict.Refuse -> throw verdict.failure
@@ -608,6 +627,7 @@ internal class AndroidKeystoreHardwareKeyProvider(
                 } catch (_: java.security.KeyStoreException) {
                     throw deleteRefused()
                 }
+                discarded.forget(alias)
                 true
             } else {
                 false
@@ -688,6 +708,21 @@ internal class AndroidKeystoreHardwareKeyProvider(
         }
 
     /**
+     * [keystoreOp] for an ephemeral generation under the scratch [alias]: a caller cancelled while the key was made gets
+     * the cancellation, and the key it will never receive, and so never close, is deleted rather than left behind.
+     */
+    private suspend fun <T> ephemeralOp(
+        alias: String,
+        block: () -> T,
+    ): T =
+        keystoreLock.withLock {
+            withContextReleasingOnCancel(
+                keystoreDispatcher,
+                release = { synchronized(keystoreMonitor) { discarded.discard(alias, Undeleted.Unconfirmed) } },
+            ) { synchronized(keystoreMonitor) { mappingKeystoreFailures(block) } }
+        }
+
+    /**
      * [keystoreOp] for a store operation (a lookup, a load, a listing, a delete): a keystore failure is a retryable
      * [com.ditchoom.buffer.crypto.KeyStoreException.StorageFailure], not a [HardwareKeyException].
      */
@@ -740,15 +775,14 @@ internal class AndroidKeystoreHardwareKeyProvider(
         build: (StrongBoxRequest) -> T,
     ): Placed<T> {
         val generated = generateWithStrongBoxFallback(build)
-        var confirmed = false
+        var judged = false
         try {
-            val placement =
-                confirmedPlacement(alias, keyOf(generated.key), alg, KeyOrigin.JustGenerated(generated.fallback))
-            confirmed = true
-            return Placed(generated.key, placement)
+            val verdict = custodyVerdict(placementOf(keyOf(generated.key)), KeyOrigin.JustGenerated(generated.attempt))
+            judged = true
+            return Placed(generated.key, confirmedPlacement(alias, alg, verdict))
         } finally {
             // A key whose placement could not even be read is not handed out, and not left behind under its alias.
-            if (!confirmed) deleteQuietly(alias)
+            if (!judged) discarded.discard(alias, Undeleted.Unconfirmed)
         }
     }
 
@@ -763,7 +797,7 @@ internal class AndroidKeystoreHardwareKeyProvider(
         while (true) {
             val refusal =
                 try {
-                    return Attempted(build(StrongBoxRequest.StrongBox), SecureElementFallback.None)
+                    return Attempted(build(StrongBoxRequest.StrongBox), StrongBoxAttempt.Accepted)
                 } catch (e: GeneralSecurityException) {
                     e
                 } catch (e: ProviderException) {
@@ -772,30 +806,29 @@ internal class AndroidKeystoreHardwareKeyProvider(
             when (val decision = strongBoxRefusal(keystoreFailureFacts(refusal), attempt)) {
                 StrongBoxRefusal.RetryStrongBox -> attempt++
                 is StrongBoxRefusal.FallBackToTee ->
-                    return mappingKeystoreFailures { Attempted(build(StrongBoxRequest.Tee), decision.fallback) }
+                    return mappingKeystoreFailures {
+                        Attempted(build(StrongBoxRequest.Tee), StrongBoxAttempt.FellBack(decision.fallback))
+                    }
             }
         }
     }
 
     /**
-     * The custody [key] (stored under [alias]) has, read from its `KeyInfo`: the keystore's own report, which only
-     * attestation verified off the device proves. See [custodyVerdict]: a key outside secure hardware is deleted and
-     * refused with [InsufficientKeyCustody] only when [origin] says this call just generated it.
+     * The placement of a key this call just generated under [alias], from [verdict] on its `KeyInfo`: the keystore's own
+     * report, which only attestation verified off the device proves. A key outside secure hardware is deleted and
+     * refused with [InsufficientKeyCustody]; when the keystore will not delete it, the refusal still stands, and the
+     * provider deletes it before any later lookup of [alias] in this process rather than reattach it (see
+     * [DiscardedKeys]).
      */
     private fun confirmedPlacement(
         alias: String,
-        key: java.security.Key,
         alg: ProtectedKeyAlgorithm,
-        origin: KeyOrigin,
+        verdict: CustodyVerdict,
     ): KeyPlacement =
-        when (val verdict = custodyVerdict(placementOf(key), origin)) {
+        when (verdict) {
             is CustodyVerdict.Accept -> verdict.placement
             is CustodyVerdict.DeleteAndRefuse -> {
-                try {
-                    keyStore.deleteEntry(alias)
-                } catch (_: java.security.KeyStoreException) {
-                    throw deleteRefused()
-                }
+                discarded.discard(alias, Undeleted.OutsideHardware(alg, verdict.offered))
                 throw notHardware(alg, verdict.offered)
             }
         }
@@ -817,14 +850,6 @@ internal class AndroidKeystoreHardwareKeyProvider(
         }
     }
 
-    /** Deletes [alias] after a failed generation; a keystore that cannot delete it leaves nothing more to do. */
-    private fun deleteQuietly(alias: String) {
-        try {
-            if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)
-        } catch (_: java.security.KeyStoreException) {
-            // The generation's own failure is what the caller sees.
-        }
-    }
 }
 
 /** Which element a key generation asks for. */
@@ -840,10 +865,10 @@ internal sealed interface StrongBoxRequest {
     }
 }
 
-/** A keystore generation's result, and the fallback that produced it when StrongBox refused. */
+/** A keystore generation's result, and how its StrongBox request went. */
 private class Attempted<T>(
     val key: T,
-    val fallback: SecureElementFallback,
+    val attempt: StrongBoxAttempt,
 )
 
 /** Where a key lives, as its `KeyInfo` reports, and why it is not in StrongBox when it asked to be. */

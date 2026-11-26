@@ -11,6 +11,7 @@ import java.security.Key
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.KeyStoreSpi
+import java.security.UnrecoverableKeyException
 import java.security.cert.Certificate
 import java.security.spec.ECGenParameterSpec
 import java.util.Collections
@@ -159,6 +160,27 @@ class AndroidKeystoreAliasTest {
             }
         }
 
+    /** An entry the keystore holds and cannot build a key from is a corrupt entry: there, never generated over. */
+    @Test
+    fun anEntryTheKeystoreCannotBuildIsCorruptAndThere() =
+        runTest {
+            val spi = FakeKeystoreSpi()
+            spi.entries[ALIAS] = SecretKeySpec(ByteArray(KEY_BYTES), "AES")
+            spi.unbuildable = true
+            val provider = providerOver(spi)
+
+            assertTrue(provider.containsAlias(ALIAS))
+            assertFailsWith<KeyStoreException.CorruptEntry> { provider.reattachAesGcm(ALIAS, ProtectedKeySpec()) }
+            assertFailsWith<KeyStoreException.CorruptEntry> {
+                provider.getOrGenerateEntry(
+                    ALIAS,
+                    ProtectedKeyAlgorithm.AesGcm,
+                    reattach = { error("never reattached") },
+                    generate = { error("never generated over") },
+                )
+            }
+        }
+
     private fun softwarePrivateKey(
         algorithm: String,
         curve: String?,
@@ -187,8 +209,14 @@ class AndroidKeystoreAliasTest {
     private class FakeKeystoreSpi : KeyStoreSpi() {
         val entries = ConcurrentHashMap<String, Key>()
 
-        /** The keystore cannot answer: `getKey` throws and `containsAlias` answers `false`. */
+        /**
+         * The keystore cannot answer: `getKey` throws what a device throws, an `UnrecoverableKeyException` caused by an
+         * `android.security.KeyStoreException`, and `containsAlias` answers `false`.
+         */
         @Volatile var failing = false
+
+        /** The entry is there and cannot be turned into a key: `UnrecoverableKeyException` with no keystore cause. */
+        @Volatile var unbuildable = false
 
         /** `containsAlias` and `isKeyEntry` answer `false` whatever is stored, as the platform's do on a failure. */
         @Volatile var containsAliasBlind = false
@@ -197,7 +225,8 @@ class AndroidKeystoreAliasTest {
             alias: String,
             password: CharArray?,
         ): Key? {
-            if (failing) throw JcaKeyStoreException("keystore unavailable")
+            if (failing) throw UnrecoverableKeyException("keystore unavailable").apply { initCause(androidKeystoreFailure()) }
+            if (unbuildable && entries.containsKey(alias)) throw UnrecoverableKeyException("no certificate")
             return entries[alias]
         }
 
@@ -258,6 +287,17 @@ class AndroidKeystoreAliasTest {
     }
 
     private companion object {
+        /**
+         * An `android.security.KeyStoreException`, the cause a device's `getKey` failure carries. The host's android.jar
+         * stubs throw from every constructor, so the instance is allocated without one; only its type is read.
+         */
+        fun androidKeystoreFailure(): Throwable {
+            val unsafeField = Class.forName("sun.misc.Unsafe").getDeclaredField("theUnsafe").apply { isAccessible = true }
+            val unsafe = unsafeField.get(null)
+            val allocate = unsafe.javaClass.getMethod("allocateInstance", Class::class.java)
+            return allocate.invoke(unsafe, android.security.KeyStoreException::class.java) as Throwable
+        }
+
         const val ALIAS = "store:identity"
         const val KEY_BYTES = 16
         const val RSA_BITS = 1024

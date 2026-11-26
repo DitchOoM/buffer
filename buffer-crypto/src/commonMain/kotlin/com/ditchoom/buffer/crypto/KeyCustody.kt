@@ -77,12 +77,16 @@ val KeyCustody.dedicatedSecureElement: Boolean get() =
  * where it asked to be, so a caller can log it.
  */
 sealed interface SecureElementFallback {
-    /** No fallback happened: the key is where it asked to be, or it never asked for a dedicated secure element. */
+    /**
+     * No fallback happened: the platform reports the key in the dedicated secure element it asked for, or the key never
+     * asked for one.
+     */
     data object None : SecureElementFallback
 
     /**
      * Not known: the key was persisted earlier and reattached, and the platform keeps no record of whether its
-     * generation fell back. Its [KeyCustody] still says whether a dedicated secure element holds it.
+     * generation fell back; or the platform cannot say which secure hardware holds the key (Android before API 31, or
+     * a secure level of an unnamed kind). Its [KeyCustody] still says what the platform vouches for.
      */
     data object NotRecorded : SecureElementFallback
 
@@ -90,11 +94,17 @@ sealed interface SecureElementFallback {
      * Asked for a dedicated secure element and made in the platform's other secure hardware because of [reason].
      * [detail] is what the platform itself reported, for logs; on Android it is an `AndroidKeystoreFallbackDetail`.
      */
-    @ConsistentCopyVisibility
-    data class ToWeakerSecureTier internal constructor(
+    class ToWeakerSecureTier internal constructor(
         val reason: SecureElementFallbackReason,
         val detail: SecureElementFallbackDetail,
-    ) : SecureElementFallback
+    ) : SecureElementFallback {
+        override fun equals(other: Any?): Boolean =
+            this === other || (other is ToWeakerSecureTier && reason == other.reason && detail == other.detail)
+
+        override fun hashCode(): Int = 31 * reason.hashCode() + detail.hashCode()
+
+        override fun toString(): String = "ToWeakerSecureTier(reason=$reason, detail=$detail)"
+    }
 }
 
 /**
@@ -129,10 +139,15 @@ abstract class SecureElementFallbackDetail internal constructor()
 /** What a platform reported about a key's or an algorithm's custody when it fell short. */
 sealed interface OfferedCustody {
     /** The platform named this tier. */
-    @ConsistentCopyVisibility
-    data class Tier internal constructor(
+    class Tier internal constructor(
         val tier: CustodyTier,
-    ) : OfferedCustody
+    ) : OfferedCustody {
+        override fun equals(other: Any?): Boolean = this === other || (other is Tier && tier == other.tier)
+
+        override fun hashCode(): Int = tier.hashCode()
+
+        override fun toString(): String = "Tier(tier=$tier)"
+    }
 
     /** The platform named no level it would vouch for (Android `SECURITY_LEVEL_UNKNOWN`). */
     data object Unreported : OfferedCustody

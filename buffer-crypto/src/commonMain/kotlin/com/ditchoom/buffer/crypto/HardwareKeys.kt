@@ -319,9 +319,10 @@ interface HardwareKeyProvider : ProtectedKeyProvider {
     val dedicatedSecureElement: Boolean
 
     /**
-     * A hardware provider's keys are always [KeyCustody.NonExportable.Hardware]; the narrowed return
-     * type re-states, at the type level, that a hardware key can never be exportable or
-     * software-backed. This is the floor every key from the provider has; a key may report a stronger custody. The
+     * A hardware provider generates only [KeyCustody.NonExportable.Hardware] keys; the narrowed return
+     * type re-states, at the type level, that a key it generates can never be exportable or
+     * software-backed. This is the floor every key the provider generates has; a key may report a stronger custody. A
+     * key an Android [KeyStore] reattaches from an earlier release can sit below it, and says so on its own custody. The
      * default derives it from [dedicatedSecureElement]; the Android provider reports the TEE floor instead, since
      * whether StrongBox holds a key is known only from that key.
      */

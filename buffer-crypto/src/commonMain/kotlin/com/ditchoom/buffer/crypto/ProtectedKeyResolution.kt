@@ -144,11 +144,16 @@ sealed interface CapabilityFinding {
         data object NotPresent : Enclave
 
         /**
-         * The Enclave exists but the generate-and-discard probe failed. Settled when the binary lacks
-         * the entitlement the Enclave requires; any other refusal is probed again on the next
-         * resolution.
+         * The Enclave exists but the generate-and-discard probe failed for a reason none of the other arms names.
+         * Probed again once the probe's retry window has passed.
          */
         data object ProbeFailed : Enclave
+
+        /** The binary lacks the entitlement the Enclave requires. Settled for the process: the fix is in the signing. */
+        data object NotEntitled : Enclave
+
+        /** The probe was refused with `errSecInteractionNotAllowed` (a locked device). Probed again on the next call. */
+        data object DeviceLocked : Enclave
     }
 
     /** [ProtectedKeyBackend.WebCrypto] findings. */
@@ -218,16 +223,18 @@ sealed interface ProtectedKeyResolution {
 /**
  * The per-platform resolution seam. Internal so the platform actuals stay out of the public ABI;
  * the public surface is [CryptoCapabilities.protectedKeyResolution] plus the frozen witnesses.
- * Actuals cache a settled answer (the probes are expensive) through [SettlingLazy], and never cache a
- * refusal that a later attempt might not repeat.
+ * Actuals cache a settled answer (the probes are expensive) through [SettlingLazy]; a refusal a later attempt might
+ * not repeat is held only for the probe's retry window ([PROBE_RETRY_AFTER]), and a locked device's not at all.
  */
 internal expect fun platformProtectedKeyResolution(): ProtectedKeyResolution
 
 /**
  * What one resolution attempt came to: [Settled] is the answer for the rest of the process (a backend
- * that works, or one that cannot work in this process at all); [Unsettled] is this attempt's answer
- * only, so a transient refusal is never pinned for the process lifetime. [Undecided] is also this
- * attempt's answer only, but counts toward the [SettlingLazy]'s limit of undecided windows.
+ * that works, or one that cannot work in this process at all); [Unsettled] is held for the retry window
+ * only, so a transient refusal is never pinned for the process lifetime. [Undecided] is held like
+ * [Unsettled] but counts toward the [SettlingLazy]'s limit of undecided windows, after which [Undecided.settlesAs]
+ * is settled. [ThisCallOnly] is not held at all: the next read computes again (a locked device, which a caller is
+ * told to retry after the unlock).
  */
 internal sealed interface Settlement<out T> {
     val value: T
@@ -241,6 +248,11 @@ internal sealed interface Settlement<out T> {
     ) : Settlement<T>
 
     class Undecided<out T>(
+        override val value: T,
+        val settlesAs: T,
+    ) : Settlement<T>
+
+    class ThisCallOnly<out T>(
         override val value: T,
     ) : Settlement<T>
 }
@@ -257,13 +269,14 @@ internal val PROBE_RETRY_AFTER: Duration = 5.seconds
  * [get] computes again. So a refused probe is neither pinned for the process lifetime nor repeated on every call.
  * Concurrent reads may compute twice; the first settled value wins and every later read sees it. A
  * [Settlement.Undecided] answer is held like an unsettled one, and after [undecidedLimit] retry windows that each
- * ended undecided it is settled; concurrent undecided answers within one window count once.
+ * ended undecided its [Settlement.Undecided.settlesAs] is settled; concurrent undecided answers within one window
+ * count once. A [Settlement.ThisCallOnly] answer is returned and not held.
  */
 @OptIn(ExperimentalAtomicApi::class)
 internal class SettlingLazy<T : Any>(
     private val retryAfter: Duration,
     private val timeSource: TimeSource.WithComparableMarks,
-    /** After this many [Settlement.Undecided] answers the last one is settled for good. */
+    /** After this many [Settlement.Undecided] windows the last one's [Settlement.Undecided.settlesAs] is settled. */
     private val undecidedLimit: Int = Int.MAX_VALUE,
     private val compute: () -> Settlement<T>,
 ) {
@@ -299,21 +312,25 @@ internal class SettlingLazy<T : Any>(
                 if (now !is Held.Settled) held.compareAndSet(now, Held.Unsettled(attempt.value, until))
                 attempt.value
             }
-            is Settlement.Undecided -> undecide(attempt.value)
+            is Settlement.Undecided -> undecide(attempt.value, attempt.settlesAs)
+            is Settlement.ThisCallOnly -> attempt.value
         }
 
     /**
      * Holds an undecided [value] for the retry window, and counts it only when it is the answer that opened the window:
      * reads that probed at once during one failure, and lost the race to store their hold, are one undecided window.
      */
-    private fun undecide(value: T): T {
+    private fun undecide(
+        value: T,
+        settlesAs: T,
+    ): T {
         val now = held.load()
         val markNow = timeSource.markNow()
         return when {
             now is Held.Settled -> now.value
             now is Held.Unsettled && markNow < now.until -> now.value
             !held.compareAndSet(now, Held.Unsettled(value, markNow + retryAfter)) -> value
-            undecided.addAndFetch(1) >= undecidedLimit -> settle(Held.Settled(value))
+            undecided.addAndFetch(1) >= undecidedLimit -> settle(Held.Settled(settlesAs))
             else -> value
         }
     }
