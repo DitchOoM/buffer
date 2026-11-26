@@ -29,12 +29,15 @@ class KeystorePlacementTest {
     fun aLevelTheKeystoreWillNotNameIsRefusedAsUnreportedNotAsSoftware() {
         val unknown = placementOfSecurityLevel(Level.SECURITY_LEVEL_UNKNOWN)
         assertEquals(KeystorePlacement.NotSecureHardware(OfferedCustody.Unreported), unknown)
-        val refusal = custodyVerdict(unknown, KeyOrigin.Reattached) as CustodyVerdict.Refuse
-        val failure = notHardware(ProtectedKeyAlgorithm.EcdsaP256, refusal.offered)
+        val refusal = custodyVerdict(unknown, KeyOrigin.JustGenerated(SecureElementFallback.None))
+        val failure = notHardware(ProtectedKeyAlgorithm.EcdsaP256, (refusal as CustodyVerdict.DeleteAndRefuse).offered)
         assertEquals(OfferedCustody.Unreported, failure.offered)
         assertEquals(CustodyTier.ExportableSoftware, failure.available, "an unnamed level vouches for no tier")
-        val softwareRefusal = custodyVerdict(software, KeyOrigin.Reattached) as CustodyVerdict.Refuse
-        assertEquals(OfferedCustody.Tier(CustodyTier.NonExportableSoftware), softwareRefusal.offered)
+        val softwareRefusal = custodyVerdict(software, KeyOrigin.JustGenerated(SecureElementFallback.None))
+        assertEquals(
+            OfferedCustody.Tier(CustodyTier.NonExportableSoftware),
+            (softwareRefusal as CustodyVerdict.DeleteAndRefuse).offered,
+        )
     }
 
     @Test
@@ -44,25 +47,34 @@ class KeystorePlacementTest {
     }
 
     @Test
+    fun aReattachedKeyOutsideHardwareIsHandedOutNotRefused() {
+        val honest =
+            CustodyVerdict.Accept(KeyPlacement(KeyCustody.NonExportable.Software, SecureElementFallback.NotRecorded))
+        // A key an earlier release stored outside hardware stays usable, reporting the custody it really has.
+        assertEquals(honest, custodyVerdict(software, KeyOrigin.Reattached))
+        assertEquals(honest, custodyVerdict(KeystorePlacement.NotSecureHardware(OfferedCustody.Unreported), KeyOrigin.Reattached))
+    }
+
+    @Test
     fun onlyAJustGeneratedKeyOutsideHardwareIsDeleted() {
         val generated = KeyOrigin.JustGenerated(SecureElementFallback.None)
         assertTrue(custodyVerdict(software, generated) is CustodyVerdict.DeleteAndRefuse)
-        assertTrue(custodyVerdict(software, KeyOrigin.Reattached) is CustodyVerdict.Refuse)
+        assertTrue(custodyVerdict(software, KeyOrigin.Reattached) is CustodyVerdict.Accept)
     }
 
     @Test
     fun aReattachedKeySaysItsFallbackWasNotRecordedAndAGeneratedOneKeepsItsOwn() {
         assertEquals(
-            CustodyVerdict.Accept(HardwarePlacement(tee.custody, SecureElementFallback.NotRecorded)),
+            CustodyVerdict.Accept(KeyPlacement(tee.custody, SecureElementFallback.NotRecorded)),
             custodyVerdict(tee, KeyOrigin.Reattached),
         )
         val toTee = weaker(Reason.ElementAbsent, AndroidKeystoreCode.Unpublished)
         assertEquals(
-            CustodyVerdict.Accept(HardwarePlacement(tee.custody, toTee)),
+            CustodyVerdict.Accept(KeyPlacement(tee.custody, toTee)),
             custodyVerdict(tee, KeyOrigin.JustGenerated(toTee)),
         )
         assertEquals(
-            CustodyVerdict.Accept(HardwarePlacement(strongBox.custody, SecureElementFallback.None)),
+            CustodyVerdict.Accept(KeyPlacement(strongBox.custody, SecureElementFallback.None)),
             custodyVerdict(strongBox, KeyOrigin.JustGenerated(SecureElementFallback.None)),
         )
     }

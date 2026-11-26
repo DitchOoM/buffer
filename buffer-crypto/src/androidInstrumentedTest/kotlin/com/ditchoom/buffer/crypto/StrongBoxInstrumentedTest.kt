@@ -19,8 +19,9 @@ import kotlin.test.assertTrue
  * via `FEATURE_STRONGBOX_KEYSTORE`, and that the real provider round-trips.
  *
  * On a StrongBox device (Pixel 3+, recent Samsung, …) an ECDSA P-256 key — which every StrongBox must
- * hold — reports `dedicatedSecureElement == true`; on a TEE-only device `false`. The provider itself
- * reports the TEE floor either way, because which element holds a key is known only per key.
+ * hold — reports `dedicatedSecureElement == true`; on a TEE-only device `false`. The provider's custody
+ * reports the TEE floor either way, because which element holds a key is known only per key; the
+ * deprecated provider-wide `dedicatedSecureElement` keeps its StrongBox probe.
  */
 class StrongBoxInstrumentedTest {
     private val hasStrongBox: Boolean =
@@ -49,6 +50,9 @@ class StrongBoxInstrumentedTest {
                     "an ECDSA P-256 key's custody must equal the device StrongBox feature ($hasStrongBox)",
                 )
                 assertEquals(false, provider.custody.dedicatedSecureElement, "the provider reports the TEE floor")
+                @Suppress("DEPRECATION")
+                val probed = provider.dedicatedSecureElement
+                assertEquals(hasStrongBox, probed, "the deprecated probe still answers whether the device has StrongBox")
                 // The provider-minted key publishes its public key and produces a verifiable signature.
                 val vk = signing.verifyKey
                 val ops = signatureAsyncOrNull(SignatureScheme.EcdsaP256)

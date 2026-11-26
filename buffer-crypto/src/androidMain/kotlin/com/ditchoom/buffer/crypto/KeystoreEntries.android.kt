@@ -1,5 +1,14 @@
 package com.ditchoom.buffer.crypto
 
+import android.security.keystore.KeyProperties
+import java.security.AlgorithmParameters
+import java.security.GeneralSecurityException
+import java.security.PrivateKey
+import java.security.ProviderException
+import java.security.interfaces.ECKey
+import java.security.spec.ECGenParameterSpec
+import java.security.spec.ECParameterSpec
+
 /*
  * What the Android Keystore provider decides from one alias lookup: whether a get-or-generate may generate, whether
  * an entry is there for contains/delete, and the store failure each refusal stands for. Pure functions of the lookup,
@@ -21,8 +30,11 @@ internal sealed interface EntryLookup {
     data object OtherType : EntryLookup
 
     /**
-     * `UnrecoverableKeyException`. With a keystore exception as its cause the keystore failed to answer; without one it
-     * could not load the key (android-36 drops the cause when rethrowing `KeyPermanentlyInvalidatedException`).
+     * `UnrecoverableKeyException`. With a keystore exception as its cause the keystore failed to answer. Without one it
+     * could not build the key from the entry (no or an unparsable certificate, an unsupported key type), or the key was
+     * permanently invalidated: `AndroidKeyStoreSpi.engineGetKey` rethrows `KeyPermanentlyInvalidatedException` as a bare
+     * `UnrecoverableKeyException`, so the two cannot be told apart. A key is invalidated only when it is bound to user
+     * authentication, which the persistent store's keys never are, so for them it is a corrupt entry.
      */
     data class Unloadable(
         val keystoreFailed: Boolean,
@@ -77,4 +89,75 @@ internal fun entryVerdict(lookup: EntryLookup): EntryVerdict =
             } else {
                 EntryVerdict.Refuse(KeyStoreException.CorruptEntry())
             }
+    }
+
+/** What a load of a key of one algorithm does with the lookup of its alias. */
+internal sealed interface LoadVerdict {
+    /** A key of the asked-for algorithm is there: read its entry. */
+    data object Load : LoadVerdict
+
+    /** No key, or a key of another kind: the load answers `null`. */
+    data object NoSuchKey : LoadVerdict
+
+    data class Refuse(
+        val failure: KeyStoreException,
+    ) : LoadVerdict
+}
+
+internal fun loadVerdict(
+    lookup: EntryLookup,
+    expected: ProtectedKeyAlgorithm,
+): LoadVerdict =
+    when (lookup) {
+        EntryLookup.Absent, EntryLookup.OtherType -> LoadVerdict.NoSuchKey
+        is EntryLookup.Private -> if (lookup.algorithm == expected) LoadVerdict.Load else LoadVerdict.NoSuchKey
+        EntryLookup.Secret -> if (expected == ProtectedKeyAlgorithm.AesGcm) LoadVerdict.Load else LoadVerdict.NoSuchKey
+        is EntryLookup.Unloadable ->
+            when (val verdict = entryVerdict(lookup)) {
+                is EntryVerdict.Refuse -> LoadVerdict.Refuse(verdict.failure)
+                EntryVerdict.Empty, is EntryVerdict.Holds -> LoadVerdict.NoSuchKey
+            }
+    }
+
+/**
+ * What a private key under an alias is. Only a P-256 key is one this store writes: its keystore-recorded [purposes]
+ * tell agreement from signing. Any other key, an RSA or a P-384 one, is [EntryLookup.OtherType]; reading it as P-256
+ * would build a wrong public key.
+ */
+internal fun privateEntryLookup(
+    params: ECParameterSpec?,
+    purposes: () -> Int,
+): EntryLookup =
+    when {
+        params == null || !isP256(params) -> EntryLookup.OtherType
+        purposes() and KeyProperties.PURPOSE_AGREE_KEY != 0 -> EntryLookup.Private(ProtectedKeyAlgorithm.EcdhP256)
+        else -> EntryLookup.Private(ProtectedKeyAlgorithm.EcdsaP256)
+    }
+
+/** The EC domain [privateKey] lives on, or `null` for a key that is not an EC key. */
+internal fun ecParamsOf(privateKey: PrivateKey): ECParameterSpec? = (privateKey as? ECKey)?.params
+
+private fun isP256(params: ECParameterSpec): Boolean = params.order == p256.order && params.curve == p256.curve
+
+private val p256: ECParameterSpec by lazy {
+    AlgorithmParameters
+        .getInstance("EC")
+        .apply { init(ECGenParameterSpec(SECP256R1)) }
+        .getParameterSpec(ECParameterSpec::class.java)
+}
+
+/**
+ * Runs a store [block] (a lookup, a read of an entry or its `KeyInfo`, a listing, a delete), normalizing a keystore
+ * failure to a retryable [KeyStoreException.StorageFailure]: a store that could not answer, not a key that failed. A
+ * [CryptoException] thrown inside passes through.
+ */
+internal inline fun <T> mappingStoreFailures(block: () -> T): T =
+    try {
+        block()
+    } catch (e: CryptoException) {
+        throw e
+    } catch (_: GeneralSecurityException) {
+        throw KeyStoreException.StorageFailure(retryable = true)
+    } catch (_: ProviderException) {
+        throw KeyStoreException.StorageFailure(retryable = true)
     }

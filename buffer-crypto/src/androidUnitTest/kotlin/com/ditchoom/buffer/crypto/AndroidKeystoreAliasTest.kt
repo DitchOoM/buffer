@@ -8,9 +8,11 @@ import kotlinx.coroutines.test.runTest
 import java.io.InputStream
 import java.io.OutputStream
 import java.security.Key
+import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.KeyStoreSpi
 import java.security.cert.Certificate
+import java.security.spec.ECGenParameterSpec
 import java.util.Collections
 import java.util.Date
 import java.util.Enumeration
@@ -20,6 +22,7 @@ import javax.crypto.spec.SecretKeySpec
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import java.security.KeyStoreException as JcaKeyStoreException
 
@@ -41,7 +44,7 @@ class AndroidKeystoreAliasTest {
                         provider.getOrGenerateEntry(
                             ALIAS,
                             ProtectedKeyAlgorithm.AesGcm,
-                            reattach = { spi.entries[ALIAS] },
+                            reattach = { spi.entries[ALIAS] as SecretKeySpec? },
                             generate = {
                                 generations.incrementAndGet()
                                 SecretKeySpec(ByteArray(KEY_BYTES) { racer.toByte() }, "AES").also {
@@ -96,6 +99,76 @@ class AndroidKeystoreAliasTest {
             assertEquals(false, provider.deleteAlias(ALIAS), "nothing left to remove")
         }
 
+    @Test
+    fun aLoadOnAKeystoreThatCannotAnswerIsAStorageFailureNotAbsent() =
+        runTest {
+            val spi = FakeKeystoreSpi()
+            spi.entries[ALIAS] = SecretKeySpec(ByteArray(KEY_BYTES), "AES")
+            spi.failing = true
+            val provider = providerOver(spi)
+
+            val failure =
+                assertFailsWith<KeyStoreException.StorageFailure>("a stored key is never reported absent") {
+                    provider.reattachAesGcm(ALIAS, ProtectedKeySpec())
+                }
+            assertTrue(failure.retryable)
+        }
+
+    @Test
+    fun aLoadWhoseEntryReadMissesAKeyTheLookupFoundIsAStorageFailure() =
+        runTest {
+            val spi = FakeKeystoreSpi()
+            spi.entries[ALIAS] = SecretKeySpec(ByteArray(KEY_BYTES), "AES")
+            // The platform's getEntry answers null when its metadata read fails, while getKey still finds the key.
+            spi.containsAliasBlind = true
+            val provider = providerOver(spi)
+
+            assertFailsWith<KeyStoreException.StorageFailure> { provider.reattachAesGcm(ALIAS, ProtectedKeySpec()) }
+        }
+
+    @Test
+    fun aStoreReadThatFailsIsAStoreFailureNotAHardwareKeyFailure() =
+        runTest {
+            val spi = FakeKeystoreSpi()
+            spi.entries[ALIAS] = SecretKeySpec(ByteArray(KEY_BYTES), "AES")
+            val provider = providerOver(spi)
+
+            // The entry is there, and reading its KeyInfo fails (no AndroidKeyStore provider on a host JVM).
+            val failure =
+                assertFailsWith<KeyStoreException.StorageFailure> { provider.reattachAesGcm(ALIAS, ProtectedKeySpec()) }
+            assertTrue(failure.retryable)
+        }
+
+    @Test
+    fun aPrivateKeyThatIsNotP256IsAKeyOfAnotherTypeNotASigningKey() =
+        runTest {
+            listOf(softwarePrivateKey("RSA", null), softwarePrivateKey("EC", "secp384r1")).forEach { other ->
+                val spi = FakeKeystoreSpi()
+                spi.entries[ALIAS] = other
+                val provider = providerOver(spi)
+
+                assertFailsWith<KeyStoreException.CorruptEntry>("${other.algorithm} is not a key this store writes") {
+                    provider.getOrGenerateEntry(
+                        ALIAS,
+                        ProtectedKeyAlgorithm.EcdsaP256,
+                        reattach = { error("never reattached") },
+                        generate = { error("never generated over") },
+                    )
+                }
+                assertNull(provider.reattachSigning(ALIAS, ProtectedKeySpec()), "a load of another kind is absent")
+            }
+        }
+
+    private fun softwarePrivateKey(
+        algorithm: String,
+        curve: String?,
+    ): java.security.PrivateKey =
+        KeyPairGenerator
+            .getInstance(algorithm)
+            .apply { if (curve != null) initialize(ECGenParameterSpec(curve)) else initialize(RSA_BITS) }
+            .generateKeyPair()
+            .private
+
     private fun TestScope.providerOver(spi: FakeKeystoreSpi): AndroidKeystoreHardwareKeyProvider {
         val keyStore = object : KeyStore(spi, null, "fake") {}
         keyStore.load(null)
@@ -112,12 +185,12 @@ class AndroidKeystoreAliasTest {
 
     /** An in-memory keystore SPI with the Android keystore's two lookup behaviours. */
     private class FakeKeystoreSpi : KeyStoreSpi() {
-        val entries = ConcurrentHashMap<String, SecretKeySpec>()
+        val entries = ConcurrentHashMap<String, Key>()
 
         /** The keystore cannot answer: `getKey` throws and `containsAlias` answers `false`. */
         @Volatile var failing = false
 
-        /** `containsAlias` answers `false` whatever is stored. */
+        /** `containsAlias` and `isKeyEntry` answer `false` whatever is stored, as the platform's do on a failed read. */
         @Volatile var containsAliasBlind = false
 
         override fun engineGetKey(
@@ -143,7 +216,7 @@ class AndroidKeystoreAliasTest {
 
         override fun engineSize(): Int = entries.size
 
-        override fun engineIsKeyEntry(alias: String): Boolean = entries.containsKey(alias)
+        override fun engineIsKeyEntry(alias: String): Boolean = engineContainsAlias(alias)
 
         override fun engineIsCertificateEntry(alias: String): Boolean = false
 
@@ -187,5 +260,6 @@ class AndroidKeystoreAliasTest {
     private companion object {
         const val ALIAS = "store:identity"
         const val KEY_BYTES = 16
+        const val RSA_BITS = 1024
     }
 }

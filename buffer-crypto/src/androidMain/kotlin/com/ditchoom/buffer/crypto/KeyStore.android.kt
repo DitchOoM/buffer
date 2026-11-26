@@ -39,7 +39,12 @@ internal class AndroidKeystoreKeyStore(
     private val provider: AndroidKeystoreHardwareKeyProvider,
     private val name: String,
 ) : KeyStore {
-    override fun custodyFor(alg: ProtectedKeyAlgorithm): KeyCustody = provider.custody
+    /**
+     * The TEE floor for an algorithm the keystore holds (a StrongBox key reports more on its own custody); for one it
+     * cannot hold, [HardwareKeyException.AlgorithmNotEligible], since no key of it will ever come from this store.
+     */
+    override fun custodyFor(alg: ProtectedKeyAlgorithm): KeyCustody =
+        if (provider.eligible(alg)) provider.custody else throw HardwareKeyException.AlgorithmNotEligible()
 
     override fun eligible(alg: ProtectedKeyAlgorithm): Boolean = provider.eligible(alg)
 
@@ -132,6 +137,7 @@ internal class AndroidKeystoreKeyStore(
         return provider.containsAlias(namespaced(alias))
     }
 
+    /** See [AndroidKeystoreHardwareKeyProvider.listAliases]: a keystore failing partway can end the listing early. */
     override suspend fun aliases(): Set<String> {
         val prefix = "$name:"
         return provider.listAliases(prefix).mapTo(mutableSetOf()) { it.substring(prefix.length) }

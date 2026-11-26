@@ -77,27 +77,29 @@ internal sealed interface KeyOrigin {
         val fallback: SecureElementFallback,
     ) : KeyOrigin
 
-    /** Persisted earlier and reattached: refusing to use it never deletes it, and its fallback was never recorded. */
+    /** Persisted earlier and reattached: it is never deleted, and its fallback was never recorded. */
     data object Reattached : KeyOrigin
 }
 
 /** What to do with a key once its placement is known. */
 internal sealed interface CustodyVerdict {
     data class Accept(
-        val placement: HardwarePlacement,
+        val placement: KeyPlacement,
     ) : CustodyVerdict
 
     /** A key just generated outside secure hardware: delete it, then refuse. */
     data class DeleteAndRefuse(
         val offered: OfferedCustody,
     ) : CustodyVerdict
-
-    /** A persisted key outside secure hardware: refuse, and leave the entry as it is. */
-    data class Refuse(
-        val offered: OfferedCustody,
-    ) : CustodyVerdict
 }
 
+/**
+ * A key in secure hardware is accepted with the custody its `KeyInfo` names. A key outside it is refused and deleted
+ * when this call just generated it; a key persisted earlier (an earlier release did not check) is handed out with the
+ * custody it really has, [KeyCustody.NonExportable.Software]: the keystore never exports it, and nothing vouches for
+ * hardware. Refusing it would leave a stored key that no call could ever use; a caller that needs hardware checks the
+ * key's own custody.
+ */
 internal fun custodyVerdict(
     placement: KeystorePlacement,
     origin: KeyOrigin,
@@ -105,7 +107,7 @@ internal fun custodyVerdict(
     when (placement) {
         is KeystorePlacement.SecureHardware ->
             CustodyVerdict.Accept(
-                HardwarePlacement(
+                KeyPlacement(
                     placement.custody,
                     when (origin) {
                         is KeyOrigin.JustGenerated -> origin.fallback
@@ -116,11 +118,12 @@ internal fun custodyVerdict(
         is KeystorePlacement.NotSecureHardware ->
             when (origin) {
                 is KeyOrigin.JustGenerated -> CustodyVerdict.DeleteAndRefuse(placement.offered)
-                KeyOrigin.Reattached -> CustodyVerdict.Refuse(placement.offered)
+                KeyOrigin.Reattached ->
+                    CustodyVerdict.Accept(KeyPlacement(KeyCustody.NonExportable.Software, SecureElementFallback.NotRecorded))
             }
     }
 
-/** The refusal of a key of [alg] that the keystore placed outside secure hardware, as [offered]. */
+/** The refusal of a key of [alg] that a generation placed outside secure hardware, as [offered]. */
 internal fun notHardware(
     alg: ProtectedKeyAlgorithm,
     offered: OfferedCustody,
