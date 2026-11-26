@@ -1,5 +1,6 @@
 package com.ditchoom.buffer.crypto
 
+import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.AtomicReference
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.jvm.JvmInline
@@ -225,7 +226,8 @@ internal expect fun platformProtectedKeyResolution(): ProtectedKeyResolution
 /**
  * What one resolution attempt came to: [Settled] is the answer for the rest of the process (a backend
  * that works, or one that cannot work in this process at all); [Unsettled] is this attempt's answer
- * only, so a transient refusal is never pinned for the process lifetime.
+ * only, so a transient refusal is never pinned for the process lifetime. [Undecided] is also this
+ * attempt's answer only, but counts toward the [SettlingLazy]'s limit of undecided windows.
  */
 internal sealed interface Settlement<out T> {
     val value: T
@@ -235,6 +237,10 @@ internal sealed interface Settlement<out T> {
     ) : Settlement<T>
 
     class Unsettled<out T>(
+        override val value: T,
+    ) : Settlement<T>
+
+    class Undecided<out T>(
         override val value: T,
     ) : Settlement<T>
 }
@@ -249,12 +255,16 @@ internal val PROBE_RETRY_AFTER: Duration = 5.seconds
  * A lazily computed value that caches a [Settlement.Settled] outcome for good and an [Settlement.Unsettled] one for
  * [retryAfter], measured on [timeSource]: within that window the unsettled answer is returned again, after it the next
  * [get] computes again. So a refused probe is neither pinned for the process lifetime nor repeated on every call.
- * Concurrent reads may compute twice; the first settled value wins and every later read sees it.
+ * Concurrent reads may compute twice; the first settled value wins and every later read sees it. A
+ * [Settlement.Undecided] answer is held like an unsettled one, and after [undecidedLimit] retry windows that each
+ * ended undecided it is settled; concurrent undecided answers within one window count once.
  */
 @OptIn(ExperimentalAtomicApi::class)
 internal class SettlingLazy<T : Any>(
     private val retryAfter: Duration,
     private val timeSource: TimeSource.WithComparableMarks,
+    /** After this many [Settlement.Undecided] answers the last one is settled for good. */
+    private val undecidedLimit: Int = Int.MAX_VALUE,
     private val compute: () -> Settlement<T>,
 ) {
     private sealed interface Held<out T> {
@@ -271,6 +281,7 @@ internal class SettlingLazy<T : Any>(
     }
 
     private val held = AtomicReference<Held<T>>(Held.Nothing)
+    private val undecided = AtomicInt(0)
 
     fun get(): T =
         when (val current = held.load()) {
@@ -288,7 +299,21 @@ internal class SettlingLazy<T : Any>(
                 if (now !is Held.Settled) held.compareAndSet(now, Held.Unsettled(attempt.value, until))
                 attempt.value
             }
+            is Settlement.Undecided -> undecide(attempt.value)
         }
+
+    /**
+     * Holds an undecided [value] for the retry window, and counts it only when it is the answer that opened the window:
+     * reads that probed at once during one failure, and lost the race to store their hold, are one undecided window.
+     */
+    private fun undecide(value: T): T {
+        val now = held.load()
+        if (now is Held.Settled) return now.value
+        val markNow = timeSource.markNow()
+        if (now is Held.Unsettled && markNow < now.until) return now.value
+        if (!held.compareAndSet(now, Held.Unsettled(value, markNow + retryAfter))) return value
+        return if (undecided.addAndFetch(1) >= undecidedLimit) settle(Held.Settled(value)) else value
+    }
 
     /** Stores [settled] unless another read settled first; either way, returns the value every later read sees. */
     private fun settle(settled: Held.Settled<T>): T {

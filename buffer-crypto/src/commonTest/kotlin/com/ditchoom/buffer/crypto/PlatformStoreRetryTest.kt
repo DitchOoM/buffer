@@ -74,11 +74,56 @@ class PlatformStoreRetryTest {
         assertEquals(3, computed, "a settled answer is never recomputed")
     }
 
+    /**
+     * Two reads compute at once: the outer one starts first and settles last. The answer every read sees is the one
+     * that was stored first, not the one that started first.
+     */
     @Test
     fun theFirstSettledAnswerWins() {
-        val first = Any()
-        val lazy = SettlingLazy(1.seconds, TestTimeSource()) { Settlement.Settled(first) }
-        assertSame(first, lazy.get())
-        assertSame(first, lazy.get())
+        val startedFirst = Any()
+        val settledFirst = Any()
+        var computed = 0
+        lateinit var lazy: SettlingLazy<Any>
+        lazy =
+            SettlingLazy(1.seconds, TestTimeSource()) {
+                computed++
+                if (computed == 1) {
+                    assertSame(settledFirst, lazy.get(), "the read that started second settles first")
+                    Settlement.Settled(startedFirst)
+                } else {
+                    Settlement.Settled(settledFirst)
+                }
+            }
+        assertSame(settledFirst, lazy.get(), "the read that started first sees the answer stored first")
+        assertSame(settledFirst, lazy.get())
+        assertEquals(2, computed)
+    }
+
+    /**
+     * Three reads probe at once during one passing failure: each starts its probe before any stores its answer. That
+     * is one undecided window, not three, so the limit is not reached by one moment of contention.
+     */
+    @Test
+    fun concurrentUndecidedAnswersInOneWindowCountOnce() {
+        val clock = TestTimeSource()
+        var computed = 0
+        lateinit var lazy: SettlingLazy<String>
+        lazy =
+            SettlingLazy(1.seconds, clock, undecidedLimit = 3) {
+                computed++
+                if (computed < 3) lazy.get()
+                Settlement.Undecided("undecided")
+            }
+        assertEquals("undecided", lazy.get())
+        assertEquals(3, computed, "three reads probed at once")
+        clock += 1.seconds
+        lazy.get()
+        assertEquals(4, computed, "one window of contention did not settle the answer")
+        clock += 1.seconds
+        lazy.get()
+        assertEquals(5, computed)
+        clock += 1.seconds
+        lazy.get()
+        assertEquals(5, computed, "the third undecided window settled it")
     }
 }

@@ -28,7 +28,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import platform.posix.size_tVar
-import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.time.Duration
 import kotlin.time.TimeMark
@@ -88,7 +87,8 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
      * in [appleEnclaveProbe] — a failure routes key agreement to the software floor instead of
      * over-promising hardware custody.
      */
-    private val agreementSupport = SettlingLazy(PROBE_RETRY_AFTER, TimeSource.Monotonic) { probeAgreement() }
+    private val agreementSupport =
+        SettlingLazy(PROBE_RETRY_AFTER, TimeSource.Monotonic, undecidedLimit = UNDECIDED_PROBES) { probeAgreement() }
 
     private val agreementSupported: Boolean get() = agreementSupport.get()
 
@@ -286,20 +286,13 @@ internal class SecureEnclaveHardwareKeyProvider : HardwareKeyProvider {
             undecided()
         }
 
-    private val undecidedProbes = AtomicInt(0)
-
     /**
      * A failure that says nothing about the element is asked again after the probe window, but not for ever: after
-     * [UNDECIDED_PROBES] of them in all (a locked device is not counted), the element has answered as clearly as it
-     * will, and agreement is settled off,
-     * so a device whose agreement always fails does not mint and discard a key every few seconds for the process life.
+     * [UNDECIDED_PROBES] windows that ended undecided (a locked device is not counted), the element has answered as
+     * clearly as it will, and agreement is settled off, so a device whose agreement always fails does not mint and
+     * discard a key every few seconds for the process life.
      */
-    private fun undecided(): Settlement<Boolean> =
-        if (undecidedProbes.addAndFetch(1) >= UNDECIDED_PROBES) {
-            Settlement.Settled(false)
-        } else {
-            Settlement.Unsettled(false)
-        }
+    private fun undecided(): Settlement<Boolean> = Settlement.Undecided(false)
 
     private fun requireP256(peer: KeyAgreementPublicKey) =
         require(peer.curve == KeyAgreementCurve.P256) { "private/public key curve mismatch" }
