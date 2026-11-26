@@ -415,9 +415,10 @@ tracked to completion:
   still pass (a locked device, a busy or not-yet-available keychain); a store whose move is refused for any other
   reason stops asking.
 - **Failures are typed by family.** A failure of a key operation is a `HardwareKeyException`: an Enclave generate,
-  sign or agreement the OS refuses with `errSecInteractionNotAllowed` (which a locked device is documented to return;
-  not observed on a device for this change) is `HardwareKeyException.DeviceLocked`, and an Enclave refused for lack of
-  an entitlement is `HardwareKeyException.AccessDenied`. A failure of the store is a `KeyStoreException`. On Android
+  sign or agreement the OS refuses with `errSecInteractionNotAllowed` is `HardwareKeyException.DeviceLocked` (observed
+  for an access-controlled generation on a Mac whose screen was locked; the other calls' statuses on a locked iPhone
+  are not observed here), and an Enclave refused for lack of an entitlement is `HardwareKeyException.AccessDenied`.
+  A failure of the store is a `KeyStoreException`. On Android
   that covers the store's lookups, loads, `KeyInfo` reads, listings and deletes: a keystore failure in one of them is
   `StorageFailure(retryable = true)`, while a key generation that fails stays a `HardwareKeyException`. On Apple:
 

@@ -35,9 +35,10 @@ class EnclaveBoundKeyAgreementTest {
     }
 
     /**
-     * Generates a bound agreement key, or `null` when this environment's enrollment cannot mint one
-     * for [policy] (no passcode / no enrolled biometric) — the element's honest refusal, which the
-     * caller treats as a skip rather than a failure.
+     * Generates a bound agreement key, or `null` when this environment cannot mint one for [policy]:
+     * no passcode or enrolled biometric, or a locked screen (the OS refuses an access-controlled
+     * generation with `errSecInteractionNotAllowed`, observed on a Mac whose screen was locked). The
+     * caller treats that as a skip rather than a failure.
      */
     private suspend fun PerUseAgreementCapable.generateOrSkip(policy: UserAuthenticationPolicy): KeyAgreementKeyPair? =
         try {
@@ -46,6 +47,10 @@ class EnclaveBoundKeyAgreementTest {
                 is UserAuthenticationPolicy.PerUse -> generateKeyAgreement(KeyAgreementCurve.P256, policy)
             }
         } catch (_: HardwareKeyException.SecureElementUnavailable) {
+            println("SKIPPED bound agreement generation: the element declined it (no passcode or biometric)")
+            null
+        } catch (_: HardwareKeyException.DeviceLocked) {
+            println("SKIPPED bound agreement generation: the OS refused it while the device is locked")
             null
         }
 
