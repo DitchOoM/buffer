@@ -24,8 +24,8 @@ import kotlin.test.assertTrue
 import java.security.KeyStoreException as JcaKeyStoreException
 
 /**
- * The provider's alias lookups over a `java.security.KeyStore` whose SPI behaves like the Android keystore's, off-device:
- * `containsAlias` answers `false` for a keystore error, and `getKey` throws instead.
+ * The provider's alias lookups over a `java.security.KeyStore` whose SPI behaves like the Android keystore's,
+ * off-device: `containsAlias` answers `false` for a keystore error, and `getKey` throws instead.
  */
 class AndroidKeystoreAliasTest {
     @Test
@@ -79,7 +79,7 @@ class AndroidKeystoreAliasTest {
             val provider = providerOver(spi)
 
             assertFailsWith<KeyStoreException.StorageFailure> { provider.deleteAlias(ALIAS) }
-            assertTrue(spi.entries.containsKey(ALIAS), "a delete that could not tell whether the key is there leaves it")
+            assertTrue(spi.entries.containsKey(ALIAS), "a delete that cannot tell whether the key is there leaves it")
         }
 
     @Test
@@ -128,7 +128,11 @@ class AndroidKeystoreAliasTest {
             return entries[alias]
         }
 
-        override fun engineContainsAlias(alias: String): Boolean = if (failing || containsAliasBlind) false else entries.containsKey(alias)
+        override fun engineContainsAlias(alias: String): Boolean =
+            when {
+                failing || containsAliasBlind -> false
+                else -> entries.containsKey(alias)
+            }
 
         override fun engineDeleteEntry(alias: String) {
             if (failing) throw JcaKeyStoreException("keystore unavailable")

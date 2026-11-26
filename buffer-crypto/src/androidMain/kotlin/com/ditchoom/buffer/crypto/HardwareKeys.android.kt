@@ -404,10 +404,10 @@ internal class AndroidKeystoreHardwareKeyProvider(
     // delete. Metadata (kind + public key) is intrinsic to the keystore entry, so there is no sidecar.
 
     /**
-     * The key under [alias] when it holds [expected], or one [generate]d under it when the keystore has none. The lookup
-     * and the generation run in one keystore critical section, so no other caller of this provider can generate under
-     * [alias] in between: two racing get-or-generates end with one key, and a generation that fails deletes only what
-     * it made. [reattach] and [generate] run inside that section and must not enter it again.
+     * The key under [alias] when it holds [expected], or one [generate]d under it when the keystore has none. The
+     * lookup and the generation run in one keystore critical section, so no other caller of this provider can generate
+     * under [alias] in between: two racing get-or-generates end with one key, and a generation that fails deletes only
+     * what it made. [reattach] and [generate] run inside that section and must not enter it again.
      */
     internal suspend fun <K : Any> getOrGenerateEntry(
         alias: String,

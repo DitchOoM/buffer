@@ -733,7 +733,10 @@ internal sealed interface EnclaveProbe {
     data object Refused : EnclaveProbe
 }
 
-/** The probe outcome a [bcks_secure_enclave_probe] status names; [EnclaveProbe.Locked] and [EnclaveProbe.Refused] are not settled. */
+/**
+ * The probe outcome a [bcks_secure_enclave_probe] status names; [EnclaveProbe.Locked] and [EnclaveProbe.Refused] are
+ * not settled.
+ */
 internal fun enclaveProbeOf(status: Int): Settlement<EnclaveProbe> =
     when (status) {
         BCKS_OK -> Settlement.Settled(EnclaveProbe.Usable)
