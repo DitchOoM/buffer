@@ -713,13 +713,13 @@ internal sealed interface EnclaveProbe {
     /** The Enclave minted a key: the provider is usable. */
     data object Usable : EnclaveProbe
 
-    /** CryptoKit reports no Enclave on this hardware (or the simulator). */
+    /** CryptoKit reports no Enclave: a simulator, an Intel Mac without a T2 chip, a virtual machine. */
     data object NotPresent : EnclaveProbe
 
     /** The Enclave refuses this binary for lack of an entitlement — stable for the life of the process. */
     data object NotEntitled : EnclaveProbe
 
-    /** The device is locked: probed again, since the answer after the unlock may differ. */
+    /** The probe was refused with `errSecInteractionNotAllowed` (a locked device): probed again later. */
     data object Locked : EnclaveProbe
 
     /** The Enclave refused for another reason, which a later probe may not repeat. */
@@ -741,7 +741,7 @@ internal fun enclaveProbeOf(status: Int): Settlement<EnclaveProbe> =
 /**
  * The Secure Enclave probe, through a [SettlingLazy]: presence ([bcks_secure_enclave_available]) and
  * a generate-and-discard ([bcks_secure_enclave_probe]) that fails closed on an unentitled binary or
- * the simulator, keeping [CryptoCapabilities.hardware] honestly [HardwareSupport.Unavailable] there.
+ * hardware without an Enclave, keeping [CryptoCapabilities.hardware] honestly [HardwareSupport.Unavailable] there.
  * A refusal for any other reason is probed again on the next resolution rather than pinned.
  */
 private val enclaveProbe =

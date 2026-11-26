@@ -84,12 +84,12 @@ class AuthorizationFailed internal constructor() : CryptoMisuseException("hardwa
 
 /**
  * The custody on offer for [alg] ([available]) is weaker than the [required] tier: either a
- * [KeyProvider.requireTier] assertion failed, or a key a hardware backend just generated or reattached
- * reported a weaker security level than the backend promises (an OS keystore that silently placed the
- * key in software). In the second case the key has already been deleted, so nothing weaker than
- * [required] is ever handed out. Structured and non-secret — it names only public tiers, never key
- * material. Only ever constructed on the unmet path, so an "available ≥ required" instance is
- * unrepresentable.
+ * [KeyProvider.requireTier] assertion failed, or a key a hardware backend just generated reported a
+ * weaker security level than the backend promises (an OS keystore that silently placed the key in
+ * software). In the second case the generated key has been deleted. A key persisted earlier is never
+ * refused or deleted for its level: it is handed out reporting the custody it has, which the caller
+ * checks. Structured and non-secret — it names only public tiers, never key material. Only ever
+ * constructed on the unmet path, so an "available ≥ required" instance is unrepresentable.
  */
 class InsufficientKeyCustody internal constructor(
     val alg: ProtectedKeyAlgorithm,
@@ -150,8 +150,9 @@ sealed class HardwareKeyException protected constructor(
     ) : HardwareKeyException("transient secure-hardware failure")
 
     /**
-     * The key's protection class is unavailable while the device is locked (Apple: an Enclave key made under a
-     * when-unlocked class, or any Enclave operation on a locked device that the OS refuses). Retry after the unlock;
+     * The OS refused the key operation because the key's protection class is unavailable (Apple: an Enclave call
+     * refused with `errSecInteractionNotAllowed` on a key bound to no user authentication, which a locked device is
+     * documented to return, for example for an older key made under a when-unlocked class). Retry after the unlock;
      * the key itself is unchanged.
      */
     class DeviceLocked internal constructor() : HardwareKeyException("hardware key unavailable until device unlock")

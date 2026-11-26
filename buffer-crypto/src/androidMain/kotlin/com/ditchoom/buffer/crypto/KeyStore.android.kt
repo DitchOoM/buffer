@@ -3,7 +3,8 @@ package com.ditchoom.buffer.crypto
 /**
  * Android: a durable [AndroidKeystoreKeyStore] on a device (or emulator) whose keys live in the
  * `AndroidKeyStore` and never leave it ([KeyCustody.NonExportable.Hardware] — StrongBox or TEE, as
- * each key's own custody reports). The keystore is opened on first use; one that fails to load answers
+ * each key's own custody reports; a key an earlier release stored outside secure hardware reports
+ * [KeyCustody.NonExportable.Software]). The keystore is opened on first use; one that fails to load answers
  * that call with a retryable [KeyStoreException.StorageFailure] and is opened again on the next, so a
  * device never falls back to a weaker store. A host-JVM unit-test run has no `AndroidKeyStore`
  * provider at all, so it uses the durable on-disk software store ([KeyCustody.ExportableSoftware]); a

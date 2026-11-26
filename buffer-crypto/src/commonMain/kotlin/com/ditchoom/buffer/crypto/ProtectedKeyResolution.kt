@@ -140,7 +140,7 @@ sealed interface CapabilityFinding {
 
     /** [ProtectedKeyBackend.AppleSecureEnclave] findings. */
     sealed interface Enclave : CapabilityFinding {
-        /** CryptoKit reports no Secure Enclave on this hardware (or the simulator). */
+        /** CryptoKit reports no Secure Enclave: a simulator, an Intel Mac without a T2 chip, a virtual machine. */
         data object NotPresent : Enclave
 
         /**

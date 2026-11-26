@@ -11,7 +11,9 @@ interface KeyProvider {
     /**
      * The [KeyCustody] a key generated for [alg] has at least on this platform (routing introspection); a hardware key
      * may report a stronger custody of its own. A platform [KeyStore] whose backend could not be opened throws the
-     * typed [KeyStoreException] that refused it, and opens it again on the next call.
+     * typed [KeyStoreException] that refused it, and opens it again on the next call. A platform [KeyStore] asked about
+     * an algorithm its backend cannot hold ([eligible] is `false`) throws [HardwareKeyException.AlgorithmNotEligible]
+     * rather than name a custody no key of it will have.
      *
      * On a platform [KeyStore] the first call (and the first after a refused probe's window) opens the backend on the
      * calling thread, which can mean a generate-and-discard probe key in the secure element; call it off the main
